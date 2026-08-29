@@ -127,11 +127,18 @@ def park_at(point: str, args: Sequence[str]) -> Iterator[Parked]:
 
 
 def assert_only_temp_residue(before: Snapshot, after: Snapshot) -> None:
-    """A hard kill may leave a toolkit temp. It may leave nothing else."""
+    """A hard kill may leave a toolkit temp. It may leave nothing else.
+
+    A directory's own ``mtime`` — and, on APFS, its ``st_size`` — move as a
+    direct consequence of the temp entry that was just tolerated. They are the
+    same fact reported a second time, not a change to anything a user owns, so
+    they are tolerated *on directories only*. This is a crash-arm helper and
+    deliberately not part of the purity comparator, which still reports both.
+    """
     for item in diff(before, after):
         if item.kind == "added" and is_toolkit_temp(item.path):
             continue
-        if item.kind == "mtime" and Path(item.path).is_dir():
+        if item.kind in {"mtime", "size"} and Path(item.path).is_dir():
             continue
         raise AssertionError(f"a kill changed more than the temp namespace: {item}")
 

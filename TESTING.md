@@ -70,7 +70,7 @@ Six planted mutations prove the comparator can fail, and a non-dry-run control p
 | Configuration | Skips from these arms |
 |---|---|
 | Linux, engines installed or absent | **0.** Every arm above runs; the cross-filesystem ladder reaches `/dev/shm`. |
-| macOS | **0 or up to 6** — the cross-filesystem arms skip together, with the ladder printed, when no second mount is available. |
+| macOS | **5** — the cross-filesystem arms that need a second mount skip together, with the ladder printed. The sixth arm in that file asserts the *absence* of a warning on one filesystem and always runs. |
 | Any platform, `uid 0` | **1** — the unwritable-destination arm, since directory permissions cannot cause a write to fail for root. |
 | Filesystem without hard links | **1** — the sidecar-keeps-the-inode arm. |
 

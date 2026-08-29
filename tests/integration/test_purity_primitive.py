@@ -106,11 +106,18 @@ def test_control_five_a_replacement_with_identical_content_is_detected(tmp_path:
 
 
 def test_control_six_a_mode_change_is_detected(tmp_path: Path) -> None:
+    """The starting mode is pinned, not inherited from the ambient umask.
+
+    Creating the file and then changing the mode *back* would be a no-op under
+    a 022 umask and a real change under 002 — the test would pass on the
+    author's machine and fail on the runner, which is how a control test stops
+    controlling anything.
+    """
     target = tmp_path / "doc.pdf"
     target.write_bytes(b"aaaa")
+    target.chmod(0o644)
     before = snapshot(target)
     target.chmod(0o600)
-    target.chmod(0o644)
     after = snapshot(target)
     assert "mode" in {item.kind for item in diff(before, after)}
 
