@@ -53,6 +53,16 @@ class PageRange:
         """The selection with order and duplicates discarded."""
         return frozenset(self.indices)
 
+    @property
+    def is_empty(self) -> bool:
+        """True when the selection resolved to zero pages.
+
+        A property, never a field: an empty-but-valid selection is not an
+        error (``PLAN.md`` §4.3), and this is how a verb tells the two apart
+        without re-deriving it from ``indices`` at every call site.
+        """
+        return not self.indices
+
     def to_dict(self) -> dict[str, object]:
         return {
             "spec": self.spec,

@@ -20,6 +20,26 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-03] Page-range grammar & selection engine — 2026-08-29
+- Added `src/pdf_toolkit/ops/pagerange.py`: the one module that owns the full `PLAN.md`
+  §4.3 grammar (`N`, `A-B`, `B-A`, `N-`, `-N`, `first`/`last`, `even`/`odd`, `all`,
+  `!TOKEN`, `,`) via a single left-to-right evaluator over a running list, one
+  normalization switch at the end (ordered vs. sorted-deduplicated). `parse()`/`render()`
+  are public and framework-free (stdlib + `pdf_toolkit.models`/`errors` only, no engine,
+  no I/O); `GRAMMAR_HELP` is the one string PDF-07/PDF-08 will build their `--pages` help
+  text from (G6). PLAN §12 R-04 closed: `-N` is negative indexing, with a dedicated
+  `1-N` open-left hint on an unresolvable negative index.
+- Added `PageRangeError(UsageError)` to `src/pdf_toolkit/errors.py` (`spec`/`token`/
+  `column`/`reason`) and the `is_empty` property (never a field) to `PageRange` in
+  `src/pdf_toolkit/models.py` — both edits additive-only, no other line touched.
+- Added `tests/test_pagerange.py`: the §4.3 token table (10/10 rows) and error table
+  (7/7 rows) as data with completeness meta-tests, the five named property invariants
+  P1–P5 at 1000 hypothesis examples each (`-k property` selects exactly those five), the
+  PLAN §12 R-04 hint cases, and the module's own import-boundary/no-I/O tests. 100%
+  statement+branch coverage on the module.
+- The grammar is deliberately **unwired**: no verb, no flag, no `cli/` file created or
+  edited — `pdftoolkit --help` still lists only `version`. Wiring is PDF-07/PDF-08.
+
 ## [Task: PDF-16 — Project website (GitHub Pages), Phase A] - 2026-08-29
 - Added `website/` (27 files — 24 hand-authored, plus generated `package-lock.json`,
   `public/og-image.png`, `src/data/licenses.json`): a zero-client-JS Astro 7 +

@@ -26,6 +26,7 @@ __all__ = [
     "EngineMissingError",
     "FailureError",
     "NoInputError",
+    "PageRangeError",
     "PdfToolkitError",
     "RefusedError",
     "UsageError",
@@ -85,6 +86,35 @@ class UsageError(PdfToolkitError):
 
     exit_code: ClassVar[int] = USAGE
     kind: ClassVar[str] = "usage"
+
+
+class PageRangeError(UsageError):
+    """Exit 2 — a page-range spec is malformed, out of range, or otherwise
+    cannot be resolved against a page count.
+
+    Raised only by ``pdf_toolkit.ops.pagerange.parse``. Carries the offending
+    ``token`` and its 1-based ``column`` in the original ``spec`` string, plus
+    a short machine-readable ``reason``, so a caller can build a precise
+    diagnostic without re-parsing the message. An empty-but-valid selection is
+    *not* this error (``PLAN.md`` §4.3) — it is a normal ``PageRange`` whose
+    ``is_empty`` is ``True``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        spec: str,
+        token: str,
+        column: int,
+        reason: str,
+        path: str | None = None,
+    ) -> None:
+        super().__init__(message, path=path)
+        self.spec = spec
+        self.token = token
+        self.column = column
+        self.reason = reason
 
 
 class EngineMissingError(PdfToolkitError):
