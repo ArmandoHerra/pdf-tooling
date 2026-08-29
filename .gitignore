@@ -33,5 +33,11 @@ coverage.xml
 htmlcov/
 *.egg-info/
 
+# Dedicated license-measurement environments built by scripts/licenses.py
+# (PDF-02 Design §4.2). The inventory is generated from a pinned --no-dev
+# closure, never from the ambient venv, so these are build scratch, not sources.
+.venv-licenses/
+.venv-licenses-dev/
+
 # Scratch space for manual probing against real documents. Never committed.
 .scratch/

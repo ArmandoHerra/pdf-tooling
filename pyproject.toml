@@ -9,7 +9,7 @@ description = "One safe, permissively-licensed command-line tool for the common 
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES"]
 authors = [{ name = "Armando Herra" }]
 keywords = ["pdf", "cli", "merge", "split", "ocr", "rasterize"]
 classifiers = [
@@ -77,7 +77,9 @@ packages = ["src/pdf_toolkit"]
 include = [
   "/src",
   "/tests",
+  "/scripts",
   "/Makefile",
+  "/THIRD_PARTY_LICENSES",
   "/README.md",
   "/CONTRIBUTING.md",
   "/TESTING.md",

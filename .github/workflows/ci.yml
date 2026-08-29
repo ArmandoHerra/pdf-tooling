@@ -1,0 +1,280 @@
+---
+# PDF-02. The two machine-checked halves of claim G2 (PLAN §2) live here:
+# `license-gate` (no AGPL/GPL/LGPL in the distributed closure) and the
+# forbidden-name AST walk inside `test` (nothing reachable via subprocess
+# either). A red in either is a product-claim failure, not a chore.
+#
+# Every third-party action is SHA-pinned to a 40-hex commit with a trailing
+# `# vX.Y.Z` comment — the shape of mediakit's deploy-website.yml. Dependabot
+# updates the SHA and the comment together, which is why the comment is part of
+# the convention rather than decoration.
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # release.yml calls this whole workflow as its gate, which makes PLAN §11's
+  # "the release job is gated behind the full ci.yml job set" literally true
+  # rather than approximately so.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Redundant PR runs are cancelled. A `main` push run is NEVER cancelled: that
+  # run is the wave gate for the cycle and something is waiting on it.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Every uv invocation asserts the lockfile is current — including the ones
+  # `make` reaches indirectly via `uv run`, which would otherwise be free to
+  # re-resolve and quietly defeat the `uv sync --locked` discipline.
+  # NOTE: UV_LOCKED, not UV_FROZEN. UV_FROZEN is mutually exclusive with the
+  # `--locked` flag these steps pass ("the argument `--locked` cannot be used
+  # with UV_FROZEN"), so setting it here would fail every sync step.
+  # scripts/licenses.py strips both from its own subprocess env and states its
+  # lockfile discipline explicitly (see its _clean_env docstring).
+  UV_LOCKED: "1"
+  # Pinned so a gitleaks release cannot change what this gate means overnight.
+  GITLEAKS_VERSION: "8.30.1"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --locked
+      # A red here is formatting or a lint rule, and the remedy differs:
+      # `make fmt` rewrites the tree; a lint finding must be fixed or explicitly
+      # justified with a scoped noqa. This target never degrades to a weaker
+      # substitute and never exits 0 when the tool is absent (the MHC-51 lesson).
+      - run: make fmt-check
+      - run: make lint
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --locked
+      - run: make typecheck
+
+  test:
+    name: test
+    strategy:
+      fail-fast: false
+      matrix:
+        # PLAN §9.1 C-02's matrix. macos-13 is deliberately ABSENT: GitHub's
+        # macos-13 pool is being wound down and its jobs sit in "queued"
+        # indefinitely, holding the whole run open so it never reaches a
+        # terminal state. Do not add it back without checking pool health.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      # Engines are deliberately NOT installed here; the two engine
+      # configurations are the engines-present / without-engines jobs below.
+      - run: uv sync --locked
+      # This is where tests/test_license_policy.py runs — the forbidden-name AST
+      # walk. A red naming `gs`/`fitz`/`pdftotext` is a PLAN §7.2 violation
+      # (a shell-out or import of a GPL/AGPL tool), NOT a flaky test. The remedy
+      # is to remove the call, never to relax the walk.
+      - run: make test
+
+  engines-present:
+    name: engines-present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Install engines
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng libreoffice-writer
+      # PDF-15's engineer extends the apt list above if convert fixtures need
+      # libreoffice-calc / -impress.
+      - name: Verify engines present
+        run: |
+          tesseract --version
+          soffice --version
+      - run: uv sync --locked
+      - name: Run suite with engines installed
+        run: uv run pytest --junitxml=junit-engines-present.xml
+      # With engines installed, an engine-gated SKIP means a test that should
+      # have exercised a real engine silently did not — a false green.
+      - name: Assert no engine-gated skips
+        run: uv run python scripts/assert_skips.py junit-engines-present.xml --expect-zero
+
+  without-engines:
+    name: without-engines
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      # This job's ENTIRE POINT is engine absence. If a runner image ever starts
+      # shipping tesseract or libreoffice, that is a real finding to report, not
+      # something to relax — the engines-absent configuration would have stopped
+      # being tested at all.
+      - name: Verify engines are absent
+        run: |
+          if command -v tesseract >/dev/null 2>&1 || command -v soffice >/dev/null 2>&1; then
+            echo "engines unexpectedly present — this job's whole point is ABSENCE" >&2
+            exit 1
+          fi
+      - run: uv sync --locked
+      - name: Run suite without engines
+        run: uv run pytest --junitxml=junit-without-engines.xml
+      # Prints "engine-gated skips: N". Vacuous by construction until PDF-06
+      # introduces the markers, and it SAYS SO rather than implying coverage.
+      - name: Assert engine-gated SKIP visibility
+        run: uv run python scripts/assert_skips.py junit-without-engines.xml
+
+  sast:
+    name: sast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --locked
+      # THIS step is the gate. The report step below is artifact-only.
+      - run: make sast
+      - name: Bandit JSON report (artifact only)
+        if: always()
+        run: uv run bandit -r src/ -c pyproject.toml -f json -o bandit-report.json || true
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          if-no-files-found: ignore
+
+  vulncheck:
+    name: vulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --locked
+      # A red here is a CVE in a pinned dependency. Remedy: bump the dependency
+      # and re-lock. Q5 freezes the dependency SET, not its versions.
+      - run: make vulncheck
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is load-bearing here, not cosmetic: the default shallow
+      # checkout gives gitleaks a single commit to scan, silently downgrading
+      # the full-history gate to a one-commit gate that still reports success.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install pinned gitleaks
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL "$url" -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      # The SAME command the developer runs locally (PLAN §8.1 "same as CI").
+      # `make secret-scan` hard-fails with an install hint when gitleaks is
+      # missing; it never exits 0 without having scanned.
+      - run: make secret-scan
+      - name: Gitleaks JSON report (artifact only)
+        if: always()
+        run: gitleaks detect --no-banner --report-path gitleaks-report.json --exit-code 0 || true
+      - name: Upload gitleaks report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          if-no-files-found: ignore
+
+  license-gate:
+    name: license-gate
+    # 3.11 per PLAN §7.2 mechanism 1. scripts/licenses.py ALSO pins 3.11 for the
+    # environment it measures, so this leg and a developer laptop on 3.14
+    # produce a byte-identical inventory.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.11"
+      - run: uv sync --locked
+      # THE product claim. A red here means a package whose license matches
+      # AGPL|GPL|LGPL (or is UNKNOWN) entered the DISTRIBUTED closure.
+      # Remedy: remove the dependency. NOT: widen the deny pattern — MPL-2.0 is
+      # permitted and recorded (pikepdf bundles libqpdf; PLAN §12 R-11), so a
+      # gate reddening on pikepdf would be a defective gate.
+      - name: Regenerate and gate the license inventory
+        run: make licenses
+      # If this diff is non-empty, the committed inventory is stale relative to
+      # uv.lock. Remedy: run `make licenses` locally and commit the result.
+      - name: Assert THIRD_PARTY_LICENSES is current
+        run: git diff --exit-code -- THIRD_PARTY_LICENSES
+      # The dev tree is scanned too, so nothing goes unobserved — but it does not
+      # block: a GPL dev tool is not on the product's call graph (PLAN §7.3).
+      - name: Dev-tree license scan (informational, non-blocking)
+        continue-on-error: true
+        run: uv run python scripts/licenses.py check --informational
+
+      # --- PDF-16 inserts the website licenses.json drift diff here (PLAN §12 R-15). ---
+      # Shape: run `make licenses`, then `git diff --exit-code -- website/src/data/licenses.json`.
+      # The generator already writes that file when website/src/data/ exists (PDF-02, scripts/licenses.py).
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv build
+      # PLAN §11 requires LICENSE, NOTICE and THIRD_PARTY_LICENSES inside BOTH
+      # artifacts. Asserted by READING the archives, never by trusting the
+      # build backend's include configuration to have stayed correct.
+      - name: Assert both artifacts carry the license files
+        run: uv run --no-project python scripts/assert_artifacts.py
+      - name: Upload dist
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

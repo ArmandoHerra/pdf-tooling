@@ -1,0 +1,51 @@
+version: 2
+
+updates:
+  # Python dependencies. `uv` (NOT `pip`) is the correct ecosystem for this
+  # project: it reads pyproject.toml AND uv.lock together. The `pip` ecosystem
+  # would bump pyproject.toml and leave uv.lock stale, and every CI job runs
+  # `uv sync --locked`, so every one of them would then go red on a lockfile
+  # that no longer matches — a self-inflicted permanent red on Dependabot PRs.
+  #
+  # Minor+patch are grouped into one PR to keep volume low on a repo with no
+  # branch protection; majors stay ungrouped so each one gets its own review.
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Workflow actions across ci.yml and release.yml, both SHA-pinned. Dependabot
+  # updates the 40-hex SHA and its trailing `# vX.Y.Z` comment together, which
+  # is the second reason those comments are part of the pinning convention.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions-all:
+        patterns: ["*"]
+
+  # NOTE: Dependabot PRs are not DCO-signed. That is a second reason a required
+  # DCO status check stays out of scope this cycle (the first is HC-3: direct
+  # pushes to main are how the next fourteen specs land).
+
+  # --- PDF-16 appends the npm ecosystem block for /website here (PLAN §11.1.4). ---
+  # PDF-16 APPENDS. It must fail loudly if this file is absent, never create it
+  # (decision.md §0.3).
