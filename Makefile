@@ -57,10 +57,22 @@ sast: ## Static security analysis of src/
 	uv run bandit -r src/ -c pyproject.toml
 
 secret-scan: ## Scan history and worktree for secrets (needs the gitleaks binary)
+	@command -v gitleaks >/dev/null 2>&1 || { \
+		echo ""; \
+		echo "make: gitleaks is not on PATH."; \
+		echo "  This gate cannot run, and it will NOT exit 0 pretending that it did."; \
+		echo "  Install: https://github.com/gitleaks/gitleaks/releases"; \
+		echo "           (macOS: brew install gitleaks)"; \
+		echo "  CI installs a version-pinned release binary and then runs this same"; \
+		echo "  target, so the local command and the CI command stay identical."; \
+		echo ""; \
+		exit 1; \
+	}
 	gitleaks detect --no-banner
 
-licenses: ## Regenerate THIRD_PARTY_LICENSES from the resolved environment
-	uv run pip-licenses --format=plain-vertical --with-license-file --no-license-path > THIRD_PARTY_LICENSES
+licenses: ## Regenerate THIRD_PARTY_LICENSES from the pinned closure, then gate it
+	uv run python scripts/licenses.py generate
+	uv run python scripts/licenses.py check
 
 ci: fmt-check lint typecheck test licenses sast vulncheck ## Run the full local gate
 

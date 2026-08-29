@@ -1,0 +1,112 @@
+---
+# PDF-02. CONFIGURED AND NEVER FIRED.
+#
+# Operator ruling Q6 (tracked as B-015): v0.1.0 is not tagged in this cycle and
+# the PyPI pending publisher is not registered. This workflow's acceptance is a
+# workflow_dispatch run in which `gate` and `build` succeed and `publish` is
+# SKIPPED. Do not tag to "test" it.
+#
+# Trusted Publishing (OIDC) means there is NO PyPI token in this repository and
+# none is ever created (D-12). The remaining operator half — registering a
+# pending publisher at https://pypi.org/manage/account/publishing/ for project
+# `pdf-toolkit`, workflow `release.yml`, environment `pypi` — rides with B-015.
+name: Release
+
+"on":
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify without publishing (the only supported dispatch mode)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  UV_LOCKED: "1"
+
+jobs:
+  # PLAN §11: "the release job is gated behind the full ci.yml job set,
+  # including the license gate; a red gate cannot publish." Calling the WHOLE
+  # workflow makes that literally true, rather than re-running a hand-picked
+  # subset that can drift out of sync with ci.yml.
+  gate:
+    name: gate (full CI)
+    # The ONE reference in this repo that is deliberately not SHA-pinned, and
+    # must not be. A LOCAL reusable workflow is addressed by path and always
+    # runs at the CALLER'S commit, so it carries no third-party supply-chain
+    # risk. The SHA-pinnable form (owner/repo/.github/workflows/ci.yml@<sha>)
+    # is for REMOTE reusable workflows and would pin the release gate to a
+    # stale copy of CI — the opposite of what a gate is for.
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  build:
+    name: build
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv build
+      # Re-asserted here and not merely in ci.yml: this is the artifact that
+      # would actually be published, so it is the one that must be checked.
+      - name: Assert both artifacts carry the license files
+        run: uv run --no-project python scripts/assert_artifacts.py
+      - name: Upload dist
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish (PyPI)
+    needs: build
+    # STRUCTURALLY CANNOT FIRE ON A DISPATCH. This condition — not the
+    # `dry_run` input — is what makes the dispatch safe; the input is
+    # documentation of intent. A dispatch run shows this job as `skipped`.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pdf-toolkit
+    permissions:
+      id-token: write     # PyPI Trusted Publishing (OIDC). No token, anywhere.
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+
+  github-release:
+    name: github-release
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # creating a GitHub Release is the ONLY write in this repo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Download dist
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: dist
+          path: dist
+      # PLAN §11 wants notes generated from the [PDF-NN ...]-tagged changelog.md
+      # entries. That only matters when a tag is actually cut (B-015), so this
+      # uses --generate-notes for now. Noted, not built.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* THIRD_PARTY_LICENSES --generate-notes
