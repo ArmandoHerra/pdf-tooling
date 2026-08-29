@@ -23,3 +23,15 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python tooling caches and coverage artefacts produced by this repo's own targets
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+
+# Scratch space for manual probing against real documents. Never committed.
+.scratch/

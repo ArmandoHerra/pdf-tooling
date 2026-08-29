@@ -1,0 +1,116 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf-toolkit"
+version = "0.1.0.dev0"
+description = "One safe, permissively-licensed command-line tool for the common PDF chores."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Armando Herra" }]
+keywords = ["pdf", "cli", "merge", "split", "ocr", "rasterize"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Utilities",
+]
+
+# The complete approved runtime stack, declared up front so that no later spec
+# has to add a runtime dependency: `THIRD_PARTY_LICENSES` and the website's
+# license data are generated from the lockfile and diffed in CI, so an
+# incremental addition turns an unrelated commit's gate red.
+dependencies = [
+  "pypdf[crypto]>=6.16.2,<7",
+  "pypdfium2>=5.13.0,<6",
+  "reportlab>=5.0.1,<6",
+  "pikepdf>=10.12.0,<11",
+  "pdfplumber>=0.11.10,<0.12",
+  "pytesseract>=0.3.13,<0.4",
+  "pillow>=12.3.0,<13",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+# HTML/Markdown composition. Needs system pango/cairo, so it is never a base
+# dependency; the base install must stay system-library-free.
+html = ["weasyprint>=69.0,<70"]
+all = ["weasyprint>=69.0,<70"]
+
+[project.scripts]
+pdftoolkit = "pdf_toolkit.cli.main:main"
+pdf-toolkit = "pdf_toolkit.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/ArmandoHerra/pdf-toolkit"
+Repository = "https://github.com/ArmandoHerra/pdf-toolkit"
+Changelog = "https://github.com/ArmandoHerra/pdf-toolkit/blob/main/changelog.md"
+
+[dependency-groups]
+dev = [
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "pytest-xdist>=3.6",
+  "hypothesis>=6.100",
+  "bandit>=1.7.9",
+  "pip-audit>=2.7",
+  "pip-licenses>=5.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf_toolkit"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/Makefile",
+  "/README.md",
+  "/CONTRIBUTING.md",
+  "/TESTING.md",
+  "/changelog.md",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+mypy_path = "src"
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "e2e: subprocess-level CLI runs against the installed console script",
+]
+
+[tool.coverage.run]
+source = ["pdf_toolkit"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "dist", "build"]

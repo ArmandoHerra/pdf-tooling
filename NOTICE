@@ -1,0 +1,42 @@
+pdf-toolkit
+Copyright 2026 Armando Herra
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full text.
+
+This product orchestrates third-party PDF engines rather than implementing PDF
+parsing or rendering itself. Every engine on the call graph is permissively
+licensed; nothing under AGPL, GPL or LGPL is reachable — not as an import, not
+as an optional extra, and not as a subprocess fallback.
+
+The complete, generated attribution list for a given build lives in
+THIRD_PARTY_LICENSES, produced from the resolved environment and shipped in
+both the sdist and the wheel.
+
+Engine attribution summary:
+
+  pypdf                 BSD-3-Clause
+  cryptography          Apache-2.0 OR BSD-3-Clause
+  pypdfium2             BSD-3-Clause / Apache-2.0 (Chromium's pdfium)
+  reportlab             BSD
+  pikepdf               MPL-2.0 (bundles libqpdf, Apache-2.0)
+  pdfplumber            MIT
+  pdfminer.six          MIT
+  pytesseract           Apache-2.0
+  Pillow                MIT-CMU
+  typer                 MIT (bundles Click, BSD-3-Clause)
+
+MPL-2.0 appears above and is deliberate rather than overlooked. MPL-2.0 is
+file-level copyleft: its obligations attach to modified MPL files, not to a
+work that merely depends on the unmodified library. pikepdf is used unmodified
+and is neither patched nor vendored, so no MPL file is distributed in a
+modified form by this project. It is recorded here rather than hidden.
+
+Optional, never installed by default:
+
+  WeasyPrint            BSD   (the [html] extra; needs system pango/cairo)
+
+Runtime-detected system binaries, invoked as separate processes and never
+bundled into the wheel:
+
+  tesseract             Apache-2.0
+  soffice / LibreOffice MPL-2.0
