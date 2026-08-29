@@ -9,6 +9,7 @@ fonts/logos. Re-run any time the tagline changes:
 Pillow is already a declared runtime dependency (PLAN.md §7.1), so no
 separate install step is needed.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -16,12 +17,12 @@ import pathlib
 from PIL import Image, ImageDraw, ImageFont
 
 WIDTH, HEIGHT = 1200, 630
-BG_TOP = (15, 23, 42)       # surface-900  #0f172a
-BG_BOTTOM = (136, 19, 55)   # primary-900  #881337
-ACCENT = (251, 113, 133)    # primary-400  #fb7185
-RIM = (190, 18, 60)         # primary-700  #be123c
-TEXT = (248, 250, 252)      # surface-50
-SUBTEXT = (251, 113, 133)   # primary-400  #fb7185
+BG_TOP = (15, 23, 42)  # surface-900  #0f172a
+BG_BOTTOM = (136, 19, 55)  # primary-900  #881337
+ACCENT = (251, 113, 133)  # primary-400  #fb7185
+RIM = (190, 18, 60)  # primary-700  #be123c
+TEXT = (248, 250, 252)  # surface-50
+SUBTEXT = (251, 113, 133)  # primary-400  #fb7185
 
 FONT_CANDIDATES_BOLD = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -52,27 +53,42 @@ def _vertical_gradient(width: int, height: int, top: tuple, bottom: tuple) -> Im
     return base
 
 
-def _draw_document(draw: "ImageDraw.ImageDraw", cx: int, cy: int, r: float) -> None:
+def _draw_document(draw: ImageDraw.ImageDraw, cx: int, cy: int, r: float) -> None:
     """Frame + folded-corner document, echoing website/src/assets/pdf-toolkit-logo.svg."""
     f = r * 1.58
     draw.rounded_rectangle(
         [cx - f, cy - f, cx + f, cy + f],
-        radius=int(r * 0.62), outline=ACCENT, width=max(2, int(r * 0.11)),
+        radius=int(r * 0.62),
+        outline=ACCENT,
+        width=max(2, int(r * 0.11)),
     )
-    w, h, fold = r * 0.78, r * 1.10, r * 0.34          # page half-width, half-height, fold size
+    w, h, fold = r * 0.78, r * 1.10, r * 0.34  # page half-width, half-height, fold size
     left, right, top, bot = cx - w, cx + w, cy - h, cy + h
     lw = max(3, int(r * 0.10))
     draw.line(
-        [(left, top), (right - fold, top), (right, top + fold), (right, bot),
-         (left, bot), (left, top)],
-        fill=RIM, width=lw, joint="curve",
+        [
+            (left, top),
+            (right - fold, top),
+            (right, top + fold),
+            (right, bot),
+            (left, bot),
+            (left, top),
+        ],
+        fill=RIM,
+        width=lw,
+        joint="curve",
     )
-    draw.line([(right - fold, top), (right - fold, top + fold), (right, top + fold)],
-              fill=RIM, width=lw, joint="curve")
-    for k, frac in enumerate((0.55, 0.35)):            # two text rules inside the page
+    draw.line(
+        [(right - fold, top), (right - fold, top + fold), (right, top + fold)],
+        fill=RIM,
+        width=lw,
+        joint="curve",
+    )
+    for k, frac in enumerate((0.55, 0.35)):  # two text rules inside the page
         y = cy + r * (0.10 + 0.30 * k)
-        draw.line([(left + r * 0.22, y), (left + r * 0.22 + 2 * w * frac, y)],
-                  fill=ACCENT, width=lw)
+        draw.line(
+            [(left + r * 0.22, y), (left + r * 0.22 + 2 * w * frac, y)], fill=ACCENT, width=lw
+        )
 
 
 def main() -> None:
@@ -88,7 +104,9 @@ def main() -> None:
 
     text_x = 350
     draw.text((text_x, 190), "pdf-toolkit", font=title_font, fill=TEXT)
-    draw.text((text_x, 310), "Every common PDF chore. One safe CLI.", font=tagline_font, fill=SUBTEXT)
+    draw.text(
+        (text_x, 310), "Every common PDF chore. One safe CLI.", font=tagline_font, fill=SUBTEXT
+    )
     draw.text((text_x, 358), "No copyleft underneath.", font=tagline_font, fill=SUBTEXT)
     draw.text(
         (text_x, 440),
