@@ -28,6 +28,8 @@ src/pdf_toolkit/
 └── output/    L6  stdout is the payload; stderr is everything else
 ```
 
+`website/` at the repo root is a separate Astro 7 + Tailwind v4 landing page (GitHub Pages); see `website/README.md`.
+
 Each package's `__init__.py` states its own contract in its docstring. Read it before editing anything in that package — the rule you are about to break is written at the top of the file.
 
 `models.py` holds the data model and the schema version. It is shared, so each model a later change owns has a named insertion anchor; insert at your own anchor and nowhere else.

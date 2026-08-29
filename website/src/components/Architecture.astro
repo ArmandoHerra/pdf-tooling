@@ -1,0 +1,42 @@
+---
+const steps = [
+  { label: 'CLI (Typer)', detail: 'Parses flags, builds one frozen OperationPlan, picks a renderer. The ONLY layer that may import Typer.' },
+  { label: 'Ops', detail: 'Framework-free verbs, pure functions over ports. No I/O except through Safety and Ports.' },
+  { label: 'Safety', detail: 'The single write chokepoint — atomic write-to-temp-then-rename, no-clobber, the --dry-run gate.' },
+  { label: 'Ports', detail: 'typing.Protocol definitions only: StructureEngine · RasterEngine · ComposeEngine · TextEngine · OcrEngine · OfficeConverter' },
+  { label: 'Adapters', detail: 'The ONLY modules that import an engine library or spawn a process — which is what makes the licence guarantee auditable.' },
+  { label: 'Engines', detail: 'pypdf · pypdfium2 · pikepdf · reportlab · pdfplumber · Tesseract · LibreOffice.' },
+];
+---
+
+<section id="architecture" class="border-t border-surface-800 bg-surface-800/20 py-24">
+  <div class="mx-auto max-w-5xl px-6">
+    <div class="mx-auto max-w-2xl text-center">
+      <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">
+        A six-layer spine, one licence guarantee
+      </h2>
+      <p class="mt-4 text-lg text-surface-100">
+        Adapters are the only modules that import an engine library or spawn a process —
+        that is what makes the licence guarantee auditable by reading eight files.
+      </p>
+    </div>
+
+    <div class="mt-14 flex flex-col items-stretch gap-2 lg:flex-row lg:items-center lg:gap-3">
+      {steps.map((step, i) => (
+        <>
+          <div class="min-w-0 flex-1 rounded-lg border border-surface-800 bg-surface-900 p-4 text-center">
+            <p class="font-mono text-sm font-semibold text-primary-400">{step.label}</p>
+            <p class="mt-1 text-xs leading-snug text-surface-100 break-words">{step.detail}</p>
+          </div>
+          {i < steps.length - 1 && (
+            <div class="flex items-center justify-center text-primary-400" aria-hidden="true">
+              <svg class="h-5 w-5 rotate-90 lg:rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </div>
+          )}
+        </>
+      ))}
+    </div>
+  </div>
+</section>

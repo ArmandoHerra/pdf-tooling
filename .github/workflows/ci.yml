@@ -257,6 +257,12 @@ jobs:
       # Shape: run `make licenses`, then `git diff --exit-code -- website/src/data/licenses.json`.
       # The generator already writes that file when website/src/data/ exists (PDF-02, scripts/licenses.py).
 
+      - name: Regenerate website licence data
+        run: make licenses
+
+      - name: Fail on website licence drift
+        run: git diff --exit-code -- website/src/data/licenses.json
+
   build:
     name: build
     runs-on: ubuntu-latest

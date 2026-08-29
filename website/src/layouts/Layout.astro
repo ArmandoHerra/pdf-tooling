@@ -1,0 +1,46 @@
+---
+import '../styles/global.css';
+import { withBase } from '../lib/site';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'pdf-toolkit — Every common PDF chore. One safe CLI. No copyleft underneath.',
+  description = "An Apache-2.0 PDF toolkit CLI in Python — merge, split, extract, rotate, PDF↔images, text, tables, compress, encrypt, metadata, watermark, OCR and Office→PDF — over pypdf, pdfium, pikepdf, reportlab and pdfplumber, with nothing AGPL or GPL on the call graph.",
+} = Astro.props;
+
+const ogImage = new URL(withBase('og-image.png'), Astro.site).toString();
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalUrl} />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="pdf-toolkit" />
+    <meta property="og:description" content="Every common PDF chore. One safe CLI. No copyleft underneath." />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:type" content="website" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="pdf-toolkit" />
+    <meta name="twitter:description" content="Every common PDF chore. One safe CLI. No copyleft underneath." />
+    <meta name="twitter:image" content={ogImage} />
+
+    <link rel="icon" type="image/svg+xml" href={withBase('favicon.svg')} />
+  </head>
+  <body class="font-sans antialiased">
+    <slot />
+  </body>
+</html>

@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.astro/
+
+# Env
+.env
+.env.production
+
+# Editor/OS
+.DS_Store
+*.swp

@@ -1,0 +1,48 @@
+---
+// PDF-16 Phase A — R-6: only commands that exist in wave 3. `merge` /
+// `rasterize` / `compose` land in wave 5 and do not exist yet; showing them
+// here would violate honesty rule 7. Re-derived from `uv run pdftoolkit
+// --help`, 2026-08-29: the entire Commands: block is `version`.
+const install = `# Install (the repository is public; this line is live today)
+uv tool install git+https://github.com/ArmandoHerra/pdf-toolkit
+# or: pipx install git+https://github.com/ArmandoHerra/pdf-toolkit`;
+
+const commands = `pdftoolkit --version        # version, Python, and resolved adapter versions
+pdftoolkit --help           # the global flags and the verbs available today
+pdftoolkit version          # the same information, as a rendered payload
+pdftoolkit version -o json  # structured, one object with schema_version`;
+---
+
+<section id="quickstart" class="border-t border-surface-800 bg-surface-800/20 py-24">
+  <div class="mx-auto max-w-4xl px-6">
+    <div class="mx-auto max-w-2xl text-center">
+      <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">Quick Start</h2>
+      <p class="mt-4 text-lg text-surface-100">
+        Install <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdf-toolkit</code>;
+        the command is <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftoolkit</code>.
+        This is not <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftk</code> —
+        it shares no code with it and is Apache-2.0.
+      </p>
+    </div>
+
+    <pre tabindex="0" class="mt-8 overflow-x-auto rounded-lg border border-surface-800 bg-surface-900 p-4 font-mono text-xs leading-relaxed text-surface-100"><code>{install}</code></pre>
+
+    <div tabindex="0" class="mt-6 overflow-x-auto rounded-xl border border-surface-800 bg-surface-900">
+      <div class="flex items-center gap-2 border-b border-surface-800 px-4 py-3">
+        <span class="h-3 w-3 rounded-full bg-red-500/70"></span>
+        <span class="h-3 w-3 rounded-full bg-yellow-500/70"></span>
+        <span class="h-3 w-3 rounded-full bg-green-500/70"></span>
+        <span class="ml-3 text-xs text-surface-100">terminal</span>
+      </div>
+      <pre tabindex="0" class="overflow-x-auto p-6 font-mono text-sm leading-relaxed text-surface-50"><code>{commands}</code></pre>
+    </div>
+
+    <p class="mt-6 text-sm text-surface-100">
+      Until the first PyPI release, install straight from the repository — no package-index
+      install, no Homebrew formula, no system package, no container image yet.
+      The document verbs are <a href="#verbs" class="text-primary-400 underline hover:text-primary-300">specified and not yet shipped</a> —
+      <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdftoolkit --help</code> is the authoritative
+      list of what actually exists.
+    </p>
+  </div>
+</section>

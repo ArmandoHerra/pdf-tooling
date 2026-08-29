@@ -1,0 +1,68 @@
+---
+const features = [
+  {
+    icon: 'shield',
+    title: 'Safe by default',
+    description: '--dry-run shows exactly what would be written and touches nothing. Outputs never clobber without --force. Every write goes to a temp file on the target filesystem, is fsync\'d, and is moved into place with os.replace. Inputs are never modified unless you ask for --in-place, which writes a .bak sidecar first.',
+  },
+  {
+    icon: 'scale',
+    title: 'License-clean stack',
+    description: 'Apache-2.0 top to bottom. pypdf, pdfium, pikepdf, reportlab and pdfplumber are BSD / MIT / Apache / MPL. CI fails the build on any AGPL, GPL or LGPL package, and a unit test walks the source for forbidden imports and shell-outs — because the realistic leak in a PDF tool is a convenience subprocess call, not a dependency.',
+  },
+  {
+    icon: 'terminal',
+    title: 'Machine-first output',
+    description: 'Every read path emits table, json or ndjson with a declared schema_version. json is automatic when stdout is not a terminal. Designed to be a link in a shell pipeline.',
+  },
+  {
+    icon: 'stethoscope',
+    title: 'Honest engine reporting',
+    description: 'pdftoolkit doctor states, per port, which adapter resolved, its version, and what is missing — with an OS-aware install hint. A verb whose engine is absent exits 3 with that hint; never a stack trace, never a silently degraded result.',
+  },
+  {
+    icon: 'ruler',
+    title: 'One page-range grammar',
+    description: '1-3,5,9-, even, odd, first, last, -1, !5 — parsed by one module and shared by every page-addressing verb. Learn it once.',
+  },
+  {
+    icon: 'signal',
+    title: 'Stable exit codes',
+    description: 'Seven codes, uniform across every verb, asserted by a contract test. A script\'s recovery for "wrong password" differs from "engine missing" and from "refused", so they are different codes.',
+  },
+];
+
+const icons: Record<string, string> = {
+  shield:     'M12 2 20 5.5V11c0 5-3.4 8.7-8 9.9C7.4 19.7 4 16 4 11V5.5L12 2ZM9 11.5l2 2 4-4',
+  scale:      'M12 3v18M7 7 5 12h4L7 7Zm10 0-2 5h4l-2-5ZM5 12a2 2 0 0 0 4 0M15 12a2 2 0 0 0 4 0M5 21h14',
+  terminal:   'M4 5h16v14H4V5Zm3 4 3 3-3 3M12 15h5',
+  stethoscope:'M6 3v6a4 4 0 0 0 8 0V3M10 21a4 4 0 0 0 4-4v-3M18 9v2a4 4 0 0 1-4 4M18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z',
+  ruler:      'M3 8h18v8H3V8Zm4 0v3m4-3v5m4-5v3m4-5v8',
+  signal:     'M3 12h4l3-8 4 16 3-8h4',
+};
+---
+
+<section id="features" class="mx-auto max-w-6xl px-6 py-24">
+  <div class="mx-auto max-w-2xl text-center">
+    <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">
+      Every common PDF chore, without the footguns
+    </h2>
+    <p class="mt-4 text-lg text-surface-100">
+      Six principles, machine-checked rather than promised.
+    </p>
+  </div>
+
+  <div class="mt-16 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+    {features.map((f) => (
+      <div class="rounded-xl border border-surface-800 bg-surface-800/40 p-6 transition hover:border-primary-400/60">
+        <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-primary-500/10 text-primary-400">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d={icons[f.icon]} />
+          </svg>
+        </div>
+        <h3 class="text-lg font-semibold text-surface-50">{f.title}</h3>
+        <p class="mt-2 text-sm leading-relaxed text-surface-100">{f.description}</p>
+      </div>
+    ))}
+  </div>
+</section>

@@ -6,6 +6,8 @@ Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write
 
 **Current phase:** Phase 1 (v1) — per-spec status lives in `ai_plans/pdf-toolkit/specs/SPEC-INDEX.md`; history in `changelog.md`.
 
+- **Website:** https://armandoherra.github.io/pdf-toolkit/ — the public landing page (source in `website/`).
+
 ## This is not `pdftk`
 
 `pdf-toolkit` shares no code with `pdftk`, is not a fork of it, and is not a drop-in replacement for it. `pdftk` is GPL-licensed; this project is **Apache-2.0**, and its engine policy forbids anything under AGPL, GPL or LGPL from appearing as an import, an optional extra, or a `subprocess` fallback. The console script is named `pdftoolkit` precisely so the two cannot be confused on your `PATH`.

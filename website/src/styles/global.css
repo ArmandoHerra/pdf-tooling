@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/*
+ * Tailwind v4 CSS-first theme. Mirrors website/tailwind.config.mjs -- keep
+ * both in sync if you touch color/font tokens. No web fonts are fetched (no
+ * external network calls at build or runtime); the stacks below fall back to
+ * the OS default sans/mono fonts when Inter / JetBrains Mono aren't installed
+ * locally.
+ *
+ * Palette: rose primary over the shared surface scale. Deliberately not
+ * kubewright's blue or mediakit's amber -- the three sibling sites must be
+ * distinguishable. See PDF-16 spec section D3 for the measured contrast
+ * ratios and the dark-on-rose ruling. The primary-500 shade at 4.16:1
+ * against the primary-500/10 verb-chip tint fails WCAG 1.4.3 as accent
+ * text, so accent TEXT uses the primary-400 shade (6.63:1) throughout;
+ * primary-500 survives only as a fill under the surface-900 text colour
+ * or as a <=10% decorative tint. (Deliberately not spelled as Tailwind
+ * class names here so this comment does not itself trip the AC10 grep.)
+ */
+@theme {
+  --color-primary-50: #fff1f2;
+  --color-primary-100: #ffe4e6;
+  --color-primary-400: #fb7185;
+  --color-primary-500: #f43f5e;
+  --color-primary-600: #e11d48;
+  --color-primary-700: #be123c;
+  --color-primary-900: #881337;
+
+  --color-surface-50: #f8fafc;
+  --color-surface-100: #f1f5f9;
+  --color-surface-800: #1e293b;
+  --color-surface-900: #0f172a;
+
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Anchor-heavy single page: honour the OS-level motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  background-color: var(--color-surface-900);
+  color: var(--color-surface-50);
+}
+
+/* Deliberate, measured focus ring (WCAG 2.4.7) over custom-coloured controls.
+   primary-400 on surface-900 = 6.63:1 (>= 3:1, WCAG 1.4.11). */
+:focus-visible {
+  outline: 2px solid var(--color-primary-400);
+  outline-offset: 2px;
+}

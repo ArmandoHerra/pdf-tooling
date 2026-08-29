@@ -49,3 +49,21 @@ updates:
   # --- PDF-16 appends the npm ecosystem block for /website here (PLAN §11.1.4). ---
   # PDF-16 APPENDS. It must fail loudly if this file is absent, never create it
   # (decision.md §0.3).
+  # Website toolchain (PDF-16). Astro/Tailwind minor+patch grouped into one PR
+  # to keep volume low; majors stay ungrouped so an Astro/Tailwind major gets
+  # its own review (they have broken builds before).
+  - package-ecosystem: npm
+    directory: "/website"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

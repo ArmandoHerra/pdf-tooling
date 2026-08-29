@@ -1,0 +1,25 @@
+{
+  "name": "pdf-toolkit-website",
+  "version": "1.0.0",
+  "description": "Project website for pdf-toolkit — every common PDF chore, one safe CLI, no copyleft underneath",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^7.2.3",
+    "@astrojs/sitemap": "^3.7.3",
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "^6.0.3"
+  }
+}
