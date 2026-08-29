@@ -23,12 +23,20 @@ from pdf_toolkit.cli.exit_codes import (
 
 __all__ = [
     "AuthError",
+    "BackupExistsError",
+    "BackupWithoutInPlaceError",
+    "ConfirmationDeclinedError",
+    "ConfirmationRequiredError",
+    "DestinationUnwritableError",
     "EngineMissingError",
     "FailureError",
     "NoInputError",
+    "OutputCollisionError",
+    "OutputEscapesDirError",
     "PageRangeError",
     "PdfToolkitError",
     "RefusedError",
+    "TargetExistsError",
     "UsageError",
 ]
 
@@ -146,3 +154,73 @@ class AuthError(PdfToolkitError):
 
     exit_code: ClassVar[int] = AUTH
     kind: ClassVar[str] = "auth"
+
+
+# --- The safety spine's own codes (PLAN.md §5.6, PDF-04 Design §D8) ---------
+# Additive by construction: every class below is a subclass of one that already
+# existed, so it inherits an exit code that is already public API rather than
+# introducing a new integer. The *family* (``kind``) is inherited too — a
+# machine consumer keys off ``code``/``kind``, and the specific class is for
+# call sites and tests.
+
+
+class BackupWithoutInPlaceError(UsageError):
+    """Exit 2 — ``--no-backup`` was passed without ``--in-place``.
+
+    A usage error and not a safety refusal: the pair is mutually exclusive at
+    parse time, in the same family as ``--quiet``/``--verbose``, and nothing has
+    been attempted yet. Raised by ``SafetyPolicy.validate()``, which is the one
+    owner of the rule.
+    """
+
+
+class DestinationUnwritableError(FailureError):
+    """Exit 1 — the destination directory is missing or not writable.
+
+    Deliberately *not* a refusal: nothing declined on safety grounds, the
+    filesystem simply cannot accept the write. Raised at plan time so it lands
+    before an engine runs rather than after one produced bytes with nowhere to
+    put them.
+    """
+
+
+class TargetExistsError(RefusedError):
+    """Exit 5 — the output exists and ``--force`` was not given."""
+
+
+class OutputCollisionError(RefusedError):
+    """Exit 5 — two planned outputs resolve to one destination.
+
+    Detected across the whole planned output set before the first write, so a
+    200-file batch refuses at item 0 rather than at item 137.
+    """
+
+
+class BackupExistsError(RefusedError):
+    """Exit 5 — the ``.bak`` sidecar exists and ``--force`` was not given."""
+
+
+class OutputEscapesDirError(RefusedError):
+    """Exit 5 — a resolved destination lands outside its ``--out-dir``.
+
+    The split is deliberate and it is the one thing to read before adding a
+    template-expansion path: a *statically malformed* ``--name`` (a path
+    separator, or ``..`` in the template itself) is a bad invocation and stays
+    exit 2, raised by the CLI layer. A destination that only escapes **after**
+    substitution — a ``{stem}`` carrying ``../``, say — is discovered at plan
+    time from *data*, not from the invocation, so it is a safety gate declining
+    over a resolved path and is exit 5, in the same family as no-clobber and
+    collision.
+    """
+
+
+class ConfirmationRequiredError(RefusedError):
+    """Exit 5 — a bulk destructive run on a non-TTY without ``-y``.
+
+    Never a prompt and never a block on stdin: on a non-terminal the answer is
+    a refusal, immediately.
+    """
+
+
+class ConfirmationDeclinedError(RefusedError):
+    """Exit 5 — the interactive confirmation prompt was answered no."""

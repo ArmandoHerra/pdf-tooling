@@ -20,6 +20,44 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-04] Safety spine (atomic writes, no-clobber, --in-place, -y gate) — 2026-08-29
+- Added the write chokepoint under `src/pdf_toolkit/safety/`: `atomic.py`
+  (`AtomicWriter` — dry-run gate as the first statement of `__enter__`, temp beside the
+  resolved destination, `flush`/`fsync`, the `.bak` sidecar via `os.link` with a
+  `shutil.copy2` fallback, `os.replace`, and an `EXDEV` path that copies, fsyncs,
+  replaces and then verifies size **and** SHA-256), plus `paths.py` (alias-safe identity,
+  no-clobber, planned-output collision, `ensure_within`, destination writability),
+  `tempnames.py` (`TEMP_PREFIX`, `find_stray_temps` — reports, never sweeps, per
+  `PLAN.md` §12 R-07), `confirm.py` (the bulk-destructive `-y` gate, which fails closed
+  and immediately on a non-terminal) and `_faults.py` (an inherited-pipe crash
+  rendezvous, inert unless a test asks for it). `SafetyPolicy.validate()` now owns
+  `--no-backup` without `--in-place` (exit **2**) and `cli/common.py` delegates to it;
+  `cli/main.py` gained `build_rerun_hint()`. Eight error classes added to `errors.py`,
+  all subclasses of existing ones, so no new exit-code integer entered the public table.
+- Added `tests/test_import_boundaries.py`: an AST walk over every file under `src/` that
+  fails on any of fourteen filesystem-mutating call groups outside
+  `safety/atomic.py`. Two tiers, two allowlists, **both empty and asserted empty**,
+  stale-entry detection, five planted violations proving the walk bites, and a negative
+  self-test proving `str.replace`, `list.remove`, `dict.copy` and `open(p, "rb")` are
+  not flagged. Shared and append-only — PDF-05 and PDF-06 add their sections to it.
+- Added `tests/fs_snapshot.py`, the `--dry-run` purity primitive (inode, mode, size,
+  mtime, content hash, symlink target; `atime` excluded, directory mtime included;
+  `$TMPDIR`/`$HOME` redirected into the test's own tree and both snapshot roots), with
+  six planted mutations as negative controls and a non-dry-run control that produces a
+  non-empty diff so "zero differences" cannot mean "nothing ran".
+- Added `tests/atomic_harness.py` (a subprocess driver, deliberately not a verb, routing
+  errors through the product's own `emit_error` and `exit_code`) and seven test arms:
+  a **real** `SIGKILL` delivered to a child provably parked at `after_temp_create`,
+  `after_fsync` and `after_backup` leaves the original byte-identical for both a fresh
+  target and `--in-place`; a real second filesystem (`/dev/shm`) proves the degradation
+  warning and a genuine kernel `EXDEV`; the `-y` gate is exercised over a never-written
+  stdin pipe under a hard timeout and over a real `pty`.
+- `TESTING.md` gained a "Safety-spine test arms" section documenting
+  `PDF_TOOLKIT_FAULT_POINT`, `PDF_TOOLKIT_FAULT_RENDEZVOUS`,
+  `PDF_TOOLKIT_TEST_XDEV_DIR`, the second-filesystem ladder (which **fails** rather than
+  skips on Linux) and the expected visible-skip count per configuration. No runtime
+  dependency was added and no engine is touched — every arm writes plain bytes.
+
 ## [PDF-03] Page-range grammar & selection engine — 2026-08-29
 - Added `src/pdf_toolkit/ops/pagerange.py`: the one module that owns the full `PLAN.md`
   §4.3 grammar (`N`, `A-B`, `B-A`, `N-`, `-N`, `first`/`last`, `even`/`odd`, `all`,

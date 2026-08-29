@@ -349,12 +349,16 @@ def validate_config(config: GlobalConfig) -> None:
     ``--no-backup`` without ``--in-place`` is deliberately a usage error and not
     a safety refusal: it is a parse-time invocation mistake, in the same family
     as any other mutually exclusive pair, and nothing has been attempted yet.
+    That rule is owned by ``SafetyPolicy.validate()`` and delegated to below;
+    everything else here is about flags the policy does not carry.
     """
     if config.output is not None and config.out_dir is not None:
         raise UsageError("--output and --out-dir are mutually exclusive")
 
-    if config.no_backup and not config.in_place:
-        raise UsageError("--no-backup requires --in-place")
+    # Delegated, not duplicated: ``SafetyPolicy`` owns this rule, so the CLI and
+    # any other construction of a policy cannot drift apart. Still exit 2 —
+    # ``BackupWithoutInPlaceError`` is a ``UsageError``.
+    config.safety.validate()
 
     if config.quiet and config.verbose > 0:
         raise UsageError("--quiet and --verbose are mutually exclusive")

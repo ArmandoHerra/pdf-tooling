@@ -15,6 +15,10 @@ traceback and exits 1, which is a signal, not a UX.
 
 from __future__ import annotations
 
+import shlex
+import sys
+from collections.abc import Sequence
+
 import typer
 
 from pdf_toolkit.cli import cmd_version
@@ -55,6 +59,23 @@ def root(ctx: typer.Context) -> None:
 app.command(name="version", help=cmd_version.version_command.__doc__)(cmd_version.version_command)
 
 
+def build_rerun_hint(argv: Sequence[str] | None = None) -> str:
+    """The exact command to re-run, with ``-y`` appended.
+
+    The confirmation gate refuses a bulk destructive run on a non-terminal, and
+    the only thing that makes such a refusal *useful* is handing back a line the
+    operator can paste. Building it here rather than inside ``safety/`` is the
+    layering, not a convenience: reading ``sys.argv`` is a property of being the
+    process entry point, and ``safety/`` stays a pure function of its arguments
+    so it can be tested and embedded without a command line existing at all.
+
+    ``shlex.join`` rather than ``" ".join`` because a path with a space in it is
+    the ordinary case, not the exotic one, and a hint that breaks when pasted is
+    worse than no hint.
+    """
+    return shlex.join(list(sys.argv if argv is None else argv)) + " -y"
+
+
 def main() -> None:
     """Console-script entry point for ``pdftoolkit``, ``pdf-toolkit`` and ``python -m``."""
     try:
@@ -64,4 +85,4 @@ def main() -> None:
         raise SystemExit(error.exit_code) from None
 
 
-__all__ = ["PROG_NAME", "app", "global_options", "main", "root"]
+__all__ = ["PROG_NAME", "app", "build_rerun_hint", "global_options", "main", "root"]

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pdf_toolkit.errors import BackupWithoutInPlaceError
+
 
 @dataclass(frozen=True, slots=True)
 class SafetyPolicy:
@@ -35,6 +37,27 @@ class SafetyPolicy:
     assume_yes: bool
     is_tty: bool
     threads: int
+
+    def validate(self) -> None:
+        """Reject the flag combinations the policy itself owns. Exit 2.
+
+        There is exactly one today, and it lives here rather than in the CLI so
+        that the rule travels with the data: any construction of a policy — a
+        test, a future embedding, the CLI — gets the same answer, and the CLI
+        layer delegates instead of keeping a second copy that can drift.
+
+        ``--no-backup`` without ``--in-place`` is deliberately a **usage** error
+        (exit 2) and not a safety refusal (exit 5). ``PLAN.md`` §4.2 and §5.6
+        disagree on paper; §5.6's exit-2 row names "mutually exclusive flags",
+        which is precisely what this is, and nothing has been attempted yet.
+        Suppressing a backup that was never going to be taken is a mistake about
+        the invocation, not a gate declining over a resolved destination.
+
+        ``backup`` is already the resolved inverse of ``--no-backup``, so the
+        rule reads off the two fields directly and no eighth field is added.
+        """
+        if not self.backup and not self.in_place:
+            raise BackupWithoutInPlaceError("--no-backup requires --in-place")
 
     def to_dict(self) -> dict[str, object]:
         return {
