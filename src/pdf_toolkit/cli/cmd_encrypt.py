@@ -21,6 +21,18 @@ never is.
 and ``--name`` exit 2, from the shared option layer, with no check for either
 here. It produces exactly one file per invocation, so the declaration stays
 one-dimensional.
+
+**B-079 — the bulk-destructive non-TTY confirmation gate is wired here.**
+`encrypt` takes a single ``source: Path`` argument, so a bulk ``--in-place``
+run is not reachable today (arity refuses a second operand at exit 2 before
+this gate could be consulted) — the gap this closes was latent, not exposed.
+Wiring it now (``input_count=1``, the REAL resolved count for this verb's
+arity) is a no-op today and correct the day this verb's arity ever changes,
+matching ``cmd_meta_set.py``'s own precedent. Independent of, and unaffected
+by, the plaintext-``.bak`` gate above (:func:`plaintext_backup_refusal`):
+that is AC14's own ground (an unencrypted sidecar), this is R6/B-079's
+(bulk/non-TTY), and both can fire on the same invocation for different
+reasons.
 """
 
 from __future__ import annotations
@@ -43,6 +55,7 @@ from pdf_toolkit.ops.crypto import PasswordSource, encrypt_run
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports.structure import ALWAYS_GRANTED_TOKENS, PERMISSION_TOKENS
+from pdf_toolkit.safety.confirm import require_confirmation
 
 __all__ = ["encrypt_command", "parse_allow", "plaintext_backup_refusal"]
 
@@ -244,6 +257,18 @@ def encrypt_command(
         backup=config.safety.backup,
         assume_yes=config.assume_yes,
     )
+
+    if not config.dry_run and config.in_place:
+        # Local import: `cli.main` imports this module at load time to
+        # register the command, so a module-level import here would cycle.
+        from pdf_toolkit.cli.main import build_rerun_hint
+
+        require_confirmation(
+            config.safety,
+            input_count=1,
+            in_place=True,
+            rerun_hint=build_rerun_hint(),
+        )
 
     result = encrypt_run(
         source,

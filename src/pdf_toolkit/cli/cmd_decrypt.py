@@ -11,6 +11,14 @@ first.
 **OR-3.** `decrypt` declares ``--output``/``--in-place`` only — ``--out-dir``
 and ``--name`` exit 2, from the shared option layer, with no check for either
 here.
+
+**B-079 — the bulk-destructive non-TTY confirmation gate is wired here.**
+`decrypt` takes a single ``source: Path`` argument, so a bulk ``--in-place``
+run is not reachable today (arity refuses a second operand at exit 2 before
+this gate could be consulted) — the gap this closes was latent, not exposed.
+Wiring it now (``input_count=1``, the REAL resolved count for this verb's
+arity) is a no-op today and correct the day this verb's arity ever changes,
+matching ``cmd_meta_set.py``'s own precedent.
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.ops.crypto import decrypt_run
 from pdf_toolkit.output import emit_result
+from pdf_toolkit.safety.confirm import require_confirmation
 
 __all__ = ["decrypt_command"]
 
@@ -85,6 +94,17 @@ def decrypt_command(
     )
 
     _reject_missing_sources([source])
+
+    if not config.dry_run and config.in_place:
+        # Local import: `cli.main` imports this module at load time.
+        from pdf_toolkit.cli.main import build_rerun_hint
+
+        require_confirmation(
+            config.safety,
+            input_count=1,
+            in_place=True,
+            rerun_hint=build_rerun_hint(),
+        )
 
     result = decrypt_run(
         source,

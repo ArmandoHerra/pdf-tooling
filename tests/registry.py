@@ -105,6 +105,21 @@ class Invocation:
     build: Callable[[object, Path], list[str]]
     destructive: bool = False
     """Participates in the bulk/`-y` non-TTY arm (C13)."""
+    destructive_build: Callable[[object, Path], list[str]] | None = None
+    """B-079's C13 population seed. ``build`` is SHARED by C1/C9/C10/C11/C12/
+    C15 -- most of those need a single-input, ``-O``-terminated shape (C11
+    in particular relies on appending its OWN ``-O <existing target>`` and
+    Click's last-scalar-wins landing on that override, per
+    ``_compress_invocation``'s own docstring), which is neither bulk nor
+    ``--in-place`` and therefore cannot exercise C13's bulk-destructive
+    ground at all. Rather than mutate ``build`` itself and risk every OTHER
+    check silently degrading (C11's override would turn into a B-076
+    ``--in-place``/``--output`` conflict, C12's plain run would newly hit
+    the very confirmation gate C13 exists to test), a verb whose
+    ``destructive=True`` supplies its OWN bulk, ``--in-place`` argv here.
+    ``None`` (the default, and every entry but ``compress`` today) means
+    C13 falls back to ``build`` -- the shape every other registration
+    already has."""
 
 
 def _dotted_to_path(dotted: str) -> Path | None:
@@ -463,6 +478,23 @@ def _compress_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+def _compress_destructive_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """B-079's C13 population seed (`Invocation.destructive_build`) --
+    TWO ``tmp_path``-local COPIES of a corpus fixture (never the fixture
+    path itself, per `_copy_corpus_fixture`'s own docstring: `--in-place`
+    would otherwise mutate the shared, session-scoped corpus) plus
+    ``--in-place``. That is BULK (`input_count=2`) and DESTRUCTIVE
+    (`in_place=True`) simultaneously -- exactly the shape
+    `safety/confirm.py::require_confirmation` exists to refuse without
+    ``-y`` on a non-TTY, and to permit with it. `compress` needs no other
+    required flag, so this is the whole invocation; C13 reuses the same two
+    paths for both its refused and its confirmed call, which is safe
+    because a refused run mutates neither."""
+    first = _copy_corpus_fixture(corpus, tmp_path, "single_page", "c13-compress-a.pdf")
+    second = _copy_corpus_fixture(corpus, tmp_path, "single_page", "c13-compress-b.pdf")
+    return [str(first), str(second), "--in-place"]
+
+
 def _repair_invocation(corpus: object, tmp_path: Path) -> list[str]:
     """`repair` (PDF-12) -- one input, `-O` (same C11 reasoning). `single_page`
     is a fine operand: a healthy document exits 0 through `repair` exactly as
@@ -687,10 +719,20 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "text": Invocation(build=_text_invocation, destructive=False),
     "tables": Invocation(build=_tables_invocation, destructive=False),
     # PDF-12. `compress`/`repair`/`linearize` are all producing, single- or
-    # multi-target verbs over `StructureEngine`; none is destructive (a
-    # second destructive shape for C13 is a separate backlog candidate, not
-    # built here, matching every other producing verb's own note above).
-    "compress": Invocation(build=_compress_invocation, destructive=False),
+    # multi-target verbs over `StructureEngine`. B-079/B-076: `compress` is
+    # the one PDF-12 verb whose confirmation gate is now wired AND whose
+    # arity makes a bulk `--in-place` run reachable, so it is
+    # `destructive=True` with its own `destructive_build` seeding C13's
+    # previously-empty population (PDF-15's spec claimed it would be first
+    # to do this; amended -- see B-079's ledger row). `repair`/`linearize`
+    # take a single `{PDF}` argument each, so their gate is latent, not
+    # exposed (bulk is structurally unreachable), and they stay
+    # `destructive=False` like every other single-input verb.
+    "compress": Invocation(
+        build=_compress_invocation,
+        destructive=True,
+        destructive_build=_compress_destructive_invocation,
+    ),
     "repair": Invocation(build=_repair_invocation, destructive=False),
     "linearize": Invocation(build=_linearize_invocation, destructive=False),
     # PDF-13. `encrypt`/`decrypt` are single-target producing verbs;

@@ -13,15 +13,26 @@ observable at all — and therefore carries `@pytest.mark.e2e`
 (`pytestmark`, module-wide) per Design §4.
 
 Checks marked **(reg)** in the docstring of each test additionally require
-the verb's `INVOCATIONS` row. `C4`, `C9`, `C10`, `C11` and `C13` currently
-collect **zero** parametrized cases: `version`/`doctor`/`info` are the only
-verbs that exist at PDF-06 landing, none of them is `is_mutating` (they write
-nothing) and no non-root grouping parent exists yet. That is real, not a
-defect — `PDF-07` onward gains coverage for each of these automatically the
-moment a verb reaches the write chokepoint or a subcommand group is created.
-`AC6`'s own non-vacuity guard (`pytest -m e2e --collect-only -q` is
-non-zero) is satisfied by `C1`/`C2`/`C3`/`C5`/`C7`/`C8`/`C12` plus the three
-root-level tests below, which are never empty.
+the verb's `INVOCATIONS` row. `C4`, `C9`, `C10` and `C11` currently collect
+**zero** parametrized cases at PDF-06 landing's own baseline: `version`/
+`doctor`/`info` are the only verbs that exist then, none of them is
+`is_mutating` (they write nothing) and no non-root grouping parent exists
+yet. That is real, not a defect — later specs gain coverage for each of
+these automatically the moment a verb reaches the write chokepoint or a
+subcommand group is created. `AC6`'s own non-vacuity guard (`pytest -m e2e
+--collect-only -q` is non-zero) is satisfied by `C1`/`C2`/`C3`/`C5`/`C7`/
+`C8`/`C12` plus the three root-level tests below, which are never empty.
+
+**C13 (B-079).** Its `DESTRUCTIVE` population was empty from PDF-06 through
+PDF-14 — every landed `INVOCATIONS` row was `destructive=False` — which is
+*why* the bulk-destructive confirmation gate went unwired on five verbs
+(`compress`/`repair`/`linearize`/`encrypt`/`decrypt`) without the suite ever
+noticing: `DESTRUCTIVE` empty means C13 collects zero cases and cannot bite
+on anything. B-079 wires the gate on all five and seeds `compress` --
+the one of the five whose arity makes a bulk `--in-place` run reachable
+today -- as C13's first non-empty case (`tests/registry.py`'s
+`Invocation.destructive_build`); `test_c13_population_is_non_empty` below is
+the anti-lapse guard so this cannot silently regress to zero again.
 """
 
 from __future__ import annotations
@@ -245,14 +256,49 @@ def test_c12_json_on_a_pipe_by_default(verb, corpus, tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def test_c13_population_is_non_empty() -> None:
+    """B-079's own anti-lapse guard: a green C13 whose population is empty
+    is exactly the failure this row exists to prevent (`DESTRUCTIVE` sat
+    empty from PDF-06 through PDF-14, which is why the gate went unwired on
+    five verbs without the suite ever noticing). Fails BY NAME, mirroring
+    `test_every_verb_is_registered`'s own shape, rather than letting C13
+    quietly collect zero cases again."""
+    assert len(DESTRUCTIVE) > 0, (
+        "DESTRUCTIVE is empty -- C13 would collect zero parametrized cases and pass "
+        "vacuously; this is B-079's own defect shape (a control that cannot bite)"
+    )
+
+
 @pytest.mark.parametrize("verb", DESTRUCTIVE, ids=_ids(DESTRUCTIVE))
 def test_c13_bulk_destructive_requires_y_on_a_non_tty(verb, corpus, tmp_path: Path) -> None:
+    """B-079's own red/green pair: a refused run mutates NOTHING, a
+    confirmed one mutates EVERY operand -- not just the exit codes.
+
+    Operand discovery is generic (`token.startswith("-")` marks a flag,
+    everything else that resolves to a real file is an operand), matching
+    every other check in this module's own "no hard-coded verb name"
+    convention -- `Invocation.destructive_build`'s own contract is that
+    leading positional operands come before the first flag, the same shape
+    every other registered ``build`` in this file already has.
+    """
     invocation = INVOCATIONS[verb.name]
-    args = invocation.build(corpus, tmp_path)
+    args = (invocation.destructive_build or invocation.build)(corpus, tmp_path)
+    operands = [Path(tok) for tok in args if not tok.startswith("-")]
+    operands = [op for op in operands if op.is_file()]
+    assert operands, f"{verb.name}: destructive invocation names no discoverable operand file"
+    before = {op: op.read_bytes() for op in operands}
+
     refused = run_cli(verb.name, *args)
     assert refused.returncode == 5
+    for op in operands:
+        assert op.read_bytes() == before[op], f"{verb.name}: a refused bulk run mutated {op}"
+
     confirmed = run_cli(verb.name, "-y", *args)
     assert confirmed.returncode != 5
+    for op in operands:
+        assert op.read_bytes() != before[op], (
+            f"{verb.name}: --in-place was declared but the confirmed run left {op} unchanged"
+        )
 
 
 # --------------------------------------------------------------------------- #

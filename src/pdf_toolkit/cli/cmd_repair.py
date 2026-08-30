@@ -10,6 +10,14 @@ result mapped to an exit code. No PDF logic lives here.
 **OR-3.** `repair` declares `--output`/`--in-place` only — `--out-dir` and
 `--name` exit 2, from the shared option layer, with no check for either
 here.
+
+**B-079 — the bulk-destructive non-TTY confirmation gate is wired here.**
+`repair` takes a single ``source: Path`` argument, so a bulk ``--in-place``
+run is not reachable today (two operands is an arity error, exit 2, before
+this gate could ever be consulted) — the gap this closes was latent, not
+exposed. Wiring it now (``input_count=1``, the REAL resolved count for this
+verb's arity) is a no-op today and correct the day this verb's arity ever
+changes, matching ``cmd_meta_set.py``'s own precedent.
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ from pdf_toolkit.cli.common import get_config, global_options
 from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.ops.optimize import repair_run
 from pdf_toolkit.output import emit_result
+from pdf_toolkit.safety.confirm import require_confirmation
 
 __all__ = ["repair_command"]
 
@@ -66,6 +75,17 @@ def repair_command(
     """Structurally recover a damaged PDF via libqpdf's own recovery parser."""
     config = get_config(ctx)
     _reject_missing_sources([source])
+
+    if not config.dry_run and config.in_place:
+        # Local import: `cli.main` imports this module at load time.
+        from pdf_toolkit.cli.main import build_rerun_hint
+
+        require_confirmation(
+            config.safety,
+            input_count=1,
+            in_place=True,
+            rerun_hint=build_rerun_hint(),
+        )
 
     result = repair_run(
         source,

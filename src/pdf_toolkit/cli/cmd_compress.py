@@ -38,6 +38,15 @@ shared ``safety.atomic.plan_output_set``/``AtomicWriter`` planning path in
 both modes through ``_plan_filesystem``, so a dry run over an occupied or
 unwritable destination predicts what the real run does. No per-verb
 prediction logic and no per-verb exit-code logic exists in this file.
+
+**B-079 — the bulk-destructive non-TTY confirmation gate is wired here.**
+`compress` is multi-input (``sources: list[Path]``) and was the one verb of
+the five-verb blind spot (``compress``/``repair``/``linearize``/``encrypt``/
+``decrypt``) actually REACHABLE with a bulk ``--in-place`` run before this
+fix — `compress a.pdf b.pdf --in-place` on a non-terminal used to exit 0 and
+mutate both inputs, unconfirmed. Mirrors ``cmd_delete.py``/``cmd_rotate.py``'s
+own call site exactly: ``require_confirmation`` with the REAL resolved input
+count (``len(sources)``), never a literal.
 """
 
 from __future__ import annotations
@@ -56,6 +65,7 @@ from pdf_toolkit.ops.optimize import (
     compress_run,
 )
 from pdf_toolkit.output import emit_result
+from pdf_toolkit.safety.confirm import require_confirmation
 
 __all__ = ["ImageMode", "compress_command"]
 
@@ -191,6 +201,18 @@ def compress_command(
 
     if not (config.output is not None or config.out_dir is not None or config.in_place):
         raise UsageError("compress requires --output, --out-dir, or --in-place")
+
+    if not config.dry_run and config.in_place:
+        # Local import: `cli.main` imports this module at load time to
+        # register the command, so a module-level import here would cycle.
+        from pdf_toolkit.cli.main import build_rerun_hint
+
+        require_confirmation(
+            config.safety,
+            input_count=len(sources),
+            in_place=True,
+            rerun_hint=build_rerun_hint(),
+        )
 
     result = compress_run(
         sources,
