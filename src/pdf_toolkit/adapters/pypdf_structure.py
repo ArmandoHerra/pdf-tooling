@@ -536,6 +536,28 @@ class PypdfStructureWriter:
     def write(self, stream: IO[bytes]) -> None:
         self._writer.write(stream)
 
+    # -- PDF-08 (`rotate`), appended at the end of the class body ----------- #
+
+    def set_rotation(self, index: int, degrees: int) -> None:
+        """The port's rotation seam — stamp one already-appended page.
+
+        The whole method: no arithmetic, no normalization, no reading of the
+        current value. ``degrees`` arrives from ``ops/pages.py`` already
+        absolute and already inside ``{0, 90, 180, 270}``, which is what keeps
+        `rotate`'s rules unit-testable without an engine.
+
+        ``add_page`` clones each page into this writer's own object store
+        (verified: stamping ``self._writer.pages[i]`` leaves the source
+        reader's page untouched), so this cannot reach back into the document
+        being read — which is what makes ``--in-place`` safe here.
+
+        The pypdf import stays function-local like every other one in this
+        file: importing this module must cost nothing (`PLAN.md` §12 R-13).
+        """
+        from pypdf.generic import NameObject, NumberObject
+
+        self._writer.pages[index][NameObject("/Rotate")] = NumberObject(degrees)
+
 
 def _has_signature(acroform: Any, fields: Any) -> bool:
     """Presence only — ``/SigFlags`` or a field of type ``/Sig``.

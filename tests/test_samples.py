@@ -755,3 +755,170 @@ def test_ac16_the_original_is_never_an_operand(samples, tmp_path: Path) -> None:
     copy_path = samples.copy(_CRYPTO_SAMPLE_NAME)
     assert copy_path.parent == tmp_path
     assert os.access(copy_path, os.W_OK)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-08 -- AC27. Over a COPY of a real 482-page document: `extract` with a
+# long page-range expression, and `reorder --in-place` exercising the `.bak`
+# sidecar at a scale the generated corpus cannot reach.
+#
+# HC-2 / `PLAN.md` §10.1 binds this section as it binds every other: originals
+# are NEVER an operand (`samples.copy()` only), and nothing about the document
+# is asserted or reported beyond STRUCTURE -- page counts, sizes and hashes.
+# No extracted text and no metadata value appears here, in a test name, in
+# `changelog.md`, or in the Implementation Log.
+#
+# The ordering assertion below is what the generated corpus genuinely cannot
+# make: `200-190` is an eleven-page DESCENDING range, and a document long
+# enough to carry it is the only place where "order preserved" is
+# distinguishable from several plausible wrong answers.
+# --------------------------------------------------------------------------- #
+
+_PAGES_SAMPLE_NAME = "PrendiniLoria2020.pdf"
+
+#: 1-5 (5) + 100 (1) + 200-190 (11) + last (1). Derived from the spec rather
+#: than measured from the tool's own output, so this cannot rubber-stamp
+#: whatever the verb happened to produce.
+_PAGES_EXTRACT_EXPECTED = 5 + 1 + 11 + 1
+
+
+def _page_content_digests(path: Path) -> tuple[str, ...]:
+    """One SHA-256 per page over the DECODED content-stream bytes, in page
+    order -- the structural identity of a page's marks.
+
+    Deliberately narrower than `tests/pagetree.py::page_tree_digest`, and the
+    difference is measured rather than assumed. That helper additionally hashes
+    the page dictionary, which makes it exact for PDF-13's pikepdf->pikepdf
+    encrypt/decrypt round trip (its stated purpose) but unusable ACROSS a pypdf
+    rewrite: pypdf re-serializes numeric literals, so a `/MediaBox` of
+    `[0.0, 0.0, 495.0, 720.0]` comes back as `[0.0, 0.0, 495, 720]` and every
+    page's token differs while the page itself is untouched. Verified on this
+    section's own operand: with `extract --pages '1-3'`, the page-dictionary
+    tokens differ on exactly that formatting while all three content streams
+    are byte-identical.
+
+    It reuses `pagetree._content_bytes` rather than re-deriving the
+    `/Contents`-array coalescing, so the two helpers cannot drift on the one
+    thing they share.
+
+    Structural only, per HC-2 / `PLAN.md` §10.1 rule 4: a digest, never the
+    bytes, and nothing this document says is read, asserted or reported.
+    """
+    import hashlib
+    import sys
+
+    import pikepdf
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from pagetree import _content_bytes
+
+    digests: list[str] = []
+    with pikepdf.Pdf.open(str(path)) as pdf:
+        for page in pdf.pages:
+            digests.append(hashlib.sha256(_content_bytes(page)).hexdigest())
+    return tuple(digests)
+
+
+@pytest.mark.samples
+def test_ac27_extract_preserves_order_across_a_long_range_expression(
+    samples, tmp_path: Path
+) -> None:
+    from pdf_toolkit.ops.pages import extract_run
+
+    copy_path = samples.copy(_PAGES_SAMPLE_NAME)
+    target = tmp_path / "extracted.pdf"
+    result = extract_run(
+        [copy_path],
+        pages_spec="1-5,100,200-190,last",
+        output=target,
+        out_dir=None,
+        name_template=None,
+        policy=_read_only_policy(),
+    )
+    assert result.exit_code == 0
+
+    from pypdf import PdfReader
+
+    assert len(PdfReader(str(target)).pages) == _PAGES_EXTRACT_EXPECTED
+
+    # Order preserved, asserted structurally: each output page must carry the
+    # SAME content stream as the input page it claims to be -- never anything
+    # the page says.
+    source_pages = _page_content_digests(copy_path)
+    output_pages = _page_content_digests(target)
+    assert len(output_pages) == _PAGES_EXTRACT_EXPECTED
+    assert output_pages[0] == source_pages[0], "the first output page is not the input's page 1"
+    assert output_pages[4] == source_pages[4], "the fifth output page is not the input's page 5"
+    # The descending block: output pages 7..17 are input pages 200..190.
+    assert output_pages[6] == source_pages[199]
+    assert output_pages[7] == source_pages[198]
+    assert output_pages[16] == source_pages[189]
+    assert output_pages[-1] == source_pages[-1], "the last output page is not the input's last"
+
+
+@pytest.mark.samples
+def test_ac27_reorder_in_place_keeps_the_document_whole_and_backs_it_up(
+    samples, tmp_path: Path
+) -> None:
+    """§D3's totality invariant on a real document, plus §5.3 step 5's `.bak`.
+
+    The `.bak` must hash to the SHA-256 taken of the copy BEFORE the run --
+    which is the only thing that makes the sidecar a recovery path rather than
+    a claim (`PLAN.md` §12 R-06: there is no undo journal).
+    """
+    import hashlib
+
+    from pdf_toolkit.ops.pages import reorder_run
+    from pdf_toolkit.safety.policy import SafetyPolicy
+
+    copy_path = samples.copy(_PAGES_SAMPLE_NAME)
+    before_hash = hashlib.sha256(copy_path.read_bytes()).hexdigest()
+
+    from pypdf import PdfReader
+
+    before_pages = len(PdfReader(str(copy_path)).pages)
+    assert before_pages > 1, "this arm needs a multi-page operand"
+
+    before_digests = _page_content_digests(copy_path)
+
+    result = reorder_run(
+        [copy_path],
+        pages_spec="last,1",
+        output=None,
+        out_dir=None,
+        name_template=None,
+        in_place=True,
+        policy=SafetyPolicy(
+            dry_run=False,
+            force=False,
+            in_place=True,
+            backup=True,
+            assume_yes=False,
+            is_tty=False,
+            threads=1,
+        ),
+    )
+    assert result.exit_code == 0
+
+    backup = copy_path.with_name(copy_path.name + ".bak")
+    assert backup.is_file(), "no .bak sidecar was written"
+    assert hashlib.sha256(backup.read_bytes()).hexdigest() == before_hash, (
+        ".bak does not carry the pre-run bytes"
+    )
+
+    after_digests = _page_content_digests(copy_path)
+    assert len(after_digests) == before_pages, "reorder changed the page count"
+    assert after_digests[0] == before_digests[-1], "the original last page is not first"
+    assert after_digests[1] == before_digests[0], "the original first page is not second"
+    assert sorted(after_digests) == sorted(before_digests), "reorder lost or duplicated a page"
+
+
+@pytest.mark.samples
+def test_ac27_the_original_is_never_an_operand_for_the_pages_verbs(samples, tmp_path: Path) -> None:
+    """HC-2 restated as a test rather than as a promise, for this section's own
+    operand: the only path this arm can obtain is a copy under `tmp_path`."""
+    copy_path = samples.copy(_PAGES_SAMPLE_NAME)
+    assert copy_path.parent == tmp_path
+    assert os.access(copy_path, os.W_OK)

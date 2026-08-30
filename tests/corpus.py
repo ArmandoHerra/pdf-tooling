@@ -1,6 +1,6 @@
 """The deterministic reportlab-generated fixture corpus — `PLAN.md` §9.1 `C-06`.
 
-Seven :class:`FixtureSpec` rows, one per fixture the contract harness and every
+Eight :class:`FixtureSpec` rows, one per fixture the contract harness and every
 later verb spec exercises. Each spec carries **both** the build instructions
 and the expected values, so a fixture can never silently drift from what a
 test asserts against it — the `MHC-12` lesson, applied from PDF-06 onward.
@@ -110,6 +110,33 @@ def _build_multipage_text(root: Path) -> tuple[Path, FixtureSpec]:
         made.showPage()
     made.save()
     spec = FixtureSpec(name="multipage_text", page_count=3, page_size=_LETTER, page_texts=texts)
+    return path, spec
+
+
+def _build_ten_page_text(root: Path) -> tuple[Path, FixtureSpec]:
+    """PDF-08 — ten pages, each carrying its own page number in its text.
+
+    A *parameter*, not a new kind of artefact: the corpus is declarative and
+    generated at test time, so "a longer document" is one more row here rather
+    than a committed binary (`testdata/` holds only what cannot be generated).
+
+    Ten pages is the shortest length at which PDF-08's assertions are
+    meaningful. `multipage_text` (3 pages) cannot express them: `--pages even`
+    on it yields 2 pages either way under the correct and the off-by-one
+    parity implementation, and `reorder --pages 'last,1'` leaves a remainder
+    of one page, which does not distinguish "appended in ascending original
+    order" from several wrong orders. It is a NEW fixture rather than a
+    lengthened `multipage_text` because `tests/golden/text_layout.json` pins
+    that fixture's three pages and their exact "page N of 3" strings.
+    """
+    texts = tuple(f"ten_page_text fixture -- page {n} of 10." for n in range(1, 11))
+    path = root / "ten_page_text.pdf"
+    made = _new_canvas(path, _LETTER)
+    for text in texts:
+        made.drawString(72, 700, text)
+        made.showPage()
+    made.save()
+    spec = FixtureSpec(name="ten_page_text", page_count=10, page_size=_LETTER, page_texts=texts)
     return path, spec
 
 
@@ -271,6 +298,7 @@ def _build_encrypted_aes256(root: Path) -> tuple[Path, FixtureSpec]:
 #: Build order. `FIXTURE_NAMES` mirrors it for iteration by name.
 _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_multipage_text,
+    _build_ten_page_text,
     _build_rotated,
     _build_jpeg_page,
     _build_encrypted_aes256,
@@ -283,6 +311,7 @@ FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
     name
     for name in (
         "multipage_text",
+        "ten_page_text",
         "rotated",
         "jpeg_page",
         "encrypted_aes256",

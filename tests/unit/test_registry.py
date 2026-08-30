@@ -21,12 +21,13 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_sixteen_landed_verbs() -> None:
-    """`encrypt`/`decrypt`/`permissions` (PDF-13) join
+def test_discover_verbs_finds_exactly_the_twenty_landed_verbs() -> None:
+    """`extract`/`delete`/`rotate`/`reorder` (PDF-08) join
+    `encrypt`/`decrypt`/`permissions` (PDF-13),
     `compress`/`repair`/`linearize` (PDF-12), `text`/`tables` (PDF-11),
     `compose`/`create` (PDF-10), `rasterize` (PDF-09), `merge`/`split`
-    (PDF-07) and the three PDF-06-landing verbs -- sixteen total. Renamed
-    and extended rather than deleted, for the fifth time and for the same
+    (PDF-07) and the three PDF-06-landing verbs -- twenty total. Renamed
+    and extended rather than deleted, for the sixth time and for the same
     reason: this pin fails BY DESIGN the moment a verb registers, which is
     the tripwire working, not a defect."""
     verbs = discover_verbs()
@@ -48,6 +49,10 @@ def test_discover_verbs_finds_exactly_the_sixteen_landed_verbs() -> None:
         "encrypt",
         "decrypt",
         "permissions",
+        "extract",
+        "delete",
+        "rotate",
+        "reorder",
     }
 
 
@@ -84,7 +89,22 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
     # (`PLAN.md` §4.1 -- all three "no"; encryption is a whole-document
     # property and there is no such thing as encrypting page 3), so the set
     # grows and nothing in this pin is removed.
-    expected_page_addressing = {"rasterize", "text", "tables", "compress"}
+    # PDF-08: all four page-addressed structure verbs carry `--pages` (it is
+    # the whole of their addressing), so the page-addressing set grows by four
+    # and nothing in this pin is removed. `extract`/`reorder` are ORDERED and
+    # `delete`/`rotate` are SET (`PLAN.md` §4.3, spec §D1) -- a distinction
+    # this predicate deliberately does not model: it answers "does this verb
+    # take --pages", not "with which semantics".
+    expected_page_addressing = {
+        "rasterize",
+        "text",
+        "tables",
+        "compress",
+        "extract",
+        "delete",
+        "rotate",
+        "reorder",
+    }
     expected_not = {
         "version",
         "doctor",
@@ -155,6 +175,9 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
     # passes honestly, and it cannot add it to C11 or C15 -- those are
     # parameterized off `consumes`, which is empty. A verb that writes
     # nothing being checked for not writing anything is not a wrong pin.
+    # PDF-08: `extract`/`delete`/`rotate`/`reorder` each reach `AtomicWriter`
+    # via `cmd_<verb> -> ops.pages -> safety.atomic` -- two hops each, so
+    # `_MAX_IMPORT_HOPS` was not raised for any of the four.
     expected_mutating = {
         "merge",
         "split",
@@ -169,6 +192,10 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
         "encrypt",
         "decrypt",
         "permissions",
+        "extract",
+        "delete",
+        "rotate",
+        "reorder",
     }
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():

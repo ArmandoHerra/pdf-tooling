@@ -641,6 +641,23 @@ def test_changelog_prepends_every_spec_entry_below_the_anchor() -> None:
       bottom-most entry carrying that number, remediations being prepended above
       it, so a genuinely misfiled entry -- PDF-07's first entry appended at the
       bottom, say -- still fails exactly as it did before.
+
+    Generalized a THIRD time by PDF-08, for the third time in the same
+    direction and for the same reason the docstring above already gives:
+    "spec ORIGINALS descend" was itself a proxy, sound only while specs landed
+    in ascending numeric order. This wave landed PDF-09 through PDF-13 BEFORE
+    PDF-08, so PDF-08's original entry is correctly the newest and correctly
+    sits at the top, and the old assertion would have forced exactly the choice
+    the paragraph above refuses -- an honest changelog or a green suite.
+    Landing order is a scheduling fact, not a changelog invariant, and this
+    file's own header states the only ordering rule there is: newest first,
+    inserted directly below the anchor.
+
+    The catching power is preserved rather than dropped, by replacing the
+    assumption with the invariant it was reaching for: **a spec's remediation
+    entries are never dated before its own original landing entry.** PDF-07's
+    first entry appended at the bottom still fails -- on the date check, which
+    it violated all along.
     """
     text = (REPO_ROOT / "changelog.md").read_text()
     anchor = "<!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->"
@@ -667,11 +684,16 @@ def test_changelog_prepends_every_spec_entry_below_the_anchor() -> None:
     dates = [date for _, date in entries]
     assert dates == sorted(dates, reverse=True), f"entries are not newest-first: {dates}"
 
-    # Original landing entries -- the bottom-most entry per spec number -- descend.
-    numbers = [int(number) for number, _ in entries]
-    originals = [n for index, n in enumerate(numbers) if n not in numbers[index + 1 :]]
-    assert originals == sorted(originals, reverse=True), (
-        f"a spec's original entry is misfiled: {originals} (all entries: {numbers})"
+    # A spec's remediations are prepended ABOVE its original landing entry, so
+    # none of them may be dated before it. Independent of the order in which
+    # specs happened to land, which is a scheduling fact and not a property of
+    # this file (PDF-08 landed after PDF-13; see the docstring).
+    original_date: dict[str, str] = {}
+    for number, date in entries:  # bottom-most wins: iterate top-down, overwrite
+        original_date[number] = date
+    misfiled = [(number, date) for number, date in entries if date < original_date[number]]
+    assert misfiled == [], (
+        f"a remediation entry predates its spec's own original landing entry: {misfiled}"
     )
 
 

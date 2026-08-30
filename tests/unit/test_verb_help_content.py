@@ -98,3 +98,75 @@ def test_ac30_no_help_text_names_a_forbidden_tool(verb: str) -> None:
 
     lowered = _help(verb).lower()
     assert [name for name in FORBIDDEN_NAMES if name in lowered] == []
+
+
+# --------------------------------------------------------------------------- #
+# PDF-08 -- `extract`/`delete`/`rotate`/`reorder --help` are this spec's
+# documentation surface (Scope > Out: README.md and CLAUDE.md are untouched,
+# HC-5 -- the verb-surface refresh is PDF-16 Phase B). AC10's rule is that the
+# set-vs-ordered distinction is stated in EACH verb's own `--help`, and it is
+# mechanized here as an exact-string grep rather than left to review.
+#
+# Compared on collapsed whitespace throughout: `--help` hard-wraps to the
+# terminal width, so a literal `in text` check would assert the wrap position
+# rather than the sentence.
+# --------------------------------------------------------------------------- #
+
+_PAGES_VERBS = ("extract", "delete", "rotate", "reorder")
+
+
+def _collapsed(verb: str) -> str:
+    return " ".join(_help(verb).split())
+
+
+@pytest.mark.parametrize("verb", ["extract", "reorder"])
+def test_ac10_the_ordered_verbs_say_so(verb: str) -> None:
+    assert "order and duplicates are preserved" in _collapsed(verb)
+
+
+@pytest.mark.parametrize("verb", ["delete", "rotate"])
+def test_ac10_the_set_verbs_say_so(verb: str) -> None:
+    assert "sorted, deduplicated set" in _collapsed(verb)
+
+
+def test_ac10_reorder_states_the_remainder_rule() -> None:
+    assert "pages you do not name are appended" in _collapsed("reorder")
+
+
+def test_ac10_the_ordered_and_set_phrasings_never_overlap() -> None:
+    """The negative half: an ordered verb must not ALSO claim set semantics,
+    and vice versa. Without this, one copy-pasted help block could satisfy
+    every positive grep above while telling the user the opposite of what the
+    verb does."""
+    for verb in ("extract", "reorder"):
+        assert "sorted, deduplicated set" not in _collapsed(verb), verb
+    for verb in ("delete", "rotate"):
+        assert "order and duplicates are preserved" not in _collapsed(verb), verb
+
+
+def test_ac10_reorder_points_at_the_verbs_that_actually_drop_pages() -> None:
+    """§D3: an exclusion in `reorder` means "move to the back", never
+    "delete" -- surprising enough that the help must name the alternatives."""
+    text = _collapsed("reorder")
+    assert "delete" in text and "extract" in text
+
+
+def test_rotate_help_names_the_accepted_angles_and_the_relative_default() -> None:
+    text = _collapsed("rotate")
+    for value in ("90", "180", "270", "-90"):
+        assert value in text, value
+    assert "--absolute" in text
+
+
+def test_delete_help_documents_the_zero_page_refusal() -> None:
+    text = _collapsed("delete")
+    assert "exit 5" in text
+    assert "zero-page" in text
+
+
+@pytest.mark.parametrize("verb", _PAGES_VERBS)
+def test_no_pages_verb_help_names_a_forbidden_tool(verb: str) -> None:
+    from test_cli_spine import FORBIDDEN_NAMES
+
+    lowered = _help(verb).lower()
+    assert [name for name in FORBIDDEN_NAMES if name in lowered] == []

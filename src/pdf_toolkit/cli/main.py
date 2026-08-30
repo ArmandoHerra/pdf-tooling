@@ -26,14 +26,18 @@ from pdf_toolkit.cli import (
     cmd_compress,
     cmd_create,
     cmd_decrypt,
+    cmd_delete,
     cmd_doctor,
     cmd_encrypt,
+    cmd_extract,
     cmd_info,
     cmd_linearize,
     cmd_merge,
     cmd_permissions,
     cmd_rasterize,
+    cmd_reorder,
     cmd_repair,
+    cmd_rotate,
     cmd_split,
     cmd_tables,
     cmd_text,
@@ -97,6 +101,12 @@ app.command(name="decrypt", help=cmd_decrypt.decrypt_command.__doc__)(cmd_decryp
 app.command(name="permissions", help=cmd_permissions.permissions_command.__doc__)(
     cmd_permissions.permissions_command
 )
+# PDF-08 -- the four page-addressed structure verbs. One `cli/cmd_*.py` module
+# each, because `cli/common.py`'s OR-3 declaration is keyed by module.
+app.command(name="extract", help=cmd_extract.extract_command.__doc__)(cmd_extract.extract_command)
+app.command(name="delete", help=cmd_delete.delete_command.__doc__)(cmd_delete.delete_command)
+app.command(name="rotate", help=cmd_rotate.rotate_command.__doc__)(cmd_rotate.rotate_command)
+app.command(name="reorder", help=cmd_reorder.reorder_command.__doc__)(cmd_reorder.reorder_command)
 
 
 def build_rerun_hint(argv: Sequence[str] | None = None) -> str:

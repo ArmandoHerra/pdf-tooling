@@ -127,6 +127,35 @@ class StructureWriter(Protocol):
         """Serialize everything accumulated so far into *stream*."""
         ...
 
+    # -- PDF-08 (`rotate`), appended at the end of the Protocol body -------- #
+
+    def set_rotation(self, index: int, degrees: int) -> None:
+        """Stamp ``/Rotate`` on one already-appended page.
+
+        ``index`` is **0-based within this writer's own appended sequence**,
+        not a source page number; ``degrees`` is the final **absolute** value,
+        already normalized into ``{0, 90, 180, 270}`` by the CALLER.
+
+        This is deliberately the narrowest possible seam, and all three of its
+        properties are consequences of that narrowness:
+
+        * **All arithmetic stays in the framework-free ops layer.**
+          Relative-vs-``--absolute``, the ``% 360`` normalization and reading
+          the page's current value all happen in ``ops/pages.py``; an adapter
+          does exactly one thing — stamp the value it was handed. So `rotate`'s
+          rules stay testable at unit level with no engine present.
+        * **No new read method is needed.** The current value comes from the
+          existing ``read_document_info(path, pages=True)`` ->
+          ``PageInfo.rotation``, which the primary adapter already normalizes.
+        * **Absent stays absent.** The caller calls this only for the pages the
+          selection names, so every unnamed page keeps whatever
+          :meth:`append_pages` copied across — including an *absent*
+          ``/Rotate`` key. Writing an explicit ``/Rotate 0`` onto untouched
+          pages would preserve rendering while failing the "changes only page
+          1" guarantee.
+        """
+        ...
+
 
 # --------------------------------------------------------------------------- #
 # PDF-12 — plain-data shapes crossing the port boundary for `compress`/`repair`.

@@ -520,6 +520,75 @@ def _permissions_invocation(corpus: object, tmp_path: Path) -> list[str]:
     return [str(corpus.path("single_page"))]  # type: ignore[attr-defined]
 
 
+# --------------------------------------------------------------------------- #
+# PDF-08 -- the four page-addressed structure verbs.
+#
+# Every row names `-O` rather than `--out-dir`, for the reason
+# `_text_invocation` documents at length: C11 appends its own
+# `-O <existing target>`, and only `-O` here keeps Click's last-scalar-wins
+# behaviour landing on C11's target instead of tripping the
+# `--output`/`--out-dir` mutual exclusion (which would measure exit 2 where
+# C11 exists to prove the no-clobber 5).
+#
+# Every row operates on `ten_page_text`, never `single_page`, and that is not
+# cosmetic: `delete --pages 1` on a ONE-page document selects every page, which
+# is the spec's §D5 zero-page refusal (exit 5) -- the row would then fail C10,
+# C12 and C15 for the right reason at the wrong time. `rotate` additionally
+# needs `--angle`, which is exactly the gap this table's own module docstring
+# names as the thing a generic walk cannot know.
+# --------------------------------------------------------------------------- #
+
+
+def _extract_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`extract` (PDF-08) -- ORDERED selection, one input, `-O`."""
+    return [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1,3",
+        "-O",
+        str(tmp_path / "registered-invocation-extract.pdf"),
+    ]
+
+
+def _delete_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`delete` (PDF-08) -- SET selection over a TEN-page operand, so the
+    survivors are non-empty and §D5's zero-page refusal is not reached."""
+    return [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "-O",
+        str(tmp_path / "registered-invocation-delete.pdf"),
+    ]
+
+
+def _rotate_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`rotate` (PDF-08) -- the verb `tests/registry.py`'s own module docstring
+    names as the reason this table exists: a generic walk cannot know it needs
+    `--angle`, and without one the invocation is exit 2."""
+    return [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "--angle",
+        "90",
+        "-O",
+        str(tmp_path / "registered-invocation-rotate.pdf"),
+    ]
+
+
+def _reorder_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`reorder` (PDF-08) -- ORDERED, and total: the unnamed pages are appended,
+    so this yields ten pages from a ten-page operand."""
+    return [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "last,1",
+        "-O",
+        str(tmp_path / "registered-invocation-reorder.pdf"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -557,6 +626,17 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "encrypt": Invocation(build=_encrypt_invocation, destructive=False),
     "decrypt": Invocation(build=_decrypt_invocation, destructive=False),
     "permissions": Invocation(build=_permissions_invocation, destructive=False),
+    # PDF-08. All four are producing, multi-input-capable verbs over
+    # `StructureEngine`. `destructive=False` like every other producing verb:
+    # the registered invocation is a single input writing to `-O`, which is
+    # neither bulk nor destructive, so C13 would have nothing to refuse. The
+    # bulk `--in-place` non-TTY posture these three DO honour is asserted
+    # directly by `tests/integration/test_pages_cli.py` instead of by giving
+    # C13 a row it would pass vacuously.
+    "extract": Invocation(build=_extract_invocation, destructive=False),
+    "delete": Invocation(build=_delete_invocation, destructive=False),
+    "rotate": Invocation(build=_rotate_invocation, destructive=False),
+    "reorder": Invocation(build=_reorder_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -728,6 +808,152 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         str(_copy_corpus_fixture(corpus, tmp_path, "encrypted_aes256", "or3-decrypt-in-place.pdf")),
         "--password-file",
         str(_password_file(tmp_path, "or3-decrypt-in-place.pw", _encrypted_password())),
+        "--in-place",
+    ],
+    # PDF-08 -- FIFTEEN rows, not sixteen: extract x {--output, --out-dir,
+    # --name} plus delete/rotate/reorder x {--output, --out-dir, --name,
+    # --in-place}. `extract` declares no `--in-place`, so its cell for that
+    # flag is on C14's REFUSED side and needs no row here -- which is exactly
+    # AC33's proof that the refusal comes from the OR-3 declaration alone.
+    #
+    # Constraints every row below satisfies, each of which would otherwise
+    # produce a green-but-meaningless cell:
+    #   1. The operand is `ten_page_text`, never `single_page`: `delete
+    #      --pages 1` on a one-page document is §D5's zero-page refusal
+    #      (exit 5), and C14's honoured side requires exit 0.
+    #   2. Every row carries `--pages` (all four verbs require it) and every
+    #      `rotate` row carries `--angle` as well.
+    #   3. Every `--in-place` row copies its fixture into `tmp_path` FIRST via
+    #      `_copy_corpus_fixture` and operates on the COPY -- naming
+    #      `corpus.path(...)` directly would mutate the shared, session-scoped
+    #      corpus (see that helper's own docstring).
+    #
+    # KNOWN, INHERITED AND NOT FIXED HERE (ledger `afe2e6137b` / backlog
+    # B-065): C14's honoured side snapshots `tmp_path` at `:300` but the row's
+    # own `build` lambda runs at `:310`, so any row materialising its fixture
+    # inside `tmp_path` passes with the verb never having written anything.
+    # The three `--in-place` rows below are therefore vacuous BY CONSTRUCTION,
+    # as PDF-12's and PDF-13's already are -- repairing C14 would change a
+    # shared control every verb depends on. The compensation is stated rather
+    # than assumed: `tests/integration/test_pages_cli.py`'s AC17 arm is what
+    # proves these three verbs actually wrote something, by hashing the input
+    # before and after and requiring `.bak` to carry the pre-run hash.
+    ("extract", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1,3",
+        "-O",
+        str(tmp_path / "or3-extract-output.pdf"),
+    ],
+    ("extract", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1,3",
+        "--out-dir",
+        str(tmp_path / "or3-extract-out-dir"),
+    ],
+    ("extract", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1,3",
+        "--out-dir",
+        str(tmp_path / "or3-extract-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
+    ],
+    ("delete", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "-O",
+        str(tmp_path / "or3-delete-output.pdf"),
+    ],
+    ("delete", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "--out-dir",
+        str(tmp_path / "or3-delete-out-dir"),
+    ],
+    ("delete", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "--out-dir",
+        str(tmp_path / "or3-delete-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
+    ],
+    ("delete", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "or3-delete-in-place.pdf")),
+        "--pages",
+        "1",
+        "--in-place",
+    ],
+    ("rotate", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "--angle",
+        "90",
+        "-O",
+        str(tmp_path / "or3-rotate-output.pdf"),
+    ],
+    ("rotate", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "--angle",
+        "90",
+        "--out-dir",
+        str(tmp_path / "or3-rotate-out-dir"),
+    ],
+    ("rotate", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "1",
+        "--angle",
+        "90",
+        "--out-dir",
+        str(tmp_path / "or3-rotate-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
+    ],
+    ("rotate", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "or3-rotate-in-place.pdf")),
+        "--pages",
+        "1",
+        "--angle",
+        "90",
+        "--in-place",
+    ],
+    ("reorder", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "last,1",
+        "-O",
+        str(tmp_path / "or3-reorder-output.pdf"),
+    ],
+    ("reorder", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "last,1",
+        "--out-dir",
+        str(tmp_path / "or3-reorder-out-dir"),
+    ],
+    ("reorder", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
+        "--pages",
+        "last,1",
+        "--out-dir",
+        str(tmp_path / "or3-reorder-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
+    ],
+    ("reorder", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "or3-reorder-in-place.pdf")),
+        "--pages",
+        "last,1",
         "--in-place",
     ],
 }

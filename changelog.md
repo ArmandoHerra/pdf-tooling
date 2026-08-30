@@ -19,6 +19,53 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-08] extract / delete / rotate / reorder — 2026-08-30
+- Added the four page-addressed structure verbs over one shared selection path.
+  The set-vs-ordered distinction is enforced in code rather than left to each
+  verb's author: `extract`/`reorder` thread `ordered=True` into
+  `ops/pagerange.py::parse` and consume `PageRange.indices`, so
+  `extract --pages '1,1,3'` yields three pages in that order;
+  `delete`/`rotate` thread `ordered=False` and consume `PageRange.as_set()`, so
+  `delete --pages '1,1,3'` equals `delete --pages '1,3'` and a page named twice
+  is rotated once. `reorder` is total — pages the selection does not name are
+  appended in ascending original order, so an exclusion moves a page to the
+  back rather than deleting it, and the verb can honour `--in-place` without
+  being able to destroy a document. `delete` refuses (exit 5) to produce a
+  zero-page PDF; an empty-but-valid selection stays exit 4, and the two are
+  pinned apart in both the outcome and the `--dry-run` prediction.
+- Extended the `StructureWriter` port with one method, `set_rotation(index,
+  degrees)`, implemented on `PypdfStructureWriter` alone
+  (`adapters/pikepdf_structure.py` is untouched — it implements neither
+  `new_writer` nor `open_document`). There was no write-side rotation anywhere
+  in the product before this. All arithmetic stays in the framework-free ops
+  layer: relative-by-default, `--absolute`, and `% 360` normalization live in
+  `ops/pages.normalize_rotation`, so the adapter only stamps a value it is
+  handed and the rules are unit-testable with no engine present. Pages the
+  selection does not name get no call at all, which is what keeps an absent
+  `/Rotate` key absent rather than stamped with an explicit 0.
+- This is the first spec where a user can reach `--in-place`, `--no-backup`,
+  the `.bak` sidecar or the non-TTY `-y` gate against a real verb; PDF-04 built
+  all of them against no callers. Each is now exercised end to end: the `.bak`
+  is proven to carry the pre-run bytes by hash, a bulk `--in-place` run fails
+  closed on a non-terminal and hands back the exact re-run command, and an
+  existing `.bak` without `--force` refuses while leaving both the input and
+  the sidecar byte-identical.
+- Known limitation, reported rather than repaired: an encrypted input produces
+  an unhandled traceback and exit 1 instead of the exit 6 that
+  `StructureEngine.open_document`'s own contract documents. pypdf raises
+  lazily, on the first page read, outside the `except` block in
+  `PypdfOpenDocument.__enter__`. Pre-existing and not introduced here —
+  `merge` and `split` reproduce it identically at `33bf481`. Password handling
+  is this spec's declared scope-out, so the criterion is carried as a strict
+  `xfail` holding the correct assertion, which turns red the day the shared
+  fix lands rather than pinning today's behaviour.
+- `--dry-run` predicts both tiers: the filesystem tier through the shared
+  `plan_output_set`/`AtomicWriter` planners, and the selection tier so that
+  `delete --pages all --dry-run` reports the zero-page refusal instead of
+  discovering it on the real run. Purity is asserted with both halves — the
+  tree is unchanged AND the run produced a non-trivial plan — because a dry run
+  that does nothing is trivially pure.
+
 ## [B-068] fix: `--password-file`'s refusal echoed the given value on stdout/stderr — 2026-08-30
 - `--password-file`'s shape check (`cli/common.py`, the shared option layer
   every verb goes through) built its own `UsageError(path=value)` instead of
