@@ -294,3 +294,45 @@ inside a purity-snapshot root.
 bar where an engine is absent" via configuration, not via `omit`). `fail_under`
 was never touched — it was 85 before this fix and stays 85 after it — and no
 `omit` of anything under `src/pdf_toolkit/` was ever added.
+
+## The coverage floor — status after the B-034 fix-forward commit
+
+PDF-06's `patch = ["subprocess"]` made the floor honest; it also made the
+local `make cover`/`make ci` unrunnable in practice. On this project's dev
+host, `[tool.coverage.run] branch = true` forces coverage.py's classic
+ctrace tracer (Python's `sys.monitoring` core, `COVERAGE_CORE=sysmon`,
+cannot measure branches on the Python/coverage.py combination this project
+runs), and ctrace tracing `adapters/pypdf_structure.py` — a pure-Python PDF
+parser and the primary `StructureEngine` — is catastrophically slow: a
+single isolated `info` subprocess call measured 0.245s uninstrumented vs
+15.8s instrumented (~65x); the `info`/`doctor`/`cli_contract` band (84
+tests) measured 14.49s vs 544.59s (~37.6x). CI was never affected — the
+same suite ran in ~86s on Python 3.13 in the `engines-present` job — which
+is itself part of the evidence: this is not a fixed per-subprocess coverage
+tax (`version`/`doctor` calls, which never reach the parser, stay near
+baseline) and not the `.coverage.*` combine step (the single-call isolation
+reproduces the full multiplier with no combine involved).
+
+The fix: `[tool.coverage.run] branch = true` → `branch = false` + `core =
+"sysmon"`. Turning off branch tracking alone does **not** fix it (still
+15.8s for the isolated call under the default ctrace core) — the win is
+specifically `core = "sysmon"` becoming reachable once branch tracking is
+off: the same isolated call drops to 0.34s (~46x faster) and the same
+84-test band drops to 21.51s end-to-end (~25x faster). This is a single
+shared `pyproject.toml` section read by both pytest-cov's parent-process
+measurement and every subprocess-patched child, on both local and CI, so
+there is no local/CI divergence to document — both apply the identical
+config.
+
+**This is line coverage, not branch coverage**, and that is a real,
+intentional trade-off, not an oversight: line coverage credits a branch's
+line as covered the moment either arm of it executes once, so it reads
+higher for the same code — the 84-test band alone moved from 66.24%
+(branch) to 71.49% (line) under identical tests. `--cov-fail-under=85` is
+unchanged. **Re-measured total: 93.79%, engines present — the floor is
+met**, comfortably above the unchanged 85% threshold. `make cover` (full
+suite, instrumented) now completes in ~77s (was ~571s); `make ci` end to
+end completes in ~80s. Re-enabling branch coverage is a legitimate future
+follow-up once coverage.py/CPython ship a version combination whose
+`sys.monitoring` core supports branch measurement — see the comment above
+`[tool.coverage.run]` in `pyproject.toml`.

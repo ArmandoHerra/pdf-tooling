@@ -112,7 +112,39 @@ markers = [
 
 [tool.coverage.run]
 source = ["pdf_toolkit"]
-branch = true
+# B-034 (QA fingerprint 406420c494): `branch = true` forces coverage.py's
+# classic ctrace backend on every Python version this project supports,
+# because sys.monitoring's branch measurement isn't available here --
+# `Can't use core=sysmon: sys.monitoring can't measure branches in this
+# version, using default core`. ctrace tracing a pure-Python PDF-parsing
+# adapter (`adapters/pypdf_structure.py`, the primary StructureEngine) is
+# where the cost concentrates: one isolated `info` subprocess call measured
+# 15.8s under this config vs 0.24s uninstrumented (~65x), and the
+# `info`/`doctor`/`cli_contract` band (84 tests, identical band both arms)
+# measured 544.59s instrumented vs 14.49s uninstrumented (~37.6x). Dropping
+# `branch = true` alone does NOT fix it (line-only under ctrace was still
+# 15.8s for that same single call) -- the fix is specifically `core =
+# "sysmon"` becoming reachable once branch tracking is off: the same single
+# call measured 0.34s (~46x faster than branch=true, ~1.4x over
+# uninstrumented) and the same 84-test band measured 21.51s end-to-end
+# (~25x faster). CI is unaffected by the slow path today (~86s for the full
+# suite on Python 3.13 in the `engines-present` job, run 33287428715) but
+# picks up the same sysmon speedup, and this config applies identically to
+# both, so CI keeps measuring the same suite at the same or a lower
+# resource cost -- nothing diverges between local and CI.
+#
+# WHAT THE FLOOR NOW MEANS: this is line coverage, not branch coverage.
+# Line coverage is a weaker check -- a line inside an `if`/`else` counts as
+# covered the moment either arm executes once, even if the other arm never
+# does. It also reads higher for the same code (this band alone moved from
+# 66.24% branch to 71.49% line). `--cov-fail-under=85` is unchanged and
+# still enforced; it is enforcing a weaker property than it was before this
+# change. Re-enabling branch coverage is a legitimate follow-up once
+# coverage.py/CPython ship the version combination that supports branch
+# measurement under sys.monitoring, at which point this comment block and
+# the `core = "sysmon"` line below should be revisited together.
+branch = false
+core = "sysmon"
 # The suite drives the CLI through subprocess.run (the only way exit codes and
 # non-TTY posture are real -- see tests/registry.py, tests/test_doctor.py,
 # tests/test_info.py). Without this, coverage.py measures the parent pytest

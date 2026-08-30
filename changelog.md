@@ -19,6 +19,54 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [B-034] `make ci` was locally unrunnable under coverage instrumentation — 2026-08-30
+- **Measurement (identical band both arms, `tests/test_info.py` +
+  `tests/test_doctor.py` + `tests/test_cli_contract.py`, 84 tests):**
+  14.49s uninstrumented vs **544.59s** instrumented under the pre-existing
+  `[tool.coverage.run]` config (`branch = true`, default core) — a 37.6x
+  penalty, consistent with the qa-sentinel's earlier 57x control on
+  `tests/test_info.py` alone. A single isolated `info` subprocess call
+  (real PDF parse) measured 0.245s uninstrumented vs **15.8s** instrumented
+  (~65x) — `version`/`doctor` calls, which never reach the parser, stayed
+  near baseline (~2.6x for 10 calls). CI is unaffected: the same suite ran
+  in ~86s on Python 3.13 in the `engines-present` job (run `33287428715`).
+- **Diagnosis, attributed by direct measurement, not assumed:** the cost is
+  coverage.py's classic ctrace tracer applied to `adapters/pypdf_structure.py`
+  — the primary `StructureEngine`, a pure-Python PDF parser reached by every
+  `info` call. `branch = true` blocks `sys.monitoring` (`COVERAGE_CORE=sysmon`)
+  from engaging at all (`Can't use core=sysmon: sys.monitoring can't measure
+  branches in this version`), forcing ctrace, and ctrace on pure-Python
+  parsing code is what is catastrophically slow — not a fixed per-subprocess
+  startup tax (ruled out: `version`/`doctor` pay the same startup and stay
+  fast) and not the `.coverage.*` combine step (ruled out: the single-call
+  isolation reproduces the full multiplier with zero combine involved).
+  Turning off branch tracking alone did **not** help (15.8s, unchanged) —
+  the fix is specifically `core = "sysmon"` becoming reachable once branch
+  tracking is off: same single call measured 0.34s (~46x faster), same
+  84-test band measured 21.51s end-to-end (~25x faster).
+- **Fix, config-only:** `[tool.coverage.run]` in `pyproject.toml` — `branch =
+  true` → `branch = false` + `core = "sysmon"`. No Makefile or CI workflow
+  changes needed: pytest-cov's parent-process measurement and the
+  `patch = ["subprocess"]` child measurement both read the same
+  `pyproject.toml` section, so local and CI apply the identical config with
+  zero divergence. `--cov-fail-under=85` is unchanged; `patch`/`parallel`
+  (subprocess measurement) are untouched — the floor for subprocess-executed
+  code stays exactly as honest as `d777dd8` left it.
+- **What the floor now means:** this is line coverage, not branch coverage —
+  a weaker property (a line inside a branch counts as covered the moment
+  either arm executes once) that reads higher for the same code. The
+  84-test band alone moved from 66.24% (branch) to 71.49% (line) under
+  identical tests. Re-enabling branch coverage is a legitimate follow-up
+  once coverage.py/CPython ship a version combination where `sys.monitoring`
+  supports branch measurement.
+- **End-to-end result:** `make cover` (full 490-test suite, instrumented):
+  93.79% line coverage (>= the unchanged 85% floor) in **76.67s**, down from
+  a PM-observed baseline of ~571s. `make ci` (fmt-check, lint, typecheck,
+  cover, licenses, sast, vulncheck): green, **80s** total wall clock, well
+  under the ~5 minute target from OR-5. Only `pyproject.toml` changed —
+  `make licenses`'s regenerate step is a no-op diff since no dependency
+  moved.
+
 ## [PDF-04] Ruling X-67 fix-forward: `--dry-run` now runs the plan and predicts the refusal — 2026-08-29
 - **The preview lied.** The dry-run gate was the first statement of
   `AtomicWriter.__enter__`, so `_plan()` never ran under `--dry-run` and a dry
