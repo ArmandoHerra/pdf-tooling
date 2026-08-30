@@ -20,6 +20,46 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-06] Coverage floor fix-forward: subprocess-executed CLI code was unmeasured — 2026-08-29
+- `[tool.coverage.run]` gained `patch = ["subprocess"]` and `parallel = true`.
+  The suite drives the CLI exclusively through `subprocess.run`
+  (`tests/registry.py`, `tests/test_doctor.py`, `tests/test_info.py`,
+  `tests/test_cli_spine.py`); without subprocess patching, coverage.py
+  measured the parent pytest process only, and the landing commit's reported
+  **71.29%** was a measurement artifact, not a real gap. Every subprocess
+  call site already inherits the parent's full environment by default
+  (`env=None`), so `COVERAGE_PROCESS_CONFIG` (set by the patch) reaches every
+  child with no test-helper changes; `tests/unit/test_subprocess_util.py`'s
+  deliberately scrubbed `env=` (testing `subprocess_util`'s own env
+  handling, not the CLI) is the one exception, left untouched on purpose.
+- `Makefile`'s `cover` target pins `COVERAGE_FILE` to an absolute path so a
+  subprocess-measured child's parallel data file always lands next to the
+  parent's in the repo root, never inside a purity-snapshot root (several
+  tests spawn the CLI with `cwd` set to a temp directory). `clean` now also
+  removes `.coverage.*`; `.gitignore` gained the same pattern.
+- `tests/test_cli_spine.py::test_help_stays_within_the_startup_budget` now
+  runs its five `--help` timings with `COVERAGE_PROCESS_START`/
+  `COVERAGE_PROCESS_CONFIG` stripped from the child's environment — R-13's
+  250 ms budget is a claim about the product's real startup latency, not
+  about how the suite happens to be instrumented, and coverage.py's own
+  tracer overhead (worse under `branch = true`) pushed the unpatched
+  measurement past the budget. `run_cli()` gained an optional `env=`
+  parameter (default `None`, so every other call site's inheritance is
+  unchanged).
+- Re-measured total: **91.29%, engines present — the floor is met**
+  (`cli/cmd_doctor.py` 32%→94%, `cli/cmd_info.py` 26%→94%, `ops/inspect.py`
+  30%→90%, `output/json.py` 43%→90%, `cli/main.py` 70%→100%, `__main__.py`
+  0%→83%). `fail_under` stays 85; no `omit` of anything under
+  `src/pdf_toolkit/` was added, then or now.
+- `.github/workflows/ci.yml`'s `engines-present` job now also enforces
+  `--cov-fail-under=85` (conditionally authorized only because the floor
+  genuinely passes there — `decision.md` X-85); `without-engines` is
+  deliberately not gated on it, matching Design §6's engines-present-only
+  coverage allowance.
+- `TESTING.md`'s coverage-floor section rewritten to report the true,
+  current state. The original PDF-06 entry below is left untouched per this
+  file's own rule 3 — this is a new entry, not a correction of that one.
+
 ## [PDF-06] Fixture corpus, CLI contract harness & real-sample guard — 2026-08-29
 - Added `tests/corpus.py`: seven deterministic reportlab-generated fixtures
   (`multipage_text`, `rotated`, `jpeg_page`, `encrypted_aes256`,

@@ -36,7 +36,12 @@ test-e2e: ## Run only the subprocess-level CLI tests
 	uv run pytest -m e2e
 
 cover: ## Run the suite under coverage against the project's floor
-	uv run pytest --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85
+	# COVERAGE_FILE is pinned to an absolute path so subprocess-measured CLI
+	# children (run with cwd=tmp_path/workspace by several tests) always write
+	# their parallel data file next to this one in the repo root, never inside
+	# a purity-snapshot root -- see [tool.coverage.run] in pyproject.toml.
+	COVERAGE_FILE=$(CURDIR)/.coverage \
+	  uv run pytest --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85
 
 fmt: ## Format the tree
 	uv run ruff format .
@@ -108,3 +113,4 @@ ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local
 
 clean: ## Remove build, cache and coverage artefacts
 	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml .scratch
+	rm -f .coverage.*

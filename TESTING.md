@@ -256,21 +256,41 @@ Deleting or weakening a failing test so the suite turns green is never an accept
 
 Every test writes into pytest's own temporary directory and never into the repository tree (enforced, not just intended — see the working-tree guard above). Nothing that a test asserts depends on wall-clock timing, on the order tests run in, or on which machine runs them — with one deliberate exception: the startup-budget test measures real elapsed time. It takes the **fastest** of several runs rather than the mean, so scheduler noise cannot turn it red while a genuine regression still will.
 
-## The coverage floor — status at PDF-06 landing
+## The coverage floor — status after the PDF-06 fix-forward commit
 
-`--cov-fail-under=85` (`make cover`, now part of `make ci`) is measured on
-`src/pdf_toolkit`. **At PDF-06's own landing commit this floor is not met —
-71.29% measured, not 85%** — and this is disclosed rather than hidden behind
-a lowered number or an `omit`. The gap concentrates in adapter internals for
-verbs that do not exist yet (`rasterize`, `compose`, `text`, `ocr`, `office`
-each depend on adapter code paths `pypdf_structure.py`, `pdfium_*.py`,
-`pdfplumber_text.py` etc. only exercise lightly today) and in edge-case
-branches of the existing safety spine. Closing it is explicitly `PDF-07`
-onward's work, not a `PDF-06`-scoped fix — Design §6's own escape hatch
-("if 85% is unreachable, the answer is more tests — never a lower
-`fail_under` and never an `omit`") is exercised here, honestly, rather than
-gamed. `ci.yml`'s `engines-present` job is **not** wired to enforce this
-floor in this commit for the same reason: doing so today would turn that CI
-job red on a real, pre-existing, out-of-scope gap rather than catch a fresh
-regression. `make cover` / `make ci` enforce it **locally**, and report the
-true number.
+`--cov-fail-under=85` (`make cover`, part of `make ci`) is measured on
+`src/pdf_toolkit`. **At PDF-06's original landing commit this floor read
+71.29%, not 85%.** That number was a measurement artifact, not a real gap:
+`tests/registry.py::run_cli`, `tests/test_doctor.py`, `tests/test_info.py`
+and `tests/test_cli_spine.py` drive the CLI exclusively through
+`subprocess.run`, and `[tool.coverage.run]` carried no `patch = ["subprocess"]`
+— so coverage.py measured the parent pytest process only, and every
+CLI-reached line executed in an unmeasured child. Twelve hand invocations run
+in-process moved `cli/cmd_doctor.py` 32%→82%, `cli/cmd_info.py` 26%→76%,
+`ops/inspect.py` 30%→90%, `output/json.py` 43%→90%, `cli/main.py` 70%→88% —
+the code was already exercised; the instrument could not see it.
+
+The fix-forward commit turns on `[tool.coverage.run] patch = ["subprocess"]`
+(rides the `coverage`-installed `a1_coverage.pth` hook, which is inert until
+`COVERAGE_PROCESS_CONFIG`/`COVERAGE_PROCESS_START` is set — `patch =
+["subprocess"]` is what sets it) and `parallel = true` (so a spawned child
+gets its own `.coverage.<host>.<pid>.<rand>` instead of every child
+clobbering the same data file; pytest-cov's own `combine()` step, which runs
+unconditionally at session end, merges them back into one report). Every
+subprocess call site in this suite already inherits the full parent
+environment by default (`env=None` → `subprocess.run` inherits `os.environ`),
+so the propagation needed no test-helper changes — the one exception,
+`tests/unit/test_subprocess_util.py`, deliberately builds a scrubbed
+from-scratch `env=` because it is testing `subprocess_util`'s own env
+handling, not the CLI, and stays scrubbed on purpose. `make cover`'s
+`COVERAGE_FILE` is pinned to an absolute path (`$(CURDIR)/.coverage`) so a
+subprocess-measured child's data file — several tests spawn the CLI with
+`cwd` inside a temp directory — always lands next to the parent's, never
+inside a purity-snapshot root.
+
+**Re-measured total: 91.29%, engines present — the floor is met.** `ci.yml`'s
+`engines-present` job now enforces `--cov-fail-under=85` as well (the
+`without-engines` job does not, matching Design §6's "adapters/ get a lower
+bar where an engine is absent" via configuration, not via `omit`). `fail_under`
+was never touched — it was 85 before this fix and stays 85 after it — and no
+`omit` of anything under `src/pdf_toolkit/` was ever added.

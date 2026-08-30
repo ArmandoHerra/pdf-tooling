@@ -119,8 +119,21 @@ jobs:
           tesseract --version
           soffice --version
       - run: uv sync --locked
+      # PDF-06 fix-forward: the 85% floor is enforced HERE, and only here —
+      # this is the one job where every verb's engine-backed path is actually
+      # reachable, so Design §6's "adapters/ get a lower bar where an engine
+      # is absent" is expressed by running the gate in exactly this
+      # configuration rather than by omitting any file. `COVERAGE_FILE` is
+      # pinned absolute for the same reason `make cover` pins it locally:
+      # several tests spawn the CLI with `cwd` inside a temp directory, and an
+      # unpinned relative data file would let a subprocess-measured `.coverage.*`
+      # land somewhere a purity snapshot could see it.
       - name: Run suite with engines installed
-        run: uv run pytest --junitxml=junit-engines-present.xml
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
+        run: >
+          uv run pytest --junitxml=junit-engines-present.xml
+          --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85
       # With engines installed, an engine-gated SKIP means a test that should
       # have exercised a real engine silently did not — a false green.
       - name: Assert no engine-gated skips

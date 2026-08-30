@@ -12,6 +12,7 @@ arrive later: this file owns the spine, and there is no ``conftest.py`` here yet
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -107,7 +108,7 @@ def console_script() -> list[str]:
     return [sys.executable, "-m", "pdf_toolkit"]
 
 
-def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """Run the CLI as a subprocess, which is the only way exit codes are real."""
     return subprocess.run(
         [*console_script(), *args],
@@ -115,6 +116,7 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
         cwd=REPO_ROOT,
+        env=env,
     )
 
 
@@ -437,11 +439,29 @@ def test_no_engine_library_is_imported_at_module_scope() -> None:
 def test_help_stays_within_the_startup_budget() -> None:
     import time
 
+    # R-13 is a claim about the product's real startup latency, not about how
+    # this suite happens to be instrumented. Under `make cover`,
+    # [tool.coverage.run]'s `patch = ["subprocess"]` (PDF-06 fix-forward) makes
+    # every child process measured, and coverage.py's own tracer overhead
+    # (worse still under `branch = true`) is real and unrelated to the
+    # product's own startup path -- an uninstrumented child is what "fastest
+    # --help" is actually supposed to measure, in every mode `make cover`
+    # included. `COVERAGE_PROCESS_START`/`COVERAGE_PROCESS_CONFIG` are the two
+    # env vars `a1_coverage.pth` checks (see coverage 7.16.0's own hook) to
+    # decide whether to auto-start tracing in a fresh interpreter, so scrubbing
+    # them from this one child's environment is enough to opt it out without
+    # touching any other subprocess call site's default full-inheritance.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("COVERAGE_PROCESS_START", "COVERAGE_PROCESS_CONFIG")
+    }
+
     budget_ms = STARTUP_BUDGET_MS
     timings: list[float] = []
     for _ in range(5):
         started = time.perf_counter()
-        result = run_cli("--help")
+        result = run_cli("--help", env=env)
         timings.append((time.perf_counter() - started) * 1000)
         assert result.returncode == 0
     # Best-of-N rather than the mean, so scheduler noise cannot flake the gate

@@ -113,6 +113,23 @@ markers = [
 [tool.coverage.run]
 source = ["pdf_toolkit"]
 branch = true
+# The suite drives the CLI through subprocess.run (the only way exit codes and
+# non-TTY posture are real -- see tests/registry.py, tests/test_doctor.py,
+# tests/test_info.py). Without this, coverage.py measures the parent pytest
+# process only, and every CLI-reached line executes in an unmeasured child.
+# `patch = ["subprocess"]` rides the coverage.py-installed `a1_coverage.pth`
+# hook (already present regardless of this setting) by exporting
+# COVERAGE_PROCESS_CONFIG into os.environ, which every subprocess call site in
+# this suite inherits by default (none scrub the environment except
+# tests/unit/test_subprocess_util.py, which is testing subprocess_util's own
+# env handling, not the CLI, and stays scrubbed on purpose).
+# `parallel = true` is not decoration: without it a spawned child's data_suffix
+# defaults to None and every child overwrites the same data file instead of
+# getting its own `.coverage.<host>.<pid>.<rand>` -- pytest-cov's own combine()
+# step (run unconditionally at session end, `Central.finish()`) merges them
+# back into one report regardless of whether xdist is in play.
+patch = ["subprocess"]
+parallel = true
 
 [tool.coverage.report]
 show_missing = true
