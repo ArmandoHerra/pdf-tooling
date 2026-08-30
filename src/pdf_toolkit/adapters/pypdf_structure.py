@@ -32,7 +32,12 @@ from pdf_toolkit.errors import AuthError, EngineMissingError, FailureError, NoIn
 from pdf_toolkit.models import DocumentInfo, PageInfo
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports import BROKEN_INSTALL_HINT
-from pdf_toolkit.ports.structure import CompressOutcome, ImagePassOutcome, RepairOutcome
+from pdf_toolkit.ports.structure import (
+    CompressOutcome,
+    ImagePassOutcome,
+    RepairOutcome,
+    algorithm_name,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from pypdf import PdfReader
@@ -62,22 +67,13 @@ _OPTIMIZE_HINT: Final[str] = (
 #: skipped, counted, and the count is reported (D-12.2's skip rule).
 _UNENCODABLE_FILTERS: Final[frozenset[str]] = frozenset({"/CCITTFaxDecode", "/JBIG2Decode"})
 
-#: The ONE encryption-algorithm map, keyed by ``(/V, /CFM, key-length-in-bits)``
-#: from the standard security handler's encryption dictionary. PDF-13 extends it
-#: **here** and nowhere else; a second copy is how two verbs start disagreeing
-#: about what a file is encrypted with.
-#:
-#: ``/CFM`` is ``""`` for /V 1 and 2, which predate crypt filters. A lookup that
-#: misses yields ``None`` plus a stderr warning — never a guess.
-_ALGORITHM_MAP: Final[dict[tuple[int, str, int], str]] = {
-    (1, "", 40): "RC4-40",
-    (2, "", 40): "RC4-40",
-    (2, "", 128): "RC4-128",
-    (4, "/V2", 40): "RC4-40",
-    (4, "/V2", 128): "RC4-128",
-    (4, "/AESV2", 128): "AES-128",
-    (5, "/AESV3", 256): "AES-256",
-}
+#: The ONE encryption-algorithm map now lives at the port
+#: (``ports.structure.ENCRYPTION_ALGORITHMS``), not here. **Moved by PDF-13**
+#: for the reason this comment already gave when the map was local: *"a second
+#: copy is how two verbs start disagreeing about what a file is encrypted
+#: with."* PDF-13's `permissions` answers from the pikepdf adapter while
+#: ``info`` answers from this one, so the map had to become shared or become
+#: duplicated. The rows are unchanged; only their home moved.
 
 #: Permission bits, ISO 32000-1 Table 22, 1-based bit numbers. Spelled as raw
 #: bit positions rather than as an engine enum so the decoding is a property of
@@ -122,7 +118,7 @@ def _algorithm(encryption: Any) -> tuple[str | None, str | None]:
         entry = crypt_filters.get_object().get(str(default))
         if entry is not None:
             method = str(entry.get_object().get("/CFM", "") or "")
-    algorithm = _ALGORITHM_MAP.get((version, method, length))
+    algorithm = algorithm_name(version, method, length)
     if algorithm is not None:
         return algorithm, None
     return None, (
@@ -276,7 +272,7 @@ class PypdfStructureAdapter:
             if not unlocked:
                 raise AuthError(
                     "a user password is required to read this document; supply one with "
-                    "--password-file PATH (or --password -)",
+                    "--password-file PATH (or --password-file - to read one line from stdin)",
                     path=str(path),
                 )
 

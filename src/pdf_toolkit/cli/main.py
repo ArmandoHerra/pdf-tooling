@@ -25,10 +25,13 @@ from pdf_toolkit.cli import (
     cmd_compose,
     cmd_compress,
     cmd_create,
+    cmd_decrypt,
     cmd_doctor,
+    cmd_encrypt,
     cmd_info,
     cmd_linearize,
     cmd_merge,
+    cmd_permissions,
     cmd_rasterize,
     cmd_repair,
     cmd_split,
@@ -88,6 +91,11 @@ app.command(name="compress", help=cmd_compress.compress_command.__doc__)(
 app.command(name="repair", help=cmd_repair.repair_command.__doc__)(cmd_repair.repair_command)
 app.command(name="linearize", help=cmd_linearize.linearize_command.__doc__)(
     cmd_linearize.linearize_command
+)
+app.command(name="encrypt", help=cmd_encrypt.encrypt_command.__doc__)(cmd_encrypt.encrypt_command)
+app.command(name="decrypt", help=cmd_decrypt.decrypt_command.__doc__)(cmd_decrypt.decrypt_command)
+app.command(name="permissions", help=cmd_permissions.permissions_command.__doc__)(
+    cmd_permissions.permissions_command
 )
 
 

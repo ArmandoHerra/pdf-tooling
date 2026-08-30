@@ -7,8 +7,17 @@ or not the run was verbose.
 Redaction is installed here, on the first commit, rather than retrofitted later
 around a live credential: a module-level registry holds values that must never
 appear in a record, and a ``logging.Filter`` scrubs them at *every* verbosity,
-including the most verbose. The spec that resolves passwords registers values
-with :func:`register_secret`; the mechanism does not wait for it.
+including the most verbose.
+
+**The password work deliberately does NOT use that registry** (PDF-13). A
+process-global set of live plaintext passwords is a new leak surface built to
+defend against leaks, and it cannot catch a value that was sliced, partially
+formatted or escape-encoded on its way out. Prevention by construction beats
+scrubbing. What PDF-13 added instead is one behaviour below: a
+:class:`~pdf_toolkit.secret.Secret` in ``record.msg`` or ``record.args``
+renders through its own redacting ``__str__``. The filter does **not** scan
+strings for secrets. :func:`register_secret` stays available for a caller that
+genuinely has a plaintext string to suppress; nothing in this product does.
 
 Note that ``import logging`` inside this module resolves to the standard
 library: absolute imports are the default, so the module's own name does not
@@ -21,6 +30,8 @@ import logging
 import os
 import sys
 from typing import Any, Final
+
+from pdf_toolkit.secret import Secret
 
 __all__ = [
     "REDACTION_PLACEHOLDER",
@@ -59,24 +70,41 @@ def _scrub(text: str) -> str:
     return text
 
 
+def _render(value: Any) -> Any:
+    """One log argument, rendered safely (PDF-13).
+
+    A :class:`~pdf_toolkit.secret.Secret` is converted to ``str`` **here**,
+    which is where its redacting ``__str__`` produces ``"<redacted>"``. That
+    is a type-driven guarantee rather than a search: it holds for a value
+    this filter has never seen, at every verbosity, and it cannot be defeated
+    by slicing or escape-encoding the way a plaintext-registry scrub can.
+    Strings are scrubbed against the registry as before; nothing else is
+    touched.
+    """
+    if isinstance(value, Secret):
+        return str(value)
+    if isinstance(value, str):
+        return _scrub(value)
+    return value
+
+
 class RedactingFilter(logging.Filter):
     """Replace every registered secret in a record with a fixed placeholder."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if not _SECRETS:
-            return True
-        if isinstance(record.msg, str):
+        # NOT gated on `_SECRETS` any more: the `Secret` rendering below is a
+        # type guarantee that must hold whether or not anything was ever
+        # registered, and gating it on a registry nothing populates would
+        # make it dead code (`_SECRETS` is empty in this product by design).
+        if isinstance(record.msg, Secret):
+            record.msg = str(record.msg)
+        elif isinstance(record.msg, str) and _SECRETS:
             record.msg = _scrub(record.msg)
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {
-                    key: (_scrub(value) if isinstance(value, str) else value)
-                    for key, value in record.args.items()
-                }
+                record.args = {key: _render(value) for key, value in record.args.items()}
             elif isinstance(record.args, tuple):
-                scrubbed: tuple[Any, ...] = tuple(
-                    _scrub(value) if isinstance(value, str) else value for value in record.args
-                )
+                scrubbed: tuple[Any, ...] = tuple(_render(value) for value in record.args)
                 record.args = scrubbed
         return True
 

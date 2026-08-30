@@ -32,16 +32,21 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Protocol, cast
+from typing import IO, TYPE_CHECKING, Final, Protocol, cast
 
 from pdf_toolkit.models import DocumentInfo, EngineReport
 from pdf_toolkit.ports import KIND_PYTHON_PACKAGE, Adapter, build_report, require
+from pdf_toolkit.secret import Secret
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pdf_toolkit.adapters import AdapterProbe
 
 __all__ = [
+    "ALWAYS_GRANTED_TOKENS",
+    "ENCRYPTION_ALGORITHMS",
+    "PERMISSION_TOKENS",
     "CompressOutcome",
+    "EncryptionFacts",
     "ImagePassEngine",
     "ImagePassOutcome",
     "ImageXObjectFacts",
@@ -53,6 +58,8 @@ __all__ = [
     "StructureWriter",
     "adapters",
     "probe",
+    "algorithm_name",
+    "require_encryption",
     "require_image_pass",
     "require_linearization",
     "require_structure",
@@ -211,6 +218,110 @@ class ImagePassOutcome:
     images_skipped: int
 
 
+# --------------------------------------------------------------------------- #
+# PDF-13 — the encryption vocabulary and facts. Port level, not adapter level,
+# because every row below is a property of the PDF *format* (ISO 32000) rather
+# than of an engine: two adapters read the same encryption dictionary and must
+# not be able to disagree about what it says.
+# --------------------------------------------------------------------------- #
+
+#: The ONE encryption-algorithm map, keyed by ``(/V, /CFM, key-length-in-bits)``
+#: from the standard security handler's encryption dictionary.
+#:
+#: **Promoted here from ``adapters/pypdf_structure.py`` by PDF-13**, whose own
+#: comment named the reason: *"PDF-13 extends it here and nowhere else; a
+#: second copy is how two verbs start disagreeing about what a file is
+#: encrypted with."* PDF-13 is that second consumer — ``permissions`` answers
+#: from the pikepdf adapter while ``info`` answers from the pypdf one — so the
+#: map moved to the port both adapters already depend on rather than being
+#: copied. The rows themselves are unchanged.
+#:
+#: ``/CFM`` is ``""`` for /V 1 and 2, which predate crypt filters. A lookup
+#: that misses yields ``None`` plus a warning — never a guess.
+ENCRYPTION_ALGORITHMS: Final[dict[tuple[int, str, int], str]] = {
+    (1, "", 40): "RC4-40",
+    (2, "", 40): "RC4-40",
+    (2, "", 128): "RC4-128",
+    (4, "/V2", 40): "RC4-40",
+    (4, "/V2", 128): "RC4-128",
+    (4, "/AESV2", 128): "AES-128",
+    (5, "/AESV3", 256): "AES-256",
+}
+
+#: The `--allow` vocabulary, and the exact tokens `permissions` reports back.
+#: Deliberately its own list rather than ``DocumentInfo.permissions``' tokens:
+#: those are ``info``'s shipped public JSON (``fill-forms``,
+#: ``extract-accessibility``, ``print-high-resolution``, …) and renaming them
+#: would break a published contract, while these are `PLAN.md` §5.7's own
+#: `--allow` spelling. The overlap is intentional and the divergence is
+#: recorded rather than silently reconciled.
+PERMISSION_TOKENS: Final[tuple[str, ...]] = (
+    "accessibility",
+    "annotate",
+    "assemble",
+    "copy",
+    "forms",
+    "modify",
+    "print",
+    "print-highres",
+)
+
+#: Tokens the *format* grants whatever was requested. **Measured, not assumed**
+#: (pikepdf 10.12.0 / libqpdf 12.3.2, R=4 and R=6 both): saving with every
+#: permission denied still yields ``accessibility=True``, because ISO 32000-2
+#: deprecated bit 10 and conforming readers always permit extraction for
+#: accessibility. Reported honestly rather than echoed back as denied.
+ALWAYS_GRANTED_TOKENS: Final[tuple[str, ...]] = ("accessibility",)
+
+
+def algorithm_name(version: int, method: str, bits: int) -> str | None:
+    """``"AES-256"``/``"RC4-128"``/… for one encryption dictionary, or ``None``.
+
+    ``None`` rather than a plausible-looking guess when the combination is
+    unknown: an encryption algorithm reported wrongly is worse than one
+    reported as unknown.
+    """
+    return ENCRYPTION_ALGORITHMS.get((version, method, bits))
+
+
+@dataclass(frozen=True, slots=True)
+class EncryptionFacts:
+    """What one document's security handler says, read without a write.
+
+    A plain dataclass like every other shape crossing this port, so
+    ``ops/crypto.py`` answers `permissions` without ever holding a
+    ``pikepdf.Pdf`` — and, more to the point here, without a ``Secret`` ever
+    needing to exist below L2.
+    """
+
+    encrypted: bool
+    unlocked: bool
+    """Whether the supplied credential (or the empty user password) opened it.
+    ``False`` with ``encrypted=True`` is exactly `PLAN.md` §5.6's exit-6
+    third sub-case."""
+
+    algorithm: str | None
+    revision: int | None
+    key_bits: int | None
+    granted: tuple[str, ...]
+    """Granted :data:`PERMISSION_TOKENS`, sorted. Empty when unreadable."""
+
+    permissions_readable: bool
+    """``False`` when the format did not let the bits be read at all. The
+    output then **says so** rather than reporting an empty set as if it were
+    a measured deny-everything (`PLAN.md` §5.7's last sentence)."""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "encrypted": self.encrypted,
+            "algorithm": self.algorithm,
+            "revision": self.revision,
+            "key_bits": self.key_bits,
+            "granted": list(self.granted),
+            "permissions_readable": self.permissions_readable,
+        }
+
+
 class StructureEngine(Protocol):
     """Read a document's structure. Implemented in full by the primary adapter."""
 
@@ -279,6 +390,52 @@ class StructureEngine(Protocol):
             AuthError: Exit 6 -- the document is password-protected.
             FailureError: Exit 1 -- the engine could not process it, or the
                 internal verification failed.
+        """
+        ...
+
+    def read_encryption(self, data: bytes, password: Secret | None) -> EncryptionFacts:
+        """The `"robust-encryption"` capability, read half (PDF-13).
+
+        Never raises on a wrong or absent password: "we could not open it"
+        is a *fact about the document* this method reports
+        (``unlocked=False``), and turning it into an exception here would
+        make `encrypt`'s already-encrypted refusal (exit 5) indistinguishable
+        from `decrypt`'s wrong-password refusal (exit 6) at the call site
+        that has to tell them apart.
+
+        Raises:
+            FailureError: Exit 1 -- malformed, corrupt or unparseable.
+        """
+        ...
+
+    def encrypt(
+        self,
+        data: bytes,
+        *,
+        owner: Secret,
+        user: Secret | None,
+        allow: frozenset[str],
+        legacy: bool,
+    ) -> bytes:
+        """The `"robust-encryption"` capability, write half (PDF-13).
+
+        ``allow`` holds :data:`PERMISSION_TOKENS`; ``legacy`` selects RC4-128
+        (R4) instead of AES-256 (R6). No cryptography is implemented in this
+        product — every operation is libqpdf's.
+
+        Raises:
+            AuthError: Exit 6 -- the input is itself password-protected.
+            FailureError: Exit 1 -- the engine could not process it.
+        """
+        ...
+
+    def decrypt(self, data: bytes, *, password: Secret) -> bytes:
+        """The `"robust-encryption"` capability, removal half (PDF-13).
+
+        Raises:
+            AuthError: Exit 6 -- wrong password, or user-level access where
+                owner-level is required.
+            FailureError: Exit 1 -- the engine could not process it.
         """
         ...
 
@@ -369,6 +526,17 @@ def require_structure(*, capability: str | None = None) -> StructureEngine:
 def require_linearization() -> LinearizationProbe:
     """The adapter that can answer ``linearized``, selected by capability."""
     return cast("LinearizationProbe", require(PORT, capability="linearized"))
+
+
+def require_encryption() -> StructureEngine:
+    """The adapter that can encrypt/decrypt, selected by capability.
+
+    ``"robust-encryption"`` is declared only by the pikepdf adapter, which is
+    `PLAN.md` §7.1's named owner of the capability and D-04's "selected by
+    capability, not by guesswork" applied to the one operation where guessing
+    would be worst.
+    """
+    return cast("StructureEngine", require(PORT, capability="robust-encryption"))
 
 
 def require_image_pass() -> ImagePassEngine:

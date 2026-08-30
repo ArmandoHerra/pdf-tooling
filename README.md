@@ -79,6 +79,33 @@ Uniform across every verb.
 
 Structure-level compression plus optional image downsampling is the ceiling of a permissive stack: Ghostscript is AGPL-3.0+ and deliberately excluded, so `compress` builds on `pikepdf`/libqpdf object streams and an opt-in Pillow image pass instead. `--images downsample`'s resample threshold is computed against the page's own width in inches (the page box), never an image's placement rectangle, which under-downsamples a small image on a large page — a stated, conservative limitation.
 
+## Encryption, passwords and permissions
+
+`encrypt` writes AES-256 (revision 6) by default. `--legacy` selects RC4-128, which is cryptographically broken and exists only for readers that predate PDF 1.7 ExtensionLevel 3; it also leaves document metadata unencrypted, because the format cannot encrypt metadata without AES. Every cryptographic operation is libqpdf's, reached through `pikepdf`. This tool implements no cryptography of its own — no key derivation, no cipher, no password comparison.
+
+**A password is never accepted as a command-line value.** There is no `--password`, no `--user-password` and no `--owner-password`: `argv` is world-readable in `/proc` and lands in shell history, so the harm would happen before the tool could refuse. Passing any of those three spellings is a usage error (exit 2) naming the three supported paths, in order of preference:
+
+| Path | Spelling | Notes |
+|---|---|---|
+| A file | `--password-file PATH`, `--owner-password-file PATH`, `--user-password-file PATH` | The first line only. A single trailing newline is stripped; no other whitespace is, because a password may legitimately end in a space. |
+| Standard input | the same flags with `-` | One line. Only one slot may read from stdin per run. |
+| The environment | `PDF_TOOLKIT_PASSWORD`, `PDF_TOOLKIT_OWNER_PASSWORD` | Consulted only when no flag was given for that slot. |
+| A prompt | none | Only when stdin is a terminal. Never on a pipe, where it would hang. |
+
+With none of those available the run exits **6** and writes nothing.
+
+Run `chmod 600` on any password file. The tool warns when one is readable by group or other, and recommends exactly that — it warns rather than refuses, because refusing to read a 0644 file would break more scripts than it protects.
+
+**The environment channel is weaker than a file, and this document says so rather than implying otherwise.** A process's environment is readable through `/proc/<pid>/environ` by any process running as the same user, and it is inherited by every child the tool spawns. A password file with restrictive permissions is the stronger choice; the environment variable exists because a CI system often has no better option.
+
+No secure erasure is claimed, anywhere. A resolved password is held in a buffer that is zeroed after use, but Python may already have copied it while decoding the file, and swap and core dumps are outside a process's control. The same goes for the `.bak` sidecar and for temporary files: they are deleted, not shredded.
+
+`encrypt --in-place` needs one more word from you, and it is the one place where the safety default and the security default point in opposite directions. The `.bak` sidecar is a copy of the **original**, so an in-place encryption would leave plaintext sitting next to the ciphertext, silently. So it refuses (exit 5) unless you pass `--no-backup` (keep no plaintext copy) or `-y` (keep it, knowingly).
+
+**Permission bits are advisory.** They are a request to the reader, not a lock: only cooperating readers honour them, any reader holding the file may ignore every bit, and a reader that can display a page can extract it. Encryption protects the content; the bits on their own protect nothing. `--allow` takes a comma-separated, repeatable list from `print`, `print-highres`, `copy`, `modify`, `annotate`, `forms`, `assemble`, `accessibility`, plus the exclusive `all` and `none`; omitting it grants nothing. `accessibility` is granted whatever you ask for — PDF 2.0 deprecated that bit and conforming readers always permit it — and `permissions` reports what the document actually grants rather than what was requested.
+
+`decrypt` round-trips the **page tree** byte for byte: the decoded content streams, the page dictionaries and every embedded image's raw bytes come back identical. The whole file does not, and nothing here claims it does — `/ID`, `/Encrypt`, the trailer, the cross-reference table and object numbering all legitimately change on any resave.
+
 ## Development
 
 ```bash

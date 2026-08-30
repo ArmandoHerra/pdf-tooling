@@ -21,11 +21,12 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_thirteen_landed_verbs() -> None:
-    """`compress`/`repair`/`linearize` (PDF-12) join `text`/`tables` (PDF-11),
+def test_discover_verbs_finds_exactly_the_sixteen_landed_verbs() -> None:
+    """`encrypt`/`decrypt`/`permissions` (PDF-13) join
+    `compress`/`repair`/`linearize` (PDF-12), `text`/`tables` (PDF-11),
     `compose`/`create` (PDF-10), `rasterize` (PDF-09), `merge`/`split`
-    (PDF-07) and the three PDF-06-landing verbs -- thirteen total. Renamed
-    and extended rather than deleted, for the fourth time and for the same
+    (PDF-07) and the three PDF-06-landing verbs -- sixteen total. Renamed
+    and extended rather than deleted, for the fifth time and for the same
     reason: this pin fails BY DESIGN the moment a verb registers, which is
     the tripwire working, not a defect."""
     verbs = discover_verbs()
@@ -44,6 +45,9 @@ def test_discover_verbs_finds_exactly_the_thirteen_landed_verbs() -> None:
         "compress",
         "repair",
         "linearize",
+        "encrypt",
+        "decrypt",
+        "permissions",
     }
 
 
@@ -76,6 +80,10 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
     # "(image pass)" (D-12.2's `--pages` scopes the image pass only);
     # `repair`/`linearize` are "no" (D-12.4/D-12.6), so both join
     # `expected_not` instead.
+    # PDF-13: none of `encrypt`/`decrypt`/`permissions` is page-addressing
+    # (`PLAN.md` §4.1 -- all three "no"; encryption is a whole-document
+    # property and there is no such thing as encrypting page 3), so the set
+    # grows and nothing in this pin is removed.
     expected_page_addressing = {"rasterize", "text", "tables", "compress"}
     expected_not = {
         "version",
@@ -87,6 +95,9 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
         "create",
         "repair",
         "linearize",
+        "encrypt",
+        "decrypt",
+        "permissions",
     }
     # PDF-10 extends `expected_not`: neither `compose` nor `create` is page
     # addressing (`PLAN.md` §4.1 -- both "no"), so the set grows and nothing in
@@ -125,6 +136,25 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
     # PDF-12: `compress`/`repair`/`linearize` each reach `AtomicWriter` via
     # `cmd_optimize -> ops.optimize -> safety.atomic` -- two hops each, so
     # `_MAX_IMPORT_HOPS` was not raised for any of the three.
+    # PDF-13: `encrypt`/`decrypt` reach `AtomicWriter` via `cmd_encrypt ->
+    # ops.crypto -> safety.atomic` and `cmd_decrypt -> ops.crypto ->
+    # safety.atomic` -- two hops each, so `_MAX_IMPORT_HOPS` was not raised.
+    #
+    # `permissions` is the interesting one and it is pinned DELIBERATELY,
+    # not by accident. It **writes nothing** -- it declares `consumes=()`
+    # under OR-3 and all four output flags exit 2 -- yet it classifies
+    # `is_mutating=True`, because this predicate is REACHABILITY over the
+    # import graph (see `tests/registry.py`'s module docstring), and
+    # `permissions` shares `ops/crypto.py` with the two producing verbs, as
+    # every crypto verb must: the OR-3 declaration is keyed by *cmd module*,
+    # never by ops module, so splitting the ops layer to make this predicate
+    # prettier would buy nothing and cost the shared code path.
+    #
+    # The over-approximation is in the SAFE direction and costs nothing real:
+    # it adds `permissions` to C9/C10's dry-run purity arms, both of which it
+    # passes honestly, and it cannot add it to C11 or C15 -- those are
+    # parameterized off `consumes`, which is empty. A verb that writes
+    # nothing being checked for not writing anything is not a wrong pin.
     expected_mutating = {
         "merge",
         "split",
@@ -136,6 +166,9 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
         "compress",
         "repair",
         "linearize",
+        "encrypt",
+        "decrypt",
+        "permissions",
     }
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():

@@ -666,3 +666,92 @@ def test_ac16_linearize_over_a_482_page_sample(samples, tmp_path: Path) -> None:
 
     with pikepdf.Pdf.open(target) as reopened:
         assert reopened.is_linearized is True
+
+
+# --------------------------------------------------------------------------- #
+# PDF-13 -- AC16. Over a COPY of a real CV: encrypt -> `info` reports AES-256
+# -> decrypt -> the page tree comes back byte for byte.
+#
+# HC-2 / `PLAN.md` §10.1 binds this section harder than any other in this file,
+# because the operand is a PERSONAL DOCUMENT. Originals are never an operand
+# (`samples.copy()` only), nothing about it is asserted or reported beyond
+# STRUCTURE -- page count, sizes and hashes -- and nothing password-bearing is
+# captured, printed or written anywhere. `inspect_document` is called in
+# process rather than `info -o json` through a subprocess deliberately: it is
+# the same code path `info` runs, and it never renders this document's
+# metadata into a captured stream that a failure report could carry.
+# --------------------------------------------------------------------------- #
+
+_CRYPTO_SAMPLE_NAME = "ArmandoHerra_Cloud_Architect_2026_CV.pdf"
+_CRYPTO_SAMPLE_PASSWORD = "samples-arm-owner-password"
+
+
+def _crypto_slot(path: Path, slot: str):
+    from pdf_toolkit.cli.password import plan_password
+
+    return plan_password(
+        slot=slot,
+        flag=f"--{slot}-password-file" if slot != "password" else "--password-file",
+        value=str(path),
+        env_names=(),
+        prompt="x: ",
+        allow_empty=slot != "owner",
+    )
+
+
+@pytest.mark.samples
+def test_ac16_encrypt_info_decrypt_round_trips_a_real_document(samples, tmp_path: Path) -> None:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from pagetree import page_tree_digest
+    from pdf_toolkit.ops.crypto import decrypt_run, encrypt_run
+    from pdf_toolkit.ops.inspect import inspect_document
+
+    copy_path = samples.copy(_CRYPTO_SAMPLE_NAME)
+    password_file = tmp_path / "owner.pw"
+    password_file.write_text(_CRYPTO_SAMPLE_PASSWORD)
+    password_file.chmod(0o600)
+
+    before = page_tree_digest(copy_path)
+    assert before, "the sample yielded no pages"
+
+    encrypted = tmp_path / "sample-encrypted.pdf"
+    encrypt_result = encrypt_run(
+        copy_path,
+        owner=_crypto_slot(password_file, "owner"),
+        user=None,
+        allow=frozenset({"print"}),
+        legacy=False,
+        output=encrypted,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert encrypt_result.exit_code == 0
+
+    report = inspect_document(encrypted)
+    assert report.encrypted is True
+    assert report.encryption_algorithm == "AES-256"
+
+    decrypted = tmp_path / "sample-decrypted.pdf"
+    decrypt_result = decrypt_run(
+        encrypted,
+        password=_crypto_slot(password_file, "password"),
+        output=decrypted,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert decrypt_result.exit_code == 0
+
+    assert page_tree_digest(decrypted) == before
+
+
+@pytest.mark.samples
+def test_ac16_the_original_is_never_an_operand(samples, tmp_path: Path) -> None:
+    """HC-2 restated as a test rather than as a promise: the only path this
+    arm can obtain is a copy under `tmp_path`, and it is writable."""
+    copy_path = samples.copy(_CRYPTO_SAMPLE_NAME)
+    assert copy_path.parent == tmp_path
+    assert os.access(copy_path, os.W_OK)

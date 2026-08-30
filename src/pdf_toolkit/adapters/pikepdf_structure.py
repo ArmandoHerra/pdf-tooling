@@ -42,11 +42,15 @@ from pdf_toolkit.adapters import AdapterProbe, package_probe
 from pdf_toolkit.errors import AuthError, FailureError
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports.structure import (
+    PERMISSION_TOKENS,
     CompressOutcome,
+    EncryptionFacts,
     ImageXObjectFacts,
     RepairOutcome,
     StructuralFacts,
+    algorithm_name,
 )
+from pdf_toolkit.secret import Secret
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     import pikepdf
@@ -62,7 +66,8 @@ __all__ = ["ADAPTER", "CAPABILITY_SUMMARY", "PikepdfStructureAdapter"]
 _WARNING_PREFIX_RE: Final = re.compile(r"^\S+ <[^>]+>(?:\s*\([^)]*\))?:\s*(.*)$")
 
 _PASSWORD_HINT: Final[str] = (
-    "supply one with --password-file PATH (or --password -), or run 'pdftoolkit decrypt' first"
+    "supply one with --password-file PATH (or --password-file - to read one line from stdin), "
+    "or run 'pdftoolkit decrypt' first"
 )
 
 _NAME: Final[str] = "pikepdf"
@@ -76,6 +81,35 @@ _CAPABILITIES: Final[frozenset[str]] = frozenset(
 #: Rendered into ``StructureEngine``'s ``detail`` so ``doctor`` states what the
 #: secondary is *for*, not merely that it exists.
 CAPABILITY_SUMMARY: Final[str] = "repair, linearize, object-streams, encryption"
+
+#: PDF-13 -- `PLAN.md` §5.7's `--allow` vocabulary mapped to libqpdf's own
+#: permission fields. Verified against `pikepdf.Permissions()._fields` at
+#: pikepdf 10.12.0 / libqpdf 12.3.2 before it was written, not recalled from a
+#: document. `print-highres` also implies `print` (`print_lowres`): a reader
+#: that may print at full resolution may obviously print at low resolution,
+#: and the format has no spelling for "high but not low".
+_PERMISSION_FIELDS: Final[dict[str, str]] = {
+    "accessibility": "accessibility",
+    "annotate": "modify_annotation",
+    "assemble": "modify_assembly",
+    "copy": "extract",
+    "forms": "modify_form",
+    "modify": "modify_other",
+    "print": "print_lowres",
+    "print-highres": "print_highres",
+}
+
+#: ``EncryptionInfo.stream_method`` -> the ``/CFM`` spelling
+#: :data:`~pdf_toolkit.ports.structure.ENCRYPTION_ALGORITHMS` is keyed by.
+#: ``none`` is /V 1 and 2, which predate crypt filters; ``unknown`` is absent
+#: on purpose, so an unrecognised handler yields ``None`` and a warning rather
+#: than a guess.
+_CFM_BY_STREAM_METHOD: Final[dict[str, str]] = {
+    "none": "",
+    "rc4": "/V2",
+    "aes": "/AESV2",
+    "aesv3": "/AESV3",
+}
 
 
 class PikepdfStructureAdapter:
@@ -230,6 +264,162 @@ class PikepdfStructureAdapter:
         if not verified:
             raise FailureError("linearization did not verify: the saved output is not linearized")
         return output
+
+    # -- PDF-13: the `"robust-encryption"` capability ---------------------- #
+    #
+    # THIS IS THE ONLY FILE PERMITTED TO CALL `Secret.reveal()`
+    # (`PLAN.md` §5.7; enforced by an allowlist walk in
+    # `tests/test_password_leaks.py`). Every `reveal()` below sits at the
+    # exact point where libqpdf demands a `str`, is passed straight into the
+    # engine call, and is never bound to a local that outlives the
+    # expression, never logged, never formatted and never returned.
+    #
+    # No cryptography is implemented here or anywhere in this product: key
+    # derivation, ciphers and password comparison are libqpdf's, reached
+    # through pikepdf. A hand-rolled anything in this path is an automatic
+    # rejection (`PLAN.md` §5.7, this spec's Non-goals).
+
+    def read_encryption(self, data: bytes, password: Secret | None) -> EncryptionFacts:
+        """The read half: what this document's security handler says.
+
+        **Never raises on a wrong or absent password.** "The credential did
+        not open it" is a fact about the document, reported as
+        ``unlocked=False`` -- because the one caller that has to tell
+        `encrypt`'s already-encrypted refusal (exit 5) apart from `decrypt`'s
+        wrong-password refusal (exit 6) cannot do so from a single exception
+        type.
+        """
+        import pikepdf
+
+        logger = get_logger("adapters.pikepdf")
+        try:
+            pdf = pikepdf.Pdf.open(io.BytesIO(data), password=password.reveal() if password else "")
+        except pikepdf.PasswordError:
+            # Encrypted, and this credential is not the one. Nothing about the
+            # attempt is logged: not the password, not its length, not its
+            # source -- the caller owns the (safe) source label.
+            return EncryptionFacts(
+                encrypted=True,
+                unlocked=False,
+                algorithm=None,
+                revision=None,
+                key_bits=None,
+                granted=(),
+                permissions_readable=False,
+            )
+        except pikepdf.PdfError as error:
+            raise FailureError(f"could not read this document's encryption: {error}") from error
+
+        with pdf:
+            if not pdf.is_encrypted:
+                return EncryptionFacts(
+                    encrypted=False,
+                    unlocked=True,
+                    algorithm=None,
+                    revision=None,
+                    key_bits=None,
+                    granted=tuple(PERMISSION_TOKENS),
+                    permissions_readable=True,
+                )
+            info = pdf.encryption
+            method = _CFM_BY_STREAM_METHOD.get(info.stream_method.name)
+            algorithm = (
+                algorithm_name(int(info.V), method, int(info.bits)) if method is not None else None
+            )
+            if algorithm is None:
+                logger.warning(
+                    "unrecognised encryption dictionary (/V %s, method %s, %s-bit); "
+                    "reporting the algorithm as null rather than guessing",
+                    info.V,
+                    info.stream_method.name,
+                    info.bits,
+                )
+            allow = pdf.allow
+            granted = tuple(
+                sorted(
+                    token for token, field in _PERMISSION_FIELDS.items() if getattr(allow, field)
+                )
+            )
+            return EncryptionFacts(
+                encrypted=True,
+                unlocked=True,
+                algorithm=algorithm,
+                revision=int(info.R),
+                key_bits=int(info.bits),
+                granted=granted,
+                permissions_readable=True,
+            )
+
+    def encrypt(
+        self,
+        data: bytes,
+        *,
+        owner: Secret,
+        user: Secret | None,
+        allow: frozenset[str],
+        legacy: bool,
+    ) -> bytes:
+        """The write half: AES-256 (R6) by default, RC4-128 (R4) under ``legacy``.
+
+        ``metadata=`` is forced off in the legacy shape because libqpdf
+        refuses to encrypt metadata without AES (``ValueError: Cannot encrypt
+        metadata unless AES encryption is enabled``) -- measured, not assumed.
+        The caller's `--legacy` warning states that consequence rather than
+        letting it be a surprise.
+        """
+        import pikepdf
+
+        permissions = pikepdf.Permissions(
+            **{field: (token in allow) for token, field in _PERMISSION_FIELDS.items()}
+        )
+        try:
+            with pikepdf.Pdf.open(io.BytesIO(data)) as pdf:
+                out_buffer = io.BytesIO()
+                pdf.save(
+                    out_buffer,
+                    encryption=pikepdf.Encryption(
+                        owner=owner.reveal(),
+                        user=user.reveal() if user is not None else "",
+                        R=4 if legacy else 6,
+                        allow=permissions,
+                        aes=not legacy,
+                        metadata=not legacy,
+                    ),
+                )
+        except pikepdf.PasswordError as error:
+            raise AuthError(
+                f"a password is required to open this document; {_PASSWORD_HINT}"
+            ) from error
+        except pikepdf.PdfError as error:
+            raise FailureError(f"could not encrypt this document: {error}") from error
+        return out_buffer.getvalue()
+
+    def decrypt(self, data: bytes, *, password: Secret) -> bytes:
+        """The removal half: saving without ``encryption=`` writes plaintext.
+
+        `PLAN.md` §5.6's third exit-6 sub-case (opened with the user password
+        where owner-level access is required) is **not simulated here**:
+        libqpdf grants full access to any credential that opens the document
+        and does not itself enforce the permission bits, so a check invented
+        at this layer would be a claim the format does not support -- the
+        same security-theatre standard §9.2 applies to redaction. If a future
+        engine reports it, it maps to :class:`AuthError` beside the wrong
+        password below.
+        """
+        import pikepdf
+
+        try:
+            with pikepdf.Pdf.open(io.BytesIO(data), password=password.reveal()) as pdf:
+                out_buffer = io.BytesIO()
+                pdf.save(out_buffer)
+        except pikepdf.PasswordError as error:
+            raise AuthError(
+                "the supplied password did not open this document",
+                redacted=True,
+            ) from error
+        except pikepdf.PdfError as error:
+            raise FailureError(f"could not decrypt this document: {error}") from error
+        return out_buffer.getvalue()
 
 
 def _filter_tuple(obj: pikepdf.Object) -> tuple[str, ...]:

@@ -19,6 +19,47 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-13] encrypt / decrypt / permissions + password handling — 2026-08-30
+- Added `encrypt` (AES-256 / revision 6 by default; RC4-128 only behind
+  `--legacy`, which warns that it is broken and that metadata is left
+  unencrypted), `decrypt` (an unencrypted document is exit 4 and writes
+  nothing) and `permissions` (non-producing: it reports, so all four output
+  flags exit 2). Every cryptographic operation is libqpdf's through
+  `pikepdf`'s `robust-encryption` capability — no key derivation, no cipher
+  and no password comparison is implemented in this repository, and no
+  runtime dependency moved.
+- A password is never accepted as a command-line value, and the inviting
+  spelling no longer exists: `--password` (a shipped alias of
+  `--password-file`), `--user-password` and `--owner-password` are hidden,
+  refusing options that exit 2 with a message naming the file, environment
+  and prompt paths. The harm — a value reaching shell history and
+  world-readable `/proc` argv — happens before a tool could refuse, so the
+  removal is preventive rather than post-hoc. Resolution is
+  file/stdin → environment → TTY prompt → exit 6.
+- Passwords travel as a `Secret` whose every rendering is `<redacted>`, which
+  JSON and `pickle` refuse, and whose single accessor `reveal()` is confined
+  by an AST walk to one adapter file. Four adversarial proofs, each with a
+  positive control: absent from captured `-vv` stderr (which is asserted
+  non-empty and carrying a real debug record), absent from `-o json` in raw
+  bytes and in every string leaf and under `\uXXXX` escaping, absent from a
+  forced traceback including the locals-capturing form, and absent from
+  `/proc/<pid>/cmdline` read while the process is provably blocked on stdin.
+  The environment channel is asserted to be readable and is documented as
+  weaker than a file rather than implied safe.
+- `--dry-run` predicts what it can and states what it cannot. Password
+  *resolvability* is predicted (`would_exit: 6`) from existence alone, with
+  no secret entering the process; password *correctness* deliberately is not,
+  and the payload says so with `password_verified: false` — a preview must
+  not become an oracle that distinguishes a right password from a wrong one
+  inside a CI artifact.
+- `encrypt --in-place` refuses (exit 5) unless given `--no-backup` or `-y`,
+  because the `.bak` sidecar is a copy of the *original* and would leave
+  plaintext beside the ciphertext. Permission bits are reported as the
+  document grants them, not as they were requested: `accessibility` is always
+  granted and `print-highres` also grants `print`, both measured against
+  libqpdf and both documented as advisory — the bits are a request to a
+  cooperating reader, never a lock.
+
 ## [PDF-12] compress + repair + linearize — 2026-08-30
 - Added `compress` (`pikepdf`/libqpdf object streams + stream recompression,
   lossless by construction; opt-in `--images downsample|recompress` over

@@ -465,6 +465,61 @@ def _linearize_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+def _password_file(tmp_path: Path, filename: str, password: str) -> Path:
+    """A 0600 password file inside `tmp_path` -- never a literal on the command
+    line (`PLAN.md` §5.7, ruling OR-4: argv is world-readable in /proc).
+
+    PDF-13 HAZARD, and it reads like a defect until you check it: **every**
+    `encrypt` row must supply `--owner-password-file`, or the invocation exits
+    2 or 6 for a reason that has nothing to do with the flag under test and the
+    cell proves nothing. The file is created by the row itself so no row
+    depends on another having run first."""
+    destination = tmp_path / filename
+    destination.write_text(password)
+    destination.chmod(0o600)
+    return destination
+
+
+def _encrypt_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`encrypt` (PDF-13) -- one input, `-O` (same C11 reasoning as
+    `_text_invocation`: C11 appends its own `-O <existing target>`, and only
+    `-O` here keeps Click's last-scalar-wins landing on C11's target instead
+    of tripping the `--output`/`--out-dir` mutual exclusion)."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--owner-password-file",
+        str(_password_file(tmp_path, "registered-invocation-encrypt.pw", "registry-owner-pw")),
+        "-O",
+        str(tmp_path / "registered-invocation-encrypt.pdf"),
+    ]
+
+
+def _decrypt_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`decrypt` (PDF-13) -- the operand MUST be an encrypted document, because
+    `decrypt` on an unencrypted one is exit 4 by design ("valid invocation,
+    nothing to act on") and C12/C15 both require this row to reach exit 0. The
+    `encrypted_aes256` fixture carries a user password the corpus publishes as
+    `corpus.ENCRYPTED_PASSWORD`."""
+    from corpus import ENCRYPTED_PASSWORD
+
+    return [
+        str(corpus.path("encrypted_aes256")),  # type: ignore[attr-defined]
+        "--password-file",
+        str(_password_file(tmp_path, "registered-invocation-decrypt.pw", ENCRYPTED_PASSWORD)),
+        "-O",
+        str(tmp_path / "registered-invocation-decrypt.pdf"),
+    ]
+
+
+def _permissions_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`permissions` (PDF-13) is NON-PRODUCING: it reports and writes nothing,
+    so its row names no destination at all -- the same shape `info`'s row has.
+    It declares `consumes=()` under OR-3, so it never enters C11's or C15's
+    populations and never needs a discoverable target."""
+    del tmp_path
+    return [str(corpus.path("single_page"))]  # type: ignore[attr-defined]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -496,6 +551,12 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "compress": Invocation(build=_compress_invocation, destructive=False),
     "repair": Invocation(build=_repair_invocation, destructive=False),
     "linearize": Invocation(build=_linearize_invocation, destructive=False),
+    # PDF-13. `encrypt`/`decrypt` are single-target producing verbs;
+    # `permissions` is NON-PRODUCING and its row names no destination, which
+    # is why it is absent from C11/C15 rather than skipped by them.
+    "encrypt": Invocation(build=_encrypt_invocation, destructive=False),
+    "decrypt": Invocation(build=_decrypt_invocation, destructive=False),
+    "permissions": Invocation(build=_permissions_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -631,4 +692,51 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-linearize-in-place.pdf")),
         "--in-place",
     ],
+    # PDF-13 -- four rows: encrypt/decrypt x {--output, --in-place}. Three
+    # constraints, each of which would otherwise produce a green-but-meaningless
+    # cell:
+    #   1. Every row names `-O`, never `--out-dir` -- C11 appends its own
+    #      `-O <existing target>` (X-121).
+    #   2. Every `encrypt` row supplies `--owner-password-file`, or it exits 2
+    #      or 6 for an unrelated reason (see `_password_file`).
+    #   3. The `("encrypt", "--in-place")` row supplies `--no-backup`, because a
+    #      bare `encrypt --in-place` exits 5 BY DESIGN -- the plaintext-`.bak`
+    #      gate -- and could never be "honoured" without it. `--no-backup`
+    #      rather than `-y` so the row leaves no plaintext copy behind either.
+    ("encrypt", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--owner-password-file",
+        str(_password_file(tmp_path, "or3-encrypt-output.pw", "or3-owner-pw")),
+        "-O",
+        str(tmp_path / "or3-encrypt-output.pdf"),
+    ],
+    ("encrypt", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-encrypt-in-place.pdf")),
+        "--owner-password-file",
+        str(_password_file(tmp_path, "or3-encrypt-in-place.pw", "or3-owner-pw")),
+        "--in-place",
+        "--no-backup",
+    ],
+    ("decrypt", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("encrypted_aes256")),  # type: ignore[attr-defined]
+        "--password-file",
+        str(_password_file(tmp_path, "or3-decrypt-output.pw", _encrypted_password())),
+        "-O",
+        str(tmp_path / "or3-decrypt-output.pdf"),
+    ],
+    ("decrypt", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "encrypted_aes256", "or3-decrypt-in-place.pdf")),
+        "--password-file",
+        str(_password_file(tmp_path, "or3-decrypt-in-place.pw", _encrypted_password())),
+        "--in-place",
+    ],
 }
+
+
+def _encrypted_password() -> str:
+    """The `encrypted_aes256` fixture's own password, read from the corpus
+    module rather than repeated as a literal (the `MHC-12` rule: a fixture and
+    what a test asserts against it must not be able to drift)."""
+    from corpus import ENCRYPTED_PASSWORD
+
+    return ENCRYPTED_PASSWORD

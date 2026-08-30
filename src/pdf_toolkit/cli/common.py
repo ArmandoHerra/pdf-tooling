@@ -33,6 +33,7 @@ from pdf_toolkit.safety.policy import SafetyPolicy
 __all__ = [
     "GLOBAL_OPTIONS",
     "OUTPUT_FLAGS",
+    "REFUSED_PASSWORD_FLAGS",
     "CliState",
     "GlobalConfig",
     "consumed_output_flags",
@@ -96,6 +97,89 @@ class _ParamSpec:
     name: str
     annotation: Any
     default: Any
+
+
+#: Ruling **OR-4** (`decision.md` §0.5) + PM ruling **X-114**: no flag in this
+#: product takes a password-shaped value. `--password` shipped as an alias of
+#: `--password-file`; it is removed, and `--user-password` / `--owner-password`
+#: are refused pre-emptively so PDF-13 cannot re-create the same shape on new
+#: surface the day it is removed from the old.
+#:
+#: **Deleting the alias would not have been enough.** With the spelling simply
+#: gone, `--password X` falls into Click's unknown-option path, and ledger
+#: finding `4772bfd8fc` records that unknown flags on this product bypass the
+#: error envelope entirely — so the user would get a generic *"No such
+#: option"* carrying none of the three supported paths OR-4 requires the
+#: message to name.
+#:
+#: **Why a hidden BOOLEAN eager option rather than a hidden value-taking one**
+#: (verified against Click's own parsing order, not assumed):
+#:
+#: * A value-taking option given no value fails inside Click's parser with its
+#:   own un-enveloped *"requires an argument"* message — the shape OR-4's
+#:   message has to cover.
+#: * A boolean never binds the value at all, so `--password hunter2` cannot
+#:   echo it even by accident: the word is left in the positional stream and
+#:   is never looked at. That is the never-echo rule made structural rather
+#:   than remembered.
+#: * ``is_eager=True`` makes the callback fire during parameter processing,
+#:   **before** Click's own "got unexpected extra arguments" check, so the
+#:   refusal is identical whether or not the stray word perturbs arity.
+#:
+#: They are **not** in :data:`GLOBAL_OPTIONS` and ``hidden=True`` keeps them
+#: out of every ``--help`` body, so the §4.2 verb-block-vs-root diff test is
+#: unperturbed on both sides — that test is the control proving the removal
+#: did not deform the shared block.
+REFUSED_PASSWORD_FLAGS: Final[tuple[str, ...]] = (
+    "--password",
+    "--user-password",
+    "--owner-password",
+)
+
+
+def _password_flag_refusal(flag: str) -> UsageError:
+    """OR-4's message: name the three supported paths, echo nothing.
+
+    ``path=`` is deliberately absent. At the moment of refusal we cannot know
+    whether the value was a literal password or a perfectly valid path, and a
+    rendered ``path=`` field would print it either way.
+    """
+    return UsageError(
+        f"{flag} is not a flag: a password is never accepted as a command-line value "
+        "(argv is world-readable in /proc and lands in shell history). Use "
+        "--password-file PATH (or '-' to read one line from stdin), set "
+        "PDF_TOOLKIT_PASSWORD in the environment, or run on a terminal to be prompted.",
+        redacted=True,
+    )
+
+
+def _refusing_callback(flag: str) -> Callable[[bool], None]:
+    def callback(value: bool) -> None:
+        if value:
+            raise _password_flag_refusal(flag)
+
+    return callback
+
+
+def _refused_password_spec(flag: str) -> _ParamSpec:
+    return _ParamSpec(
+        f"refused{flag.replace('-', '_')}",
+        Annotated[
+            bool,
+            typer.Option(
+                flag,
+                hidden=True,
+                is_eager=True,
+                callback=_refusing_callback(flag),
+            ),
+        ],
+        False,
+    )
+
+
+_REFUSED_PASSWORD_PARAMS: Final[tuple[_ParamSpec, ...]] = tuple(
+    _refused_password_spec(flag) for flag in REFUSED_PASSWORD_FLAGS
+)
 
 
 GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
@@ -198,7 +282,6 @@ GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
             str | None,
             typer.Option(
                 "--password-file",
-                "--password",
                 help="Path to a file holding the password, or '-' to read one line from stdin. "
                 "A literal password is never accepted.",
                 show_default=False,
@@ -258,6 +341,7 @@ GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
         ],
         False,
     ),
+    *_REFUSED_PASSWORD_PARAMS,
 )
 
 
