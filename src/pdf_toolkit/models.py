@@ -22,6 +22,7 @@ __all__ = [
     "DocumentInfo",
     "EngineReport",
     "ItemResult",
+    "MetadataReport",
     "OperationPlan",
     "OperationResult",
     "PageInfo",
@@ -484,4 +485,71 @@ class TableGrid:
             "col_count": self.col_count,
             "rows": [list(row) for row in self.rows],
             "path": self.path,
+        }
+
+
+# --- ANCHOR: PDF-14 `meta get` model ---------------------------------------
+# Appended by PDF-14 (`meta get`/`meta set`/`watermark`/`stamp`), never
+# inserted at another spec's anchor -- same convention PDF-11 already used
+# above: `models.py` is shared across the wave, and an append can never move
+# a line another engineer's diff is anchored on. Scope's own Models row asks
+# for exactly ONE new frozen dataclass here; every nested shape below
+# (`disagreements`, `residual_surfaces`) stays a plain mapping assembled by
+# `to_dict()` rather than a second dataclass -- mirroring `PageRange.to_dict()`'s
+# own convention of never nesting a second dataclass inside a report model.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataReport:
+    """`meta get`'s payload -- both metadata halves, side by side, never
+    merged (Design D2.1). `info` and `xmp` are reported independently and a
+    disagreement between them is stated, never resolved.
+
+    ``xmp``/``xmp_raw`` are ``None`` when the document carries no XMP packet
+    at all -- not an empty dict/string, which would claim a packet with no
+    fields. ``xmp_raw`` is populated only when the CLI's ``--xmp`` flag was
+    given (D2.1's additive rule); the op decides that, not this model.
+    """
+
+    schema_version: int
+    path: str
+
+    info: Mapping[str, str]
+    """Verbatim `/Info` keys, `/`-prefix stripped (e.g. ``"Title"``), every
+    value already stringified -- the JSON report's own shape. Non-string
+    `/Info` values (e.g. a `/Trapped` name object) are reported as their
+    string form here; the WRITE side (`meta set`) preserves the original
+    PdfObject type internally, which this read-only report has no need to
+    carry back out."""
+
+    xmp: Mapping[str, object] | None
+    """Parsed XMP properties, keyed by the Design D2.1 alignment table's
+    REPORT field names (``title``, ``author``, ``subject``, ``keywords``,
+    ``creator``, ``producer``, ``creation_date``, ``mod_date``) -- lowercase,
+    matching ``disagreements``' own ``"field"`` spelling, so the two never
+    disagree about what to call the same property."""
+
+    xmp_raw: str | None
+    """The XMP packet, verbatim, only with ``--xmp``."""
+
+    disagreements: tuple[Mapping[str, object], ...]
+    """``{"field": ..., "info": ... | None, "xmp": ... | None}`` per
+    disagreeing field (D2.1) -- a field present on one side only is a
+    disagreement with ``None`` on the missing side."""
+
+    residual_surfaces: Mapping[str, object]
+    """D2.4's five facts, already keyed exactly as the report needs them:
+    ``page_xmp_pages``, ``doc_piece_info``, ``page_piece_info_pages``,
+    ``annotation_authors``, ``embedded_files``, ``trailer_id``."""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "path": self.path,
+            "info": dict(self.info),
+            "xmp": dict(self.xmp) if self.xmp is not None else None,
+            "xmp_raw": self.xmp_raw,
+            "disagreements": [dict(item) for item in self.disagreements],
+            "residual_surfaces": dict(self.residual_surfaces),
         }

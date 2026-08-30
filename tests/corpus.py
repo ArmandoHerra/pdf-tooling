@@ -38,6 +38,8 @@ from typing import Final
 
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DictionaryObject, NameObject, StreamObject, TextStringObject
+from pypdf.xmp import XmpInformation
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -295,6 +297,204 @@ def _build_encrypted_aes256(root: Path) -> tuple[Path, FixtureSpec]:
     return path, spec
 
 
+#: PDF-14 -- `meta get`/`meta set`/`watermark`/`stamp`'s own fixture
+#: extensions (Scope > Fixtures). Every builder is deterministic across two
+#: independent builds, verified the same way PDF-06's own fixtures are
+#: (`tests/test_corpus.py::test_every_fixture_matches_its_own_spec` +
+#: PDF-14's own `tests/test_corpus.py`-style byte-identity check in
+#: `tests/unit/test_metadata.py`): `PdfWriter(clone_from=reader)` over an
+#: `invariant=1` reportlab source, never a fresh, unseeded `PdfWriter()` with
+#: engine-chosen defaults.
+
+
+def _build_metadata_typed(root: Path) -> tuple[Path, FixtureSpec]:
+    """AC3's own fixture: a `/Trapped` NAME value (never a string) and a
+    custom `/Info` key, alongside the ordinary title/author/subject/keywords
+    -- the full-dict, type-preserving `meta set` roundtrip has nothing to
+    prove against `metadata_rich` alone, which carries neither."""
+    text = "metadata_typed fixture."
+    path = root / "metadata_typed.pdf"
+    plain = root / "_metadata_typed_plain.pdf"
+    made = _new_canvas(plain, _LETTER)
+    made.setTitle(_METADATA["title"])
+    made.setAuthor(_METADATA["author"])
+    made.setSubject(_METADATA["subject"])
+    made.setKeywords(_METADATA["keywords"])
+    made.drawString(72, 700, text)
+    made.showPage()
+    made.save()
+
+    reader = PdfReader(str(plain))
+    writer = PdfWriter(clone_from=reader)
+    info = writer._info.get_object()  # noqa: SLF001 - fixture construction, not product code
+    info[NameObject("/Trapped")] = NameObject("/False")
+    info[NameObject("/CustomField")] = TextStringObject("custom-value")
+    with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
+        writer.write(handle)
+    plain.unlink()
+
+    spec = FixtureSpec(
+        name="metadata_typed",
+        page_count=1,
+        page_size=_LETTER,
+        page_texts=(text,),
+        metadata=dict(_METADATA),
+    )
+    return path, spec
+
+
+def _build_xmp_bearing(root: Path) -> tuple[Path, FixtureSpec]:
+    """AC4's own fixture: an XMP packet whose `dc:title` AGREES with
+    `/Title`, so `meta set --title X` updating both halves has something to
+    prove that a no-XMP fixture cannot."""
+    text = "xmp_bearing fixture."
+    path = root / "xmp_bearing.pdf"
+    plain = root / "_xmp_bearing_plain.pdf"
+    made = _new_canvas(plain, _LETTER)
+    made.setTitle("XMP Bearing Title")
+    made.drawString(72, 700, text)
+    made.showPage()
+    made.save()
+
+    reader = PdfReader(str(plain))
+    writer = PdfWriter(clone_from=reader)
+    xmp = XmpInformation.create()
+    xmp.dc_title = {"x-default": "XMP Bearing Title"}
+    writer.xmp_metadata = xmp
+    with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
+        writer.write(handle)
+    plain.unlink()
+
+    spec = FixtureSpec(name="xmp_bearing", page_count=1, page_size=_LETTER, page_texts=(text,))
+    return path, spec
+
+
+def _build_xmp_disagreement(root: Path) -> tuple[Path, FixtureSpec]:
+    """AC5's own fixture: `/Title` says ``"A"``, `dc:title` says ``"B"`` --
+    the one case `meta get`'s `disagreements` array exists to report."""
+    text = "xmp_disagreement fixture."
+    path = root / "xmp_disagreement.pdf"
+    plain = root / "_xmp_disagreement_plain.pdf"
+    made = _new_canvas(plain, _LETTER)
+    made.setTitle("A")
+    made.drawString(72, 700, text)
+    made.showPage()
+    made.save()
+
+    reader = PdfReader(str(plain))
+    writer = PdfWriter(clone_from=reader)
+    xmp = XmpInformation.create()
+    xmp.dc_title = {"x-default": "B"}
+    writer.xmp_metadata = xmp
+    with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
+        writer.write(handle)
+    plain.unlink()
+
+    spec = FixtureSpec(name="xmp_disagreement", page_count=1, page_size=_LETTER, page_texts=(text,))
+    return path, spec
+
+
+def _build_residual_surfaces(root: Path) -> tuple[Path, FixtureSpec]:
+    """AC7's own fixture: document-level `/Info` + XMP (both clearable by
+    `--clear-all`) alongside page-level XMP `/Metadata` and a document-level
+    `/PieceInfo` -- neither of which `--clear-all` touches (D2.4), so
+    `meta get`'s `residual_surfaces` has something real to report after a
+    clear."""
+    text = "residual_surfaces fixture."
+    path = root / "residual_surfaces.pdf"
+    plain = root / "_residual_surfaces_plain.pdf"
+    made = _new_canvas(plain, _LETTER)
+    made.setTitle("Residual Surfaces Title")
+    made.drawString(72, 700, text)
+    made.showPage()
+    made.save()
+
+    reader = PdfReader(str(plain))
+    writer = PdfWriter(clone_from=reader)
+    xmp = XmpInformation.create()
+    xmp.dc_title = {"x-default": "Residual Surfaces Title"}
+    writer.xmp_metadata = xmp
+
+    # Page-level XMP `/Metadata` -- detection is `"/Metadata" in page`
+    # (D2.4); the stream need not be a well-formed packet for that check.
+    page_xmp_stream = StreamObject()
+    page_xmp_stream.set_data(b"<x:xmpmeta xmlns:x='adobe:ns:meta/'></x:xmpmeta>")
+    page_xmp_stream[NameObject("/Type")] = NameObject("/Metadata")
+    page_xmp_stream[NameObject("/Subtype")] = NameObject("/XML")
+    page_xmp_ref = writer._add_object(page_xmp_stream)  # noqa: SLF001 - fixture construction
+    writer.pages[0][NameObject("/Metadata")] = page_xmp_ref
+
+    # Document-level `/PieceInfo` -- detection is `"/PieceInfo" in root`.
+    piece_info = DictionaryObject()
+    piece_info[NameObject("/PDFToolkitTestMarker")] = TextStringObject("present")
+    writer._root_object[NameObject("/PieceInfo")] = piece_info  # noqa: SLF001
+
+    with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
+        writer.write(handle)
+    plain.unlink()
+
+    spec = FixtureSpec(
+        name="residual_surfaces", page_count=1, page_size=_LETTER, page_texts=(text,)
+    )
+    return path, spec
+
+
+def _build_no_contents_page(root: Path) -> tuple[Path, FixtureSpec]:
+    """Design D4.4 row 1's own fixture: a page carrying NO `/Contents` key
+    at all -- `PdfWriter.add_blank_page` never sets one, which is exactly
+    the shape a legitimately blank page has."""
+    path = root / "no_contents_page.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=_LETTER[0], height=_LETTER[1])
+    with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
+        writer.write(handle)
+    spec = FixtureSpec(name="no_contents_page", page_count=1, page_size=_LETTER, page_texts=("",))
+    return path, spec
+
+
+def _build_empty_contents_page(root: Path) -> tuple[Path, FixtureSpec]:
+    """Design D4.4 row 2's own fixture: a page whose `/Contents` key IS
+    present but points at a zero-length stream -- deliberately distinct
+    from `no_contents_page` (D4.4 treats the two cases differently: this
+    one is ordinary, `no_contents_page` gets a run-level warning)."""
+    path = root / "empty_contents_page.pdf"
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=_LETTER[0], height=_LETTER[1])
+    stream = StreamObject()
+    stream.set_data(b"")
+    page[NameObject("/Contents")] = writer._add_object(stream)  # noqa: SLF001
+    with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
+        writer.write(handle)
+    spec = FixtureSpec(
+        name="empty_contents_page", page_count=1, page_size=_LETTER, page_texts=("",)
+    )
+    return path, spec
+
+
+#: The literal ASCII marker `stamp_source` draws, and the marker
+#: `tests/unit/test_overlay.py`/`tests/integration/test_overlay_preservation.py`
+#: locate with `bytes.index` (never `find`) to prove content-stream order
+#: (Design §D4.3). Exported so no test retypes the literal.
+STAMP_MARKER: Final[str] = "ZZSTAMPZZ"
+
+
+def _build_stamp_source(root: Path) -> tuple[Path, FixtureSpec]:
+    """Design §D4.3's own fixture: a one-page PDF carrying `STAMP_MARKER` in
+    a BASE-14 font (Helvetica), so it appears in the content stream as a
+    literal `(ZZSTAMPZZ) Tj` rather than a subset-encoded hex string --
+    `stamp`'s `--from` operand for the underlay/overlay ordering proof."""
+    path = root / "stamp_source.pdf"
+    made = _new_canvas(path, _LETTER)
+    made.setFont("Helvetica", 24)
+    made.drawString(72, 700, STAMP_MARKER)
+    made.showPage()
+    made.save()
+    spec = FixtureSpec(
+        name="stamp_source", page_count=1, page_size=_LETTER, page_texts=(STAMP_MARKER,)
+    )
+    return path, spec
+
+
 #: Build order. `FIXTURE_NAMES` mirrors it for iteration by name.
 _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_multipage_text,
@@ -305,6 +505,13 @@ _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_metadata_rich,
     _build_single_page,
     _build_tabular,
+    _build_metadata_typed,
+    _build_xmp_bearing,
+    _build_xmp_disagreement,
+    _build_residual_surfaces,
+    _build_no_contents_page,
+    _build_empty_contents_page,
+    _build_stamp_source,
 )
 
 FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
@@ -318,6 +525,13 @@ FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
         "metadata_rich",
         "single_page",
         "tabular",
+        "metadata_typed",
+        "xmp_bearing",
+        "xmp_disagreement",
+        "residual_surfaces",
+        "no_contents_page",
+        "empty_contents_page",
+        "stamp_source",
     )
 )
 

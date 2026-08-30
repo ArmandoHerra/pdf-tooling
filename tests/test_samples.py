@@ -922,3 +922,209 @@ def test_ac27_the_original_is_never_an_operand_for_the_pages_verbs(samples, tmp_
     copy_path = samples.copy(_PAGES_SAMPLE_NAME)
     assert copy_path.parent == tmp_path
     assert os.access(copy_path, os.W_OK)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-14 -- AC17's three arms, over `catalogo_arquitectura_2017_2023_0.pdf`
+# (14 pages, A4, MS Publisher, text + images -- PLAN.md §10.1, named for
+# exactly "watermark/stamp on mixed pages, meta get/set"). Originals are
+# NEVER an operand (`samples.copy()` only, HC-2 rule 1).
+#
+# ARM A carries this section's own, STRICTER privacy discipline (Design D12,
+# AC25): no `/Info`/XMP VALUE from the real document is ever compared for
+# equality directly -- a failing `assert a == b` would have pytest's own
+# assertion rewriting interpolate BOTH sides into the failure message, which
+# is exactly the leak AC25 exists to prevent. Preservation is proven with a
+# SHA-256 FINGERPRINT of each value instead: a fingerprint mismatch still
+# fails loudly, but a failure message can only ever show a hex digest, never
+# the value it was computed from. Every assertion besides the fingerprint
+# comparison is on `sorted(keys())`, `type(...).__name__` or `len(str(...))`
+# -- a field name, a boolean, a count or a length, never a value (AC25's own
+# affordance). `capsys` proves NOTHING was printed at all: Arm A calls
+# `ops/metadata.py` directly, never the CLI, so there is no stdout to leak
+# through in the first place -- proven rather than assumed.
+#
+# ARMS B/C follow this file's EXISTING, already-landed convention for
+# structural/content preservation checks (PDF-12's own lossless sample test,
+# above: `assert before_texts == after_texts`) -- HC-2 rule 4 forbids
+# asserting or reporting a content string, not comparing two extractions for
+# equality; a mismatch there is exactly the same class of risk every earlier
+# @samples content-preservation arm already accepts. Arm C's own marker
+# (`corpus.STAMP_MARKER`) is one THIS SUITE wrote (Design §D7 rule 4): the
+# `stamp_source` fixture, never sample content.
+#
+# Nothing beyond filename, page count, size and hash is quoted anywhere in
+# this section (HC-2 rule 4) -- no page text, no title, no metadata VALUE.
+# --------------------------------------------------------------------------- #
+
+_META_SAMPLE_NAME = "catalogo_arquitectura_2017_2023_0.pdf"
+_META_SAMPLE_PAGES = 14
+
+
+def _fingerprint(value: object) -> str:
+    """A one-way digest of one metadata value -- proves equality without a
+    failure message ever being able to show the value itself (AC25)."""
+    import hashlib
+
+    return hashlib.sha256(str(value).encode("utf-8", errors="replace")).hexdigest()
+
+
+@pytest.mark.samples
+def test_pdf14_arm_a_meta_get_reports_a_non_empty_producer(
+    samples, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pdf_toolkit.ops.metadata import meta_get_run
+
+    copy_path = samples.copy(_META_SAMPLE_NAME)
+    report = meta_get_run(copy_path, xmp=False)
+
+    # Existence and LENGTH only (AC25) -- never the value.
+    assert "Producer" in report.info
+    assert isinstance(report.info["Producer"], str)
+    assert len(report.info["Producer"]) > 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.samples
+def test_pdf14_arm_a_meta_set_title_preserves_every_other_info_field(
+    samples, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pdf_toolkit.ops.metadata import meta_get_run, meta_set_run
+
+    copy_path = samples.copy(_META_SAMPLE_NAME)
+    before = meta_get_run(copy_path, xmp=False)
+    before_keys = sorted(before.info)
+    before_types = {key: type(value).__name__ for key, value in before.info.items()}
+    before_fingerprints = {key: _fingerprint(value) for key, value in before.info.items()}
+
+    target = tmp_path / "tagged.pdf"
+    literal_title = "pdftoolkit-samples-arm-a-title"  # OUR OWN literal, never sample content
+    result = meta_set_run(
+        copy_path,
+        sets={"title": literal_title},
+        clear_producer=False,
+        clear_all=False,
+        output=target,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert result.exit_code == 0
+
+    after = meta_get_run(target, xmp=False)
+    # `Title` may be a NEW key on a real document that never carried one --
+    # `meta set --title` both ADDS an absent key and UPDATES a present one
+    # (D2.2), and this sample happens to exercise the "absent" case, which
+    # the generated corpus's own `metadata_typed` fixture (always title-
+    # bearing) cannot. Every OTHER key's PRESENCE is unaffected either way.
+    expected_keys = sorted({*before_keys, "Title"})
+    assert sorted(after.info) == expected_keys, "meta set changed which keys are present"
+    for key in before_keys:
+        assert type(after.info[key]).__name__ == before_types[key], f"{key}: type changed"
+        if key == "Title":
+            continue
+        assert _fingerprint(after.info[key]) == before_fingerprints[key], f"{key}: value changed"
+    assert after.info["Title"] == literal_title
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.samples
+def test_pdf14_arm_b_watermark_preserves_text_and_adds_draft_over_mixed_pages(
+    samples, tmp_path: Path
+) -> None:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from pdf_toolkit.ops.overlay import watermark_run
+    from pdfium_text import page_texts
+
+    copy_path = samples.copy(_META_SAMPLE_NAME)
+    target = tmp_path / "watermarked.pdf"
+    result = watermark_run(
+        copy_path,
+        text="DRAFT",
+        pages_spec=None,
+        position="overlay",
+        font_size=36.0,
+        color=(0.5, 0.5, 0.5),
+        opacity=0.3,
+        rotate_deg=30.0,
+        output=target,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert result.exit_code == 0
+
+    before_texts = page_texts(copy_path)
+    after_texts = page_texts(target)
+    assert len(before_texts) == len(after_texts) == _META_SAMPLE_PAGES
+    for before_text, after_text in zip(before_texts, after_texts, strict=True):
+        assert before_text in after_text
+        assert "DRAFT" in after_text
+
+
+@pytest.mark.samples
+def test_pdf14_arm_c_stamp_underlay_sits_beneath_a_real_page(
+    samples, tmp_path: Path, corpus
+) -> None:
+    import pypdf
+
+    from corpus import STAMP_MARKER
+    from pdf_toolkit.ops.overlay import stamp_run
+
+    copy_path = samples.copy(_META_SAMPLE_NAME)
+    stamp_source = corpus.path("stamp_source")  # OUR OWN marker, never sample content
+
+    over_target = tmp_path / "over.pdf"
+    over_result = stamp_run(
+        copy_path,
+        from_path=stamp_source,
+        from_page=1,
+        pages_spec="1",
+        position="overlay",
+        output=over_target,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert over_result.exit_code == 0
+    over_stream = pypdf.PdfReader(str(over_target)).pages[0].get_contents().get_data()
+    over_index = over_stream.index(STAMP_MARKER.encode())
+
+    under_target = tmp_path / "under.pdf"
+    under_result = stamp_run(
+        copy_path,
+        from_path=stamp_source,
+        from_page=1,
+        pages_spec="1",
+        position="underlay",
+        output=under_target,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert under_result.exit_code == 0
+    under_stream = pypdf.PdfReader(str(under_target)).pages[0].get_contents().get_data()
+    under_index = under_stream.index(STAMP_MARKER.encode())
+
+    # Structural proof, never a quoted content string (HC-2 rule 4): the
+    # SAME marker, over the SAME real page, sits at a smaller byte offset
+    # under `underlay` than under `overlay` -- exactly what "beneath" means
+    # in content-stream order (Design §D4.3), without ever locating or
+    # quoting the sample's own text.
+    assert under_index < over_index
+
+
+@pytest.mark.samples
+def test_pdf14_the_original_is_never_an_operand(samples, tmp_path: Path) -> None:
+    """HC-2 restated as a test rather than as a promise, for this section's
+    own operand: the only path this arm can obtain is a copy under
+    `tmp_path`, and it is writable."""
+    copy_path = samples.copy(_META_SAMPLE_NAME)
+    assert copy_path.parent == tmp_path
+    assert os.access(copy_path, os.W_OK)

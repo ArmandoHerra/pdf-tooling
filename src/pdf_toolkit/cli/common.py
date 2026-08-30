@@ -659,17 +659,38 @@ def _was_given_explicitly(ctx: typer.Context, name: str) -> bool:
 
 
 def _verb_name(ctx: typer.Context) -> str:
-    """The invoked verb's own command name, e.g. ``"merge"``.
+    """The invoked verb's own command name, e.g. ``"merge"`` or (PDF-14, the
+    first grouping parent) ``"meta set"``.
 
     Read off the live Click command rather than passed around separately, so
-    the OR-3 message always names the verb that was actually typed. Falls
-    back to a generic label rather than raising -- a message that says "this
-    command" is a smaller defect than an unrelated crash inside error
+    the OR-3 message always names the verb that was actually typed. Walks
+    ``ctx.parent`` up to, but excluding, the ROOT context (whose ``.parent``
+    is ``None``) so a subcommand's OWN name is joined with every grouping
+    parent above it, in invocation order -- ``meta`` (the group) then
+    ``set`` (the leaf) becomes ``"meta set"``. A top-level verb has exactly
+    one context between it and the root, so this returns the SAME single
+    name it always did (verified: no existing verb's message changes).
+    Falls back to a generic label rather than raising -- a message that says
+    "this command" is a smaller defect than an unrelated crash inside error
     handling.
     """
-    command = getattr(ctx, "command", None)
-    name = getattr(command, "name", None)
-    return name if isinstance(name, str) else "this command"
+    parts: list[str] = []
+    # `object`, not `typer.Context`: `.parent`'s own stub type
+    # (`typer.models.Context | None`) does not unify with the marker
+    # annotation `ctx` itself carries at the call site (the same
+    # marker-vs-runtime-Click-Context duck-typing `_attach()`'s own
+    # docstring already names above) -- every access below is `getattr`,
+    # which needs no narrower type.
+    node: object | None = ctx
+    while node is not None and getattr(node, "parent", None) is not None:
+        command = getattr(node, "command", None)
+        name = getattr(command, "name", None)
+        if isinstance(name, str):
+            parts.append(name)
+        node = getattr(node, "parent", None)
+    if not parts:
+        return "this command"
+    return " ".join(reversed(parts))
 
 
 def _verb_handler(ctx: typer.Context, values: dict[str, Any], *, consumes: tuple[str, ...]) -> None:

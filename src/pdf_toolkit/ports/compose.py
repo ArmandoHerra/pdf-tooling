@@ -150,6 +150,49 @@ class ComposeEngine(Protocol):
         """
         ...
 
+    # -- PDF-14 (`watermark`), appended at the end of the Protocol body ---- #
+
+    def render_text_layer(
+        self,
+        text: str,
+        *,
+        page_size: tuple[float, float],
+        font: str,
+        font_size: float,
+        color: tuple[float, float, float],
+        opacity: float,
+        rotate_deg: float,
+        out: IO[bytes],
+    ) -> ComposeReport:
+        """Render ONE page, ``page_size`` points, containing only *text*,
+        styled and positioned as a watermark layer, into *out*.
+
+        Unlike :meth:`render_text` (a paginated DOCUMENT renderer with no
+        rotation, no alpha and no per-page geometry — see this port's own
+        module docstring), this method renders a single page at a caller-given
+        size, centred, rotated about the page centre by ``rotate_deg``, drawn
+        with the given fill colour at ``opacity`` (``Canvas.setFillAlpha``).
+        Never a path, never a bytes return: this port's own rule binds every
+        method to a caller-supplied binary stream.
+
+        Args:
+            text: Already normalised — the op owns wrapping (there is none:
+                a watermark is one line, centred).
+            page_size: ``(width, height)`` in points — the TARGET page's own
+                `/MediaBox` dimensions (Design §D3), so the layer composites
+                without a size mismatch.
+            font: A base-14 font name.
+            font_size: Points.
+            color: ``(r, g, b)``, each ``0.0``-``1.0``.
+            opacity: ``0.0``-``1.0``, passed straight to ``setFillAlpha``.
+            rotate_deg: Degrees, about the page centre.
+            out: An open binary stream. Never a path.
+
+        Raises:
+            TypeError: *out* is not a writable binary stream.
+        """
+        ...
+
 
 def adapters() -> tuple[Adapter, ...]:
     from pdf_toolkit.adapters import reportlab_compose

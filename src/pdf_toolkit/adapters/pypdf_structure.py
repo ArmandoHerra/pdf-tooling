@@ -33,8 +33,11 @@ from pdf_toolkit.models import DocumentInfo, PageInfo
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports import BROKEN_INSTALL_HINT
 from pdf_toolkit.ports.structure import (
+    CompositeOutcome,
     CompressOutcome,
     ImagePassOutcome,
+    MetadataFacts,
+    MetadataWriteOutcome,
     RepairOutcome,
     algorithm_name,
 )
@@ -54,7 +57,13 @@ _MODULE: Final[str] = "pypdf"
 #: registry rather than documentation.
 #: `"image-pass"` (PDF-12) is `compress --images downsample|recompress`'s own
 #: capability -- pypdf/Pillow work, never pikepdf's.
-_CAPABILITIES: Final[frozenset[str]] = frozenset({"read", "metadata", "pages", "image-pass"})
+#: `"composite"` (PDF-14) is `watermark`/`stamp`'s own capability -- declared
+#: ONLY by this adapter so it disambiguates against the pikepdf secondary
+#: (X-76: selected by capability, never by adapter name; `require_composite()`
+#: mirrors the landed `require_image_pass()`).
+_CAPABILITIES: Final[frozenset[str]] = frozenset(
+    {"read", "metadata", "pages", "image-pass", "composite"}
+)
 
 #: PDF-12's optimize operations this adapter explicitly refuses. Named once so
 #: the three refusal methods below stay identical in shape.
@@ -201,6 +210,121 @@ def _metadata(reader: PdfReader) -> dict[str, str]:
     if raw is None:
         return {}
     return {str(key): str(value) for key, value in raw.items() if value is not None}
+
+
+# --------------------------------------------------------------------------- #
+# PDF-14 -- `meta get`/`meta set`'s D2.1 alignment table, and the read/write
+# helpers built on it. ONE table, read by both directions, so a report field
+# and its write can never disagree about which `/Info` key or which XMP
+# property it means.
+# --------------------------------------------------------------------------- #
+
+#: ``(report field, /Info key without the slash, XmpInformation attribute)``.
+_ALIGNMENT: Final[tuple[tuple[str, str, str], ...]] = (
+    ("title", "Title", "dc_title"),
+    ("author", "Author", "dc_creator"),
+    ("subject", "Subject", "dc_description"),
+    ("keywords", "Keywords", "pdf_keywords"),
+    ("creator", "Creator", "xmp_creator_tool"),
+    ("producer", "Producer", "pdf_producer"),
+    ("creation_date", "CreationDate", "xmp_create_date"),
+    ("mod_date", "ModDate", "xmp_modify_date"),
+)
+
+
+def _alignment_row(field: str) -> tuple[str, str, str]:
+    for row in _ALIGNMENT:
+        if row[0] == field:
+            return row
+    raise AssertionError(f"unknown metadata field {field!r}")  # pragma: no cover - ops/ validates
+
+
+def _set_xmp_field(xmp: Any, attr: str, field: str, value: str | None) -> None:
+    """Apply one D2.1 alignment row's XMP half. ``field`` selects the SHAPE
+    (`dc_title`/`dc_description` are LangAlt dicts comparing `x-default`;
+    `dc_creator` is a Seq list; everything else is a plain string) -- the
+    XmpInformation setters themselves do not infer a shape from the
+    property name, so this dispatch is what keeps D2.1's own table honest.
+    ``value=None`` clears the property (every setter below accepts
+    ``Optional[...]``, verified against `pypdf` 6.16.2's own source)."""
+    if field in ("title", "subject"):
+        setattr(xmp, attr, {"x-default": value} if value is not None else None)
+    elif field == "author":
+        setattr(xmp, attr, [value] if value is not None else None)
+    else:
+        setattr(xmp, attr, value)
+
+
+def _info_report_dict(reader: PdfReader) -> dict[str, str]:
+    """D2.1's `info` half: `/Info` entries, `/`-prefix stripped, every value
+    stringified. Deliberately NOT `_metadata()` above -- that helper feeds
+    the already-published, golden-tested `info` verb and stays untouched by
+    this spec; this is `meta get`'s own, slash-stripped shape."""
+    raw = reader.metadata
+    if raw is None:
+        return {}
+    return {str(key).lstrip("/"): str(value) for key, value in raw.items() if value is not None}
+
+
+def _xmp_report_fields(reader: PdfReader) -> tuple[dict[str, object] | None, str | None]:
+    """D2.1's `xmp` half plus the raw packet text -- `(None, None)` when the
+    document carries no XMP packet at all."""
+    try:
+        xmp = reader.xmp_metadata
+    # Malformed XMP is not a malformed document (mirrors `_xmp()` below).
+    except Exception:
+        return None, None
+    if xmp is None:
+        return None, None
+    raw = _xmp(reader)  # the existing, pinned helper -- reused, not re-derived
+    fields: dict[str, object] = {}
+    for field, _info_name, xmp_attr in _ALIGNMENT:
+        try:
+            fields[field] = getattr(xmp, xmp_attr)
+        except Exception:
+            fields[field] = None
+    return fields, raw
+
+
+def _residual_surfaces(reader: PdfReader) -> dict[str, object]:
+    """D2.4: the surfaces `--clear-all` does NOT clear, detected so they are
+    REPORTED rather than merely disclaimed. Cheap, pypdf-only detection,
+    exactly as D2.4 names it: `"/Metadata" in page`, `"/PieceInfo" in page`,
+    `"/PieceInfo" in root`, an `/Annots` entry carrying `/T`,
+    `/Names /EmbeddedFiles`, `/ID` in the trailer."""
+    root: Any = reader.trailer["/Root"].get_object()
+    page_xmp_pages: list[int] = []
+    page_piece_info_pages: list[int] = []
+    annotation_authors = 0
+    for index, page in enumerate(reader.pages, start=1):
+        if "/Metadata" in page:
+            page_xmp_pages.append(index)
+        if "/PieceInfo" in page:
+            page_piece_info_pages.append(index)
+        annots = page.get("/Annots")
+        if annots is not None:
+            for annot_ref in annots.get_object():
+                annot = annot_ref.get_object()
+                if "/T" in annot:
+                    annotation_authors += 1
+    doc_piece_info = "/PieceInfo" in root
+    embedded_files = 0
+    names = root.get("/Names")
+    if names is not None:
+        embedded_files_dict = names.get_object().get("/EmbeddedFiles")
+        if embedded_files_dict is not None:
+            names_array = embedded_files_dict.get_object().get("/Names")
+            if names_array is not None:
+                embedded_files = len(names_array.get_object()) // 2
+    trailer_id = "/ID" in reader.trailer
+    return {
+        "page_xmp_pages": page_xmp_pages,
+        "doc_piece_info": doc_piece_info,
+        "page_piece_info_pages": page_piece_info_pages,
+        "annotation_authors": annotation_authors,
+        "embedded_files": embedded_files,
+        "trailer_id": trailer_id,
+    }
 
 
 class PypdfStructureAdapter:
@@ -433,6 +557,180 @@ class PypdfStructureAdapter:
         return ImagePassOutcome(
             output=out_buffer.getvalue(), images_transformed=transformed, images_skipped=skipped
         )
+
+    # -- PDF-14 (`meta get`/`meta set`), appended at the end of the class --- #
+
+    def read_metadata(self, path: Path) -> MetadataFacts:
+        """The `meta get` read (D2, D2.4)."""
+        from pypdf import PdfReader
+        from pypdf.errors import PdfReadError
+
+        if not path.exists():
+            raise NoInputError("no such file", path=str(path))
+        if path.is_dir():
+            raise UsageError("expected a PDF file, not a directory", path=str(path))
+
+        try:
+            reader = PdfReader(str(path))
+        except PdfReadError as error:
+            raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
+        except (OSError, ValueError) as error:
+            raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
+
+        if reader.is_encrypted:
+            # The empty user password, tried once -- same convention as
+            # `read_document_info` above.
+            try:
+                unlocked = bool(reader.decrypt(""))
+            except Exception as error:
+                logger = get_logger("adapters.pypdf")
+                logger.debug("%s: decrypt('') raised %s", path, error)
+                unlocked = False
+            if not unlocked:
+                raise AuthError(
+                    "a user password is required to read this document's metadata; "
+                    "supply one with --password-file PATH (or --password-file - to "
+                    "read one line from stdin)",
+                    path=str(path),
+                )
+
+        try:
+            info = _info_report_dict(reader)
+            xmp_fields, xmp_raw = _xmp_report_fields(reader)
+            residual = _residual_surfaces(reader)
+        except PdfReadError as error:
+            raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
+        except (KeyError, TypeError, ValueError, OSError) as error:
+            raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
+
+        return MetadataFacts(info=info, xmp=xmp_fields, xmp_raw=xmp_raw, residual_surfaces=residual)
+
+    def write_metadata(
+        self,
+        data: bytes,
+        *,
+        sets: Mapping[str, str],
+        clears: Sequence[str],
+        clear_all: bool,
+    ) -> MetadataWriteOutcome:
+        """The `meta set` write (D2.2/D2.3)."""
+        from pypdf import PdfReader, PdfWriter
+        from pypdf.errors import PdfReadError
+        from pypdf.generic import NameObject, TextStringObject
+
+        try:
+            reader = PdfReader(io.BytesIO(data))
+        except PdfReadError as error:
+            raise FailureError(f"could not read PDF: {error}") from error
+        except (OSError, ValueError) as error:
+            raise FailureError(f"could not read PDF: {error}") from error
+
+        if reader.is_encrypted:
+            try:
+                unlocked = bool(reader.decrypt(""))
+            except Exception:
+                unlocked = False
+            if not unlocked:
+                raise AuthError(
+                    "a user password is required to write this document's metadata; "
+                    "supply one with --password-file PATH (or --password-file - to "
+                    "read one line from stdin)"
+                )
+
+        # `clone_from=reader` -- not `writer.append(reader)` -- is what makes
+        # D2.3's guarantee cheap: it clones EVERY `/Info` key with its
+        # ORIGINAL PdfObject type intact (verified: a `/Trapped` NameObject
+        # round-trips as a NameObject, not the string `"/False"` the public
+        # `PdfWriter.metadata = value` setter would produce via
+        # `create_string_object(str(value))`) and carries the XMP packet
+        # across verbatim. Every key this method does not name in
+        # `sets`/`clears` is therefore untouched BY CONSTRUCTION -- there is
+        # no copy-then-compare step that could miss one.
+        try:
+            writer = PdfWriter(clone_from=reader)
+        except PdfReadError as error:
+            raise FailureError(f"could not read PDF: {error}") from error
+
+        xmp = writer.xmp_metadata
+        had_xmp = xmp is not None
+
+        if clear_all:
+            # D2.3's documented, commented deviation: the public setter
+            # cannot preserve non-string types AND cannot remove a key, so
+            # the writer's own `/Info` dictionary is cleared directly.
+            # `.clear()` leaves an EMPTY dictionary object rather than
+            # removing `/Info` from the trailer entirely -- AC7 accepts
+            # either ("empty/absent"), and an empty dictionary is the
+            # behaviour `PdfWriter.metadata = None` itself already produces
+            # elsewhere in this codebase's own conventions.
+            writer_info: Any = writer._info  # noqa: SLF001 -- see above; `Any` sidesteps
+            # the stub's `DictionaryObject | None` -- `PdfWriter(clone_from=...)`
+            # always populates `_info` (verified against pypdf 6.16.2's own
+            # `clone_from` path), so the `None` arm is unreachable here.
+            writer_info.get_object().clear()
+            writer.xmp_metadata = None
+            wrote_xmp = had_xmp
+        else:
+            writer_info = writer._info  # noqa: SLF001 -- see above
+            info: Any = writer_info.get_object()
+            for field, value in sets.items():
+                _, info_name, xmp_attr = _alignment_row(field)
+                info[NameObject("/" + info_name)] = TextStringObject(value)
+                if xmp is not None:
+                    _set_xmp_field(xmp, xmp_attr, field, value)
+            for field in clears:
+                _, info_name, xmp_attr = _alignment_row(field)
+                key = NameObject("/" + info_name)
+                if key in info:
+                    del info[key]
+                if xmp is not None:
+                    _set_xmp_field(xmp, xmp_attr, field, None)
+            if xmp is not None:
+                writer.xmp_metadata = xmp
+            wrote_xmp = xmp is not None and bool(sets or clears)
+
+        out_buffer = io.BytesIO()
+        writer.write(out_buffer)
+        return MetadataWriteOutcome(output=out_buffer.getvalue(), wrote_xmp=wrote_xmp)
+
+    # -- PDF-14 (`watermark`/`stamp`), appended at the end of the class ---- #
+
+    def composite_layer(
+        self,
+        document: PypdfOpenDocument,
+        *,
+        layer: bytes,
+        pages: Sequence[int],
+        position: str,
+    ) -> CompositeOutcome:
+        """The `watermark`/`stamp` compositing primitive (D4.1)."""
+        from pypdf import PdfReader
+        from pypdf.errors import PdfReadError
+
+        try:
+            layer_reader = PdfReader(io.BytesIO(layer))
+            layer_page = layer_reader.pages[0]
+        except (PdfReadError, IndexError, OSError, ValueError) as error:
+            raise FailureError(f"could not read the composite layer: {error}") from error
+
+        reader = document._open_reader  # noqa: SLF001 -- same adapter's own
+        # internal pair, mirroring `PypdfStructureWriter.append_pages` above.
+        over = position == "overlay"
+        composited: list[int] = []
+        blank: list[int] = []
+        for number in pages:
+            page = reader.pages[number - 1]
+            # `get_contents()` re-derives a FRESH `ContentStream` from the
+            # underlying object on every call (verified against pypdf
+            # 6.16.2's own source) rather than caching a mutated one, which
+            # is what makes reusing the SAME `layer_page` across every
+            # selected page safe: `merge_page` never mutates its `page2`
+            # argument, only `self`.
+            if page.get_contents() is None:
+                blank.append(number)
+            page.merge_page(layer_page, over=over)
+            composited.append(number)
+        return CompositeOutcome(pages_composited=tuple(composited), blank_pages=tuple(blank))
 
 
 class PypdfOpenDocument:

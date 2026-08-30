@@ -170,3 +170,34 @@ def test_no_pages_verb_help_names_a_forbidden_tool(verb: str) -> None:
 
     lowered = _help(verb).lower()
     assert [name for name in FORBIDDEN_NAMES if name in lowered] == []
+
+
+# --------------------------------------------------------------------------- #
+# PDF-14 -- `meta set --help`'s AC7 mechanized honesty clause: the sentence
+# naming what `--clear-all` does NOT clear is a grep over captured `--help`
+# output, never left to a human to notice.
+# --------------------------------------------------------------------------- #
+
+
+def test_ac7_meta_set_help_names_clear_all_and_its_uncleared_surfaces() -> None:
+    text = _help("meta set")
+    assert "--clear-all" in text
+    lowered = text.lower()
+    assert "page" in lowered
+    assert "pieceinfo" in lowered
+    assert "annotation" in lowered
+
+
+def test_watermark_and_stamp_help_state_the_overlay_default() -> None:
+    for verb in ("watermark", "stamp"):
+        text = _collapsed(verb)
+        assert "overlay" in text
+        assert "'overlay' (default)" in text or "overlay (default)" in text.replace("'", "")
+
+
+@pytest.mark.parametrize("verb", ["watermark", "stamp"])
+def test_no_overlay_verb_help_names_a_forbidden_tool(verb: str) -> None:
+    from test_cli_spine import FORBIDDEN_NAMES
+
+    lowered = _help(verb).lower()
+    assert [name for name in FORBIDDEN_NAMES if name in lowered] == []

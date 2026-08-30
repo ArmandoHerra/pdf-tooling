@@ -19,6 +19,78 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-14] feat: `meta get`/`meta set` over /Info + XMP; `watermark`/`stamp` via the compositing port — 2026-08-30
+- `meta` is the CLI's first grouping parent — `meta get`/`meta set` each live
+  in their own `cli/cmd_meta_{get,set}.py` module (D8.1), with `cli/cmd_meta.py`
+  holding only the sub-`Typer`. `watermark`/`stamp` are ordinary top-level
+  verbs. Registered on the live tree via `app.add_typer(cmd_meta.meta_app)`.
+  `cli/common.py::_verb_name` now walks the `ctx.parent` chain so an OR-3
+  refusal on a grouped verb names `"meta set"`, not `"set"` — verified
+  unchanged for every pre-existing top-level verb — and
+  `tests/registry.py::run_cli`'s first argument is tokenized on whitespace,
+  so `run_cli(verb.name, ...)` (`test_cli_contract.py`'s own convention,
+  unedited) reaches a two-word verb correctly.
+- `meta get` reports the document information dictionary and the XMP packet
+  SIDE BY SIDE and states a disagreement rather than resolving it
+  (`MetadataReport`, one new model per `models.py`'s Scope row). `meta set`
+  writes/clears `--title`/`--author`/`--subject`/`--keywords`/`--creator`/
+  `--clear-producer`/`--clear-all`, syncing XMP only when a packet already
+  exists and creating none where one did not — `adapters/pypdf_structure.py`'s
+  `write_metadata` uses `PdfWriter(clone_from=reader)` plus direct
+  `/Info`-dictionary manipulation (documented deviation, D2.3) so every
+  untouched key keeps its ORIGINAL PdfObject type (a `/Trapped` name object
+  round-trips as a name object, never stringified).
+- `watermark`/`stamp` composite an overlay/underlay layer onto the selected
+  pages through a new `StructureEngine.composite_layer` port method
+  (Design D4.1): it mutates an already-open document's reader pages IN PLACE,
+  and the caller reuses the SAME `new_writer()`/`append_pages()`/`write()`
+  path `rotate` already established — `set_rotation` stamps the WRITER's
+  pages post-append, `composite_layer` stamps the READER's pages pre-append.
+  `watermark`'s text layer is a new `ComposeEngine.render_text_layer` method
+  on the existing `reportlab_compose` adapter (single-page, rotated,
+  alpha-blended — distinct from `render_text`'s paginated-document shape).
+  Both new port methods are selected BY CAPABILITY (`"text-layer"`,
+  `"composite"`, X-76) — `require_composite()` mirrors `require_image_pass()`.
+  Deviation from the spec's Scope row, recorded rather than silently
+  exceeded: `meta get`/`meta set` needed their OWN two new `StructureEngine`
+  methods (`read_metadata`/`write_metadata`) beyond the two the Scope table
+  named — there is no existing method that reports XMP-property-level or
+  residual-surface facts without widening the pinned `DocumentInfo` model or
+  letting `ops/` hold a pypdf object.
+- Page-range scoping is consumed, never reimplemented (`ops.pagerange.parse`,
+  called exactly once per run for each verb). The dry-run gate follows the
+  LANDED convention every other producing verb already uses
+  (`safety.atomic.plan_output_set` + the item's own `exit_code =
+  plan.would_exit`): a `--dry-run` over an occupied `-O` target exits **5**,
+  matching `test_cli_contract.py::test_c15_dry_run_predicts_an_occupied_
+  target_refusal` — NOT the 0 `decision.md` §8 X-67's prose predicted before
+  that convention landed (B-025, deliberately unmet per the spec's own R1
+  ruling). Every `--in-place` path calls `safety.confirm.require_confirmation`
+  (mirroring `cmd_rotate.py` exactly), so none of the three new verbs joins
+  the five-verb confirmation blind spot (B-079).
+- Seven new deterministic corpus fixtures (`tests/corpus.py`): a `/Trapped`-
+  and custom-key-bearing `metadata_typed`; an agreeing `xmp_bearing`; a
+  disagreeing `xmp_disagreement`; a `residual_surfaces` fixture carrying
+  page-level XMP + document-level `/PieceInfo`; `no_contents_page`/
+  `empty_contents_page` for the two content-stream edge cases; and
+  `stamp_source`, carrying the `STAMP_MARKER` ASCII marker in a base-14 font
+  for the content-stream-order proof. All byte-identical across two builds.
+- Tests: `tests/unit/test_metadata.py`, `tests/unit/test_overlay.py`,
+  `tests/unit/test_meta_group.py`, `tests/integration/
+  test_overlay_preservation.py`, plus a PDF-14 section appended to
+  `tests/test_samples.py` (three `@samples` arms over
+  `catalogo_arquitectura_2017_2023_0.pdf`, run through `make samples-gate`).
+  Registry additions only — `tests/test_cli_contract.py` itself is unedited
+  (`tests/registry.py::INVOCATIONS`/`OUTPUT_FLAG_INVOCATIONS` carry the four
+  new rows; `tests/unit/test_registry.py`'s pinned verb/classification sets
+  extended from twenty to twenty-four).
+- Known, disclosed finding: `composite_layer` merges onto a document's reader
+  pages before they are attached to a writer, which pypdf 6.16.2 accepts but
+  flags with a `DeprecationWarning` slated for removal in pypdf 7.0.0 — the
+  spec's own Design §D4.1 signature (`document: OpenStructureDocument`, not
+  a writer) makes the alternative (attach-then-merge) a different method
+  shape; not a defect against the pinned version, filed for the PM.
+
 ## [B-078] fix: `open_document` now raises `AuthError` on a user-password-protected input — 2026-08-30
 - `StructureEngine.open_document`'s own Protocol docstring documented `AuthError:
   Exit 6` for an encrypted input; `PypdfOpenDocument.__enter__` never implemented

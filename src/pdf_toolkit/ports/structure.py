@@ -45,12 +45,15 @@ __all__ = [
     "ALWAYS_GRANTED_TOKENS",
     "ENCRYPTION_ALGORITHMS",
     "PERMISSION_TOKENS",
+    "CompositeOutcome",
     "CompressOutcome",
     "EncryptionFacts",
     "ImagePassEngine",
     "ImagePassOutcome",
     "ImageXObjectFacts",
     "LinearizationProbe",
+    "MetadataFacts",
+    "MetadataWriteOutcome",
     "OpenStructureDocument",
     "RepairOutcome",
     "StructuralFacts",
@@ -59,6 +62,7 @@ __all__ = [
     "adapters",
     "probe",
     "algorithm_name",
+    "require_composite",
     "require_encryption",
     "require_image_pass",
     "require_linearization",
@@ -245,6 +249,96 @@ class ImagePassOutcome:
     output: bytes
     images_transformed: int
     images_skipped: int
+
+
+# --------------------------------------------------------------------------- #
+# PDF-14 -- `meta get`/`meta set`'s plain-data shapes (Design D2), and
+# `watermark`/`stamp`'s compositing outcome (Design D4.1). Every one of these
+# crosses the port as a stdlib dataclass, mirroring the PDF-12 shapes just
+# above: `ops/metadata.py` never holds an `XmpInformation`, and
+# `ops/overlay.py` never holds a `pypdf.PageObject`.
+#
+# **Deviation from the spec's own Scope > Ports row, recorded here rather
+# than silently exceeded:** that row names exactly two new port methods
+# (`ComposeEngine.render_text_layer` and `StructureEngine.composite_layer`).
+# `meta get`/`meta set` need their OWN two new `StructureEngine` methods too
+# (`read_metadata`/`write_metadata`, below) -- there is no existing method
+# that can report XMP-property-level facts or residual-surface facts without
+# either widening the ALREADY-PUBLISHED `DocumentInfo`/`read_document_info`
+# shape (a breaking change to a pinned, golden-tested model) or letting
+# `ops/metadata.py` hold a pypdf object (forbidden by the import-boundary
+# test). The "two new methods" count in the spec's Scope table is therefore
+# an undercount by two; see the Implementation Log.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataFacts:
+    """One document's `/Info` + XMP + residual-surface facts (D2), read
+    without a write. A plain dataclass like every other shape crossing this
+    port -- `ops/metadata.py` never holds an `XmpInformation` or a pypdf
+    `DictionaryObject`.
+    """
+
+    info: Mapping[str, str]
+    """`/Info` entries, `/`-prefix stripped, every value already
+    stringified -- D2.1's `info: {...}` JSON shape needs nothing richer. A
+    non-string original value (e.g. a `/Trapped` name object) is reported as
+    its string form; its ORIGINAL PdfObject type is preserved on the WRITE
+    side (D2.3) and never needs to cross back out of a read-only report."""
+
+    xmp: Mapping[str, object] | None
+    """Parsed XMP properties, keyed by the D2.1 alignment table's REPORT
+    field names (``title``, ``author``, ``subject``, ``keywords``,
+    ``creator``, ``producer``, ``creation_date``, ``mod_date``). ``None``
+    when the document carries no XMP packet at all."""
+
+    xmp_raw: str | None
+    """The XMP packet, verbatim, or ``None``. Always populated when a packet
+    exists -- `--xmp`'s additive behaviour (D2.1) is an `ops/`-level decision
+    about what to INCLUDE in the rendered report, not a reason to withhold
+    the bytes at the port."""
+
+    residual_surfaces: Mapping[str, object]
+    """D2.4's five facts, already keyed exactly as the report needs them:
+    ``page_xmp_pages``, ``doc_piece_info``, ``page_piece_info_pages``,
+    ``annotation_authors``, ``embedded_files``, ``trailer_id``."""
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataWriteOutcome:
+    """One `meta set` write (D2.2/D2.3): the candidate bytes, plus which
+    halves were actually touched, for the run's own reporting."""
+
+    output: bytes
+
+    wrote_xmp: bool
+    """Whether an XMP packet existed and was updated (D2.2's "creates
+    neither" rule -- ``False`` on a document with no packet, even when
+    ``sets``/``clears``/``clear_all`` were non-empty)."""
+
+
+@dataclass(frozen=True, slots=True)
+class CompositeOutcome:
+    """One `watermark`/`stamp` compositing pass (D4.1): merges *layer* onto
+    each selected page of an already-open document, IN PLACE, via
+    ``page.merge_page`` -- never producing a writer or serialized bytes
+    itself. The actual serialization reuses the SAME `new_writer()` +
+    `append_pages()` + `write()` path every page-addressing verb already
+    uses (`ops/pages.py`'s `rotate_run` is the donor): `set_rotation` stamps
+    the WRITER's pages POST-append; `composite_layer` stamps the READER's
+    pages PRE-append, which is exactly what `append_pages`'s own
+    clone-on-add (`add_page`) picks up automatically.
+    """
+
+    pages_composited: tuple[int, ...]
+    """1-based, in the order composited -- the selection's own order."""
+
+    blank_pages: tuple[int, ...]
+    """Pages with no `/Contents` key at merge time (D4.4): overlay and
+    underlay are byte-identical there. `ops/overlay.py` turns this into an
+    `OperationResult.warnings` entry naming the pages; the adapter reports
+    only the fact, never the wording."""
 
 
 # --------------------------------------------------------------------------- #
@@ -468,6 +562,77 @@ class StructureEngine(Protocol):
         """
         ...
 
+    # -- PDF-14 (`meta get`/`meta set`, `watermark`/`stamp`), appended at the
+    # end of the Protocol body -------------------------------------------- #
+
+    def read_metadata(self, path: Path) -> MetadataFacts:
+        """The `meta get` read (D2, D2.4). Both halves, side by side, plus
+        the D2.4 residual-surface facts -- never merged, never guessed.
+
+        Raises:
+            NoInputError: Exit 4 -- the path does not exist.
+            FailureError: Exit 1 -- malformed, corrupt or unparseable.
+            AuthError: Exit 6 -- a user password is required and none was
+                supplied.
+        """
+        ...
+
+    def write_metadata(
+        self,
+        data: bytes,
+        *,
+        sets: Mapping[str, str],
+        clears: Sequence[str],
+        clear_all: bool,
+    ) -> MetadataWriteOutcome:
+        """The `meta set` write (D2.2/D2.3). Applies ``sets``/``clears`` (or
+        clears everything, under ``clear_all``) to `/Info`, and -- only when
+        the document already carries an XMP packet -- to XMP too, via the
+        D2.1 alignment table. Creates no XMP packet where none existed.
+
+        Preserves the original PdfObject type of every `/Info` key not
+        named in ``sets``/``clears`` (D2.3): the public
+        ``PdfWriter.metadata = value`` setter stringifies every value
+        through ``create_string_object(str(value))``, which would silently
+        corrupt a field (e.g. a `/Trapped` name object) the caller never
+        asked to touch.
+
+        Raises:
+            AuthError: Exit 6 -- the document is password-protected.
+            FailureError: Exit 1 -- the engine could not process it.
+        """
+        ...
+
+    def composite_layer(
+        self,
+        document: OpenStructureDocument,
+        *,
+        layer: bytes,
+        pages: Sequence[int],
+        position: str,
+    ) -> CompositeOutcome:
+        """The `watermark`/`stamp` compositing primitive (D4.1), reusable by
+        `PDF-15`'s `ops/ocr.py` through this SAME port method.
+
+        Merges *layer* -- a one-page PDF, already serialized: the generated
+        watermark text layer or the selected `--from` page -- onto each of
+        *pages* (1-based, sorted, deduplicated) of *document*, IN PLACE, via
+        ``page.merge_page(layer_page, over=(position == "overlay"))``.
+        *document* stays open for the caller to then `new_writer()` +
+        `append_pages()` + `write()`, exactly as every other page-addressing
+        verb does -- this method produces no writer and no bytes itself.
+
+        Args:
+            document: An already-open, already-``__enter__``ed document.
+            layer: A one-page PDF, already serialized.
+            pages: 1-based, sorted, deduplicated.
+            position: ``"overlay"`` or ``"underlay"``.
+
+        Raises:
+            FailureError: Exit 1 -- *layer* is not a parseable one-page PDF.
+        """
+        ...
+
 
 class ImagePassEngine(Protocol):
     """The shape an adapter must have to claim the `"image-pass"` capability
@@ -572,3 +737,10 @@ def require_image_pass() -> ImagePassEngine:
     """The adapter that can perform `compress --images`, selected by
     capability (`"image-pass"`, declared only by the pypdf adapter)."""
     return cast("ImagePassEngine", require(PORT, capability="image-pass"))
+
+
+def require_composite() -> StructureEngine:
+    """The adapter that can perform `watermark`/`stamp` compositing,
+    selected by capability (`"composite"`, declared only by the pypdf
+    adapter -- it disambiguates against the pikepdf secondary, X-76)."""
+    return cast("StructureEngine", require(PORT, capability="composite"))

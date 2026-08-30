@@ -279,9 +279,28 @@ def run_cli(
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the CLI as a subprocess — the only place exit codes and real TTY-less
-    stdin/stdout posture are observable at all."""
+    stdin/stdout posture are observable at all.
+
+    **PDF-14 — the FIRST argument is tokenized on whitespace before it
+    reaches ``subprocess.run``.** ``meta`` is the CLI's first grouping
+    parent, and every caller in this test suite passes the verb as ONE
+    argument — ``run_cli(verb.name, *args, ...)`` (``test_cli_contract.py``'s
+    own convention, unedited by this spec) — where ``VerbSpec.name`` is the
+    space-joined display string ``discover_verbs()`` already builds (e.g.
+    ``"meta set"``). A real shell tokenizes on whitespace before ``exec``
+    ever sees an argv, which is exactly what this reproduces for the ONE
+    argument that is ever a verb/group name. Every OTHER argument is passed
+    through UNSPLIT: a ``--title`` value, a path, or any other flag argument
+    may legitimately contain a space, and no argument but the verb name has
+    ever needed splitting before this spec (`tests/registry.py`'s own
+    module docstring already names the mechanism this completes: "a
+    grouping parent... returns `()` today and picks the future group up
+    automatically the moment it exists").
+    """
+    head = tuple(args[0].split()) if args and " " in args[0] else args[:1]
+    resolved = (*head, *args[1:])
     return subprocess.run(
-        [*console_script(), *args],
+        [*console_script(), *resolved],
         input=stdin,
         capture_output=True,
         text=True,
@@ -589,6 +608,60 @@ def _reorder_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+# --------------------------------------------------------------------------- #
+# PDF-14 -- `meta get`/`meta set`/`watermark`/`stamp`. Every producing row
+# names `-O` rather than `--out-dir`, for the reason `_text_invocation`
+# documents at length: C11 appends its own `-O <existing target>`, and only
+# `-O` here keeps Click's last-scalar-wins behaviour landing on C11's target
+# instead of tripping the `--output`/`--out-dir` mutual exclusion.
+# --------------------------------------------------------------------------- #
+
+
+def _meta_get_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`meta get` (PDF-14) is NON-PRODUCING: it reports and writes nothing,
+    so its row names no destination -- same shape `permissions`'s own row
+    has. It declares `consumes=()` under OR-3."""
+    del tmp_path
+    return [str(corpus.path("single_page"))]  # type: ignore[attr-defined]
+
+
+def _meta_set_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`meta set` (PDF-14) -- one input, `-O`, one field flag (D2.2: no
+    field/clear flag is exit 2, so a bare invocation would fail C10/C12/C15
+    for the wrong reason)."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--title",
+        "registered-invocation-title",
+        "-O",
+        str(tmp_path / "registered-invocation-meta-set.pdf"),
+    ]
+
+
+def _watermark_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`watermark` (PDF-14) -- one input, `-O`, `--text` (required)."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--text",
+        "REGISTERED-INVOCATION",
+        "-O",
+        str(tmp_path / "registered-invocation-watermark.pdf"),
+    ]
+
+
+def _stamp_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`stamp` (PDF-14) -- one input, `-O`, `--from` (required). The
+    generated corpus itself is a fine `--from` operand: `single_page`'s own
+    page 1 becomes the stamp layer."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--from",
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "registered-invocation-stamp.pdf"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -637,6 +710,16 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "delete": Invocation(build=_delete_invocation, destructive=False),
     "rotate": Invocation(build=_rotate_invocation, destructive=False),
     "reorder": Invocation(build=_reorder_invocation, destructive=False),
+    # PDF-14. `meta get` is NON-PRODUCING, same shape as `permissions`.
+    # `meta set`/`watermark`/`stamp` are single-target producing verbs over
+    # `StructureEngine` (+ `ComposeEngine` for `watermark`'s text layer);
+    # none is destructive, matching every other producing verb's own note
+    # above -- a single input writing to `-O` is neither bulk nor
+    # destructive, so C13 has nothing to refuse.
+    "meta get": Invocation(build=_meta_get_invocation, destructive=False),
+    "meta set": Invocation(build=_meta_set_invocation, destructive=False),
+    "watermark": Invocation(build=_watermark_invocation, destructive=False),
+    "stamp": Invocation(build=_stamp_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -954,6 +1037,51 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         str(_copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "or3-reorder-in-place.pdf")),
         "--pages",
         "last,1",
+        "--in-place",
+    ],
+    # PDF-14 -- six rows: `meta set`/`watermark`/`stamp` x {--output,
+    # --in-place}. Every `--in-place` row copies its fixture into `tmp_path`
+    # FIRST via `_copy_corpus_fixture` and operates on the COPY, for the same
+    # reason every earlier `--in-place` row does (see that helper's own
+    # docstring): naming `corpus.path(...)` directly would mutate the
+    # shared, session-scoped corpus.
+    ("meta set", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--title",
+        "or3-title",
+        "-O",
+        str(tmp_path / "or3-meta-set-output.pdf"),
+    ],
+    ("meta set", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-meta-set-in-place.pdf")),
+        "--title",
+        "or3-title",
+        "--in-place",
+    ],
+    ("watermark", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--text",
+        "OR3-WATERMARK",
+        "-O",
+        str(tmp_path / "or3-watermark-output.pdf"),
+    ],
+    ("watermark", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-watermark-in-place.pdf")),
+        "--text",
+        "OR3-WATERMARK",
+        "--in-place",
+    ],
+    ("stamp", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--from",
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "or3-stamp-output.pdf"),
+    ],
+    ("stamp", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-stamp-in-place.pdf")),
+        "--from",
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
         "--in-place",
     ],
 }

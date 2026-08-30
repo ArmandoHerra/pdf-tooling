@@ -21,15 +21,19 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_twenty_landed_verbs() -> None:
-    """`extract`/`delete`/`rotate`/`reorder` (PDF-08) join
+def test_discover_verbs_finds_exactly_the_twenty_four_landed_verbs() -> None:
+    """`meta get`/`meta set`/`watermark`/`stamp` (PDF-14) join
+    `extract`/`delete`/`rotate`/`reorder` (PDF-08),
     `encrypt`/`decrypt`/`permissions` (PDF-13),
     `compress`/`repair`/`linearize` (PDF-12), `text`/`tables` (PDF-11),
     `compose`/`create` (PDF-10), `rasterize` (PDF-09), `merge`/`split`
-    (PDF-07) and the three PDF-06-landing verbs -- twenty total. Renamed
-    and extended rather than deleted, for the sixth time and for the same
-    reason: this pin fails BY DESIGN the moment a verb registers, which is
-    the tripwire working, not a defect."""
+    (PDF-07) and the three PDF-06-landing verbs -- twenty-four total.
+    Renamed and extended rather than deleted, for the seventh time and for
+    the same reason: this pin fails BY DESIGN the moment a verb registers,
+    which is the tripwire working, not a defect. `meta get`/`meta set` are
+    the FIRST two-word verb names this pin has ever carried -- `meta` is
+    the CLI's only grouping parent (`discover_verbs()` space-joins a
+    leaf's full path, per its own docstring)."""
     verbs = discover_verbs()
     names = {verb.name for verb in verbs}
     assert names == {
@@ -53,6 +57,10 @@ def test_discover_verbs_finds_exactly_the_twenty_landed_verbs() -> None:
         "delete",
         "rotate",
         "reorder",
+        "meta get",
+        "meta set",
+        "watermark",
+        "stamp",
     }
 
 
@@ -104,6 +112,8 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
         "delete",
         "rotate",
         "reorder",
+        "watermark",
+        "stamp",
     }
     expected_not = {
         "version",
@@ -118,10 +128,15 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
         "encrypt",
         "decrypt",
         "permissions",
+        "meta get",
+        "meta set",
     }
     # PDF-10 extends `expected_not`: neither `compose` nor `create` is page
     # addressing (`PLAN.md` §4.1 -- both "no"), so the set grows and nothing in
     # this pin is removed.
+    # PDF-14: `watermark`/`stamp` both carry `--pages` (Design D4.2) and join
+    # `expected_page_addressing`; `meta get`/`meta set` carry no `--pages` at
+    # all (metadata is a whole-document property) and join `expected_not`.
     for verb in discover_verbs():
         if verb.name in expected_page_addressing:
             assert verb.is_page_addressing is True, f"{verb.name} should be page-addressing"
@@ -178,6 +193,13 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
     # PDF-08: `extract`/`delete`/`rotate`/`reorder` each reach `AtomicWriter`
     # via `cmd_<verb> -> ops.pages -> safety.atomic` -- two hops each, so
     # `_MAX_IMPORT_HOPS` was not raised for any of the four.
+    # PDF-14: `meta get` is the SECOND verb (after `permissions`) pinned
+    # `is_mutating=True` DELIBERATELY despite writing nothing itself --
+    # `cmd_meta_get.py` and `cmd_meta_set.py` share `ops/metadata.py`, and
+    # this predicate is REACHABILITY over the import graph (see
+    # `tests/registry.py`'s module docstring), not "does this verb's OWN
+    # body call `AtomicWriter`". `meta set`/`watermark`/`stamp` are
+    # genuinely producing verbs and classify `True` for the ordinary reason.
     expected_mutating = {
         "merge",
         "split",
@@ -196,6 +218,10 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
         "delete",
         "rotate",
         "reorder",
+        "meta get",
+        "meta set",
+        "watermark",
+        "stamp",
     }
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():

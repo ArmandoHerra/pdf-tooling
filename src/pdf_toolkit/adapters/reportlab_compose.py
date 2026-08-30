@@ -100,7 +100,10 @@ _NAME: Final[str] = "reportlab"
 _DISTRIBUTION: Final[str] = "reportlab"
 _MODULE: Final[str] = "reportlab"
 
-_CAPABILITIES: Final[frozenset[str]] = frozenset({"compose", "text-layout", "vector"})
+#: `"text-layer"` (PDF-14) is `watermark`'s own capability -- a single-page,
+#: rotated, alpha-blended text render, distinct from `"text-layout"`'s
+#: paginated-document shape (`render_text`/`_paginate`).
+_CAPABILITIES: Final[frozenset[str]] = frozenset({"compose", "text-layout", "vector", "text-layer"})
 
 #: The one form-feed-free page break in a text render, and the split token for
 #: source lines. Spelled here so the two render paths cannot drift.
@@ -204,6 +207,45 @@ class ReportlabComposeAdapter:
         payload = made.getpdfdata()
         stream.write(payload)
         return ComposeReport(page_count=len(pages))
+
+    def render_text_layer(
+        self,
+        text: str,
+        *,
+        page_size: tuple[float, float],
+        font: str,
+        font_size: float,
+        color: tuple[float, float, float],
+        opacity: float,
+        rotate_deg: float,
+        out: IO[bytes],
+    ) -> ComposeReport:
+        """Render ONE page, *page_size* points, containing only *text*,
+        centred and rotated about the page centre. See the port docstring.
+
+        Order matters: ``translate`` to the page centre, THEN ``rotate`` (so
+        the rotation pivots on the centre rather than the origin), THEN
+        ``drawCentredString(0, 0, text)`` in that now-rotated, now-recentred
+        local frame -- the standard reportlab "rotate about a point" idiom.
+        """
+        stream = _require_stream(out)
+
+        from reportlab.pdfgen import canvas
+
+        width, height = page_size
+        made = canvas.Canvas(stream, pagesize=page_size)
+        made.saveState()
+        made.translate(width / 2.0, height / 2.0)
+        made.rotate(rotate_deg)
+        made.setFont(font, font_size)
+        made.setFillColorRGB(*color)
+        made.setFillAlpha(opacity)
+        made.drawCentredString(0, 0, text)
+        made.restoreState()
+        made.showPage()
+        payload = made.getpdfdata()
+        stream.write(payload)
+        return ComposeReport(page_count=1)
 
 
 def _content_width(layout: TextLayout) -> float:

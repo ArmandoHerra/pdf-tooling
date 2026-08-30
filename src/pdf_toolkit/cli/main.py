@@ -33,15 +33,20 @@ from pdf_toolkit.cli import (
     cmd_info,
     cmd_linearize,
     cmd_merge,
+    cmd_meta,
+    cmd_meta_get,
+    cmd_meta_set,
     cmd_permissions,
     cmd_rasterize,
     cmd_reorder,
     cmd_repair,
     cmd_rotate,
     cmd_split,
+    cmd_stamp,
     cmd_tables,
     cmd_text,
     cmd_version,
+    cmd_watermark,
 )
 from pdf_toolkit.cli.common import current_error_format, global_options, root_global_options
 from pdf_toolkit.cli.exit_codes import OK
@@ -107,6 +112,21 @@ app.command(name="extract", help=cmd_extract.extract_command.__doc__)(cmd_extrac
 app.command(name="delete", help=cmd_delete.delete_command.__doc__)(cmd_delete.delete_command)
 app.command(name="rotate", help=cmd_rotate.rotate_command.__doc__)(cmd_rotate.rotate_command)
 app.command(name="reorder", help=cmd_reorder.reorder_command.__doc__)(cmd_reorder.reorder_command)
+
+# PDF-14. `meta` is the CLI's only grouping parent -- `cli/cmd_meta.py` holds
+# only the sub-Typer, `get`/`set` each live in their own module (D8.1).
+# `watermark`/`stamp` are ordinary top-level verbs.
+app.add_typer(cmd_meta.meta_app)
+cmd_meta.meta_app.command(name="get", help=cmd_meta_get.meta_get_command.__doc__)(
+    cmd_meta_get.meta_get_command
+)
+cmd_meta.meta_app.command(name="set", help=cmd_meta_set.meta_set_command.__doc__)(
+    cmd_meta_set.meta_set_command
+)
+app.command(name="watermark", help=cmd_watermark.watermark_command.__doc__)(
+    cmd_watermark.watermark_command
+)
+app.command(name="stamp", help=cmd_stamp.stamp_command.__doc__)(cmd_stamp.stamp_command)
 
 
 def build_rerun_hint(argv: Sequence[str] | None = None) -> str:
