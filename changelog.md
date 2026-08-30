@@ -20,6 +20,71 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-06] Fixture corpus, CLI contract harness & real-sample guard — 2026-08-29
+- Added `tests/corpus.py`: seven deterministic reportlab-generated fixtures
+  (`multipage_text`, `rotated`, `jpeg_page`, `encrypted_aes256`,
+  `metadata_rich`, `single_page`, `tabular`), built once per session into
+  pytest's own scratch directory. Six are byte-identical across two
+  independent builds; `encrypted_aes256` is exempt by construction (a fresh
+  AES-256 salt every build) and is instead proven semantically —
+  `tests/test_corpus.py`.
+- Added `testdata/malformed.pdf` (439 B, xref/trailer destroyed, body
+  objects intact, `info` exits 1, pikepdf recovers with 5 warnings) and
+  `testdata/scanned-page.png` (synthesized, tesseract-recoverable) — the only
+  two committed binaries, each earning its place per `testdata/README.md`.
+- Added `tests/registry.py`: `discover_verbs()` walks the live Typer tree
+  with no skip list, no filter, no hard-coded verb name; the
+  `INVOCATIONS` registration contract; and a `reaches_atomic_writer()` scan
+  that stands in for the Design-literal `is_mutating` predicate, which is
+  unsatisfiable in this codebase because the global flag block attaches
+  `-O`/`--out-dir`/`--in-place` to every verb uniformly (see the module's own
+  docstring for the full account, and this spec's Implementation Log).
+- Added `tests/test_cli_contract.py`: the thirteen-check per-verb matrix
+  (`--help`, exit codes, dry-run purity, no-clobber, JSON-on-a-pipe, bulk
+  non-TTY posture), parameterized over `discover_verbs()`, plus the AC10
+  anti-lapse guard (`test_every_verb_is_registered`, with an automated
+  monkeypatch proof that it fires).
+- Added `tests/conftest.py`: the session-scoped `corpus` and `golden`
+  fixtures, the `requires(engine)` marker resolving through
+  `ports.resolve()`, the PATH-shadowing engines-hiding shim
+  (`PDF_TOOLKIT_TEST_HIDE_ENGINES`, never touching a system binary), the
+  working-tree guard (tracked files only, controller-only under `-n auto`),
+  and the `samples` fixture.
+- Added `tests/samples_guard.py`: the `PLAN.md` §10.1 rule 3
+  originals-integrity guard as an independently-loadable pytest plugin —
+  session-start manifest, session-end re-hash, fails the session naming the
+  file, controller-only (`if hasattr(config, "workerinput")`). Proven against
+  a **synthetic** samples directory, never the operator's real corpus
+  (ruling X-25), including a proof that it runs exactly once under `-n 2`
+  (`tests/integration/test_samples_guard_fires.py`).
+- Added `tests/test_samples.py` (the append-only home for `PDF-07`…`PDF-15`'s
+  `@samples` arms) and `tests/golden/` (empty at landing; the primitive is
+  self-tested in `tests/unit/test_golden.py` entirely inside a scratch
+  directory).
+- Appended Section 3 to `tests/test_import_boundaries.py`: no `typer`/`click`
+  import below `cli/` (`PLAN.md` §10, D-03), inheriting PDF-04's AST-walk
+  machinery per `decision.md` X-6.
+- `Makefile`: added `samples-scratch` / `samples-check`; `clean` now removes
+  `.scratch/`; `ci` now runs `cover` instead of `test` (X-22) — the coverage
+  floor is real on the local gate for the first time. **At this commit,
+  coverage measures 71.29%, not the 85% floor** — a genuine, disclosed,
+  out-of-scope gap (adapter internals for verbs that do not exist yet);
+  `ci.yml`'s `engines-present` job is deliberately **not** wired to enforce
+  the floor in this commit, to avoid shipping a red CI run over a gap PDF-06
+  cannot close. See `TESTING.md`'s closing section and this spec's
+  Implementation Log.
+- `pyproject.toml`: `[tool.pytest.ini_options]` gained `addopts =
+  "--strict-markers -ra"` and the `samples` / `requires(engine)` markers.
+  `[tool.coverage.*]` untouched — already correct.
+- `scripts/assert_skips.py`: the `without-engines` count is no longer
+  vacuous (at least 7 engine-gated skips now exist) — its docstring and its
+  own zero-count branch were updated to treat a future zero as a
+  **regression**, not vacuity, per the fleet's own "make the unverifiable
+  case FAIL, not SKIP" lesson.
+- `tests/test_cli_spine.py`: `MAKEFILE_TARGETS` gained `samples-scratch` /
+  `samples-check` (disclosed necessary edit, X-54 class — the Makefile-target
+  consistency test would otherwise turn red on PDF-06's own Makefile change).
+
 ## [PDF-05] Engine ports, adapters, doctor & info — 2026-08-29
 - Added `src/pdf_toolkit/ports/`: six `typing.Protocol` port modules
   (`StructureEngine`, `RasterEngine`, `ComposeEngine`, `TextEngine`, `OcrEngine`,

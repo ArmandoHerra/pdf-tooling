@@ -81,6 +81,11 @@ MAKEFILE_TARGETS = {
     "sast",
     "secret-scan",
     "licenses",
+    # PDF-06 (decision.md file-contention table): the two §10.1 real-samples
+    # targets, added to the same Makefile PDF-01 created. Sequential by
+    # wave -- no overlap with PDF-01's 18 targets.
+    "samples-scratch",
+    "samples-check",
     "ci",
     "clean",
 }

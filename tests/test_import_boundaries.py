@@ -1130,3 +1130,143 @@ def test_importing_the_port_layer_loads_no_engine() -> None:
     assert result.returncode == 0, (
         f"importing the port layer pulled in engines: {result.stdout.strip()}\n{result.stderr}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Section 3 -- the typer/click import boundary (PDF-06)
+#
+# APPENDED, never rewriting Sections 1/2. `PLAN.md` §10 / D-03: no typer or
+# click import below L1 (`cli/`) -- `ops/` stays framework-free per L2's own
+# contract (`CLAUDE.md`'s layer table), so a page-range parser or a future
+# `ops/merge.py` cannot quietly grow a dependency on the CLI layer. PDF-04
+# scoped this Out and built the reusable machinery (`iter_python_files`,
+# `module_name`, `_imported_top_levels`) that Section 2 also builds on;
+# `decision.md` X-6 assigns the assertion itself to PDF-06 and estimates it at
+# roughly ten lines against machinery that already exists -- this section is
+# that estimate honoured.
+# --------------------------------------------------------------------------- #
+
+#: L1 -- the only package permitted to import the CLI framework.
+CLI_PACKAGE: Final = "pdf_toolkit.cli"
+
+#: `click` is checked even though nothing in this codebase can literally
+#: `import click` today -- the installed Typer vendors its own copy
+#: (`cli/common.py`'s own docstring: "the CLI framework vendors its Click, so
+#: there is no importable top-level click.core to reach into"). Checking for
+#: it anyway means a future dependency change that reintroduces a real `click`
+#: package is caught immediately rather than silently widening L1.
+CLI_FRAMEWORK_MODULES: Final = frozenset({"typer", "click"})
+
+KIND_CLI_FRAMEWORK_IMPORT: Final = "cli-framework-import"
+
+
+def _below_l1(module: str) -> bool:
+    return module != CLI_PACKAGE and not module.startswith(CLI_PACKAGE + ".")
+
+
+def scan_cli_framework_imports(source: str, module: str) -> list[Boundary]:
+    """`typer`/`click` imported outside `cli/` -- `PLAN.md` §10, D-03."""
+    if not _below_l1(module):
+        return []
+    tree = ast.parse(source, filename=module)
+    return [
+        Boundary(module, line, name, KIND_CLI_FRAMEWORK_IMPORT, "typer/click import below L1")
+        for name, line in _imported_top_levels(tree)
+        if name in CLI_FRAMEWORK_MODULES
+    ]
+
+
+def scan_cli_framework_boundary(root: Path) -> list[Boundary]:
+    found: list[Boundary] = []
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        found.extend(scan_cli_framework_imports(path.read_text(), module))
+    return found
+
+
+@pytest.fixture(scope="module")
+def cli_framework_boundaries() -> list[Boundary]:
+    return scan_cli_framework_boundary(SRC)
+
+
+def test_no_typer_or_click_import_below_l1(cli_framework_boundaries: list[Boundary]) -> None:
+    listed = "\n".join(f"  - {item}" for item in cli_framework_boundaries)
+    assert cli_framework_boundaries == [], (
+        f"typer/click is importable only inside {CLI_PACKAGE} -- PLAN.md §10 / D-03:\n{listed}"
+    )
+
+
+def test_the_cli_package_actually_imports_typer() -> None:
+    """Non-vacuity. If cli/ itself never imports typer, the boundary above proves nothing."""
+    importing = False
+    for path in iter_python_files(SRC):
+        module = module_name(path, SRC)
+        if _below_l1(module):
+            continue
+        tree = ast.parse(path.read_text(), filename=module)
+        if "typer" in {name for name, _ in _imported_top_levels(tree)}:
+            importing = True
+            break
+    assert importing, "no module under cli/ imports typer -- the walk is vacuous"
+
+
+PLANTED_SECTION_3: Final = (
+    (
+        "plant-typer-import-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "import typer\n\n\ndef go():\n    return typer\n",
+    ),
+    (
+        "plant-typer-from-import-in-safety",
+        "pdf_toolkit/safety/sneaky.py",
+        "from typer import Typer\n\n\ndef go():\n    return Typer\n",
+    ),
+    (
+        "plant-click-import-in-ports",
+        "pdf_toolkit/ports/sneaky.py",
+        "import click\n\n\ndef go():\n    return click\n",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "relative", "source"),
+    PLANTED_SECTION_3,
+    ids=[row[0] for row in PLANTED_SECTION_3],
+)
+def test_a_planted_section_3_violation_fails_the_walk(
+    label: str,
+    relative: str,
+    source: str,
+    tmp_path: Path,
+) -> None:
+    """Copy src/, plant one below-L1 typer/click import, confirm Section 3 turns red."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / relative
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(source)
+
+    found = scan_cli_framework_boundary(scratch)
+    assert found, f"Section 3 did not notice the planted violation: {label}"
+
+
+BENIGN_SECTION_3 = '''
+"""This module talks about typer and click without importing either."""
+
+typer = "not the module"
+
+
+def go(click):
+    """click is a parameter name here, not an import."""
+    return typer, click
+'''
+
+
+def test_benign_section_3_mentions_are_never_flagged() -> None:
+    """typer/click named in a docstring, a string literal, or a parameter name
+    is not an import -- the mechanized proof that Section 3 is an AST walk and
+    not a text grep, matching Sections 1 and 2's own negative-control
+    discipline."""
+    found = scan_cli_framework_imports(BENIGN_SECTION_3, "pdf_toolkit.ops.benign")
+    assert found == [], f"false positives: {[str(item) for item in found]}"

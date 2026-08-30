@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 """Assert engine-gated tests render a VISIBLE SKIP when engines are absent.
 
-PDF-02, consumed by the `without-engines` CI job. Reads a pytest JUnit XML
-report and:
+PDF-02, consumed by the `without-engines` and `engines-present` CI jobs. Reads
+a pytest JUnit XML report and:
 
   * exits non-zero if any testcase carries <failure> or <error>;
   * counts skips whose reason names an engine and prints the count.
 
-STATED VACUITY — READ THIS BEFORE TRUSTING THE PASS
----------------------------------------------------
-At PDF-02 time there are NO engine-gated tests: PDF-05 introduces
-`ports.resolve()` and PDF-06 introduces the markers. This assertion therefore
-passes on an empty input, and it SAYS SO on every run rather than implying
-coverage it does not have. A gate that silently passes on empty input is the
-silently-skipped-verification defect class; a gate that announces its own
-vacuity and names the spec that closes it is not.
+NO LONGER VACUOUS, AS OF PDF-06
+--------------------------------
+PDF-05 introduced `ports.resolve()`; PDF-06 introduces `@pytest.mark.requires(
+engine)` (`tests/conftest.py`) and the PATH-shadowing engine-hiding shim
+(`PDF_TOOLKIT_TEST_HIDE_ENGINES`). This assertion's count is real from PDF-06
+onward — it is no longer possible for the `without-engines` job to pass on an
+empty input, because at least one engine-gated test (`tests/test_testdata.py`'s
+tesseract-recovery arm) now exists and skips visibly whenever the engine is
+absent, in addition to the engine-gated arms PDF-05 already shipped in
+`tests/test_doctor.py`.
 
-PDF-06 may replace the reason-regex with a marker-based query once
-`requires_engine` exists — PDF-06 owns the markers.
+The reason-regex below (`ENGINE_REASON`) was kept rather than replaced with a
+marker-based query: `@pytest.mark.requires(engine)`'s own skip reason already
+names the engine literally (`"{engine} unavailable (port {port}); install
+with: {hint}"` — see `tests/conftest.py::pytest_collection_modifyitems`), so
+the regex already matches every marker-driven skip without needing to import
+pytest's own marker metadata from a JUnit report, which does not carry it.
+Replacing a working, simpler mechanism with a more complex one that answers
+the same question was not worth the diff.
 """
 
 from __future__ import annotations
@@ -29,11 +37,6 @@ import xml.etree.ElementTree as ET  # noqa: N817
 from pathlib import Path
 
 ENGINE_REASON = re.compile(r"engine|tesseract|soffice|libreoffice", re.IGNORECASE)
-
-VACUITY_NOTE = """\
-NOTE: no engine-gated tests exist yet. PDF-06's acceptance criterion requires this
-      count to be NON-ZERO in the without-engines job; until PDF-06 lands, this
-      assertion is vacuous by construction and says so rather than implying coverage."""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,7 +93,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if engine_skips == 0:
-        print(VACUITY_NOTE)
+        # PDF-06 makes this count non-vacuous: at least one engine-gated test
+        # exists (`tests/test_testdata.py`, plus PDF-05's own arms in
+        # `tests/test_doctor.py`), so a without-engines run reporting ZERO
+        # engine-gated skips is a REGRESSION -- the harness stopped skipping
+        # and started passing, or an engine-gated test was silently removed --
+        # not the vacuity this script used to (correctly) report before PDF-06
+        # landed. "Make the unverifiable case FAIL, not SKIP."
+        print(
+            "assert_skips: 0 engine-gated skips in a without-engines run. This count has been "
+            "non-vacuous since PDF-06; a zero here means the harness stopped skipping visibly, "
+            "or every engine-gated test was removed -- both are regressions.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

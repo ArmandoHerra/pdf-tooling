@@ -6,10 +6,10 @@
 uv sync
 make test          # everything
 make test-e2e      # only the subprocess-level CLI tests
-make cover         # the suite under coverage, against the project's floor
+make cover         # the suite under coverage, against the project's floor (also runs in `make ci`)
+make samples-scratch  # copy $PDF_TOOLKIT_SAMPLES_DIR -> .scratch/samples/ + write the originals manifest
+make samples-check    # re-hash the originals against that manifest -- never a CI job (see below)
 ```
-
-`make cover` is deliberately **not** part of `make ci`. The coverage floor becomes a gate once the fixture corpus and the per-verb contract harness exist; enforcing it against a spine with one placeholder verb would measure nothing and block everything.
 
 Individual files and selections work as usual:
 
@@ -17,16 +17,177 @@ Individual files and selections work as usual:
 uv run pytest tests/test_cli_spine.py -q
 uv run pytest -k renderer -q
 uv run pytest -m e2e -q
+uv run pytest -m samples -q
+uv run pytest --update-golden -q          # regenerate tests/golden/ files; review the diff
 ```
 
-## What the current suites cover
+## The generated fixture corpus
 
-- **`tests/test_cli_spine.py`** — the command surface and its exit codes, the exit-code constants themselves, the three renderers and their stream discipline, the structured error shape, global-flag precedence across both declaration levels, the mutually exclusive flag pairs, and the startup budget.
-- **`tests/test_docs_antirot.py`** — that the documentation cannot silently rot: one phase line per prime document, no specification identifiers or counts embedded in them, and every `make` target mentioned in the documentation actually existing in the `Makefile`.
+`tests/corpus.py` builds seven deterministic PDFs (`multipage_text`, `rotated`,
+`jpeg_page`, `encrypted_aes256`, `metadata_rich`, `single_page`, `tabular`)
+with `reportlab`, once per test session, into pytest's own scratch directory
+— never into the repository tree. Each fixture's expected values (page count,
+per-page text, rotation, metadata, encryption, cell grid) live in the same
+file as its generator, so a fixture can never silently drift from what a test
+asserts against it. Six of the seven are byte-identical across two
+independent builds; `encrypted_aes256` is the one honest exemption (a fresh
+AES-256 salt every build) and is instead proven semantically. See
+`tests/corpus.py`'s module docstring and `tests/test_corpus.py`.
 
-## Safety-spine test arms
+Access it in a test via the session-scoped `corpus` fixture:
+`corpus.path("single_page")` / `corpus.spec("single_page")`.
 
-The write chokepoint's guarantees are the ones a user acts on, so each of them is *demonstrated* by a run rather than asserted in prose. Three of those arms need something the ordinary suite does not, and all three are described here so that a red — or a skip — can be read without opening the test.
+## `testdata/` — the two committed binaries
+
+`testdata/malformed.pdf` (a hand-authored PDF with its xref/trailer
+destroyed, body objects intact) and `testdata/scanned-page.png` (a
+synthesized raster tesseract can recover text from) are the only binary
+artifacts committed to this repository — everything else is generated at
+test time. See `testdata/README.md` for provenance, exact defect, and the
+spec each one is pinned for. `tests/test_testdata.py` mechanizes the
+contract.
+
+## The CLI contract harness
+
+`tests/registry.py::discover_verbs()` walks the **live** Typer command tree
+with no skip list, no filter and no hard-coded verb name — a new verb is
+covered automatically the next time the suite runs. `tests/test_cli_contract.py`
+parameterizes thirteen checks (`--help`, exit codes, dry-run purity,
+no-clobber, JSON-on-a-pipe, bulk non-TTY posture) over that discovery.
+
+**The registration contract.** A verb that needs a specific argv shape (e.g.
+`rotate --angle`) registers a `tests/registry.py::Invocation` — the harness
+cannot invent one. `test_every_verb_is_registered` fails the suite, naming
+the verb, the moment one is discovered but not registered
+(`tests/registry.py::INVOCATIONS`).
+
+**A named deviation from the literal `is_mutating` predicate.** The Design
+intent was to derive "does this verb mutate anything" from whether its click
+command declares `-O/--output`, `--out-dir` or `--in-place`. Those three are
+part of the **global** flag block every verb inherits uniformly
+(`pdf_toolkit.cli.common.global_options`), so that signal is universally true
+today and cannot discriminate. `tests/registry.py` instead walks the verb's
+own callback module (and every `pdf_toolkit.*` module it imports,
+transitively) for a reference to `AtomicWriter`, the one write chokepoint —
+still fully structural, still classifies a new verb automatically, and
+correctly reports `version`/`doctor`/`info` as non-mutating today. See
+`tests/registry.py`'s module docstring for the full account.
+
+## The `samples` fixture — `PLAN.md` §10.1
+
+```bash
+export PDF_TOOLKIT_SAMPLES_DIR=/path/to/your/samples
+uv run pytest -m samples -q
+```
+
+The operator's own real-document corpus, entirely outside the repository and
+**never committed**. Six rules bind it, restated here because they are the
+highest-consequence part of this test suite:
+
+1. **Originals are never an operand.** No verb, test, or probe receives a
+   path under `$PDF_TOOLKIT_SAMPLES_DIR`. The `samples` fixture exposes
+   exactly `available`, `names()`, `copy(name)`, `copy_tree(name)` — **no
+   member returns a path under the originals directory.**
+2. **Copy-on-use, per test.** `samples.copy(name)` / `samples.copy_tree(name)`
+   copy with `shutil.copy2` into the test's own `tmp_path`, then chmod the
+   copy user-writable. Nothing is ever copied into `testdata/` or `tests/`.
+3. **The originals-integrity guard** (`tests/samples_guard.py`) hashes every
+   original at session start and re-hashes at session end; any difference at
+   all **fails the session, naming the file** — never a warning. Controller-
+   only under `pytest -n auto` (`if hasattr(config, "workerinput")`), proven
+   by `tests/integration/test_samples_guard_fires.py` against a **synthetic**
+   samples directory — the operator's real corpus is never used to prove the
+   guard, and it never mutates a real original in doing so.
+4. **Privacy.** Nothing from the corpus is committed, and nothing about it is
+   quoted anywhere beyond **filename, page count, size, and hash** — not in
+   this file, not in `changelog.md`, not in `testdata/README.md`, not in a
+   spec's Implementation Log.
+5. **Visible skip when absent.** `@pytest.mark.samples` tests skip with a
+   reason (`"PDF_TOOLKIT_SAMPLES_DIR not set — real-document arm skipped
+   (PLAN.md §10.1 rule 5)"`) both via the marker (collection-time) and via the
+   fixture itself (`samples.copy()`/`copy_tree()`, so an unmarked test that
+   reaches the fixture still skips instead of erroring). CI never sets the
+   variable, so the suite is green without the corpus and *more thorough*
+   with it.
+6. **Scratch lives in `.scratch/`** (gitignored). `make samples-scratch`
+   copies the tree there and writes a `sha256sum`-compatible originals
+   manifest; `pdftoolkit … .scratch/samples/<file>` is the only sanctioned
+   way to point a verb at a real document interactively. `make clean` removes
+   it.
+
+**`make samples-check` is never a CI job** (`decision.md` `B-R01`) — its
+absence from `ci.yml` is a decision, not a gap: CI never has the corpus, so
+running it there would be a permanent no-op that looks like coverage.
+
+Later specs (`PDF-07`…`PDF-15`) append their own `@samples` arm to
+`tests/test_samples.py` — an append-only shared file; see that file's own
+module docstring for the rules every arm follows.
+
+## Engine markers, and hiding an engine without touching the host
+
+```bash
+uv run pytest --markers            # the registered list
+PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest -rs -q
+```
+
+`@pytest.mark.requires("tesseract")` (or `"soffice"`, or a bare port name
+like `"OcrEngine"`) resolves through the **same** `ports.resolve()` the CLI
+uses, never an independent `shutil.which`. A missing engine yields a visible
+`pytest.skip`, never a pass and never a silent xfail.
+
+`PDF_TOOLKIT_TEST_HIDE_ENGINES` builds a **PATH-shadowing symlink directory**
+under `$TMPDIR` — every executable reachable on the real `PATH` is symlinked
+into it except the named ones, and `PATH` is repointed there for the process.
+**No system binary is ever renamed, moved, or `chmod`-ed.** Applied before
+collection (`tests/conftest.py::pytest_configure`), so the `requires(engine)`
+skip decision itself sees the hidden PATH.
+
+| Marker | Selects |
+|---|---|
+| `e2e` | Tests that run the installed console script as a subprocess. Slower, and the only ones that measure real process startup. |
+| `samples` | The `PLAN.md` §10.1 real-document arm. Skips visibly when `$PDF_TOOLKIT_SAMPLES_DIR` is unset. |
+| `requires(engine)` | Skips visibly when the named engine/port does not resolve via `ports.resolve()`. |
+
+## The golden primitive
+
+`tests/conftest.py::Golden` compares a payload against
+`tests/golden/<name>.json` as a **parsed dict**, never a raw string, so key
+order is never a false failure. `uv run pytest --update-golden` regenerates —
+review the diff before committing. An ordinary run never writes a golden file
+into existence: a missing one fails loudly with that instruction rather than
+being silently created, which is what keeps `tests/golden/` out of the
+working-tree guard's way. Goldens are built from the generated corpus only,
+never from a sample (`PLAN.md` §10.1 rule 4). Empty at PDF-06 landing — see
+`tests/golden/README.md`.
+
+## The working-tree guard
+
+`tests/conftest.py` hashes every **tracked** file (`git ls-files`) before and
+after the session and fails, naming the file, if any changed —
+`.pytest_cache/`, coverage data and `.scratch/` are untracked and therefore
+exempt by construction. Controller-only under `-n auto`, same reasoning as
+the samples guard above.
+
+## Expected skip counts
+
+Measured against the landed suite at PDF-06's own commit (`uv run pytest -rs
+-q`), on Linux, with `$PDF_TOOLKIT_SAMPLES_DIR` unset (CI's own posture):
+
+| Configuration | Total skips | What they are |
+|---|---|---|
+| **Engines present** (`tesseract` + `soffice` on `PATH`) | non-zero, but **zero are engine-gated** — `scripts/assert_skips.py --expect-zero` asserts exactly that. The non-zero remainder is the pre-existing safety-spine skips (see below) plus four `test_cli_contract.py` parametrize sets that are empty until a mutating verb or a subcommand group exists (`C4`, `C9`, `C10`/`C11`/`C13`), plus the `samples`-marked arms (unset). |
+| **Engines hidden** (`PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice`) | the engines-present count **plus at least 7 engine-gated skips** — `tests/test_doctor.py`'s existing arms (PDF-05) plus `tests/test_testdata.py`'s tesseract-recovery arm (PDF-06). `scripts/assert_skips.py` (no `--expect-zero`) asserts this count is **non-zero**; a zero here is a regression, not vacuity, as of PDF-06. |
+
+Both counts are read with `-rs` (`pytest`'s own reason-printing flag) — a
+skip is information, not noise: it says which guarantee this particular run
+did not check, and why.
+
+## Safety-spine test arms (`PDF-04`)
+
+The write chokepoint's guarantees are the ones a user acts on, so each of
+them is *demonstrated* by a run rather than asserted in prose. Three of those
+arms need something the ordinary suite does not, and all three are described
+here so that a red — or a skip — can be read without opening the test.
 
 ### Fault injection: a real `SIGKILL`, at a named point
 
@@ -57,15 +218,15 @@ PDF_TOOLKIT_TEST_XDEV_DIR=/dev/shm uv run pytest tests/integration/test_cross_fi
 
 ### The `--dry-run` purity primitive
 
-`tests/fs_snapshot.py` photographs every root before and after a run — inode, mode, size, mtime, content hash and symlink target — and fails on any difference. `atime` is excluded (a dry run legitimately reads); directory mtime is included (it is the only thing that sees a create-then-delete inside the run). `$TMPDIR` and `$HOME` are redirected into the test's own temporary directory and both are snapshot roots, which is what turns "the temp directory gained nothing" into a whole-tree comparison instead of a glob racing every other process on the machine.
+`tests/fs_snapshot.py` photographs every root before and after a run — inode, mode, size, mtime, content hash and symlink target — and fails on any difference. `atime` is excluded (a dry run legitimately reads); directory mtime is included (it is the only thing that sees a create-then-delete inside the run). `$TMPDIR` and `$HOME` are redirected into the test's own temporary directory and both are snapshot roots, which is what turns "the temp directory gained nothing" into a whole-tree comparison instead of a glob racing every other process on the machine. `tests/test_cli_contract.py`'s `C9`/`C10` checks consume this primitive directly rather than re-deriving it.
 
 Six planted mutations prove the comparator can fail, and a non-dry-run control proves the guard is live: zero differences has to mean *the run wrote nothing*, never *the run never happened*.
 
-### The write-chokepoint import-boundary test
+### The write-chokepoint / import-boundary tests
 
-`tests/test_import_boundaries.py` walks the AST of every file under `src/` and fails on any filesystem-mutating call outside `src/pdf_toolkit/safety/atomic.py`. Its two allowlists are empty, a test asserts they are empty, and a stale entry — one that no longer resolves to a real call site — fails the test. Planted violations prove the walk bites. The file is shared and append-only: later specs add their own section and reuse its machinery.
+`tests/test_import_boundaries.py` is shared and append-only across three specs: Section 1 (PDF-04) walks the AST of every file under `src/` and fails on any filesystem-mutating call outside `src/pdf_toolkit/safety/atomic.py`; Section 2 (PDF-05) does the same for engine imports outside `adapters/` and spawns outside the one subprocess chokepoint; Section 3 (PDF-06) does the same for `typer`/`click` imports below `cli/` (`PLAN.md` §10, D-03). Every section's allowlists are empty, a test asserts they are empty, and a stale entry — one that no longer resolves to a real call site — fails the test. Planted violations prove each walk bites, and a negative-control test proves none of the three walks is a text grep.
 
-### Expected visible skips
+### Expected visible skips (safety-spine arms only)
 
 | Configuration | Skips from these arms |
 |---|---|
@@ -74,15 +235,11 @@ Six planted mutations prove the comparator can fail, and a non-dry-run control p
 | Any platform, `uid 0` | **1** — the unwritable-destination arm, since directory permissions cannot cause a write to fail for root. |
 | Filesystem without hard links | **1** — the sidecar-keeps-the-inode arm. |
 
-Read them with `-rs`. A skip here is information, not noise: it says which guarantee this run did *not* check.
+## What the other suites cover
 
-## Markers
-
-| Marker | Selects |
-|---|---|
-| `e2e` | Tests that run the installed console script as a subprocess. Slower, and the only ones that measure real process startup. |
-
-Run `uv run pytest --markers` for the registered list.
+- **`tests/test_cli_spine.py`** — the command surface and its exit codes, the exit-code constants themselves, the three renderers and their stream discipline, the structured error shape, global-flag precedence across both declaration levels, the mutually exclusive flag pairs, and the startup budget (`PLAN.md` §12 R-13 — `tests/test_cli_contract.py` deliberately does not duplicate this; see its module docstring).
+- **`tests/test_docs_antirot.py`** — that the documentation cannot silently rot: one phase line per prime document, no specification identifiers or counts embedded in them, and every `make` target mentioned in the documentation actually existing in the `Makefile`.
+- **`tests/test_license_policy.py`** — the `PLAN.md` §7.2 forbidden-name AST walk (imports, dynamic imports, subprocess `argv[0]`, `shutil.which`).
 
 ## Skips are visible, never silent
 
@@ -97,4 +254,23 @@ Deleting or weakening a failing test so the suite turns green is never an accept
 
 ## Determinism
 
-Every test writes into pytest's own temporary directory and never into the repository tree. Nothing that a test asserts depends on wall-clock timing, on the order tests run in, or on which machine runs them — with one deliberate exception: the startup-budget test measures real elapsed time. It takes the **fastest** of several runs rather than the mean, so scheduler noise cannot turn it red while a genuine regression still will.
+Every test writes into pytest's own temporary directory and never into the repository tree (enforced, not just intended — see the working-tree guard above). Nothing that a test asserts depends on wall-clock timing, on the order tests run in, or on which machine runs them — with one deliberate exception: the startup-budget test measures real elapsed time. It takes the **fastest** of several runs rather than the mean, so scheduler noise cannot turn it red while a genuine regression still will.
+
+## The coverage floor — status at PDF-06 landing
+
+`--cov-fail-under=85` (`make cover`, now part of `make ci`) is measured on
+`src/pdf_toolkit`. **At PDF-06's own landing commit this floor is not met —
+71.29% measured, not 85%** — and this is disclosed rather than hidden behind
+a lowered number or an `omit`. The gap concentrates in adapter internals for
+verbs that do not exist yet (`rasterize`, `compose`, `text`, `ocr`, `office`
+each depend on adapter code paths `pypdf_structure.py`, `pdfium_*.py`,
+`pdfplumber_text.py` etc. only exercise lightly today) and in edge-case
+branches of the existing safety spine. Closing it is explicitly `PDF-07`
+onward's work, not a `PDF-06`-scoped fix — Design §6's own escape hatch
+("if 85% is unreachable, the answer is more tests — never a lower
+`fail_under` and never an `omit`") is exercised here, honestly, rather than
+gamed. `ci.yml`'s `engines-present` job is **not** wired to enforce this
+floor in this commit for the same reason: doing so today would turn that CI
+job red on a real, pre-existing, out-of-scope gap rather than catch a fresh
+regression. `make cover` / `make ci` enforce it **locally**, and report the
+true number.

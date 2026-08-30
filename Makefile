@@ -11,7 +11,7 @@ SHELL := /bin/bash
 ARGS ?=
 
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
-        typecheck vulncheck sast secret-scan licenses ci clean
+        typecheck vulncheck sast secret-scan licenses samples-scratch samples-check ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -74,7 +74,37 @@ licenses: ## Regenerate THIRD_PARTY_LICENSES from the pinned closure, then gate 
 	uv run python scripts/licenses.py generate
 	uv run python scripts/licenses.py check
 
-ci: fmt-check lint typecheck test licenses sast vulncheck ## Run the full local gate
+samples-scratch: ## Copy $$PDF_TOOLKIT_SAMPLES_DIR into .scratch/samples/ + write the originals manifest (PLAN.md §10.1)
+	@if [ -z "$$PDF_TOOLKIT_SAMPLES_DIR" ]; then \
+		echo "make samples-scratch: PDF_TOOLKIT_SAMPLES_DIR is not set." >&2; \
+		echo "  export PDF_TOOLKIT_SAMPLES_DIR=/path/to/your/samples" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -d "$$PDF_TOOLKIT_SAMPLES_DIR" ]; then \
+		echo "make samples-scratch: $$PDF_TOOLKIT_SAMPLES_DIR is not a directory." >&2; \
+		exit 1; \
+	fi
+	@mkdir -p .scratch
+	@rm -rf .scratch/samples
+	@cp -R "$$PDF_TOOLKIT_SAMPLES_DIR" .scratch/samples
+	@cd "$$PDF_TOOLKIT_SAMPLES_DIR" && find . -type f -print0 | sort -z \
+		| xargs -0 sha256sum > "$(CURDIR)/.scratch/samples.MANIFEST.sha256"
+	@echo "samples copied to .scratch/samples/; originals manifest written to .scratch/samples.MANIFEST.sha256"
+
+samples-check: ## Re-hash $$PDF_TOOLKIT_SAMPLES_DIR against .scratch/samples.MANIFEST.sha256 (PLAN.md §10.1 rule 3)
+	@if [ -z "$$PDF_TOOLKIT_SAMPLES_DIR" ]; then \
+		echo "make samples-check: PDF_TOOLKIT_SAMPLES_DIR is not set." >&2; \
+		echo "  export PDF_TOOLKIT_SAMPLES_DIR=/path/to/your/samples" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f .scratch/samples.MANIFEST.sha256 ]; then \
+		echo "make samples-check: no manifest at .scratch/samples.MANIFEST.sha256 -- run 'make samples-scratch' first." >&2; \
+		exit 1; \
+	fi
+	@cd "$$PDF_TOOLKIT_SAMPLES_DIR" && sha256sum -c --quiet "$(CURDIR)/.scratch/samples.MANIFEST.sha256"
+	@echo "originals unchanged"
+
+ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate
 
 clean: ## Remove build, cache and coverage artefacts
-	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml
+	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml .scratch

@@ -103,8 +103,11 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--strict-markers -ra"
 markers = [
   "e2e: subprocess-level CLI runs against the installed console script",
+  "samples: real-document arm over $PDF_TOOLKIT_SAMPLES_DIR (PLAN.md §10.1) -- skips visibly when unset",
+  "requires(engine): skip visibly when the named engine/port does not resolve via ports.resolve()",
 ]
 
 [tool.coverage.run]
