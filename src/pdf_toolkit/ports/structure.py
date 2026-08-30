@@ -5,14 +5,32 @@ Two adapters sit behind this one port: **pypdf** (the primary, pure Python) and
 row and names the secondary in its ``detail``; it never prints a seventh row.
 
 At this point in the build order the Protocol declares the probe surface plus
-exactly one operation — ``read_document_info``, which ``info`` calls. Later
-specs add their methods **here**, beside it. See ``ports/__init__``'s docstring
-for the rule and for why a stub is worse than an absence.
+one operation — ``read_document_info``, which ``info`` calls. Later specs add
+their methods **here**, beside it. See ``ports/__init__``'s docstring for the
+rule and for why a stub is worse than an absence.
+
+**PDF-12 (`compress`/`repair`/`linearize`) adds three methods to
+``StructureEngine`` — ``compress``, ``repair``, ``linearize`` — plus the
+plain-data outcome shapes those signatures need (``StructuralFacts``,
+``ImageXObjectFacts``, ``CompressOutcome``, ``RepairOutcome``). Nothing here
+crosses back into ``ops/optimize.py`` as an engine object — the shapes are
+stdlib dataclasses, exactly like ``ports/text.py``'s ``ExtractedTable`` /
+``TextLine`` precedent, so ``ops/`` never needs to import ``pikepdf``.
+
+The Pillow/pypdf **image pass** `compress --images` needs is a *separate*
+capability-selected narrowing, ``ImagePassEngine`` — mirroring
+``LinearizationProbe``'s own shape exactly — rather than a fourth method on
+``StructureEngine`` itself: the pikepdf-backed adapter never performs it (D-04
+picks the pikepdf adapter for `compress` by the `"object-streams"`
+capability; the image pass is pypdf's own `"image-pass"` capability), and
+folding two adapters' work into one Protocol method would blur exactly the
+one-operation-one-adapter mapping the licence question depends on.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Protocol, cast
 
@@ -23,12 +41,19 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from pdf_toolkit.adapters import AdapterProbe
 
 __all__ = [
+    "CompressOutcome",
+    "ImagePassEngine",
+    "ImagePassOutcome",
+    "ImageXObjectFacts",
     "LinearizationProbe",
     "OpenStructureDocument",
+    "RepairOutcome",
+    "StructuralFacts",
     "StructureEngine",
     "StructureWriter",
     "adapters",
     "probe",
+    "require_image_pass",
     "require_linearization",
     "require_structure",
 ]
@@ -96,6 +121,96 @@ class StructureWriter(Protocol):
         ...
 
 
+# --------------------------------------------------------------------------- #
+# PDF-12 — plain-data shapes crossing the port boundary for `compress`/`repair`.
+# Stdlib dataclasses only, mirroring `ports/text.py`'s `ExtractedTable`/
+# `TextLine` precedent, so a caller in `ops/optimize.py` never has to hold a
+# `pikepdf.Object` to build the D-12.3 lossless-verification message.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class ImageXObjectFacts:
+    """One image XObject's structural facts — decode-free, cheap to compare.
+
+    ``dct_sha256`` is populated only when ``"/DCTDecode"`` is among
+    ``filters``; it is the raw, undecoded stream digest, never a pixel hash
+    (`recompress_flate=True` legitimately rewrites Flate streams to different
+    bytes with identical pixels, so a digest over every filter would
+    false-fail; qpdf never recompresses `/DCTDecode`, so raw-byte identity
+    there is exact — D-12.3).
+    """
+
+    filters: tuple[str, ...]
+    width: int
+    height: int
+    colorspace: str | None
+    bits_per_component: int | None
+    dct_sha256: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "filters": list(self.filters),
+            "width": self.width,
+            "height": self.height,
+            "colorspace": self.colorspace,
+            "bits_per_component": self.bits_per_component,
+            "dct_sha256": self.dct_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class StructuralFacts:
+    """A document's page count plus every image XObject's facts, page order.
+
+    Equality of two ``StructuralFacts`` is exactly D-12.3 Layer 1's three
+    checks combined: page count identical, image XObject *count* identical
+    (the tuples are the same length), and every image's own tuple identical
+    (which folds in the ``/DCTDecode`` raw-byte check via ``dct_sha256``).
+    """
+
+    page_count: int
+    images: tuple[ImageXObjectFacts, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CompressOutcome:
+    """One `compress` structural pass: the candidate bytes plus the facts of
+    both sides of the transformation, so `ops/optimize.py` can run D-12.3's
+    Layer 1 gate — enforced there, per the design — without ever holding a
+    `pikepdf.Pdf`."""
+
+    output: bytes
+    before: StructuralFacts
+    after: StructuralFacts
+
+
+@dataclass(frozen=True, slots=True)
+class RepairOutcome:
+    """One `repair` run: recovered bytes plus the honest structural delta
+    (D-12.4). ``warnings`` are libqpdf's own recovery findings, cleaned of the
+    unstable ``stream <object at 0x...>`` prefix `Pdf.get_warnings()` attaches
+    — never fabricated, and empty when nothing was wrong."""
+
+    output: bytes
+    warnings: tuple[str, ...]
+    page_count_before: int
+    page_count_after: int
+    object_count_before: int
+    object_count_after: int
+    xref_reconstructed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ImagePassOutcome:
+    """One `compress --images` pre-pass: the transformed bytes, plus counts
+    the caller reports honestly rather than silently (D-12.2's skip rule)."""
+
+    output: bytes
+    images_transformed: int
+    images_skipped: int
+
+
 class StructureEngine(Protocol):
     """Read a document's structure. Implemented in full by the primary adapter."""
 
@@ -128,6 +243,70 @@ class StructureEngine(Protocol):
 
     def new_writer(self) -> StructureWriter:
         """A fresh, empty :class:`StructureWriter` for one output."""
+        ...
+
+    def compress(self, data: bytes) -> CompressOutcome:
+        """The `"object-streams"` capability (D-12.1/D-12.2): a structural
+        recompression pass over an in-memory document — object streams
+        generated, streams recompressed — returning the candidate bytes and
+        both sides' :class:`StructuralFacts` for D-12.3's Layer 1 gate.
+
+        Raises:
+            AuthError: Exit 6 -- the document is password-protected.
+            FailureError: Exit 1 -- the engine could not process it.
+        """
+        ...
+
+    def repair(self, data: bytes) -> RepairOutcome:
+        """The `"repair"` capability (D-12.4): reconstruct a damaged
+        cross-reference table via libqpdf's own recovery parser.
+
+        Raises:
+            AuthError: Exit 6 -- the document is password-protected.
+            FailureError: Exit 1 -- truly unrecoverable.
+        """
+        ...
+
+    def linearize(self, data: bytes) -> bytes:
+        """The `"linearize"` capability (D-12.6): rewrite for byte-serving.
+
+        Verified internally before returning — check 1 of D-12.6's three
+        (reopen the candidate, `is_linearized` true and
+        `check_linearization()` reports no problems) — so a failed
+        verification never reaches `AtomicWriter` at all.
+
+        Raises:
+            AuthError: Exit 6 -- the document is password-protected.
+            FailureError: Exit 1 -- the engine could not process it, or the
+                internal verification failed.
+        """
+        ...
+
+
+class ImagePassEngine(Protocol):
+    """The shape an adapter must have to claim the `"image-pass"` capability
+    (D-12.2's Pillow/pypdf `--images downsample|recompress` pre-pass).
+
+    A capability-selected narrowing exactly like :class:`LinearizationProbe`
+    below, not a fourth ``StructureEngine`` method: the pikepdf-backed
+    adapter never performs this operation, so putting it on the shared
+    Protocol would force every adapter to answer for work only one of them
+    does.
+    """
+
+    def downsample_images(
+        self,
+        data: bytes,
+        *,
+        mode: str,
+        pages: frozenset[int] | None,
+        dpi: float,
+        quality: int,
+    ) -> ImagePassOutcome:
+        """Transform in-scope images per D-12.2's `downsample`/`recompress`
+        rules. ``pages`` is ``None`` for "every page"; a set otherwise
+        (`PLAN.md` §4.3 set semantics). Never raises for a skip -- skipped
+        images are counted in the outcome, not refused."""
         ...
 
 
@@ -190,3 +369,9 @@ def require_structure(*, capability: str | None = None) -> StructureEngine:
 def require_linearization() -> LinearizationProbe:
     """The adapter that can answer ``linearized``, selected by capability."""
     return cast("LinearizationProbe", require(PORT, capability="linearized"))
+
+
+def require_image_pass() -> ImagePassEngine:
+    """The adapter that can perform `compress --images`, selected by
+    capability (`"image-pass"`, declared only by the pypdf adapter)."""
+    return cast("ImagePassEngine", require(PORT, capability="image-pass"))

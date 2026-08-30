@@ -23,11 +23,14 @@ import typer
 
 from pdf_toolkit.cli import (
     cmd_compose,
+    cmd_compress,
     cmd_create,
     cmd_doctor,
     cmd_info,
+    cmd_linearize,
     cmd_merge,
     cmd_rasterize,
+    cmd_repair,
     cmd_split,
     cmd_tables,
     cmd_text,
@@ -79,6 +82,13 @@ app.command(name="compose", help=cmd_compose.compose_command.__doc__)(cmd_compos
 app.command(name="create", help=cmd_create.create_command.__doc__)(cmd_create.create_command)
 app.command(name="text", help=cmd_text.text_command.__doc__)(cmd_text.text_command)
 app.command(name="tables", help=cmd_tables.tables_command.__doc__)(cmd_tables.tables_command)
+app.command(name="compress", help=cmd_compress.compress_command.__doc__)(
+    cmd_compress.compress_command
+)
+app.command(name="repair", help=cmd_repair.repair_command.__doc__)(cmd_repair.repair_command)
+app.command(name="linearize", help=cmd_linearize.linearize_command.__doc__)(
+    cmd_linearize.linearize_command
+)
 
 
 def build_rerun_hint(argv: Sequence[str] | None = None) -> str:

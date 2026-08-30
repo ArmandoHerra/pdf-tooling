@@ -532,3 +532,137 @@ def test_ac15_info_has_text_and_text_emptiness_agree_on_the_same_copy(samples) -
         "the PM as a finding about PDF-05's surface; do not adjust either side here"
     )
     assert set(info_has_text.values()) == {False}
+
+
+# --------------------------------------------------------------------------- #
+# PDF-12 -- AC16. Over COPIES of PrendiniLoria2020.pdf (482 pages) and
+# catalogo_arquitectura_2017_2023_0.pdf (14 pages) -- originals are never an
+# operand, HC-2 rule 1:
+#   (a) on PrendiniLoria2020.pdf -- `compress --lossless` reduces size, page
+#       count unchanged, per-page extracted text byte-identical;
+#   (b) on catalogo_arquitectura_2017_2023_0.pdf -- `--images downsample
+#       --image-dpi 150` does not produce an output LARGER than the
+#       lossless-only output of the same input, page count and text
+#       unchanged (this real document's own embedded images happen to sit at
+#       or under the page-box DPI-150 threshold already -- D-12.2's own
+#       stated, conservative limitation -- so `images_transformed` is
+#       legitimately 0 here; the stronger, deterministic proof that
+#       downsampling itself shrinks a wide image lives in
+#       `tests/unit/test_optimize.py::test_ac5_downsample_is_strictly_smaller_than_lossless_only`
+#       against a local, engineered fixture built specifically to cross that
+#       threshold);
+#   (c) on PrendiniLoria2020.pdf -- `linearize` yields `is_linearized is True`.
+# Nothing beyond filename, page count, size and hash is quoted anywhere in
+# this section (HC-2 rule 4) -- no page text, no title, no metadata.
+# --------------------------------------------------------------------------- #
+
+_OPTIMIZE_SAMPLE_NAME = "PrendiniLoria2020.pdf"
+_OPTIMIZE_SAMPLE_PAGES = 482
+_IMAGE_SAMPLE_NAME = "catalogo_arquitectura_2017_2023_0.pdf"
+_IMAGE_SAMPLE_PAGES = 14
+
+
+@pytest.mark.samples
+def test_ac16_lossless_shrinks_and_preserves_text_over_a_482_page_sample(
+    samples, tmp_path: Path
+) -> None:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from pdf_toolkit.ops.optimize import compress_run
+    from pdfium_text import page_texts
+
+    copy_path = samples.copy(_OPTIMIZE_SAMPLE_NAME)
+    target = tmp_path / "lossless.pdf"
+    result = compress_run(
+        [copy_path],
+        lossless=True,
+        images="keep",
+        image_dpi=150.0,
+        image_quality=80,
+        pages_spec=None,
+        output=target,
+        out_dir=None,
+        name_template=None,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert result.exit_code == 0
+    item = result.items[0]
+    assert item.bytes_before is not None and item.bytes_after is not None
+    assert item.bytes_after < item.bytes_before
+
+    before_texts = page_texts(copy_path)
+    after_texts = page_texts(target)
+    assert len(before_texts) == len(after_texts) == _OPTIMIZE_SAMPLE_PAGES
+    assert before_texts == after_texts
+
+
+@pytest.mark.samples
+def test_ac16_downsample_does_not_exceed_lossless_only_over_a_real_scan(
+    samples, tmp_path: Path
+) -> None:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from pdf_toolkit.ops.optimize import compress_run
+    from pdfium_text import page_texts
+
+    copy_path = samples.copy(_IMAGE_SAMPLE_NAME)
+
+    lossless_target = tmp_path / "lossless.pdf"
+    lossless_result = compress_run(
+        [copy_path],
+        lossless=True,
+        images="keep",
+        image_dpi=150.0,
+        image_quality=80,
+        pages_spec=None,
+        output=lossless_target,
+        out_dir=None,
+        name_template=None,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert lossless_result.exit_code == 0
+
+    downsample_target = tmp_path / "downsampled.pdf"
+    downsample_result = compress_run(
+        [copy_path],
+        lossless=False,
+        images="downsample",
+        image_dpi=150.0,
+        image_quality=80,
+        pages_spec=None,
+        output=downsample_target,
+        out_dir=None,
+        name_template=None,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert downsample_result.exit_code == 0
+    assert downsample_target.stat().st_size <= lossless_target.stat().st_size
+
+    before_texts = page_texts(copy_path)
+    after_texts = page_texts(downsample_target)
+    assert len(before_texts) == len(after_texts) == _IMAGE_SAMPLE_PAGES
+    assert before_texts == after_texts
+
+
+@pytest.mark.samples
+def test_ac16_linearize_over_a_482_page_sample(samples, tmp_path: Path) -> None:
+    import pikepdf
+
+    from pdf_toolkit.ops.optimize import linearize_run
+
+    copy_path = samples.copy(_OPTIMIZE_SAMPLE_NAME)
+    target = tmp_path / "linearized.pdf"
+    result = linearize_run(copy_path, output=target, in_place=False, policy=_read_only_policy())
+    assert result.exit_code == 0
+
+    with pikepdf.Pdf.open(target) as reopened:
+        assert reopened.is_linearized is True

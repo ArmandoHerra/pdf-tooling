@@ -418,6 +418,53 @@ def _tables_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+def _copy_corpus_fixture(corpus: object, tmp_path: Path, name: str, filename: str) -> Path:
+    """A `tmp_path`-local COPY of a corpus fixture -- never the fixture path
+    itself (PDF-12 HAZARD: an `--in-place` row that named `corpus.path(...)`
+    directly would mutate the shared session-scoped corpus, silently
+    corrupting every downstream test that reuses it)."""
+    import shutil
+
+    destination = tmp_path / filename
+    shutil.copy(corpus.path(name), destination)  # type: ignore[attr-defined]
+    return destination
+
+
+def _compress_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`compress` (PDF-12) consumes `--output`, `--out-dir`, `--name` and
+    `--in-place`, and this row names `-O` -- same reasoning as
+    `_text_invocation`: C11 appends its own `-O <existing target>`, and only
+    `-O` in this row keeps Click's last-scalar-wins behaviour landing on
+    C11's target rather than tripping the `--output`/`--out-dir` mutual
+    exclusion."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "registered-invocation-compress.pdf"),
+    ]
+
+
+def _repair_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`repair` (PDF-12) -- one input, `-O` (same C11 reasoning). `single_page`
+    is a fine operand: a healthy document exits 0 through `repair` exactly as
+    it does through every other verb (D-12.4 -- "nothing was wrong" is a
+    success, not a refusal)."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "registered-invocation-repair.pdf"),
+    ]
+
+
+def _linearize_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`linearize` (PDF-12) -- one input, `-O` (same C11 reasoning)."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "registered-invocation-linearize.pdf"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -442,6 +489,13 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     # chokepoint) and both land in C15's PRODUCING population.
     "text": Invocation(build=_text_invocation, destructive=False),
     "tables": Invocation(build=_tables_invocation, destructive=False),
+    # PDF-12. `compress`/`repair`/`linearize` are all producing, single- or
+    # multi-target verbs over `StructureEngine`; none is destructive (a
+    # second destructive shape for C13 is a separate backlog candidate, not
+    # built here, matching every other producing verb's own note above).
+    "compress": Invocation(build=_compress_invocation, destructive=False),
+    "repair": Invocation(build=_repair_invocation, destructive=False),
+    "linearize": Invocation(build=_linearize_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -530,5 +584,51 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         str(tmp_path / "or3-tables-name"),
         "--name",
         "or3-custom-p{page:03}-t{index}.{ext}",
+    ],
+    # PDF-12 -- eight rows: compress x {--output, --out-dir, --name,
+    # --in-place}, repair/linearize x {--output, --in-place}. Every
+    # `--in-place` row copies its fixture into `tmp_path` FIRST via
+    # `_copy_corpus_fixture` and operates on the COPY -- these are the
+    # product's first `--in-place` C14 cells, and a row naming
+    # `corpus.path(...)` directly would mutate the shared, session-scoped
+    # corpus (see that helper's own docstring).
+    ("compress", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "or3-compress-output.pdf"),
+    ],
+    ("compress", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-compress-out-dir"),
+    ],
+    ("compress", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-compress-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
+    ],
+    ("compress", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-compress-in-place.pdf")),
+        "--in-place",
+    ],
+    ("repair", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "or3-repair-output.pdf"),
+    ],
+    ("repair", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-repair-in-place.pdf")),
+        "--in-place",
+    ],
+    ("linearize", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "or3-linearize-output.pdf"),
+    ],
+    ("linearize", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-linearize-in-place.pdf")),
+        "--in-place",
     ],
 }

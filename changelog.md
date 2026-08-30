@@ -19,6 +19,35 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-12] compress + repair + linearize — 2026-08-30
+- Added `compress` (`pikepdf`/libqpdf object streams + stream recompression,
+  lossless by construction; opt-in `--images downsample|recompress` over
+  Pillow, opt-in and never implied), `repair` (libqpdf's own recovery
+  parser, warnings via `pikepdf.Pdf.get_warnings()` — never a `qpdf` CLI
+  shell-out) and `linearize` (verified structurally before a byte reaches
+  disk), over `StructureEngine` extended in place with three additive
+  methods and one capability-selected sibling Protocol (`ImagePassEngine`)
+  for the image pass — the registry stays the only adapter-selection seam.
+  Ghostscript is the conventional one-call compressor and is AGPL-3.0+,
+  excluded by `PLAN.md` §7.2; this is the replacement, not a workaround.
+- `--lossless` is an enforced runtime guarantee (page count, every image
+  XObject's structural facts, every `/DCTDecode` stream's raw bytes),
+  checked before `AtomicWriter` ever opens — a violated guarantee writes
+  nothing and exits 1, naming the failed check. `compress` reports a
+  measurement, never a claim: `bytes_before`/`bytes_after` on every item, a
+  non-shrinking run still exits 0 with a signed, non-positive percentage and
+  a stderr warning. A mechanized honesty gate (`tests/test_honesty_claims.py`)
+  fails the build on any comparative or superlative claim, anywhere.
+- `compress`/`repair`/`linearize` are the product's first `--in-place`
+  verbs; `cli/cmd_compress.py`, `cmd_repair.py` and `cmd_linearize.py`
+  (one file per verb, not `cmd_optimize.py`, to keep OR-3's per-module
+  output-flag declaration collision-free) each declare their own consumed
+  output flags. `compress`/`repair`/`linearize` all satisfy contract row
+  C15 (a `--dry-run` predicts the same exit code the real run produces)
+  through the shared filesystem-tier planner, extending `[B-054]`'s pattern
+  to the `-O`/`--in-place` destination shape for the first time alongside
+  `--out-dir`.
+
 ## [PDF-11] text + tables — 2026-08-30
 - Added `text` (pypdfium2 fast path; `--layout` via pdfplumber, one block per
   line with top-left-origin geometry) and `tables` (`--strategy lines|text`,

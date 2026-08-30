@@ -21,12 +21,13 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_ten_landed_verbs() -> None:
-    """`text`/`tables` (PDF-11) join `compose`/`create` (PDF-10), `rasterize`
-    (PDF-09), `merge`/`split` (PDF-07) and the three PDF-06-landing verbs -- ten
-    total. Renamed and extended rather than deleted, for the third time and for
-    the same reason: this pin fails BY DESIGN the moment a verb registers, which
-    is the tripwire working, not a defect."""
+def test_discover_verbs_finds_exactly_the_thirteen_landed_verbs() -> None:
+    """`compress`/`repair`/`linearize` (PDF-12) join `text`/`tables` (PDF-11),
+    `compose`/`create` (PDF-10), `rasterize` (PDF-09), `merge`/`split`
+    (PDF-07) and the three PDF-06-landing verbs -- thirteen total. Renamed
+    and extended rather than deleted, for the fourth time and for the same
+    reason: this pin fails BY DESIGN the moment a verb registers, which is
+    the tripwire working, not a defect."""
     verbs = discover_verbs()
     names = {verb.name for verb in verbs}
     assert names == {
@@ -40,6 +41,9 @@ def test_discover_verbs_finds_exactly_the_ten_landed_verbs() -> None:
         "create",
         "text",
         "tables",
+        "compress",
+        "repair",
+        "linearize",
     }
 
 
@@ -68,8 +72,22 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
     # PDF-11: `text`/`tables` are `--pages` verbs (PLAN.md §4.1) and, with
     # `rasterize`, are the product's set-semantics verbs (§4.3) -- so the
     # page-addressing set grows and nothing in this pin is removed.
-    expected_page_addressing = {"rasterize", "text", "tables"}
-    expected_not = {"version", "doctor", "info", "merge", "split", "compose", "create"}
+    # PDF-12: only `compress` is page-addressing -- `PLAN.md` §4.1 marks it
+    # "(image pass)" (D-12.2's `--pages` scopes the image pass only);
+    # `repair`/`linearize` are "no" (D-12.4/D-12.6), so both join
+    # `expected_not` instead.
+    expected_page_addressing = {"rasterize", "text", "tables", "compress"}
+    expected_not = {
+        "version",
+        "doctor",
+        "info",
+        "merge",
+        "split",
+        "compose",
+        "create",
+        "repair",
+        "linearize",
+    }
     # PDF-10 extends `expected_not`: neither `compose` nor `create` is page
     # addressing (`PLAN.md` §4.1 -- both "no"), so the set grows and nothing in
     # this pin is removed.
@@ -104,7 +122,21 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
     # mutating -- `cmd_text -> ops.textract -> safety.atomic` and `cmd_tables ->
     # ops.textract -> safety.atomic` are two hops each, so `_MAX_IMPORT_HOPS`
     # was not raised for either (B-031).
-    expected_mutating = {"merge", "split", "rasterize", "compose", "create", "text", "tables"}
+    # PDF-12: `compress`/`repair`/`linearize` each reach `AtomicWriter` via
+    # `cmd_optimize -> ops.optimize -> safety.atomic` -- two hops each, so
+    # `_MAX_IMPORT_HOPS` was not raised for any of the three.
+    expected_mutating = {
+        "merge",
+        "split",
+        "rasterize",
+        "compose",
+        "create",
+        "text",
+        "tables",
+        "compress",
+        "repair",
+        "linearize",
+    }
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():
         if verb.name in expected_mutating:

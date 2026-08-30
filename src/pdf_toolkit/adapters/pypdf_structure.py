@@ -9,21 +9,34 @@ Every pypdf import in this file is **function-local**, so importing this module
 costs nothing and ``doctor`` can load all eight adapters inside the startup
 budget. That is a rule, not an optimisation: ``PLAN.md`` §12 R-13 is asserted by
 a test that fails if importing ``cli.main`` leaves an engine in ``sys.modules``.
+
+**PDF-12.** This adapter never performs `compress`/`repair`/`linearize` --
+those are pikepdf's `"object-streams"`/`"repair"`/`"linearize"` capabilities
+-- so the three methods below are **explicit refusals** (exit 3, naming
+pikepdf), never a silent fallback (`PLAN.md` §5.5). What this adapter DOES
+own is the `--images downsample|recompress` pre-pass, over its own
+`"image-pass"` capability: Pillow resamples in-scope images and
+`page.images[i].replace(...)` re-embeds them, exactly the §7.1 mechanism the
+plan names for `compress`.
 """
 
 from __future__ import annotations
 
+import io
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, BinaryIO, Final
 
 from pdf_toolkit.adapters import AdapterProbe, package_probe
-from pdf_toolkit.errors import AuthError, FailureError, NoInputError, UsageError
+from pdf_toolkit.errors import AuthError, EngineMissingError, FailureError, NoInputError, UsageError
 from pdf_toolkit.models import DocumentInfo, PageInfo
 from pdf_toolkit.output.logging import get_logger
+from pdf_toolkit.ports import BROKEN_INSTALL_HINT
+from pdf_toolkit.ports.structure import CompressOutcome, ImagePassOutcome, RepairOutcome
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from pypdf import PdfReader
+    from pypdf._page import ImageFile
 
 __all__ = ["ADAPTER", "PypdfOpenDocument", "PypdfStructureAdapter", "PypdfStructureWriter"]
 
@@ -34,7 +47,20 @@ _MODULE: Final[str] = "pypdf"
 #: What this adapter claims it can do. ``ports.require(..., capability=...)``
 #: selects on these tokens, so they are a contract between adapters and the
 #: registry rather than documentation.
-_CAPABILITIES: Final[frozenset[str]] = frozenset({"read", "metadata", "pages"})
+#: `"image-pass"` (PDF-12) is `compress --images downsample|recompress`'s own
+#: capability -- pypdf/Pillow work, never pikepdf's.
+_CAPABILITIES: Final[frozenset[str]] = frozenset({"read", "metadata", "pages", "image-pass"})
+
+#: PDF-12's optimize operations this adapter explicitly refuses. Named once so
+#: the three refusal methods below stay identical in shape.
+_OPTIMIZE_HINT: Final[str] = (
+    f"install pikepdf. Install it with: {BROKEN_INSTALL_HINT}. "
+    "Run 'pdftoolkit doctor' to see which engines resolved."
+)
+
+#: Filters that mean "converting this to JPEG would lose information" --
+#: skipped, counted, and the count is reported (D-12.2's skip rule).
+_UNENCODABLE_FILTERS: Final[frozenset[str]] = frozenset({"/CCITTFaxDecode", "/JBIG2Decode"})
 
 #: The ONE encryption-algorithm map, keyed by ``(/V, /CFM, key-length-in-bits)``
 #: from the standard security handler's encryption dictionary. PDF-13 extends it
@@ -313,6 +339,92 @@ class PypdfStructureAdapter:
         """D10's write half — see :class:`PypdfStructureWriter`."""
         return PypdfStructureWriter()
 
+    def compress(self, data: bytes) -> CompressOutcome:
+        """PDF-12 explicit refusal (D-12.1) — this adapter never performs the
+        `"object-streams"` structural pass; pikepdf does. Silent fallback to a
+        different engine is forbidden by `PLAN.md` §5.5."""
+        raise EngineMissingError(
+            f"compress needs pikepdf's object-streams capability; {_OPTIMIZE_HINT}"
+        )
+
+    def repair(self, data: bytes) -> RepairOutcome:
+        """PDF-12 explicit refusal (D-12.1) — pypdf has no recovery parser."""
+        raise EngineMissingError(f"repair needs pikepdf's recovery parser; {_OPTIMIZE_HINT}")
+
+    def linearize(self, data: bytes) -> bytes:
+        """PDF-12 explicit refusal (D-12.1) — pypdf cannot linearize."""
+        raise EngineMissingError(
+            f"linearize needs pikepdf's linearization support; {_OPTIMIZE_HINT}"
+        )
+
+    def downsample_images(
+        self,
+        data: bytes,
+        *,
+        mode: str,
+        pages: frozenset[int] | None,
+        dpi: float,
+        quality: int,
+    ) -> ImagePassOutcome:
+        """The `"image-pass"` capability (D-12.2) — `compress --images
+        downsample|recompress`'s own pre-pass, over `page.images[i].replace(...)`.
+
+        ``downsample``: for each in-scope image whose pixel width exceeds
+        ``dpi x page_width_inches`` (the PAGE box, never the placement rect
+        -- D-12.2's stated, conservative limitation), resample with
+        `Image.LANCZOS` to that width, preserving aspect ratio, and
+        re-embed. An image at or under the threshold is left untouched.
+
+        ``recompress``: every in-scope image is re-embedded at ``quality``,
+        pixel dimensions unchanged.
+
+        Images that cannot be re-encoded as JPEG without losing information
+        -- an alpha channel, bilevel, `CCITTFaxDecode` or `JBIG2Decode` --
+        are skipped, counted, and never touched.
+        """
+        from PIL import Image
+        from pypdf import PdfReader, PdfWriter
+
+        reader = PdfReader(io.BytesIO(data))
+        writer = PdfWriter()
+        writer.append(reader)
+
+        transformed = 0
+        skipped = 0
+        for page_number, page in enumerate(writer.pages, start=1):
+            if pages is not None and page_number not in pages:
+                continue
+            page_width_in = float(page.mediabox.width) / 72.0
+            threshold_px = dpi * page_width_in
+            for image_file in list(page.images):
+                if _should_skip_image(image_file):
+                    skipped += 1
+                    continue
+                pil_image = image_file.image
+                if (
+                    pil_image is None
+                ):  # pragma: no cover - `_should_skip_image` already refused this
+                    continue
+                if mode == "recompress":
+                    image_file.replace(pil_image, quality=quality)
+                    transformed += 1
+                    continue
+                # mode == "downsample"
+                width, height = pil_image.size
+                if width <= threshold_px:
+                    continue
+                new_width = max(1, int(threshold_px))
+                new_height = max(1, round(height * new_width / width))
+                resized = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                image_file.replace(resized, quality=quality)
+                transformed += 1
+
+        out_buffer = io.BytesIO()
+        writer.write(out_buffer)
+        return ImagePassOutcome(
+            output=out_buffer.getvalue(), images_transformed=transformed, images_skipped=skipped
+        )
+
 
 class PypdfOpenDocument:
     """D10 — one already-open document: page count, top-level outline.
@@ -461,6 +573,39 @@ def _xmp(reader: PdfReader) -> str | None:
         return None
     data = raw.get_data()
     return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
+
+
+def _should_skip_image(image_file: ImageFile) -> bool:
+    """D-12.2's skip rule: an alpha channel, bilevel, or a filter chain that
+    is not decode-safe to re-encode as JPEG without losing information.
+
+    Checked from the image's own XObject filters, never guessed from the
+    file extension or the container -- the same "sniff the object, not the
+    name" discipline `compose`'s own eligibility table already applies.
+    """
+    pil_image = image_file.image
+    if pil_image is None:
+        return True
+    if pil_image.mode in ("RGBA", "LA", "PA") or "transparency" in pil_image.info:
+        return True
+    if pil_image.mode == "1":
+        return True
+    reference = image_file.indirect_reference
+    if reference is None:  # pragma: no cover - never inline on a PdfWriter's own page
+        return True
+    xobject = reference.get_object()
+    return any(name in _UNENCODABLE_FILTERS for name in _filter_names(xobject))
+
+
+def _filter_names(xobject: Any) -> tuple[str, ...]:
+    """`/Filter` normalized to a tuple of names -- a single `Name` or an
+    `ArrayObject` of them (pypdf's own generic types, not pikepdf's)."""
+    filt = xobject.get("/Filter")
+    if filt is None:
+        return ()
+    if isinstance(filt, list):
+        return tuple(str(entry) for entry in filt)
+    return (str(filt),)
 
 
 #: The module-level singleton the port resolves to. A singleton rather than the
