@@ -585,8 +585,16 @@ def test_ac7_the_password_is_never_in_argv_and_the_env_channel_is_documented_not
     )
     try:
         proc_dir = Path("/proc") / str(process.pid)
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + 60.0
         cmdline = b""
+        environ = b""
+        # POLL UNTIL POPULATED, not until merely readable. The kernel exposes
+        # /proc/<pid> the moment the child is forked, BEFORE `execve` has
+        # installed the new argv and environment, so a read that succeeds can
+        # still return b"" -- and an empty buffer trivially "does not contain
+        # the password", which is a green assertion proving nothing. CI caught
+        # this on `test (3.11, ubuntu-latest)`: it is a genuine race and the
+        # fix is to wait for the argv we passed to be visible.
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
@@ -595,11 +603,20 @@ def test_ac7_the_password_is_never_in_argv_and_the_env_channel_is_documented_not
                 cmdline = (proc_dir / "cmdline").read_bytes()
                 environ = (proc_dir / "environ").read_bytes()
             except OSError:  # pragma: no cover - the process is alive; retry
-                time.sleep(0.05)
-                continue
-            break
+                cmdline = b""
+                environ = b""
+            if b"--owner-password-file" in cmdline and environ:
+                break
+            time.sleep(0.05)
         else:  # pragma: no cover - only on a pathologically slow host
-            pytest.fail("could not read /proc for the blocked process")
+            pytest.fail(
+                "/proc never showed the child's own argv within 60s; the read below "
+                "would have been against an empty buffer"
+            )
+        # Still blocked at the moment the buffers above were read -- which is
+        # what makes this a measurement of a LIVE process rather than of a
+        # corpse's leftovers.
+        assert process.poll() is None
 
         assert cmdline, "read an empty /proc/<pid>/cmdline"
         assert PW_SENTINEL.encode() not in cmdline, "the password reached argv"

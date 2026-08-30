@@ -19,6 +19,22 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-13] fix: wait for /proc to show the child's argv before reading it — 2026-08-30
+- The AC7 argv proof read `/proc/<pid>/cmdline` as soon as the read
+  succeeded. The kernel exposes `/proc/<pid>` the moment the child is
+  forked, **before** `execve` has installed the new argv, so the read could
+  return an empty buffer — and an empty buffer trivially "does not contain
+  the password", which is a green assertion proving nothing. Caught by CI on
+  `test (3.11, ubuntu-latest)` (run `33315489842`, 17 jobs, that one job
+  only); the local gate and every macos-14 leg had passed.
+- The poll now waits for the argv this test itself passed to be visible, and
+  re-asserts the process is still blocked at the moment the buffers were
+  read, so the measurement is of a live process rather than of a corpse's
+  leftovers. Verified 20 consecutive runs under CPU load, zero failures.
+- A forward-fix commit rather than an amend: the operator's instruction is
+  never to rewrite history (`decision.md` §8 X-118), and `ff512ce` is already
+  on `origin/main`.
+
 ## [PDF-13] encrypt / decrypt / permissions + password handling — 2026-08-30
 - Added `encrypt` (AES-256 / revision 6 by default; RC4-128 only behind
   `--legacy`, which warns that it is broken and that metadata is left
