@@ -63,6 +63,19 @@ _OPTIMIZE_HINT: Final[str] = (
     "Run 'pdftoolkit doctor' to see which engines resolved."
 )
 
+#: [B-078] `PypdfOpenDocument.__enter__`'s own `AuthError` hint. Same shape and
+#: same actionable text as `pikepdf_structure.py`'s own `_PASSWORD_HINT`
+#: (`f"a password is required to {verb} this document; {{hint}}"`), duplicated
+#: here rather than imported so this adapter never reaches into its sibling's
+#: module for a private symbol. Pinned by `test_ac13_encrypted_input_is_exit_6
+#: _naming_decrypt`'s `match="decrypt"` precedent -- naming the *verb* that
+#: resolves it (`pdftoolkit decrypt`), not just a flag this adapter's own
+#: `open_document` does not accept.
+_PASSWORD_HINT: Final[str] = (
+    "supply one with --password-file PATH (or --password-file - to read one line from stdin), "
+    "or run 'pdftoolkit decrypt' first"
+)
+
 #: Filters that mean "converting this to JPEG would lose information" --
 #: skipped, counted, and the count is reported (D-12.2's skip rule).
 _UNENCODABLE_FILTERS: Final[frozenset[str]] = frozenset({"/CCITTFaxDecode", "/JBIG2Decode"})
@@ -437,7 +450,7 @@ class PypdfOpenDocument:
 
     def __enter__(self) -> PypdfOpenDocument:
         from pypdf import PdfReader
-        from pypdf.errors import PdfReadError
+        from pypdf.errors import FileNotDecryptedError, PdfReadError
 
         if not self._path.exists():
             raise NoInputError("no such file", path=str(self._path))
@@ -446,13 +459,31 @@ class PypdfOpenDocument:
 
         handle = open(self._path, "rb")  # closed in __exit__, kept open for lazy page reads
         try:
-            self._reader = PdfReader(handle)
+            reader = PdfReader(handle)
+            # [B-078] pypdf raises FileNotDecryptedError LAZILY -- not at the
+            # PdfReader() construction above, but on the first `.pages` access,
+            # which every caller of this class reaches only through `page_count`
+            # or `top_level_outline`, both outside the try this method used to
+            # have. Forcing that first access HERE, inside the one guard this
+            # class already has, is what makes AuthError fire in exactly ONE
+            # place for every consumer (`merge`, `split`, `extract`, `delete`,
+            # `rotate`, `reorder`, `rasterize`, `text`, `tables`, `compress
+            # --pages`) instead of leaking an unhandled traceback past whichever
+            # property happened to touch `.pages` first.
+            len(reader.pages)
+        except FileNotDecryptedError as error:
+            handle.close()
+            raise AuthError(
+                f"a password is required to open this document; {_PASSWORD_HINT}",
+                path=str(self._path),
+            ) from error
         except PdfReadError as error:
             handle.close()
             raise FailureError(f"could not read PDF: {error}", path=str(self._path)) from error
         except (OSError, ValueError) as error:
             handle.close()
             raise FailureError(f"could not read PDF: {error}", path=str(self._path)) from error
+        self._reader = reader
         self._handle = handle
         return self
 

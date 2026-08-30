@@ -421,36 +421,6 @@ def test_ac22_every_output_is_a_readable_document_with_the_expected_page_count(
 # --------------------------------------------------------------------------- #
 
 
-# NOTE ON THE WORDING OF THE `reason` BELOW -- it is a CI constraint, not style.
-# `scripts/assert_skips.py` classifies a skip as "engine-gated" by regex over its
-# REASON (`engine|tesseract|soffice|libreoffice`, case-insensitive), and pytest
-# records an xfail as `<skipped type="pytest.xfail">` in the JUnit report the
-# `engines-present` job feeds to that script with `--expect-zero`. A reason
-# naming the structure port by its class name therefore fails that job, even
-# though nothing here is engine-gated at all. The reason below is deliberately
-# written without any of those four words; the port is referred to by its module
-# and method instead. Do not reintroduce the class name here without also
-# teaching `assert_skips.py` to exclude `type="pytest.xfail"` -- which is the
-# real fix, and is reported as a finding rather than made here.
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "PDF-08 BLOCKER, reported not repaired. `ports/structure.py`'s own Protocol "
-        "docstring for `open_document` documents `AuthError: Exit 6` for an encrypted "
-        "input, and `PypdfOpenDocument.__enter__` does not implement it: pypdf raises "
-        "`FileNotDecryptedError` LAZILY, on `reader.pages` inside `page_count`, which "
-        "is outside that method's `except (PdfReadError, OSError, ValueError)` block. "
-        "The result is an unhandled traceback and exit 1. This is PRE-EXISTING and NOT "
-        "introduced here -- `merge` and `split` (PDF-07, landed at 743853f) reproduce "
-        "it identically at 33bf481. PDF-08 does not repair it: password handling is "
-        "this spec's Scope Out (PDF-13 owns the §5.7 contract), and the fix belongs to "
-        "`PypdfOpenDocument`, a class X-127 assigned to neither PDF-08 nor PDF-14, "
-        "whose repair would change two other verbs' behaviour mid-wave. The assertion "
-        "below is the CORRECT one and is left intact: strict xfail means the day the "
-        "shared fix lands this turns red as an XPASS and forces its own marker to be "
-        "removed, rather than pinning today's defect (B-073)."
-    ),
-)
 def test_ac23_an_encrypted_input_surfaces_exit_6_without_a_traceback(
     corpus, tmp_path: Path
 ) -> None:

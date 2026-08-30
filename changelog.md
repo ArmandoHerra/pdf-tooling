@@ -19,6 +19,43 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [B-078] fix: `open_document` now raises `AuthError` on a user-password-protected input — 2026-08-30
+- `StructureEngine.open_document`'s own Protocol docstring documented `AuthError:
+  Exit 6` for an encrypted input; `PypdfOpenDocument.__enter__` never implemented
+  it. pypdf raises `FileNotDecryptedError` LAZILY — not at `PdfReader()`
+  construction, but on the first `.pages` access, which sat outside the
+  construction-only `try`/`except (PdfReadError, OSError, ValueError)` block. A
+  user-password-protected input therefore surfaced an unhandled traceback and
+  exit 1 through every consumer of `open_document` — `merge`, `split`,
+  `extract`, `delete`, `rotate`, `reorder`, `rasterize`, `text`, `tables`, and
+  `compress --pages`. Pre-existing at `33bf481`, not a regression; left
+  unrepaired by PDF-08 on purpose (X-127: `PypdfOpenDocument` belongs to
+  neither PDF-08 nor PDF-14) and pinned by a strict xfail
+  (`test_ac23_an_encrypted_input_surfaces_exit_6_without_a_traceback`) until now.
+- Fixed in the ONE place every consumer shares: `__enter__` now forces the
+  first `.pages` access inside its own guard, immediately after `PdfReader()`
+  succeeds, and a new `except FileNotDecryptedError` (ahead of the existing,
+  now-widened `except PdfReadError`) raises `AuthError` instead of letting the
+  exception escape. `page_count`/`top_level_outline` are unchanged — every
+  consumer above is fixed by one edit rather than six.
+- The message follows the house `_PASSWORD_HINT`/"decrypt" precedent
+  (`adapters/pikepdf_structure.py`'s `compress`/`repair`/`linearize` refusals),
+  duplicated locally as this adapter's own `_PASSWORD_HINT` rather than
+  imported across the sibling adapter boundary: `"a password is required to
+  open this document; supply one with --password-file PATH ..., or run
+  'pdftoolkit decrypt' first"`. `path=` names the document, never the
+  password; `redacted` is not set (B-068's second-order hazard: a redacted
+  path hides a useful, non-secret value).
+- `StructureEngine` and `PypdfStructureAdapter` were not touched (PDF-14's
+  X-127 reserved anchors). No new runtime dependency; no forbidden-license
+  name reachable.
+- The `test_ac23_...` strict xfail and its dead `NOTE ON THE WORDING` comment
+  are removed from `tests/integration/test_pages_cli.py`; the assertion now
+  stands as a normal passing test, verified as a real subprocess for `merge`,
+  `split`, `extract`, `delete`, `rotate`, `reorder` against the
+  `encrypted_aes256` corpus fixture (a genuine user password, per
+  `tests/corpus.py`) before and after the fix.
+
 ## [PDF-08] fix: two CI-only defects the local gate could not see — 2026-08-30
 - `Path.stem` is not stable across supported Pythons, and AC37's containment
   test depended on it. **CPython 3.14 changed `PurePath.suffix`/`stem` so a
