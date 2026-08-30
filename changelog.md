@@ -19,6 +19,10 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [B-088] fix: restore the changelog entry silently overwritten at `33bf481` — 2026-08-30
+- `33bf481` (`[B-068] fix: --password-file's refusal echoed the given value...`) replaced the entry `73f6722` had written at the anchor instead of prepending above it, silently dropping the heading `## [PDF-13] fix: wait for /proc to show the child's argv before reading it — 2026-08-30` from the changelog (its body bullets survived verbatim, incidentally duplicated inside the `[B-068]` entry, but the heading itself — and the entry's existence as its own record — was gone). Recovered verbatim from `git show 73f6722:changelog.md` and re-inserted in chronological order, directly above the `[B-068]` entry that displaced it (73f6722 is 33bf481's own git parent).
+- A forward-fix, not a history rewrite: the entry above and every trailer already on `origin/main` are untouched; this entry is prepended above them, per the file's own rule 1.
+
 ## [PDF-14] fix: add the missing `meta get` golden (AC18/Scope > Tests) — 2026-08-30
 - The initial landing implemented and tested every acceptance criterion but
   never added the `tests/golden/meta_get.json` golden file the spec's own
@@ -220,6 +224,22 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
   discovering it on the real run. Purity is asserted with both halves — the
   tree is unchanged AND the run produced a non-trivial plan — because a dry run
   that does nothing is trivially pure.
+
+## [PDF-13] fix: wait for /proc to show the child's argv before reading it — 2026-08-30
+- The AC7 argv proof read `/proc/<pid>/cmdline` as soon as the read
+  succeeded. The kernel exposes `/proc/<pid>` the moment the child is
+  forked, **before** `execve` has installed the new argv, so the read could
+  return an empty buffer — and an empty buffer trivially "does not contain
+  the password", which is a green assertion proving nothing. Caught by CI on
+  `test (3.11, ubuntu-latest)` (run `33315489842`, 17 jobs, that one job
+  only); the local gate and every macos-14 leg had passed.
+- The poll now waits for the argv this test itself passed to be visible, and
+  re-asserts the process is still blocked at the moment the buffers were
+  read, so the measurement is of a live process rather than of a corpse's
+  leftovers. Verified 20 consecutive runs under CPU load, zero failures.
+- A forward-fix commit rather than an amend: the operator's instruction is
+  never to rewrite history (`decision.md` §8 X-118), and `ff512ce` is already
+  on `origin/main`.
 
 ## [B-068] fix: `--password-file`'s refusal echoed the given value on stdout/stderr — 2026-08-30
 - `--password-file`'s shape check (`cli/common.py`, the shared option layer
