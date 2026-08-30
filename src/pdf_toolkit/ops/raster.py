@@ -41,8 +41,13 @@ direction the prose assumed.
 ``ops/raster.py`` never calls ``open(..., "w")``, ``Path.write_bytes``,
 ``os.replace`` or creates a directory of its own — every byte reaches disk
 through ``safety.AtomicWriter``, and ``--out-dir`` is created only via
-``safety.atomic.ensure_out_dir`` (Design §D12). No ``ops/`` allowlist entry is
-needed in ``tests/test_import_boundaries.py``.
+``safety.atomic.plan_output_set`` (Design §D12, extended B-054). No ``ops/``
+allowlist entry is needed in ``tests/test_import_boundaries.py``.
+
+**The filesystem tier runs in both modes (B-054, extending X-67).**
+``plan_output_set`` is called unconditionally, so a ``--dry-run`` over an
+occupied target or an unwritable ``--out-dir`` predicts the same exit code a
+real run produces, rather than entering cleanly and being contradicted by it.
 """
 
 from __future__ import annotations
@@ -59,13 +64,9 @@ from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports import BROKEN_INSTALL_HINT
 from pdf_toolkit.ports.raster import require_raster
 from pdf_toolkit.ports.structure import require_structure
-from pdf_toolkit.safety.atomic import AtomicWriter, ensure_out_dir
+from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import (
-    check_output_collisions,
-    ensure_destination_writable,
-    ensure_no_clobber,
-)
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -331,17 +332,39 @@ def rasterize_document(
 
     source_sizes = {source: source.stat().st_size for source in sources}
 
+    # B-054: the filesystem tier (--out-dir creation, writability, every
+    # target's no-clobber) runs ONCE, unconditionally, in BOTH modes -- a real
+    # run raises exactly as before (see the block below); a dry run captures
+    # the first refusal instead (X-67, extended to a multi-target --out-dir
+    # run).
+    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
+
     if policy.dry_run:
+        # A run-level refusal (an unwritable --out-dir) is not attributable
+        # to one page, and this is not a loss of precision: rasterize's own
+        # plan-then-write design (D4) means a planning failure writes
+        # NOTHING -- not one page -- so applying the same prediction to
+        # every item states exactly what the real run would have done,
+        # mirroring merge's/compose's own single-target convention of one
+        # refusal covering every item in the run.
+        detail: dict[str, object] = {"would_exit": plan.would_exit}
+        if plan.refusal is not None:
+            detail["would_refuse"] = plan.would_refuse
         items = tuple(
             ItemResult(
                 input=str(source),
                 output=str(target),
-                ok=True,
-                exit_code=0,
-                message=_dry_run_message(page_number, fmt, dpi, width_px),
+                ok=plan.refusal is None,
+                exit_code=plan.would_exit,
+                message=(
+                    _dry_run_message(page_number, fmt, dpi, width_px)
+                    if plan.refusal is None
+                    else plan.refusal.message
+                ),
                 bytes_before=source_sizes[source],
                 bytes_after=None,
                 duration_ms=0,
+                detail=detail,
             )
             for source, page_number, target in rendered
         )
@@ -354,14 +377,12 @@ def rasterize_document(
             duration_ms=0,
         )
 
-    # Real run: --out-dir is created (chokepoint-confined, Design §D12), then
-    # every target is pre-flight no-clobber/writability checked BEFORE the
-    # first page is rendered, so a planning failure writes nothing.
-    ensure_out_dir(out_dir, policy=policy)
-    ensure_destination_writable(out_dir)
-    for target in targets:
-        ensure_no_clobber(target, force=policy.force)
-
+    # Real run: plan_output_set already created --out-dir (chokepoint-confined,
+    # Design §D12) and pre-flight checked every target for no-clobber/
+    # writability -- BEFORE the first page is rendered, so a planning failure
+    # writes nothing. It raised already if refused (the
+    # `except PdfToolkitError: ... raise` inside plan_output_set, since
+    # policy.dry_run is False here), so plan.refusal is always None below.
     work: list[_WorkItem] = [
         (slot, str(source), page_number, str(target), dpi, width_px)
         for slot, (source, page_number, target) in enumerate(rendered)

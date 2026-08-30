@@ -1,6 +1,6 @@
 """The per-verb CLI contract matrix — `PLAN.md` §10.
 
-Every check (`C1`…`C13`) is parameterized over `tests/registry.py`'s
+Every check (`C1`…`C15`) is parameterized over `tests/registry.py`'s
 `discover_verbs()`: **no skip list, no filter, no hard-coded verb name**
 (AC5). A verb registered on the live Typer tree is covered here the next time
 the suite runs, with no action from its author beyond registering an
@@ -26,6 +26,8 @@ root-level tests below, which are never empty.
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -45,13 +47,23 @@ REGISTERED = tuple(verb for verb in VERBS if verb.name in INVOCATIONS)
 DESTRUCTIVE = tuple(
     verb for verb in VERBS if verb.name in INVOCATIONS and INVOCATIONS[verb.name].destructive
 )
+#: B-054, C15 — "producing" widened from C11's `--output`-only lens to every
+#: destination-naming flag a mutating, registered verb declares consuming
+#: (OR-3's own `consumes`, `decision.md` §0.5). ONE shared derivation; C11's
+#: own narrower set below is read off it rather than re-derived, so there is
+#: one definition of "producing" in this module, not two.
+_DESTINATION_FLAGS = ("--output", "--out-dir")
+PRODUCING = tuple(
+    verb
+    for verb in MUTATING
+    if verb.name in INVOCATIONS and any(flag in verb.consumes for flag in _DESTINATION_FLAGS)
+)
 #: AC29 — C11 re-parameterized off the §D12 declaration itself rather than a
 #: hard-coded `-O`: a mutating verb only earns a no-clobber-over-`-O` case
 #: when it actually *declares* `--output` (E13 — driving `-O` at `split`,
-#: which does not consume it, is exit 2, not 5).
-OUTPUT_CONSUMING_MUTATING = tuple(
-    verb for verb in MUTATING if verb.name in INVOCATIONS and "--output" in verb.consumes
-)
+#: which does not consume it, is exit 2, not 5). Read off PRODUCING (a
+#: superset by construction) rather than MUTATING directly.
+OUTPUT_CONSUMING_MUTATING = tuple(verb for verb in PRODUCING if "--output" in verb.consumes)
 
 
 def _ids(verbs: tuple) -> list[str]:
@@ -219,8 +231,6 @@ def test_c11_no_clobber_exits_5(verb, corpus, tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("verb", REGISTERED, ids=_ids(REGISTERED))
 def test_c12_json_on_a_pipe_by_default(verb, corpus, tmp_path: Path) -> None:
-    import json
-
     invocation = INVOCATIONS[verb.name]
     args = invocation.build(corpus, tmp_path)
     result = run_cli(verb.name, *args)
@@ -322,6 +332,109 @@ def test_c14_output_flag_matrix(verb, flag: str, corpus, tmp_path: Path) -> None
             f"{verb.name} refused {flag!r} (exit 2) but still wrote something: "
             f"{sorted(str(p) for p in after - before)}"
         )
+
+
+# --------------------------------------------------------------------------- #
+# C15 -- B-054: for every PRODUCING verb, `--dry-run` predicts the SAME exit
+# code an occupied or unwritable destination produces for real, and leaves
+# the tree byte-identical. Target discovery is GENERIC: the FIRST planned
+# output path (`items[0].output`) is read from the verb's own `--dry-run`
+# JSON plan rather than a per-verb table, so this works identically for `-O`
+# verbs and `--out-dir` verbs, on both pre-fix and post-fix code -- which is
+# what makes the negative control possible -- and a future producing verb is
+# covered the moment it registers an INVOCATIONS row (already forced by
+# `test_every_verb_is_registered`), with zero action from its author.
+# --------------------------------------------------------------------------- #
+
+
+def _discover_target(verb, args: list[str], tmp_path: Path) -> Path:
+    """The first planned output path for *verb*'s registered invocation,
+    read from the product's own ``--dry-run -o json`` plan.
+
+    Anti-lapse (mirrors C14's own `pytest.fail`, never a silent skip): a
+    producing verb whose plan carries no discoverable target -- a future verb
+    that writes to stdout, say -- fails here BY NAME rather than quietly
+    dropping out of C15's coverage.
+    """
+    result = run_cli(verb.name, "--dry-run", *args, "-o", "json", cwd=tmp_path)
+    if result.returncode != 0:
+        pytest.fail(
+            f"{verb.name}: registered invocation --dry-run exited "
+            f"{result.returncode}, not 0 -- C15 cannot discover a target from "
+            f"a plan that never completed: {result.stdout}{result.stderr}"
+        )
+    payload = json.loads(result.stdout)
+    items = payload.get("items") or []
+    output = items[0].get("output") if items else None
+    if not output:
+        pytest.fail(
+            f"{verb.name}: --dry-run produced no discoverable output target "
+            "(items[0].output) -- C15 needs one to seed an occupied/unwritable "
+            "destination arm; a verb whose destination cannot be discovered "
+            "this way needs its own arm added here, by name"
+        )
+    return Path(output)
+
+
+@pytest.mark.parametrize("verb", PRODUCING, ids=_ids(PRODUCING))
+def test_c15_dry_run_predicts_an_occupied_target_refusal(verb, corpus, tmp_path: Path) -> None:
+    """B-054: dry exit code == real exit code over an occupied target, and
+    the dry run leaves the seeded bytes untouched."""
+    invocation = INVOCATIONS[verb.name]
+    args = invocation.build(corpus, tmp_path)
+    target = _discover_target(verb, args, tmp_path)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    seed = b"C15-SEEDED-BYTES"
+    target.write_bytes(seed)
+
+    env, roots = redirected_environment(tmp_path)
+    before = snapshot(*roots)
+    dry = run_cli(verb.name, "--dry-run", *args, env=env, cwd=tmp_path)
+    assert_unchanged(before, snapshot(*roots))
+    assert target.read_bytes() == seed, f"{verb.name}: --dry-run mutated the occupied target"
+
+    real = run_cli(verb.name, *args, env=env, cwd=tmp_path)
+
+    assert dry.returncode == real.returncode == 5, (
+        f"{verb.name}: dry={dry.returncode} real={real.returncode} (expected both 5) -- "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+
+
+@pytest.mark.parametrize("verb", PRODUCING, ids=_ids(PRODUCING))
+def test_c15_dry_run_predicts_an_unwritable_destination_refusal(
+    verb, corpus, tmp_path: Path
+) -> None:
+    """B-054's other arm: dry exit code == real exit code == 1 when the
+    destination directory exists but cannot accept a write."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory mode bits; this arm cannot fire as root")
+
+    invocation = INVOCATIONS[verb.name]
+    args = invocation.build(corpus, tmp_path)
+    target = _discover_target(verb, args, tmp_path)
+    destination_dir = target.parent
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    # $TMPDIR/$HOME must exist BEFORE the lock -- redirected_environment's own
+    # mkdir would otherwise fail against the very directory this arm locks.
+    env, roots = redirected_environment(tmp_path)
+
+    destination_dir.chmod(0o500)
+    try:
+        before = snapshot(*roots)
+        dry = run_cli(verb.name, "--dry-run", *args, env=env, cwd=tmp_path)
+        assert_unchanged(before, snapshot(*roots))
+
+        real = run_cli(verb.name, *args, env=env, cwd=tmp_path)
+    finally:
+        destination_dir.chmod(0o700)
+
+    assert dry.returncode == real.returncode == 1, (
+        f"{verb.name}: dry={dry.returncode} real={real.returncode} (expected both 1) -- "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
 
 
 # --------------------------------------------------------------------------- #

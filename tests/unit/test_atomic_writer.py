@@ -41,6 +41,7 @@ import pytest
 from pdf_toolkit import errors
 from pdf_toolkit.cli.exit_codes import FAILURE, OK, REFUSED, USAGE
 from pdf_toolkit.safety import TEMP_PREFIX, AtomicWriter, SafetyPolicy
+from pdf_toolkit.safety.atomic import plan_output_set
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -563,3 +564,129 @@ def test_the_predicted_status_is_absent_from_a_real_run_payload(tmp_path: Path) 
     payload = json.loads(result.stdout)
     assert payload["written"] is True
     assert "would_exit" not in payload
+
+
+# --------------------------------------------------------------------------- #
+# B-054 -- plan_output_set: the X-67 filesystem tier, extended to a
+# multi-target --out-dir run. `split`/`rasterize` never called AtomicWriter
+# during planning, so `--dry-run` over an occupied `--out-dir` target (or an
+# unwritable one) entered cleanly while the real run refused with exit 5/1 --
+# the same preview-lies defect class X-67 fixed once, recurring on a verb
+# shape a single-destination `AtomicWriter` cannot see. Every arm below
+# compares the PREDICTION against a real run's OUTCOME, mirroring the
+# discipline of the X-67 section above rather than inventing a second one.
+# --------------------------------------------------------------------------- #
+
+
+def test_plan_output_set_a_clean_plan_predicts_nothing(tmp_path: Path) -> None:
+    """The non-vacuity control: would_exit must not be a constant refusal."""
+    out_dir = tmp_path / "out"
+    targets = [out_dir / "a.pdf", out_dir / "b.pdf"]
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    assert plan.refusal is None
+    assert plan.would_exit == OK
+    assert plan.would_refuse is None
+    assert not out_dir.exists()  # dry run: _ensure_out_dir stays a no-op
+
+
+def test_plan_output_set_predicts_an_occupied_target(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    occupied = out_dir / "b.pdf"
+    occupied.write_bytes(b"already here")
+    targets = [out_dir / "a.pdf", occupied]
+
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    assert isinstance(plan.refusal, errors.TargetExistsError)
+    assert plan.would_exit == REFUSED
+    assert plan.would_refuse == plan.refusal.to_dict()
+
+    # The OUTCOME: a real run over the identical plan raises the SAME class,
+    # same message, and leaves the occupied file untouched.
+    with pytest.raises(errors.TargetExistsError, match="pass --force to overwrite it"):
+        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+    assert occupied.read_bytes() == b"already here"
+
+
+def test_plan_output_set_predicts_an_unwritable_out_dir(tmp_path: Path) -> None:
+    """Exit 1, not 5 -- the filesystem cannot accept the write; nothing declined."""
+    out_dir = tmp_path / "locked"
+    out_dir.mkdir()
+    out_dir.chmod(0o500)
+    try:
+        if os.access(out_dir, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        targets = [out_dir / "a.pdf"]
+        plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+        assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+        assert plan.would_exit == FAILURE
+        assert plan.would_refuse == plan.refusal.to_dict()
+
+        with pytest.raises(errors.DestinationUnwritableError):
+            plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+    finally:
+        out_dir.chmod(0o700)
+
+
+def test_plan_output_set_a_nonexistent_out_dir_is_not_predicted_as_a_refusal(
+    tmp_path: Path,
+) -> None:
+    """Trap 1 (B-054): the real run would CREATE this directory and succeed.
+
+    Under --dry-run, `_ensure_out_dir` is a no-op, so a non-existent `out_dir`
+    stays non-existent -- checking writability on it would raise
+    DestinationUnwritableError for an ordinary, honourable run. The
+    writability tier is skipped entirely when out_dir does not exist, so an
+    otherwise-clean plan predicts nothing.
+    """
+    out_dir = tmp_path / "not-created-yet"
+    targets = [out_dir / "a.pdf"]
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    assert plan.refusal is None
+    assert plan.would_exit == OK
+    assert not out_dir.exists()
+
+
+def test_plan_output_set_a_real_run_creates_the_out_dir_and_predicts_nothing(
+    tmp_path: Path,
+) -> None:
+    """The OUTCOME side of the Trap 1 arm above: the real run's own
+    create-then-succeed path is exactly what the dry run's silence predicted."""
+    out_dir = tmp_path / "created-for-real"
+    targets = [out_dir / "a.pdf"]
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy())
+    assert plan.refusal is None
+    assert out_dir.is_dir()
+
+
+def test_plan_output_set_stops_at_the_first_refusal(tmp_path: Path) -> None:
+    """Two conditions true at once must predict the FIRST one, as ordered.
+
+    The real run checks out_dir writability before any target's no-clobber,
+    so an occupied target inside an unwritable out_dir predicts
+    DestinationUnwritableError and never reaches TargetExistsError -- a dry
+    run that reported the second refusal, or both, would be lying in the
+    other direction (mirroring AtomicWriter._plan's own ordering guarantee).
+    """
+    out_dir = tmp_path / "locked"
+    out_dir.mkdir()
+    occupied = out_dir / "a.pdf"
+    occupied.write_bytes(b"x")
+    out_dir.chmod(0o500)
+    try:
+        if os.access(out_dir, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        plan = plan_output_set([occupied], out_dir=out_dir, policy=make_policy(dry_run=True))
+        assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+    finally:
+        out_dir.chmod(0o700)
+
+
+def test_plan_output_set_a_real_run_over_a_clean_plan_raises_nothing(tmp_path: Path) -> None:
+    """Real-run behaviour is UNCHANGED by B-054: a clean plan just returns."""
+    out_dir = tmp_path / "out"
+    targets = [out_dir / "a.pdf", out_dir / "b.pdf"]
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy())
+    assert plan.refusal is None
+    assert plan.would_exit == OK
+    assert plan.would_refuse is None

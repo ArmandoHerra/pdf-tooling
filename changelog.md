@@ -19,6 +19,28 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [B-054] `--dry-run` predicts the filesystem-tier refusal for `--out-dir` verbs — 2026-08-30
+- Fixed `split`/`rasterize`: `--dry-run` over an occupied `--out-dir` target,
+  or over an unwritable `--out-dir`, now predicts the same exit code the real
+  run produces (5 / 1) with a character-identical `would_refuse` payload,
+  instead of entering cleanly and exiting 0 (QA `b43bb70cc3`).
+- Added `safety/atomic.py::plan_output_set()` — the X-67 filesystem-tier
+  planner, extended from one destination to a multi-target `--out-dir` run,
+  run once, unconditionally, in both modes. `ensure_out_dir` is now private
+  (`_ensure_out_dir`) and `plan_output_set` is its only caller, so a future
+  `--out-dir` verb cannot reach the write chokepoint without also getting the
+  prediction. `split`/`rasterize` each call it once, at the position their
+  own real-run filesystem checks used to occupy.
+- Added contract-harness arm `C15` (`tests/test_cli_contract.py`), driven off
+  a widened structural "producing" derivation (`--output` OR `--out-dir`)
+  that C11's own set is now read off, and generic target discovery via each
+  verb's own `--dry-run -o json` plan rather than a per-verb table — so a
+  future producing verb is covered the day it registers, with zero action
+  from its author.
+- Added focused unit coverage for `plan_output_set` (clean plan, occupied
+  target, unwritable directory, and the non-existent-`--out-dir` case) in
+  `tests/unit/test_atomic_writer.py`.
+
 ## [PDF-10] compose + create — 2026-08-30
 - Added `src/pdf_toolkit/ops/compose.py` (framework-free ops for BOTH verbs) +
   `cli/cmd_compose.py` and `cli/cmd_create.py`. `compose` builds a PDF from

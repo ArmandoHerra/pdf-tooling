@@ -86,6 +86,31 @@ only thing they can move, and the purity comparator excludes it deliberately
 (``PLAN.md`` §D2), so the snapshot assertion stays at zero differences and now
 means something, because the plan actually executes.
 
+Multi-target planning (B-054)
+------------------------------
+:meth:`AtomicWriter._plan` predicts refusals for **one** destination. `split`
+and `rasterize` share **one** ``--out-dir`` across **many** targets, and called
+the read-only directory-tier helpers (``ensure_out_dir``,
+``ensure_destination_writable``, ``ensure_no_clobber``) directly, inside their
+own real-run branch only — a second, uninspected copy of the exact planning
+step X-67 already fixed once, reachable only when ``policy.dry_run`` was
+``False``. A ``--dry-run`` split or rasterize therefore entered cleanly over an
+occupied ``--out-dir`` while the real run refused with exit 5: the same
+preview-lies defect class, recurring on a verb shape ``AtomicWriter`` alone
+cannot see, because its own gate covers one file, not a directory shared by
+many.
+
+:func:`plan_output_set` is the same idea, run once for a whole target *set*:
+create the directory (real run only — :func:`_ensure_out_dir` is already a
+no-op under ``--dry-run``), check it is writable, then check every target for
+no-clobber, in the real run's own order — and under ``--dry-run``, capture the
+first refusal instead of raising it, exactly mirroring ``_plan``'s own
+first-refusal-only rule above. ``ensure_out_dir`` is now private
+(:func:`_ensure_out_dir`) and this function is its **only** caller: a future
+``--out-dir`` verb cannot obtain a created output directory except through the
+planner, so skipping the planner is not a silent diagnostic gap — it is a real
+run that cannot write at all.
+
 Recorded simplification (OR-1)
 ------------------------------
 No-clobber is a check at plan time plus a re-check immediately before
@@ -120,7 +145,8 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import IO, Final
@@ -143,7 +169,7 @@ from pdf_toolkit.safety.paths import (
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.safety.tempnames import TEMP_PREFIX
 
-__all__ = ["AtomicWriter", "DEGRADED_PREFIX", "ensure_out_dir"]
+__all__ = ["AtomicWriter", "DEGRADED_PREFIX", "PlannedOutputs", "plan_output_set"]
 
 #: The one warning class both cross-filesystem conditions are reported under, so
 #: a caller can match on a stable prefix instead of on prose.
@@ -185,7 +211,7 @@ def _digest(path: Path) -> tuple[int, str]:
     return size, hasher.hexdigest()
 
 
-def ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
+def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
     """Create ``--out-dir`` if it does not exist, unless ``--dry-run`` (`PLAN.md` §4.2).
 
     PDF-07 is the first spec to consume this: `split` is the CLI's first verb
@@ -200,10 +226,94 @@ def ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
     A dry run never calls the real ``mkdir`` — the function returns having
     done nothing at all, which is what keeps a non-existent ``--out-dir``
     non-existent under ``--dry-run`` (AC18).
+
+    **Private as of B-054.** :func:`plan_output_set` is this function's only
+    caller: a verb author who reaches past the planner cannot obtain a
+    created output directory at all, which is what makes skipping the
+    planner a real run that cannot write rather than a silent diagnostic gap.
     """
     if policy.dry_run:
         return
     out_dir.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedOutputs:
+    """B-054: the filesystem-tier plan for one multi-target ``--out-dir`` run.
+
+    Mirrors :class:`AtomicWriter`'s own X-67 vocabulary exactly, so a caller
+    comparing a prediction against an outcome is comparing like with like:
+    :attr:`refusal` is the exception a real run *would* have raised (``None``
+    when the plan is clean), :attr:`would_exit` is the status it would have
+    exited with, and :attr:`would_refuse` is the same structured payload the
+    real run's own error prints under ``-o json``.
+    """
+
+    refusal: PdfToolkitError | None
+
+    @property
+    def would_exit(self) -> int:
+        return OK if self.refusal is None else self.refusal.exit_code
+
+    @property
+    def would_refuse(self) -> dict[str, object] | None:
+        return None if self.refusal is None else self.refusal.to_dict()
+
+
+def plan_output_set(
+    targets: Sequence[Path],
+    *,
+    out_dir: Path | None,
+    policy: SafetyPolicy,
+) -> PlannedOutputs:
+    """The filesystem tier for a multi-target ``--out-dir`` run (B-054).
+
+    Runs in **both** modes, mirroring :meth:`AtomicWriter._plan` (X-67): a real
+    run raises exactly as before — same classes, same codes, same messages,
+    same order — and a dry run captures the **first** refusal and stops,
+    exactly where the real run would have stopped.
+
+    The real run's own order, unchanged:
+
+    1. :func:`_ensure_out_dir` — already a no-op under ``--dry-run``.
+    2. :func:`~pdf_toolkit.safety.paths.ensure_destination_writable`.
+    3. per *target*, in order:
+       :func:`~pdf_toolkit.safety.paths.ensure_no_clobber`.
+
+    ``out_dir`` is ``Path | None`` so a future caller with no shared directory
+    (a single-target run) can still route its per-target no-clobber check
+    through the same planner; every ``--out-dir`` verb today always supplies
+    one, since the CLI declares it required for this shape.
+
+    **Trap 1, and this is the one thing to read before touching this
+    function.** A ``--out-dir`` that does not exist yet must not be predicted
+    as a refusal. Under ``--dry-run``, :func:`_ensure_out_dir` is a no-op, so a
+    non-existent directory stays non-existent — but the *real* run would have
+    created it and moved on. Checking writability on a directory that
+    legitimately does not exist yet would turn every ordinary
+    ``split --dry-run --out-dir parts/`` into a false exit-1 refusal, so under
+    ``--dry-run``, when *out_dir* does not exist, the writability tier is
+    skipped entirely and only the (trivially passing) per-target no-clobber
+    checks run — exactly what the real run's own create-then-succeed path
+    would have reached. The one case this leaves unpredicted — a non-existent
+    ``out_dir`` whose *parent* is itself unwritable, so the real run's own
+    ``mkdir`` raises an unhandled ``PermissionError`` rather than a coded
+    refusal — is a real, measured gap: filed as a new finding rather than
+    silently patched over, because patching it would mean inventing a refusal
+    class the real run does not raise.
+    """
+    try:
+        if out_dir is not None:
+            _ensure_out_dir(out_dir, policy=policy)
+            if not (policy.dry_run and not out_dir.exists()):
+                ensure_destination_writable(out_dir)
+        for target in targets:
+            ensure_no_clobber(target, force=policy.force, in_place=policy.in_place)
+    except PdfToolkitError as refusal:
+        if not policy.dry_run:
+            raise
+        return PlannedOutputs(refusal=refusal)
+    return PlannedOutputs(refusal=None)
 
 
 class AtomicWriter:

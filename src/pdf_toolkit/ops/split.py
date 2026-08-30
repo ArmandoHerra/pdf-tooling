@@ -9,9 +9,15 @@ separator is not grammar parsing and is explicitly permitted by AC7.
 rendered — through :mod:`pdf_toolkit.safety.naming`, containment-checked —
 and all no-clobber/collision checks run **before the first byte is
 written**; a planning failure writes nothing. ``--out-dir`` is created once,
-as its own plan step, before the write loop (never inside
+as its own plan step, before the write loop, via
+:func:`~pdf_toolkit.safety.atomic.plan_output_set` (never inside
 :class:`~pdf_toolkit.safety.atomic.AtomicWriter`'s own per-target gate,
 which would create it once per part instead of once per run).
+
+**The filesystem tier runs in both modes (B-054, extending X-67).**
+``plan_output_set`` is called unconditionally, so a ``--dry-run`` over an
+occupied target or an unwritable ``--out-dir`` predicts the same exit code a
+real run produces, rather than entering cleanly and being contradicted by it.
 """
 
 from __future__ import annotations
@@ -25,13 +31,9 @@ from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
 from pdf_toolkit.ops.pagerange import PageRangeError, parse
 from pdf_toolkit.ports.structure import OpenStructureDocument, require_structure
-from pdf_toolkit.safety.atomic import AtomicWriter, ensure_out_dir
+from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
 from pdf_toolkit.safety.naming import render_name, used_fields
-from pdf_toolkit.safety.paths import (
-    check_output_collisions,
-    ensure_destination_writable,
-    ensure_no_clobber,
-)
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = ["MODES", "default_name_template", "split_document"]
@@ -216,17 +218,39 @@ def split_document(
 
         source_size = source.stat().st_size
 
+        # B-054: the filesystem tier (--out-dir creation, writability, every
+        # target's no-clobber) runs ONCE, unconditionally, in BOTH modes -- a
+        # real run raises exactly as before (see the block below); a dry run
+        # captures the first refusal instead (X-67, extended to a
+        # multi-target --out-dir run).
+        plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
+
         if policy.dry_run:
+            # A run-level refusal (an unwritable --out-dir) is not
+            # attributable to one part, and this is not a loss of precision:
+            # split's own plan-then-write design (D4) means a planning
+            # failure writes NOTHING -- not one part -- so applying the same
+            # prediction to every item states exactly what the real run would
+            # have done, mirroring merge's/compose's own single-target
+            # convention of one refusal covering every item in the run.
+            detail: dict[str, object] = {"would_exit": plan.would_exit}
+            if plan.refusal is not None:
+                detail["would_refuse"] = plan.would_refuse
             items = tuple(
                 ItemResult(
                     input=str(source),
                     output=str(target),
-                    ok=True,
-                    exit_code=0,
-                    message=f"pages {_extent_text(part.page_numbers)}",
+                    ok=plan.refusal is None,
+                    exit_code=plan.would_exit,
+                    message=(
+                        f"pages {_extent_text(part.page_numbers)}"
+                        if plan.refusal is None
+                        else plan.refusal.message
+                    ),
                     bytes_before=source_size,
                     bytes_after=None,
                     duration_ms=0,
+                    detail=detail,
                 )
                 for part, target in rendered
             )
@@ -239,14 +263,12 @@ def split_document(
                 duration_ms=0,
             )
 
-        # Real run: --out-dir is created (chokepoint-confined), then every
-        # target is pre-flight no-clobber/writability checked -- BEFORE the
-        # first AtomicWriter opens, so a planning failure writes nothing.
-        ensure_out_dir(out_dir, policy=policy)
-        ensure_destination_writable(out_dir)
-        for target in targets:
-            ensure_no_clobber(target, force=policy.force)
-
+        # Real run: plan_output_set already created --out-dir
+        # (chokepoint-confined) and pre-flight checked every target for
+        # no-clobber/writability -- BEFORE the first AtomicWriter opens, so a
+        # planning failure writes nothing. It raised already if refused (the
+        # `except PdfToolkitError: ... raise` inside plan_output_set, since
+        # policy.dry_run is False here), so plan.refusal is always None below.
         written_items: list[ItemResult] = []
         for part, target in rendered:
             writer = engine.new_writer()
