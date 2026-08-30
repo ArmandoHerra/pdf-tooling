@@ -20,6 +20,55 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-05] Engine ports, adapters, doctor & info — 2026-08-29
+- Added `src/pdf_toolkit/ports/`: six `typing.Protocol` port modules
+  (`StructureEngine`, `RasterEngine`, `ComposeEngine`, `TextEngine`, `OcrEngine`,
+  `OfficeConverter`) behind a memoized `resolve()`/`resolve_all()`/`reset_cache()`
+  registry, plus `require(port, capability=...)` as the **single** exit-3 chokepoint —
+  every message carries the OS-aware install hint and names `pdftoolkit doctor`
+  (`PLAN.md` §12 R-09). Adapter selection is **by capability, never by name**: `info`
+  asks for `linearized` and gets the pikepdf-backed adapter without naming it, and
+  `repair`/`linearize`/`object-streams` already resolve through the same seam.
+- Added `src/pdf_toolkit/adapters/`: eight engine adapters over seven backends
+  (`pypdf`/`pikepdf` structure, `pdfium` raster + text fast path, `pdfplumber` text,
+  `reportlab` compose, `tesseract` OCR, `soffice` office) — probe and version
+  reporting only, every engine import function-local, wheel presence read via
+  `find_spec` + distribution metadata rather than by importing the library.
+  `weasyprint_compose.py` is deliberately not created; `doctor` prints six rows, never
+  seven, and a secondary is named in its port's `detail`.
+- Added `adapters/subprocess_util.py`, **the product's only process-spawn point**:
+  `timeout` is a required keyword with no default, `start_new_session=True`, and a
+  process-**GROUP** kill (SIGTERM → 2 s grace → SIGKILL) on timeout *and* on every
+  other exit path. `tests/unit/test_subprocess_util.py` proves it against a real
+  forked grandchild via `os.killpg(pgid, 0)` → `ProcessLookupError`, corroborated by
+  a pgid-scoped `pgrep -g`. This is the mediakit MHC-50 lesson (163 orphaned daemons,
+  ~6.5 GiB RSS) applied before the first external binary ships.
+- Added `doctor` / `doctor --strict` and `info`. `doctor` renders exactly six rows in
+  a pinned order whatever the host looks like, exits 0 with engines missing and 3
+  under `--strict`, and reports stray `.pdftoolkit-*` residue via PDF-04's
+  `find_stray_temps()` — report, never sweep, and never a change to the exit code.
+  `info` reports page count, sizes, encryption state and algorithm, permission
+  tokens, PDF version, metadata, signature/form presence, linearization, `--fonts`
+  and `--pages-detail`; it **writes nothing**, proven by a before/after whole-tree
+  filesystem snapshot on both the plain and `--dry-run` paths. Exit codes pinned one
+  test per row: 0 / 1 malformed / 2 unknown flag / 2 directory / 4 missing / 6 locked,
+  with a batch collapsing to 1 per `PLAN.md` §5.4. `models.py` gained `PageInfo`,
+  `DocumentInfo` and `EngineReport` at their reserved anchors; `errors.py` needed no
+  change — `EngineMissingError`, `AuthError`, `NoInputError`, `UsageError` and
+  `FailureError` already carried every code this spec needs.
+- Added Section 2 to `tests/test_import_boundaries.py` (appended beside PDF-04's
+  Section 1): no engine library imported outside `adapters/`, no spawn surface
+  (`subprocess`, `pty`, `os.exec*`/`spawn*`/`system`) outside `subprocess_util.py`,
+  and every `subprocess_util.run()` call site proven to pass a statically resolvable
+  `argv[0]` that is not a forbidden binary — fourteen planted violations prove each
+  guard fires, and a negative control proves engine names in docstrings and
+  parameters are not flagged. **`tests/test_license_policy.py` was amended**: its
+  non-literal-`argv[0]` refusal applied to the chokepoint file too, which a generic
+  spawn wrapper cannot satisfy by construction, so the refusal moved inside the
+  `is_chokepoint` branch and the compensating call-site check landed in Section 2.
+  Pillow's exclusion from the engine list is recorded with its reason so a later
+  spec cannot quietly weaken the walk to make room for it.
+
 ## [PDF-04] Safety spine (atomic writes, no-clobber, --in-place, -y gate) — 2026-08-29
 - Added the write chokepoint under `src/pdf_toolkit/safety/`: `atomic.py`
   (`AtomicWriter` — dry-run gate as the first statement of `__enter__`, temp beside the

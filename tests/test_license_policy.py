@@ -24,12 +24,18 @@ time.
 
 VACUITY, STATED
 ---------------
-The two chokepoint assertions (`test_subprocess_chokepoint*`) pass VACUOUSLY
-today: `src/` contains no `subprocess` anywhere at PDF-02 time. PDF-05 is the
-spec that first makes them bite, when `ports.resolve()` and
-`adapters/subprocess_util.py` introduce the only sanctioned spawn point. PDF-05
-meets them by construction. A forward constraint that states its own vacuity is
-not a silent no-op.
+The two chokepoint assertions (`test_subprocess_chokepoint*`) passed VACUOUSLY
+at PDF-02 time: `src/` contained no `subprocess` anywhere. They are LIVE as of
+PDF-05, which introduced `adapters/subprocess_util.py` as the only sanctioned
+spawn point. A forward constraint that states its own vacuity is not a silent
+no-op.
+
+PDF-02 predicted that PDF-05 would "meet them by construction". It could not:
+the non-literal-argv[0] refusal in `scan_chokepoint` applied to the chokepoint
+file as well, and a generic spawn wrapper takes argv as a parameter, so that
+assertion went red on a correct implementation. PDF-05 moved the refusal inside
+the `is_chokepoint` branch and put the compensating call-site check in
+`tests/test_import_boundaries.py` Section 2. See the comment at the moved block.
 """
 
 from __future__ import annotations
@@ -278,13 +284,32 @@ def scan_chokepoint(source: str, filename: str, *, is_chokepoint: bool) -> list[
                     findings.append(
                         Finding(target, node.lineno, "os spawn outside chokepoint", filename)
                     )
-        if isinstance(node, ast.Call) and node.args and _is_spawn(_dotted(node.func)):
-            # A spawn whose argv[0] arrives in a non-literal cannot be checked by
-            # any static tool, so it is refused outright rather than waved through.
-            if _argv0(node.args[0], literals) is None:
-                findings.append(
-                    Finding(_dotted(node.func), node.lineno, "non-literal argv[0]", filename)
-                )
+            if isinstance(node, ast.Call) and node.args and _is_spawn(_dotted(node.func)):
+                # A spawn whose argv[0] arrives in a non-literal cannot be checked
+                # by any static tool, so it is refused outright rather than waved
+                # through -- OUTSIDE the chokepoint.
+                #
+                # AMENDED BY PDF-05, and this is the whole reason the amendment
+                # exists. This check used to sit outside the `is_chokepoint`
+                # branch, which was correct only while `src/` contained no spawn
+                # at all (see the VACUITY note in the module docstring). The
+                # chokepoint is a GENERIC wrapper: `subprocess_util.run(argv, ...)`
+                # takes argv as a function parameter, so `_argv0` resolves None by
+                # construction and this assertion turned red the moment the
+                # chokepoint was written as designed. A wrapper with a non-literal
+                # argv[0] is not a leak -- it is what a chokepoint IS.
+                #
+                # The refusal is NOT weakened, it is MOVED to where it can still
+                # bite: `tests/test_import_boundaries.py` Section 2 requires every
+                # `subprocess_util.run(...)` CALL SITE under `src/` to pass a
+                # statically resolvable argv[0] whose basename is not forbidden.
+                # Between the two files, every argv[0] in the product is still
+                # statically checked; only the pass-through inside the wrapper is
+                # exempt.
+                if _argv0(node.args[0], literals) is None:
+                    findings.append(
+                        Finding(_dotted(node.func), node.lineno, "non-literal argv[0]", filename)
+                    )
 
     return findings
 
@@ -450,11 +475,28 @@ def test_self_negative_source_is_not_committed() -> None:
         assert "sDEVICE=pdfwrite" not in text, f"synthetic violator committed at {path}"
 
 
-def test_non_literal_argv0_is_refused() -> None:
-    """A spawn whose argv[0] is computed cannot be checked statically → refused."""
+def test_non_literal_argv0_is_refused_outside_the_chokepoint() -> None:
+    """A spawn whose argv[0] is computed cannot be checked statically → refused.
+
+    AMENDED BY PDF-05 together with `scan_chokepoint`: this asserted
+    `is_chokepoint=True` while `src/` had no spawn at all, and the chokepoint is
+    precisely the one place a non-literal argv[0] is legitimate. The refusal
+    itself is unchanged and is asserted here where it still applies; the
+    companion assertion below pins the exemption so it cannot silently widen.
+    """
     source = "import subprocess\n\n\ndef go(name):\n    subprocess.run([name, '-x'], check=False)\n"
-    findings = scan_chokepoint(source, "<synthetic-dynamic>", is_chokepoint=True)
+    findings = scan_chokepoint(source, "<synthetic-dynamic>", is_chokepoint=False)
     assert any(f.kind == "non-literal argv[0]" for f in findings), findings
+
+
+def test_the_chokepoint_may_pass_argv_through() -> None:
+    """The generic wrapper is exempt — and ONLY the wrapper.
+
+    `tests/test_import_boundaries.py` Section 2 carries the compensating check
+    over the wrapper's call sites, so no argv[0] in the product goes unexamined.
+    """
+    source = "import subprocess\n\n\ndef go(name):\n    subprocess.run([name, '-x'], check=False)\n"
+    assert scan_chokepoint(source, "<synthetic-dynamic>", is_chokepoint=True) == []
 
 
 def test_forbidden_set_contains_the_plan_list() -> None:

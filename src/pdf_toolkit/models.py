@@ -18,9 +18,12 @@ from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
     "SCHEMA_VERSION",
+    "DocumentInfo",
+    "EngineReport",
     "ItemResult",
     "OperationPlan",
     "OperationResult",
+    "PageInfo",
     "PageRange",
 ]
 
@@ -78,11 +81,107 @@ class PageRange:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class PageInfo:
+    """One page, reduced to what a report can state without opening an engine twice.
+
+    ``has_text`` is the field ``ocr --skip-text-pages`` will branch on, so it
+    means *this page already carries extractable text*, not *this page looks
+    like a scan*. The two differ on a page that is a scan with an OCR layer
+    already applied, and the honest answer there is ``True``.
+    """
+
+    number: int
+    """1-based, matching the page-range grammar rather than Python indexing."""
+
+    width_pt: float
+    height_pt: float
+    """MediaBox dimensions in points, **before** ``rotation`` is applied — the
+    rotation is reported beside them rather than folded into them, so a caller
+    can reconstruct either convention and neither is silently assumed."""
+
+    rotation: int
+    """0, 90, 180 or 270."""
+
+    has_text: bool
+    image_count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "number": self.number,
+            "width_pt": self.width_pt,
+            "height_pt": self.height_pt,
+            "rotation": self.rotation,
+            "has_text": self.has_text,
+            "image_count": self.image_count,
+        }
+
+
 # --- ANCHOR: DocumentInfo --------------------------------------------------
 # Reserved for the document-level report model. Insert the frozen
 # ``DocumentInfo`` dataclass directly below this anchor line and leave the
 # anchor in place.
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentInfo:
+    """Everything ``info`` reports about one document.
+
+    ``fonts`` and ``pages`` are an **empty tuple** rather than ``None`` when the
+    flag that populates them was not passed, so the JSON shape is identical
+    across flag combinations and a consumer never has to distinguish "absent"
+    from "empty". The cost of that choice is that emptiness alone does not tell
+    you whether the flag was given; the payload carries the invocation, so it
+    does not have to.
+    """
+
+    path: str
+    size_bytes: int
+    page_count: int
+
+    pdf_version: str
+    """The header version, e.g. ``"1.7"`` — the ``%PDF-`` prefix stripped."""
+
+    encrypted: bool
+    encryption_algorithm: str | None
+    """``"AES-256"`` | ``"AES-128"`` | ``"RC4-128"`` | ``"RC4-40"``, or ``None``
+    when the encryption dictionary is unrecognised. Never guessed."""
+
+    permissions: tuple[str, ...]
+    """Decoded permission tokens; an empty tuple when unknown or unencrypted."""
+
+    linearized: bool
+    has_signature: bool
+    """Presence only. This product makes **no** signature-validity claim."""
+
+    has_forms: bool
+    metadata: dict[str, str]
+    xmp: str | None
+    fonts: tuple[str, ...]
+    """``--fonts`` only. Names as they appear in ``/BaseFont``; no embedding or
+    subset analysis is performed or implied."""
+
+    pages: tuple[PageInfo, ...]
+    """``--pages-detail`` only."""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "size_bytes": self.size_bytes,
+            "page_count": self.page_count,
+            "pdf_version": self.pdf_version,
+            "encrypted": self.encrypted,
+            "encryption_algorithm": self.encryption_algorithm,
+            "permissions": list(self.permissions),
+            "linearized": self.linearized,
+            "has_signature": self.has_signature,
+            "has_forms": self.has_forms,
+            "metadata": dict(self.metadata),
+            "xmp": self.xmp,
+            "fonts": list(self.fonts),
+            "pages": [page.to_dict() for page in self.pages],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,3 +277,44 @@ class OperationResult:
 # Insert the frozen ``EngineReport`` dataclass directly below this anchor line
 # and leave the anchor in place.
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class EngineReport:
+    """One row of ``doctor``; also what ``ports.require()`` consults.
+
+    A row exists for every port on every run, available or not. A missing engine
+    is ``available=False`` with a ``hint`` — never an absent row, because a
+    consumer counting rows must get the same number whatever the host looks
+    like.
+    """
+
+    port: str
+    """``"StructureEngine"`` | ``"RasterEngine"`` | … — a **public contract**
+    string that appears in ``doctor -o json``."""
+
+    adapter: str | None
+    available: bool
+    version: str | None
+
+    kind: str
+    """``"python-package"`` | ``"system-binary"`` | ``"optional-extra"``."""
+
+    detail: str | None
+    """Free text: the secondary adapter and its version, the installed tessdata
+    languages, or the raw version line when it did not parse."""
+
+    hint: str | None
+    """The OS-aware install command. ``None`` whenever ``available`` is true — a
+    hint on a working engine is a defect, not a courtesy."""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "port": self.port,
+            "adapter": self.adapter,
+            "available": self.available,
+            "version": self.version,
+            "kind": self.kind,
+            "detail": self.detail,
+            "hint": self.hint,
+        }

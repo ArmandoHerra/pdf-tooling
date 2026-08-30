@@ -87,6 +87,8 @@ from __future__ import annotations
 
 import ast
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Final, NamedTuple
 
@@ -571,3 +573,560 @@ def test_benign_calls_are_never_flagged() -> None:
     """The negative self-test. A guard with false positives gets allowlisted away."""
     found = scan_write_calls(BENIGN, "pdf_toolkit.ops.benign")
     assert found == [], f"false positives: {[str(call) for call in found]}"
+
+
+# --------------------------------------------------------------------------- #
+# Section 2 — engine imports and the subprocess chokepoint (PDF-05)
+#
+# APPENDED, never rewritten: Section 1 above is PDF-04's and this section builds
+# on its machinery (`iter_python_files`, `module_name`, `dotted`,
+# `from_import_bindings`) rather than starting a second walk. Section 3 belongs
+# to the fixture-corpus spec.
+#
+# WHAT THIS SECTION IS FOR
+# ------------------------
+# This is the mechanised half of the product's licensing claim. `scripts/
+# licenses.py` sees the DEPENDENCY graph; it cannot see the CALL graph. "Is
+# anything AGPL/GPL/LGPL reachable?" stays answerable by reading six port files
+# only while every engine import and every spawn is confined beneath them, and
+# twenty verbs are written after this file by authors who will not re-read
+# `PLAN.md` §5.2. A convenience `import pikepdf` in `ops/` would not break a
+# feature -- it would void the product's only reason to exist.
+#
+# THE PILLOW EXCLUSION, RECORDED WITH ITS REASON
+# ----------------------------------------------
+# `PIL`/Pillow is deliberately NOT in ENGINE_MODULES. `PLAN.md` §7.1 scopes it as
+# "image plumbing" rather than a port-backing engine, and the compression work's
+# image pass is expected to use it inside `ops/`. Writing the exclusion down HERE,
+# with the reason, is what stops a later spec from quietly weakening this test to
+# make room for it -- which is how a guard like this actually dies.
+# --------------------------------------------------------------------------- #
+
+#: Engine libraries that may be imported only beneath `adapters/`. `pdfminer` is
+#: pdfplumber's own dependency and `weasyprint` is the Phase-2 `[html]` extra;
+#: both are listed so that reaching for them directly is a red rather than a
+#: discovery made later.
+ENGINE_MODULES: Final = frozenset(
+    {
+        "pypdf",
+        "pypdfium2",
+        "pikepdf",
+        "reportlab",
+        "pdfplumber",
+        "pdfminer",
+        "pytesseract",
+        "weasyprint",
+    }
+)
+
+#: The one package permitted to import them.
+ADAPTER_PACKAGE: Final = "pdf_toolkit.adapters"
+
+#: The one module permitted to spawn. Spelled as a module path to match
+#: `module_name()`; `tests/test_license_policy.py` spells the same file as a
+#: path, and both are asserted to point at a file that exists.
+SPAWN_CHOKEPOINT: Final = "pdf_toolkit.adapters.subprocess_util"
+
+#: Spawn surfaces that must not appear outside the chokepoint. `pty` is here and
+#: not in the licence walk: it is a second, less obvious way to get a child
+#: process, and a `pty.spawn` would evade a check that only knows `subprocess`.
+SPAWN_MODULES: Final = frozenset({"subprocess", "pty"})
+OS_SPAWN_PREFIXES: Final = ("exec", "spawn")
+
+
+#: The three Section 2 finding kinds, kept DISJOINT and compared by equality.
+#: The first draft used prefix matching over prose kinds, and "spawn module
+#: outside the chokepoint" matched the argv[0] test's `startswith("spawn ")` --
+#: so an import violation turned two tests red, one of them with a message about
+#: something else entirely. A guard that fires for the wrong stated reason is a
+#: guard whose next reader mistrusts it.
+KIND_ENGINE_IMPORT: Final = "engine-import"
+KIND_SPAWN_SURFACE: Final = "spawn-surface"
+KIND_HELPER_ARGV0: Final = "helper-argv0"
+
+
+class Boundary(NamedTuple):
+    """One boundary violation, located precisely enough to act on."""
+
+    module: str
+    line: int
+    what: str
+    kind: str
+    detail: str
+
+    def __str__(self) -> str:
+        return f"{self.module}:{self.line}: {self.detail} '{self.what}'"
+
+
+def _in_adapters(module: str) -> bool:
+    return module == ADAPTER_PACKAGE or module.startswith(ADAPTER_PACKAGE + ".")
+
+
+def _imported_top_levels(tree: ast.Module) -> list[tuple[str, int]]:
+    """Every top-level module name this file imports, with its line number.
+
+    Both `import x.y` and `from x.y import z` reduce to `x`, which is the only
+    granularity that matters for "is this library on the call graph".
+    """
+    found: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.extend((alias.name.split(".")[0], node.lineno) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            found.append((node.module.split(".")[0], node.lineno))
+    return found
+
+
+def scan_engine_imports(source: str, module: str) -> list[Boundary]:
+    """Engine libraries imported outside `adapters/`."""
+    if _in_adapters(module):
+        return []
+    tree = ast.parse(source, filename=module)
+    return [
+        Boundary(module, line, name, KIND_ENGINE_IMPORT, "engine import outside adapters/")
+        for name, line in _imported_top_levels(tree)
+        if name in ENGINE_MODULES
+    ]
+
+
+def scan_spawn_surface(source: str, module: str) -> list[Boundary]:
+    """Spawn surfaces reached outside the one sanctioned module."""
+    if module == SPAWN_CHOKEPOINT:
+        return []
+    tree = ast.parse(source, filename=module)
+    found: list[Boundary] = [
+        Boundary(module, line, name, KIND_SPAWN_SURFACE, "spawn module outside the chokepoint")
+        for name, line in _imported_top_levels(tree)
+        if name in SPAWN_MODULES
+    ]
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = dotted(node.func)
+        head, _, tail = target.rpartition(".")
+        if head == "os" and (tail == "system" or tail.startswith(OS_SPAWN_PREFIXES)):
+            found.append(
+                Boundary(
+                    module,
+                    node.lineno,
+                    target,
+                    KIND_SPAWN_SURFACE,
+                    "os spawn outside the chokepoint",
+                )
+            )
+    return found
+
+
+# --------------------------------------------------------------------------- #
+# The compensating check the chokepoint's own exemption requires.
+#
+# `tests/test_license_policy.py` refuses a spawn whose `argv[0]` is not
+# statically resolvable -- but PDF-05 had to exempt the chokepoint from that
+# rule, because a generic wrapper takes argv as a parameter and therefore has a
+# non-literal argv[0] BY DEFINITION. That exemption opens a second-order hole:
+# once every spawn routes through `subprocess_util.run(...)`, the licence walk's
+# `_is_spawn()` (which matches only `subprocess.*`, `sp.*` and `os.*`) no longer
+# looks at adapter call sites at all, so a `run(["<forbidden>", ...])` would slip
+# past its forbidden-argv[0] shape. `shutil.which("<forbidden>")` is still caught
+# there, so the gap is a narrowing rather than a total loss -- and this closes it.
+# --------------------------------------------------------------------------- #
+
+SPAWN_HELPER: Final = "subprocess_util"
+SPAWN_HELPER_QUALIFIED: Final = "pdf_toolkit.adapters.subprocess_util"
+
+
+def _module_level_literals(tree: ast.Module) -> dict[str, str]:
+    """Module-level names bound to a string literal, `Final[str]` included."""
+    out: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                out[node.target.id] = node.value.value
+        elif isinstance(node, ast.Assign):
+            if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = node.value.value
+    return out
+
+
+def _is_helper_call(target: str, bindings: dict[str, str]) -> bool:
+    """Whether a dotted call target names the spawn helper's `run`.
+
+    Both spellings are recognised: `subprocess_util.run(...)` after
+    `from pdf_toolkit.adapters import subprocess_util`, and a bare `run(...)`
+    after `from ...subprocess_util import run`.
+    """
+    if target == f"{SPAWN_HELPER}.run":
+        return True
+    return bindings.get(target) == f"{SPAWN_HELPER_QUALIFIED}.run"
+
+
+def _static_argv0(node: ast.expr, literals: dict[str, str]) -> str | None:
+    """argv[0] when it is a literal or a module-level name bound to one."""
+    if isinstance(node, ast.List | ast.Tuple):
+        if not node.elts:
+            return None
+        first = node.elts[0]
+    else:
+        return None
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    if isinstance(first, ast.Name):
+        return literals.get(first.id)
+    return None
+
+
+def scan_helper_call_sites(source: str, module: str) -> list[Boundary]:
+    """Every `subprocess_util.run(...)` whose argv[0] is unresolvable or forbidden."""
+    tree = ast.parse(source, filename=module)
+    literals = _module_level_literals(tree)
+    bindings = from_import_bindings(tree)
+    found: list[Boundary] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if not _is_helper_call(dotted(node.func), bindings):
+            continue
+        argv0 = _static_argv0(node.args[0], literals)
+        if argv0 is None:
+            found.append(
+                Boundary(
+                    module,
+                    node.lineno,
+                    "argv[0]",
+                    KIND_HELPER_ARGV0,
+                    "spawn with an unresolvable argv[0]",
+                )
+            )
+            continue
+        base = argv0.replace("\\", "/").rsplit("/", 1)[-1]
+        if _is_forbidden_binary(base):
+            found.append(
+                Boundary(
+                    module,
+                    node.lineno,
+                    base,
+                    KIND_HELPER_ARGV0,
+                    "spawn of a forbidden binary",
+                )
+            )
+    return found
+
+
+# The forbidden set is IMPORTED from the licence-policy module rather than copied.
+# Two lists of the same names in two test files is how one of them silently stops
+# covering what the other covers; the tightenings PDF-02 added must apply here too.
+from test_license_policy import FORBIDDEN as LICENCE_FORBIDDEN  # noqa: E402
+from test_license_policy import normalize as _normalize_binary  # noqa: E402
+
+_NORMALIZED_FORBIDDEN: Final = frozenset(_normalize_binary(n) for n in LICENCE_FORBIDDEN)
+
+
+def _is_forbidden_binary(name: str) -> bool:
+    return _normalize_binary(name) in _NORMALIZED_FORBIDDEN
+
+
+def scan_boundaries(root: Path) -> list[Boundary]:
+    """All three Section 2 walks over every Python file under *root*."""
+    found: list[Boundary] = []
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        source = path.read_text()
+        found.extend(scan_engine_imports(source, module))
+        found.extend(scan_spawn_surface(source, module))
+        found.extend(scan_helper_call_sites(source, module))
+    return found
+
+
+# --------------------------------------------------------------------------- #
+# The gate, over the real tree.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def boundaries() -> list[Boundary]:
+    return scan_boundaries(SRC)
+
+
+def test_no_engine_library_is_imported_outside_adapters(boundaries: list[Boundary]) -> None:
+    """A red here is a LICENCE-POLICY finding (D-02), not a style finding."""
+    offenders = [item for item in boundaries if item.kind == KIND_ENGINE_IMPORT]
+    listed = "\n".join(f"  - {item}" for item in offenders)
+    assert offenders == [], (
+        "engine libraries are importable only beneath adapters/ -- this is what makes "
+        f"the licence question answerable by reading six port files:\n{listed}"
+    )
+
+
+def test_nothing_outside_the_chokepoint_can_spawn(boundaries: list[Boundary]) -> None:
+    offenders = [item for item in boundaries if item.kind == KIND_SPAWN_SURFACE]
+    listed = "\n".join(f"  - {item}" for item in offenders)
+    assert offenders == [], f"{SPAWN_CHOKEPOINT} is the only spawn point:\n{listed}"
+
+
+def test_every_spawn_call_site_names_a_permitted_binary(boundaries: list[Boundary]) -> None:
+    """The compensating check for the chokepoint's own argv[0] exemption."""
+    offenders = [item for item in boundaries if item.kind == KIND_HELPER_ARGV0]
+    listed = "\n".join(f"  - {item}" for item in offenders)
+    assert offenders == [], (
+        "every subprocess_util.run() call site must pass a statically resolvable "
+        f"argv[0] that is not a forbidden binary:\n{listed}"
+    )
+
+
+def test_the_adapters_package_actually_contains_the_engine_imports() -> None:
+    """Non-vacuity. If nothing imports an engine anywhere, Section 2 proves nothing."""
+    importing: set[str] = set()
+    for path in iter_python_files(SRC):
+        module = module_name(path, SRC)
+        if not _in_adapters(module):
+            continue
+        tree = ast.parse(path.read_text(), filename=module)
+        importing.update(name for name, _ in _imported_top_levels(tree) if name in ENGINE_MODULES)
+    assert importing, "no module under adapters/ imports an engine -- the walk is vacuous"
+
+
+def test_the_chokepoint_actually_spawns() -> None:
+    """Non-vacuity for the spawn half: the wrapper really does reach subprocess."""
+    path = SRC / SPAWN_CHOKEPOINT.replace(".", "/")
+    source = path.with_suffix(".py").read_text()
+    tree = ast.parse(source, filename=SPAWN_CHOKEPOINT)
+    assert "subprocess" in {name for name, _ in _imported_top_levels(tree)}, (
+        f"{SPAWN_CHOKEPOINT} does not import subprocess -- either the walk is broken "
+        "or the spawn moved somewhere unguarded"
+    )
+
+
+def test_the_three_finding_kinds_are_disjoint() -> None:
+    """Each violation turns exactly ONE assertion red, with the right message.
+
+    Regression guard for a real defect in this section's first draft: the kinds
+    were prose and the tests matched them by prefix, so a `import subprocess` in
+    `cli/` failed both the spawn-surface assertion AND the argv[0] assertion --
+    the latter reporting that a call site had an unresolvable argv[0], which was
+    not true and would have sent the next reader looking in the wrong file.
+    """
+    kinds = (KIND_ENGINE_IMPORT, KIND_SPAWN_SURFACE, KIND_HELPER_ARGV0)
+    assert len(set(kinds)) == 3
+    for one in kinds:
+        for other in kinds:
+            if one is not other:
+                assert not one.startswith(other) and not other.startswith(one)
+
+
+@pytest.mark.parametrize(
+    ("relative", "source", "expected_kind"),
+    [
+        (
+            "pdf_toolkit/ops/sneaky.py",
+            "import pikepdf\n",
+            KIND_ENGINE_IMPORT,
+        ),
+        (
+            "pdf_toolkit/cli/sneaky.py",
+            "import subprocess\n",
+            KIND_SPAWN_SURFACE,
+        ),
+        (
+            "pdf_toolkit/adapters/sneaky.py",
+            "from pdf_toolkit.adapters import subprocess_util\n\n\n"
+            "def go():\n    return subprocess_util.run(['gs'], timeout=1)\n",
+            KIND_HELPER_ARGV0,
+        ),
+    ],
+    ids=["engine-import", "spawn-surface", "helper-argv0"],
+)
+def test_each_violation_class_reports_only_its_own_kind(
+    relative: str,
+    source: str,
+    expected_kind: str,
+    tmp_path: Path,
+) -> None:
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / relative
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(source)
+
+    kinds = {item.kind for item in scan_boundaries(scratch)}
+    assert kinds == {expected_kind}, kinds
+
+
+def test_pillow_is_deliberately_not_an_engine_module() -> None:
+    """The recorded exclusion, asserted so it cannot be widened by accident.
+
+    Pillow is image plumbing (`PLAN.md` §7.1), not a port-backing engine, and the
+    compression work's image pass is expected to use it inside `ops/`. This
+    assertion exists so that adding it here is a deliberate, reviewed change
+    rather than a passing thought.
+    """
+    assert "PIL" not in ENGINE_MODULES
+    assert "pillow" not in ENGINE_MODULES
+
+
+# --------------------------------------------------------------------------- #
+# Proof that Section 2's guards fire. Without these, the assertions are a claim.
+# --------------------------------------------------------------------------- #
+
+PLANTED_SECTION_2: Final = (
+    (
+        "plant-pikepdf-import-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "import pikepdf\n\n\ndef go():\n    return pikepdf\n",
+    ),
+    (
+        "plant-pypdf-from-import-in-cli",
+        "pdf_toolkit/cli/sneaky.py",
+        "from pypdf import PdfReader\n\n\ndef go():\n    return PdfReader\n",
+    ),
+    (
+        "plant-reportlab-import-in-ports",
+        "pdf_toolkit/ports/sneaky.py",
+        "import reportlab.pdfgen\n\n\ndef go():\n    return reportlab\n",
+    ),
+    (
+        "plant-pdfplumber-import-in-output",
+        "pdf_toolkit/output/sneaky.py",
+        "import pdfplumber\n\n\ndef go():\n    return pdfplumber\n",
+    ),
+    (
+        "plant-pypdfium2-import-in-safety",
+        "pdf_toolkit/safety/sneaky.py",
+        "import pypdfium2\n\n\ndef go():\n    return pypdfium2\n",
+    ),
+    (
+        "plant-subprocess-import-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "import subprocess\n\n\ndef go():\n    return subprocess\n",
+    ),
+    (
+        "plant-os-system-in-cli",
+        "pdf_toolkit/cli/sneaky.py",
+        "import os\n\n\ndef go():\n    os.system('ls')\n",
+    ),
+    (
+        "plant-pty-spawn-in-adapters",
+        "pdf_toolkit/adapters/sneaky.py",
+        "import pty\n\n\ndef go():\n    pty.spawn(['ls'])\n",
+    ),
+    (
+        "plant-forbidden-binary-through-the-helper",
+        "pdf_toolkit/adapters/sneaky.py",
+        "from pdf_toolkit.adapters import subprocess_util\n\n\n"
+        "def go():\n    return subprocess_util.run(['gs', '-q'], timeout=1)\n",
+    ),
+    (
+        "plant-computed-argv0-through-the-helper",
+        "pdf_toolkit/adapters/sneaky.py",
+        "from pdf_toolkit.adapters import subprocess_util\n\n\n"
+        "def go(name):\n    return subprocess_util.run([name, '-q'], timeout=1)\n",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "relative", "source"),
+    PLANTED_SECTION_2,
+    ids=[row[0] for row in PLANTED_SECTION_2],
+)
+def test_a_planted_section_2_violation_fails_the_walk(
+    label: str,
+    relative: str,
+    source: str,
+    tmp_path: Path,
+) -> None:
+    """Copy src/, plant one violation, and confirm Section 2 turns red."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / relative
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(source)
+
+    assert scan_boundaries(scratch), f"Section 2 did not notice the planted violation: {label}"
+
+
+BENIGN_SECTION_2 = '''
+"""A module that mentions every forbidden thing without doing any of them."""
+from pdf_toolkit.adapters import subprocess_util
+
+TESSERACT_BIN = "tesseract"
+subprocess = "not the module"
+
+
+def go(pikepdf, reportlab):
+    """pypdf, pikepdf and pdfplumber appear in this docstring and are not imports."""
+    version = subprocess_util.run([TESSERACT_BIN, "--version"], timeout=5)
+    listed = subprocess_util.run(["soffice", "--version"], timeout=5)
+    return version, listed, pikepdf, reportlab
+'''
+
+
+def test_benign_section_2_calls_are_never_flagged() -> None:
+    """The negative self-test. A guard with false positives gets weakened away.
+
+    Engine names in a docstring, in a parameter name and in a local binding are
+    not imports; a `Final[str]` argv[0] and a literal argv[0] are both resolvable
+    and both permitted. This is the mechanized proof that Section 2 is an AST
+    walk and not a text grep -- exactly as its Section 1 counterpart proves for
+    the write chokepoint.
+    """
+    module = "pdf_toolkit.ops.benign"
+    found = (
+        scan_engine_imports(BENIGN_SECTION_2, module)
+        + scan_spawn_surface(BENIGN_SECTION_2, module)
+        + scan_helper_call_sites(BENIGN_SECTION_2, module)
+    )
+    assert found == [], f"false positives: {[str(item) for item in found]}"
+
+
+def test_the_two_forbidden_lists_are_the_same_list() -> None:
+    """Section 2 checks argv[0] against the LICENCE walk's set, not a copy of it.
+
+    Two hand-maintained copies of the same names is how one of them silently
+    stops covering what the other covers, so the import above is load-bearing
+    rather than tidy.
+    """
+    for name in ("gs", "pdftk", "fitz", "poppler"):
+        assert _is_forbidden_binary(name)
+    assert not _is_forbidden_binary("tesseract")
+    assert not _is_forbidden_binary("soffice")
+
+
+def test_importing_the_port_layer_loads_no_engine() -> None:
+    """`PLAN.md` §12 R-13, at the port seam.
+
+    The CLI spine already asserts that importing `cli.main` leaves `sys.modules`
+    clean -- an assertion that only became non-vacuous when the first verbs that
+    reach the ports were registered on it. This is the complementary half: even
+    importing every port module directly, which is a heavier thing to do than
+    starting the CLI, must not pull an engine in. That is what makes the
+    "lazy imports only" rule in `ports/__init__` enforced rather than intended.
+    """
+    ports = [
+        "pdf_toolkit.ports",
+        "pdf_toolkit.ports.structure",
+        "pdf_toolkit.ports.raster",
+        "pdf_toolkit.ports.compose",
+        "pdf_toolkit.ports.text",
+        "pdf_toolkit.ports.ocr",
+        "pdf_toolkit.ports.office",
+    ]
+    probe = (
+        "import sys;"
+        + "".join(f"__import__({name!r});" for name in ports)
+        + f"leaked = {set(ENGINE_MODULES)!r} & set(sys.modules);"
+        "print(sorted(leaked));"
+        "sys.exit(1 if leaked else 0)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, (
+        f"importing the port layer pulled in engines: {result.stdout.strip()}\n{result.stderr}"
+    )

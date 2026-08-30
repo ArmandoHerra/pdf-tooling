@@ -406,6 +406,14 @@ def test_table_renderer_drops_columns_that_are_entirely_absent() -> None:
 
 ENGINE_MODULES = {"pypdf", "pikepdf", "pypdfium2", "reportlab", "pdfplumber", "fitz"}
 
+#: The `--help` startup budget, `PLAN.md` §12 R-13, as a SINGLE NAMED CONSTANT.
+#: Promoted from a local in `test_help_stays_within_the_startup_budget` by
+#: PDF-05, which needed to assert against the budget rather than restate the
+#: number: a second `250.0` written somewhere else is how two tests start
+#: disagreeing about what the budget is. PDF-01 owns the measurement; this is
+#: only its name.
+STARTUP_BUDGET_MS = 250.0
+
 
 def test_no_engine_library_is_imported_at_module_scope() -> None:
     probe = (
@@ -424,7 +432,7 @@ def test_no_engine_library_is_imported_at_module_scope() -> None:
 def test_help_stays_within_the_startup_budget() -> None:
     import time
 
-    budget_ms = 250.0
+    budget_ms = STARTUP_BUDGET_MS
     timings: list[float] = []
     for _ in range(5):
         started = time.perf_counter()
