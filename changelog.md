@@ -19,6 +19,41 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [B-055] `rasterize`'s worker pool no longer survives SIGTERM/SIGINT/SIGHUP to the parent — 2026-08-30
+- Fixed: `rasterize --threads N>1` left every render worker running (and
+  writing) after a signal to the parent — `ProcessPoolExecutor.__exit__`'s
+  `shutdown(wait=True)` blocks until already-running workers finish rather
+  than signalling them, so a bare `shutdown()` in any combination was never
+  a fix. Added `ops/procpool.py::guarded_process_pool()`, a drop-in
+  `ProcessPoolExecutor` wrapper that actively SIGTERMs every known worker
+  PID (via `executor._processes`, the only reachable handle), waits out a
+  2s grace window for an in-flight `AtomicWriter` to unwind and discard its
+  own temp file, then SIGKILLs stragglers and reaps them — before letting
+  the parent die BY the signal (`SIG_DFL` + self-`kill`, `$?` = 128+signo,
+  not `sys.exit`). `ProcessPoolExecutor` stays mandatory (X-104: real
+  concurrent pdfium rendering corrupts the heap even with per-worker
+  document isolation) — this is not a switch to threads.
+- SIGTERM, SIGINT and SIGHUP all route through the one teardown routine.
+  Measured directly: a bare `kill -INT <parent pid only>` on the unfixed
+  code does NOT stop the job — "SIGINT is already clean" held only for an
+  interactive Ctrl-C, which signals the whole foreground process group and
+  kills workers by accident, not for a supervisor's single-process signal.
+  SIGKILL to the parent remains uncatchable by definition; the one thing
+  the child side can do about it, `PR_SET_PDEATHSIG(SIGKILL)` via `ctypes`
+  in the worker initializer, is Linux-only and stated as such (no macOS
+  coverage).
+- The worker initializer also resets SIGINT/SIGHUP to `SIG_DFL` and
+  installs a worker-local SIGTERM handler, closing the `fork`-inheritance
+  hazard commit `26f4c79` already paid for once: a forked worker must never
+  run the PARENT's own pool-shaped teardown handler.
+- Added `tests/integration/test_rasterize_signals.py` — black-box, real
+  `subprocess.Popen`/`os.kill` (parent PID only, never the group), proven
+  start-method agnostic by construction (never touches multiprocessing
+  internals) and seen RED on the unfixed code before being made GREEN.
+  Added `tests/unit/test_procpool.py` for the underlying mechanics. R-08
+  byte-identity (`--threads 1` vs `--threads 8`, sha256) re-verified after
+  the change.
+
 ## [B-054] `--dry-run` predicts the filesystem-tier refusal for `--out-dir` verbs — 2026-08-30
 - Fixed `split`/`rasterize`: `--dry-run` over an occupied `--out-dir` target,
   or over an unwritable `--out-dir`, now predicts the same exit code the real

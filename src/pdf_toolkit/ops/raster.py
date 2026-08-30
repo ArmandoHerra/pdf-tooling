@@ -48,12 +48,20 @@ allowlist entry is needed in ``tests/test_import_boundaries.py``.
 ``plan_output_set`` is called unconditionally, so a ``--dry-run`` over an
 occupied target or an unwritable ``--out-dir`` predicts the same exit code a
 real run produces, rather than entering cleanly and being contradicted by it.
+
+**The pool does not survive a signal to this process (B-055).** The
+``ProcessPoolExecutor`` this module opens is created through
+:func:`~pdf_toolkit.ops.procpool.guarded_process_pool`, not the bare class —
+see that module's docstring for why a plain ``with ProcessPoolExecutor(...)``
+here leaves every render worker running (and writing) after a SIGTERM to the
+parent, why that same constraint rules out a thread pool (X-104) as the fix
+for this too, and exactly what is and is not guaranteed once a signal
+arrives.
 """
 
 from __future__ import annotations
 
 import time
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Final
 
@@ -61,6 +69,7 @@ from pdf_toolkit.errors import EngineMissingError, NoInputError, PdfToolkitError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
+from pdf_toolkit.ops.procpool import guarded_process_pool
 from pdf_toolkit.ports import BROKEN_INSTALL_HINT
 from pdf_toolkit.ports.raster import require_raster
 from pdf_toolkit.ports.structure import require_structure
@@ -394,7 +403,13 @@ def rasterize_document(
     # planning time.
     collected: dict[int, ItemResult] = {}
     if chunks:
-        with ProcessPoolExecutor(max_workers=len(chunks)) as executor:
+        # B-055: `guarded_process_pool` is `ProcessPoolExecutor` plus a
+        # signal teardown -- see `ops/procpool.py`'s module docstring for
+        # why a plain `with ProcessPoolExecutor(...) as executor:` here lets
+        # every worker outlive a SIGTERM/SIGINT/SIGHUP to this process. The
+        # happy path (no signal) is unchanged: same executor, same
+        # submit/result loop, same `shutdown(wait=True)` on the way out.
+        with guarded_process_pool(len(chunks)) as executor:
             futures = [
                 executor.submit(
                     _render_chunk,
