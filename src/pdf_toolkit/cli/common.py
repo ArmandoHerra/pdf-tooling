@@ -532,18 +532,23 @@ def validate_config(
     2. The OR-3 consumption check — before every shape check below, so a verb
        that cannot honour ``--name`` at all does not lecture the user about
        template syntax.
+    2b. The B-076 ``--in-place``-vs-output-target conflict check — a
+        DIFFERENT dimension from 2 (a conflict BETWEEN two flags a verb
+        legitimately declares consuming, not an undeclared flag), so it runs
+        only once 2 has already confirmed every given flag is declared.
     3. ``SafetyPolicy.validate()``, the name-template shape check, the
        password-file shape check, ``--threads``, ``--quiet``/``--verbose`` —
-       unchanged, just now reached after 1 and 2.
+       unchanged, just now reached after 1, 2 and 2b.
 
-    All three tiers exit 2, so no exit code changes anywhere — only which
-    message is emitted.
+    All tiers exit 2, so no exit code changes anywhere — only which message
+    is emitted.
     """
     if config.output is not None and config.out_dir is not None:
         raise UsageError("--output and --out-dir are mutually exclusive")
 
     if consumes is not None:
         _check_output_flag_consumption(config, verb=verb or "this command", consumes=consumes)
+        _check_in_place_output_conflict(config, verb=verb or "this command", consumes=consumes)
 
     # Delegated, not duplicated: ``SafetyPolicy`` owns this rule, so the CLI and
     # any other construction of a policy cannot drift apart. Still exit 2 —
@@ -596,6 +601,57 @@ def _check_output_flag_consumption(
     else:
         detail = "this verb writes no files"
     raise UsageError(f"{verb} does not accept {flags_text} ({detail})")
+
+
+#: B-076 -- the three of :data:`OUTPUT_FLAGS` that name an actual destination
+#: (as opposed to `--in-place`, which names none). A verb declaring BOTH
+#: `--in-place` and at least one of these three has a real conflict to
+#: adjudicate; a verb declaring only one side never reaches this check at
+#: all (see :func:`_check_in_place_output_conflict`'s own docstring).
+_DESTINATION_FLAGS: Final[tuple[str, ...]] = ("--output", "--out-dir", "--name")
+
+
+def _check_in_place_output_conflict(
+    config: GlobalConfig, *, verb: str, consumes: tuple[str, ...]
+) -> None:
+    """B-076 -- ONE central conflict check, never a per-verb one.
+
+    Every one of the eleven verbs that declares `--in-place` alongside
+    `--output`/`--out-dir`/`--name` resolves the pair the same
+    one-dimensional way at the ``ops/`` layer: ``if in_place: ... elif
+    output/out_dir: ...`` (``ops/optimize.py:241,452``,
+    ``ops/crypto.py:258``, ``ops/pages.py:286``, ``ops/metadata.py:238``,
+    ``ops/overlay.py:167``). Given both flags, `--in-place` silently wins:
+    the input is mutated, the named destination is never written, and the
+    run exits 0. :func:`_check_output_flag_consumption` above cannot see
+    this — its declaration is one-dimensional (verb -> flag SET), and both
+    flags sit inside every one of those eleven verbs' declared sets, so the
+    matrix reads the pair as honoured. This is a conflict BETWEEN two
+    declared flags, a dimension that check has no vocabulary for.
+
+    Fires only when the verb declares BOTH sides of the conflict. A verb
+    that does not consume `--in-place` at all, or consumes none of
+    `--output`/`--out-dir`/`--name`, cannot reach here with an offending
+    flag given -- :func:`_check_output_flag_consumption` above already
+    refused the undeclared flag by name, so this never doubles up on that
+    message.
+
+    Exit 2 (`PLAN.md` §5.6 lists mutually exclusive flags under USAGE; the
+    `--no-backup`-requires-`--in-place` precedent at `SafetyPolicy.validate`
+    is exit 2 too), naming every conflicting flag.
+    """
+    if "--in-place" not in consumes or not config.in_place:
+        return
+    conflicting = tuple(
+        flag for flag in _DESTINATION_FLAGS if flag in consumes and _OUTPUT_FLAG_GIVEN[flag](config)
+    )
+    if not conflicting:
+        return
+    flags_text = ", ".join(conflicting)
+    raise UsageError(
+        f"{verb}: --in-place is mutually exclusive with {flags_text} "
+        "(--in-place would mutate the input and the destination would never be written)"
+    )
 
 
 def _validate_name_template(template: str) -> None:

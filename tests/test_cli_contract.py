@@ -484,6 +484,111 @@ def test_c15_dry_run_predicts_an_unwritable_destination_refusal(
 
 
 # --------------------------------------------------------------------------- #
+# C16 -- B-076: `--in-place` together with a destination flag (`--output`/
+# `--out-dir`/`--name`) the SAME verb ALSO declares is a CONFLICT the OR-3
+# consumption check (C14 above) cannot see -- both flags sit inside one
+# declared set, so C14's matrix reads the pair as honoured even though the
+# `ops/` layer's shared `if in_place: ... elif output/out_dir: ...`
+# precedence silently drops the destination and mutates the input instead.
+# Exit 2, naming both flags, writing and mutating nothing -- B-035's own
+# defect class, surviving *inside* the mechanism OR-3 built to end it.
+#
+# Derived generically off the live registry, exactly like C14: no
+# hard-coded verb list, so a future verb (PDF-15's `ocr`, per the ledger)
+# is covered the day it declares both flags, zero action from its author.
+# --------------------------------------------------------------------------- #
+
+_C16_DESTINATION_FLAGS = tuple(flag for flag in OUTPUT_FLAGS if flag != "--in-place")
+IN_PLACE_OUTPUT_CONFLICT_VERBS = tuple(
+    verb
+    for verb in VERBS
+    if "--in-place" in verb.consumes
+    and any(flag in verb.consumes for flag in _C16_DESTINATION_FLAGS)
+)
+
+
+def test_c16_population_is_non_empty() -> None:
+    """Anti-lapse guard, mirroring `test_c13_population_is_non_empty`
+    above: a green C16 whose population is empty proves nothing -- this
+    row's own history is three separately-measured, all-too-narrow scopes
+    (five, then three, then four verbs) before the structural population
+    was re-derived at eleven."""
+    assert len(IN_PLACE_OUTPUT_CONFLICT_VERBS) > 0, (
+        "IN_PLACE_OUTPUT_CONFLICT_VERBS is empty -- C16 would collect zero parametrized "
+        "cases and pass vacuously"
+    )
+
+
+def test_c16_instrument_control_output_alone_still_writes(corpus, tmp_path: Path) -> None:
+    """Positive control: `-O` alone (no `--in-place`) still honours the
+    target -- proves the probe below is not blind, same idiom C14's own
+    'declared' branch already relies on."""
+    args = OUTPUT_FLAG_INVOCATIONS[("compress", "--output")](corpus, tmp_path)
+    result = run_cli("compress", *args, cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(args[-1]).is_file()
+
+
+def test_c16_instrument_control_undeclared_flag_still_exits_2(corpus, tmp_path: Path) -> None:
+    """Negative control: an UNDECLARED flag (`info` does not consume
+    `--in-place`) still refuses through OR-3's own path -- proves this new
+    conflict check has not swallowed or shadowed C14's own refusal."""
+    result = run_cli("info", str(corpus.path("single_page")), "--in-place", cwd=tmp_path)
+    assert result.returncode == 2
+
+
+@pytest.mark.parametrize(
+    "verb", IN_PLACE_OUTPUT_CONFLICT_VERBS, ids=_ids(IN_PLACE_OUTPUT_CONFLICT_VERBS)
+)
+def test_c16_in_place_output_conflict_refuses_exit_2(verb, corpus, tmp_path: Path) -> None:
+    """B-076: for every verb declaring BOTH `--in-place` and a destination
+    flag, giving both together refuses the PAIR -- exit 2, naming both
+    flags, writing and mutating nothing. Per B-073, this does NOT pin
+    today's exit-0-and-mutate behaviour anywhere -- only the refusal the
+    fix introduces."""
+    flag = next((f for f in _C16_DESTINATION_FLAGS if f in verb.consumes), None)
+    assert flag is not None  # guaranteed by IN_PLACE_OUTPUT_CONFLICT_VERBS's own filter
+
+    in_place_key = (verb.name, "--in-place")
+    if in_place_key not in OUTPUT_FLAG_INVOCATIONS:
+        pytest.fail(
+            f"{verb.name} declares --in-place and {flag!r} but has no "
+            f"tests/registry.py::OUTPUT_FLAG_INVOCATIONS[{in_place_key!r}] row -- "
+            "add one (C14 needs it too) so C16 can build a copy-safe conflicting "
+            "invocation"
+        )
+    # The `--in-place` row is already copy-safe (never the shared, session-scoped
+    # corpus fixture itself, per `_copy_corpus_fixture`'s own docstring) --
+    # reused here, with the destination flag appended, rather than building a
+    # new row: the verb's `--output` row names the raw corpus path directly,
+    # which is safe there ONLY because that row never mutates it.
+    base_args = OUTPUT_FLAG_INVOCATIONS[in_place_key](corpus, tmp_path)
+    conflicting_args = [*base_args, *_offending_flag_args(flag, tmp_path)]
+
+    operand = Path(base_args[0])
+    before_bytes = operand.read_bytes()
+    before_files = set(tmp_path.rglob("*"))
+
+    result = run_cli(verb.name, *conflicting_args, cwd=tmp_path)
+
+    assert result.returncode == 2, (
+        f"{verb.name}: --in-place + {flag} expected exit 2, got {result.returncode}: "
+        f"{result.stdout}{result.stderr}"
+    )
+    combined = result.stdout + result.stderr
+    assert "--in-place" in combined, f"B-076 message does not name --in-place: {combined}"
+    assert flag in combined, f"B-076 message does not name {flag}: {combined}"
+    assert operand.read_bytes() == before_bytes, (
+        f"{verb.name}: refused (exit 2) but mutated the input"
+    )
+    after_files = set(tmp_path.rglob("*"))
+    assert after_files == before_files, (
+        f"{verb.name}: refused (exit 2) but still wrote something: "
+        f"{sorted(str(p) for p in after_files - before_files)}"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Three non-parameterized root-level tests (Design §4)
 # --------------------------------------------------------------------------- #
 
