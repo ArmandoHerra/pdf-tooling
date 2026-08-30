@@ -55,7 +55,7 @@ cover: ## Run the suite under coverage against the project's floor
 	# its own prerequisite.
 	@lock="$(CURDIR)/.make-cover.lock"; \
 	if ! mkdir "$$lock" 2>/dev/null; then \
-	  holder="$$(cat "$$lock/pid" 2>/dev/null || true)"; \
+	  holder="$$(cat "$$lock/pid" 2>/dev/null)"; \
 	  if [ -n "$$holder" ] && ! kill -0 "$$holder" 2>/dev/null; then \
 	    echo "make cover: clearing a STALE lock at $$lock (pid $$holder is no longer running)" >&2; \
 	    rm -rf "$$lock"; \
