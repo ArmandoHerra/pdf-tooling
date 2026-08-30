@@ -40,6 +40,25 @@ count is not a probability judgment the way the PM's manual repro's ``>=5s``
 necessarily was against unpatched code -- it exists only as a margin against
 filesystem/OS scheduling noise, not against a race this test is hoping to
 win.
+
+**Why the signal is sent once HALF the pages exist, not the first one.**
+An earlier version of this test signalled as soon as a single file
+appeared, which is the WORST possible moment: `multiprocessing`'s default
+start method is `spawn` on macOS, so every worker cold-imports pypdfium2,
+Pillow and this whole package independently, and workers finish that cold
+start at staggered times. Signalling at the very first file means most of
+the OTHER 7 workers are still statistically likely to be deep inside their
+own first, cold, uninterruptible C call (pdfium's render, or Pillow's
+max-compression PNG encode) at that exact instant -- and CPython cannot
+deliver a signal into a running C call, only at the next bytecode boundary
+(the `signal` module's own documented limitation), so a worker caught
+there is SIGKILLed with no chance to discard its own temp file. This was
+caught live: CI's `macos-14` leg reproduced exactly this, leaving one
+`.pdftoolkit-*` stray on the SIGTERM arm. Waiting for half the run's pages
+to already exist means most workers have survived their own cold start and
+are between pages -- ordinary, interruptible Python bytecode -- when the
+signal lands, which is what `ops/procpool.py::TEARDOWN_GRACE_S`'s own
+docstring calls a best-effort, not a guaranteed, property.
 """
 
 from __future__ import annotations
@@ -71,14 +90,26 @@ pytestmark = [
 
 #: 32 pages at a DPI high enough to keep 8 workers busy for several seconds
 #: (measured locally: ~3.7s unsignalled, 8 threads) -- long enough that a
-#: signal sent once the first file appears lands with several seconds of
-#: genuine work still ahead of it, on a CI runner slower or faster than the
-#: box this was measured on.
+#: signal sent once half the pages exist still lands with genuine work
+#: ahead of it, on a CI runner slower or faster than the box this was
+#: measured on.
 _PAGE_COUNT = 32
 _DPI = "400"
 
-_FIRST_OUTPUT_TIMEOUT_S = 20.0
-_PARENT_EXIT_TIMEOUT_S = 10.0
+#: Signal once at least this many pages already exist -- not the first one.
+#: See the module docstring for why: signalling at the very first file
+#: statistically catches the OTHER workers mid cold-start, which is exactly
+#: the residue this spec must not introduce.
+_SIGNAL_AT_COUNT = _PAGE_COUNT // 2
+
+#: Generous: a `spawn`-started worker's cold import (pypdfium2, Pillow, this
+#: whole package) plus its first render can cost real seconds on a loaded CI
+#: VM, and this is waiting for HALF the run, not one page.
+_PROGRESS_TIMEOUT_S = 60.0
+#: `ops/procpool.py::TEARDOWN_GRACE_S` is paid in full on every signalled
+#: teardown (see that module's docstring), so this must clear it with room
+#: for process spawn/reap overhead on top.
+_PARENT_EXIT_TIMEOUT_S = 25.0
 _SETTLE_S = 1.0
 
 
@@ -111,20 +142,28 @@ def _group_alive(pgid: int) -> bool:
     return True
 
 
-def _wait_for_first_output(out_dir: Path, *, timeout: float) -> None:
+def _wait_for_progress(out_dir: Path, *, at_least: int, timeout: float) -> int:
+    """Block until *out_dir* holds at least *at_least* files, and return the
+    count actually observed. See the module docstring for why this waits
+    for substantial progress rather than the first file."""
     deadline = time.monotonic() + timeout
+    count = 0
     while time.monotonic() < deadline:
-        if out_dir.is_dir() and any(out_dir.iterdir()):
-            return
+        count = len(list(out_dir.iterdir())) if out_dir.is_dir() else 0
+        if count >= at_least:
+            return count
         time.sleep(0.05)
-    pytest.fail(f"no output appeared under {out_dir} within {timeout}s -- render never started")
+    pytest.fail(
+        f"only {count}/{at_least} files appeared under {out_dir} within {timeout}s "
+        f"-- render started too slowly (or not at all) for this test to be decisive"
+    )
 
 
 def _send_signal_and_measure(
     tmp_path: Path, sig: signal.Signals
 ) -> tuple[subprocess.Popen[bytes], int, int, tuple[Path, ...]]:
     """Launch a real `rasterize` job, signal the PARENT PID ONLY once it has
-    demonstrably started writing, and return
+    made substantial, demonstrable progress, and return
     ``(process, count_at_death, count_after_settle, stray_temps)``.
     """
     source = _make_source(tmp_path / "src")
@@ -147,7 +186,7 @@ def _send_signal_and_measure(
         start_new_session=True,
     )
     try:
-        _wait_for_first_output(out_dir, timeout=_FIRST_OUTPUT_TIMEOUT_S)
+        _wait_for_progress(out_dir, at_least=_SIGNAL_AT_COUNT, timeout=_PROGRESS_TIMEOUT_S)
 
         # THE PID ONLY -- never the group. Signalling the group would kill
         # the workers directly and prove nothing about the parent's own

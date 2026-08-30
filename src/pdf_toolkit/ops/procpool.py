@@ -53,6 +53,20 @@ provable — a worker that was already mid-``os.replace`` when a real SIGKILL
 (uncatchable, see below) arrived is not something any code in this process
 can prevent, and this module makes no claim about it.
 
+**Residue avoidance is best-effort, not a guarantee — stated plainly rather
+than implied.** :data:`TEARDOWN_GRACE_S` exists so a worker's own SIGTERM
+handler gets a chance to run and unwind through an open ``AtomicWriter``,
+but that chance depends on CPython reaching a bytecode boundary to deliver
+it, and a signal cannot interrupt a call already inside pdfium's or
+Pillow's C code (the ``signal`` module's own documented limitation). A
+worker parked deep in a slow C call for longer than the grace window is
+SIGKILLed with no chance to discard its own temp file, exactly as an
+un-mitigated hard kill always could. This is the SAME class of accepted
+outcome ``safety/tempnames.py``'s own docstring already names for a plain
+SIGKILL between temp-create and ``os.replace`` (PLAN §12 R-07: reported by
+``doctor --strict``, never swept) — this module lowers how often it
+happens, it does not claim to make it impossible.
+
 Every signal is torn down through the ONE routine in
 :func:`guarded_process_pool` — SIGTERM, SIGINT and SIGHUP alike. SIGINT gets
 the same explicit treatment as the other two rather than being left to
@@ -108,7 +122,26 @@ __all__ = ["guarded_process_pool"]
 #: `adapters/` anywhere today (verbs reach an engine only through `ports/`),
 #: and coupling two unrelated layers for one shared float is not worth
 #: introducing that first backward edge. Same value class, same reasoning.
-TEARDOWN_GRACE_S: Final[float] = 2.0
+#:
+#: Sized for the SLOWEST case this product's own CI matrix exercises, not the
+#: fastest: `multiprocessing`'s default start method is `fork` on Linux but
+#: `spawn` on macOS (and everywhere from Python 3.14 on) -- a `spawn`ed
+#: worker re-imports pypdfium2, Pillow and this whole package from scratch,
+#: with no fork-inherited already-loaded state, so its very first page can
+#: cost seconds of cold-start C-extension import and JIT-free interpreter
+#: warm-up before a single byte is rendered. `guarded_process_pool`'s
+#: SIGTERM handler can only take effect at a Python bytecode boundary
+#: (CPython cannot interrupt a running C call -- the `signal` module's own
+#: documented limitation), so a worker parked inside that cold first-page
+#: encode needs a genuinely generous window to reach one, or it is SIGKILLed
+#: with no chance to discard its own temp file. Because the worker's own
+#: `call_queue.get()` loop never exits on its own even after a clean
+#: cooperative unwind (see the module docstring's stdlib-verified fact),
+#: this window is effectively always paid in full on a signalled teardown --
+#: it is not merely a ceiling; treat raising it as directly, linearly
+#: costing wall-clock, and consider it money well spent against residue
+#: rather than a knob to shrink casually.
+TEARDOWN_GRACE_S: Final[float] = 6.0
 
 #: Poll interval while waiting out `TEARDOWN_GRACE_S`.
 _POLL_S: Final[float] = 0.05

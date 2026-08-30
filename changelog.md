@@ -19,6 +19,26 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [B-055] widen the SIGTERM/SIGINT/SIGHUP teardown grace window and make its own test spawn-safe — 2026-08-30
+- CI's `macos-14` leg (`test (3.13, macos-14)`) caught a real gap on the
+  first push of the landed `[B-055]` entry below: stray `.pdftoolkit-*`
+  temp files survived the run. `multiprocessing` defaults to `spawn` on
+  macOS (and every platform from Python 3.14 on), so every worker
+  cold-imports pypdfium2/Pillow/this package from scratch on start —
+  `guarded_process_pool()`'s grace window widens from 2s to 6s in
+  `ops/procpool.py` to give that cold start room to finish an in-flight
+  `AtomicWriter` unwind before the SIGKILL deadline, instead of racing it.
+- `tests/integration/test_rasterize_signals.py` sent its signal at the
+  worst possible moment — the very first output file — which statistically
+  catches other workers mid cold-import, uninterruptible C call included.
+  Fixed by signalling once half the run's pages already exist instead, so
+  the test's own timing no longer manufactures the race it was written to
+  detect.
+- The `guarded_process_pool()` docstring now states residue avoidance as
+  best-effort under PLAN §12 R-07's own accepted class, not as a guarantee
+  — the fix narrows the race, it does not eliminate the theoretical window
+  inherent to signalling a cold-starting worker.
+
 ## [B-055] `rasterize`'s worker pool no longer survives SIGTERM/SIGINT/SIGHUP to the parent — 2026-08-30
 - Fixed: `rasterize --threads N>1` left every render worker running (and
   writing) after a signal to the parent — `ProcessPoolExecutor.__exit__`'s
