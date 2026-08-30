@@ -41,6 +41,39 @@ cover: ## Run the suite under coverage against the project's floor
 	# children (run with cwd=tmp_path/workspace by several tests) always write
 	# their parallel data file next to this one in the repo root, never inside
 	# a purity-snapshot root -- see [tool.coverage.run] in pyproject.toml.
+	#
+	# B-090: two concurrent `make cover` (or `make ci`) invocations against
+	# this one absolute COVERAGE_FILE race and corrupt it -- the observed
+	# signature was `make: *** [Makefile:44: cover] Error 1` alongside pytest
+	# itself reporting a full, clean pass. `flock(1)` is util-linux and is NOT
+	# on macOS, and this target runs on macos-14 as well as ubuntu-latest, so
+	# the guard below uses `mkdir`, which is atomic on every POSIX filesystem
+	# this repo targets and needs no new dependency. Guarding `cover` alone
+	# (the one target that actually writes COVERAGE_FILE) is deliberate:
+	# `ci` depends on `cover`, so it inherits this guard through that
+	# dependency -- guarding `ci` too would self-deadlock `make ci` against
+	# its own prerequisite.
+	@lock="$(CURDIR)/.make-cover.lock"; \
+	if ! mkdir "$$lock" 2>/dev/null; then \
+	  holder="$$(cat "$$lock/pid" 2>/dev/null || true)"; \
+	  if [ -n "$$holder" ] && ! kill -0 "$$holder" 2>/dev/null; then \
+	    echo "make cover: clearing a STALE lock at $$lock (pid $$holder is no longer running)" >&2; \
+	    rm -rf "$$lock"; \
+	  fi; \
+	  if ! mkdir "$$lock" 2>/dev/null; then \
+	    holder="$$(cat "$$lock/pid" 2>/dev/null || echo unknown)"; \
+	    echo "" >&2; \
+	    echo "make cover: REFUSED -- this is a CONCURRENCY GUARD, not a test failure." >&2; \
+	    echo "  Another 'make cover' (or 'make ci') is already running here, held by pid $$holder." >&2; \
+	    echo "  Two concurrent runs would race on the shared COVERAGE_FILE at $(CURDIR)/.coverage" >&2; \
+	    echo "  and corrupt it. Wait for the other run to finish. If you are certain nothing is" >&2; \
+	    echo "  actually running, clear the lock with 'make clean' (or: rm -rf $$lock)." >&2; \
+	    echo "" >&2; \
+	    exit 1; \
+	  fi; \
+	fi; \
+	echo "$$$$" > "$$lock/pid"; \
+	trap 'rm -rf "$$lock"' EXIT INT TERM; \
 	COVERAGE_FILE=$(CURDIR)/.coverage \
 	  uv run pytest --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85
 
@@ -188,5 +221,5 @@ samples-gate: ## Run the whole @samples chain in the one correct order (PLAN.md 
 ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate
 
 clean: ## Remove build, cache and coverage artefacts
-	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml .scratch
+	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml .scratch .make-cover.lock
 	rm -f .coverage.*
