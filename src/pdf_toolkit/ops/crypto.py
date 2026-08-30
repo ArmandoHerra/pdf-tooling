@@ -670,10 +670,19 @@ def permissions_run(
             secret.clear()
 
     if facts.encrypted and not facts.unlocked:
+        # `path` here is the TARGET DOCUMENT, not a password -- safe to show,
+        # and useful (it says which file needs a password). `redacted=True`
+        # does not belong on this one: found while landing B-068's
+        # `PdfToolkitError.to_dict()` chokepoint, which makes `redacted`
+        # actually do something for the first time -- this call site was
+        # unaffected by it being a no-op, but would have silently started
+        # rendering `path` as `<redacted>` instead of the document path once
+        # the flag gained teeth. Removed rather than left in place with the
+        # chokepoint softened for it: `redacted=True` communicates "this path
+        # might be a secret," which was never true here.
         raise AuthError(
             "a password is required to read this document's permissions",
             path=str(source),
-            redacted=True,
         )
 
     detail: dict[str, object] = {

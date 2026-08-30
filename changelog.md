@@ -19,7 +19,31 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
-## [PDF-13] fix: wait for /proc to show the child's argv before reading it — 2026-08-30
+## [B-068] fix: `--password-file`'s refusal echoed the given value on stdout/stderr — 2026-08-30
+- `--password-file`'s shape check (`cli/common.py`, the shared option layer
+  every verb goes through) built its own `UsageError(path=value)` instead of
+  routing through the never-echo constructor `--owner-password-file` /
+  `--user-password-file` already used — the value it refused reached the
+  structured error envelope's `path` field, in every output shape (default,
+  `-o json`, `-o ndjson`, `-o table`, `--quiet`, `-vv`; `-o table` puts it on
+  stderr, the other five on stdout). PDF-13's AC1 (`PLAN.md` §5.7) as
+  extended 2026-08-30 names `--password-file` explicitly; pre-existing at
+  `c870e73`, not a regression.
+- `PdfToolkitError.to_dict()` now honours `redacted` (it was a fully dead
+  flag: five write sites, zero reads) at the single chokepoint every
+  renderer consumes — a refusal built `redacted=True` with a populated
+  `path` renders `path` as `pdf_toolkit.secret.REDACTED` instead of the
+  value, so a future password-bearing flag cannot leak this way again.
+  `--password-file`'s own check now calls the shared `not_a_readable_file`
+  constructor directly, and `PASSWORD_FILE_FLAGS` (companion to
+  `REFUSED_PASSWORD_FLAGS`) is the completeness registry a new test ties to
+  every verb's rendered `--help`.
+- Found and fixed in the same pass: `permissions`' own "password required"
+  `AuthError` (`ops/crypto.py`) carried `redacted=True` alongside a
+  `path=str(source)` that names the *document*, not a password — harmless
+  while `redacted` was dead code, but would have started hiding a useful,
+  non-secret document path as `<redacted>` the moment the flag gained
+  effect. Removed; the document path is shown again, as it always was.
 - The AC7 argv proof read `/proc/<pid>/cmdline` as soon as the read
   succeeded. The kernel exposes `/proc/<pid>` the moment the child is
   forked, **before** `execve` has installed the new argv, so the read could

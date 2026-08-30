@@ -56,6 +56,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Final
 
+from pdf_toolkit.cli.common import not_a_readable_file
 from pdf_toolkit.errors import AuthError, UsageError
 from pdf_toolkit.ops.crypto import PasswordSource
 from pdf_toolkit.output.logging import get_logger
@@ -83,14 +84,16 @@ STDIN_SPELLING: Final[str] = "-"
 #: than it protects, and the warning is the honest middle.
 _LOOSE_MODE_MASK: Final[int] = 0o077
 
-
-def _not_a_readable_file(flag: str) -> UsageError:
-    """The never-echo error. ``path=`` is deliberately absent."""
-    return UsageError(
-        f"{flag} takes a file path or '-'; the given value is not a readable file. "
-        "Refusing to echo it, in case it is the password itself.",
-        redacted=True,
-    )
+# `not_a_readable_file` -- the never-echo error every password-bearing flag's
+# shape refusal builds -- is imported from `cli.common` above, not defined
+# here (B-068). It WAS defined in this module until `--password-file`'s own
+# refusal (in `cli/common.py`, the shared option layer every verb goes
+# through) needed the same constructor: `cli.common` importing THIS module
+# would have made `pdf_toolkit.safety.atomic.AtomicWriter` transitively
+# reachable (via this module's own `ops.crypto` import) from every verb's
+# callback module, silently reclassifying `doctor`/`info`/`version` as
+# "mutating" for `tests/registry.py`'s static AST reachability scan --
+# see `cli/common.py`'s own docstring on the function for the full account.
 
 
 def reject_two_stdin_streams(values: Sequence[str | None]) -> None:
@@ -228,7 +231,7 @@ def plan_password(
         if value == STDIN_SPELLING:
             return _slot(slot, "stdin", _read_stdin, flag=flag, allow_empty=allow_empty)
         if not Path(value).is_file():
-            raise _not_a_readable_file(flag)
+            raise not_a_readable_file(flag)
         return _slot(
             slot,
             f"file:{value}",

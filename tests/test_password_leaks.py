@@ -722,3 +722,168 @@ def test_ac12_the_json_payload_carries_advisory_as_data_and_not_as_prose(bed: Be
     detail = json.loads(result.stdout)["items"][0]["detail"]
     assert detail["advisory"] is True
     assert not re.search(r"advisory", json.dumps(detail).replace('"advisory"', ""), re.IGNORECASE)
+
+
+# --------------------------------------------------------------------------- #
+# B-068 -- a literal `--password-file` value echoed into the structured error
+# envelope on stdout.
+#
+# AC1/AC18 above proved the three REMOVED spellings (`--password`,
+# `--user-password`, `--owner-password`) refuse without an echo. This is the
+# parallel proof for the flags that DO exist and DO take a file path --
+# `--password-file` (global, every verb) and `--owner-password-file` /
+# `--user-password-file` (`encrypt`-only) -- and it is deliberately NOT added
+# to `_REFUSED_SPELLINGS` above: those three are hidden boolean options that
+# do not exist as flags at all, whereas `--password-file` is canonical and
+# supported, and a VALID path given to it correctly exits 0/4/6.
+#
+# `--password-file`'s shape check lived at `cli/common.py`'s shared option
+# layer, parallel to but not routed through `cli/password.py`'s
+# `not_a_readable_file` -- the constructor `--owner-password-file` /
+# `--user-password-file` already used, which is why only they measured
+# clean. `PASSWORD_FILE_FLAGS` (`cli/common.py`, companion to
+# `REFUSED_PASSWORD_FLAGS`) is the completeness registry; `_B068_FLAG_VERBS`
+# below is asserted to cover every member of it, so a future password-file
+# flag added to the registry without gaining a non-echo proof here fails the
+# suite instead of shipping quietly.
+#
+# `PASSWORD_FILE_FLAGS` is imported LOCALLY inside the two tests that need
+# it, not at module scope: this section is written and run RED (per this
+# defect's own validation protocol) BEFORE the registry exists in
+# `cli/common.py`, and a module-level `ImportError` would fail collection of
+# this entire file -- every other AC in it along with it -- rather than
+# reporting the two tests that actually depend on the not-yet-built
+# registry as failing.
+# --------------------------------------------------------------------------- #
+
+#: Flag -> the verb it is exercised on. `--password-file` is the shared/
+#: global flag -- `info`, `decrypt` and `permissions` are all reachable
+#: (mirroring AC18's own `_REFUSAL_VERBS` choice above). `--owner-password-
+#: file` / `--user-password-file` are declared only on `encrypt`
+#: (`cmd_encrypt.py`).
+_B068_FLAG_VERBS: Final[tuple[tuple[str, str], ...]] = (
+    ("--password-file", "info"),
+    ("--password-file", "decrypt"),
+    ("--password-file", "permissions"),
+    ("--owner-password-file", "encrypt"),
+    ("--user-password-file", "encrypt"),
+)
+
+#: The five output shapes the defect was measured across (default/pipe,
+#: `-o json`, `-o ndjson`, `--quiet`, `-vv`) plus `-o table` -- a B-068
+#: finding of its own: the same leak reaches STDERR under table rendering
+#: (`render_error_table`'s unconditional `f"error: {message} ({path})"`),
+#: which none of the originally measured five shapes exercises since none of
+#: them forces table rendering over a non-TTY pipe.
+_B068_SHAPES: Final[tuple[tuple[str, ...], ...]] = (
+    (),
+    ("-o", "json"),
+    ("-o", "ndjson"),
+    ("-o", "table"),
+    ("--quiet",),
+    ("-vv",),
+)
+
+
+def _b068_shape_id(shape: tuple[str, ...]) -> str:
+    return " ".join(shape) or "default"
+
+
+def _b068_argv(flag: str, verb: str, bed: Bed, bad_value: str, shape: tuple[str, ...]) -> list[str]:
+    """One complete, refusing invocation. The refusing shape is "neither `-`
+    nor a readable file" -- the same shape `_refusal_shapes`' `literal` case
+    uses above, chosen fresh here so this section reads standalone."""
+    if verb != "encrypt":
+        return [verb, str(bed.plain), flag, bad_value, *shape]
+    if flag == "--owner-password-file":
+        return [verb, str(bed.plain), "--owner-password-file", bad_value, *shape]
+    # `--user-password-file`: the owner slot is planned FIRST and must itself
+    # be a valid password file, or its own refusal is reached before the
+    # user slot's ever is.
+    return [
+        verb,
+        str(bed.plain),
+        "--owner-password-file",
+        str(bed.password_file["ascii"]),
+        "--user-password-file",
+        bad_value,
+        *shape,
+    ]
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("shape", _B068_SHAPES, ids=_b068_shape_id)
+@pytest.mark.parametrize(("flag", "verb"), _B068_FLAG_VERBS)
+def test_b068_a_password_file_flag_never_echoes_its_refused_value(
+    flag: str, verb: str, shape: tuple[str, ...], bed: Bed
+) -> None:
+    """The direct repro, generalized over every password-file-shaped flag and
+    every measured output shape: a value that is neither `-` nor a readable
+    file must not appear in `path=`, in `message`, or anywhere else in the
+    rendered output -- on stdout OR stderr.
+
+    Pins the CLEAN siblings (`--owner-password-file` / `--user-password-
+    file`) as clean in the same parametrization as the BROKEN one
+    (`--password-file`): a test that only asserted the broken case would go
+    green on the fix and never notice a later regression on its siblings.
+    """
+    bad_value = f"{PW_SENTINEL}-b068-not-a-path"
+    result = run_cli(*_b068_argv(flag, verb, bed, bad_value, shape), env=_clean_env())
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 2, f"{flag} {verb} {_b068_shape_id(shape)}: {combined}"
+    assert bad_value not in combined, (
+        f"{flag} {verb} {_b068_shape_id(shape)} echoed its refused value: {combined}"
+    )
+    assert PW_SENTINEL not in combined, (
+        f"{flag} {verb} {_b068_shape_id(shape)} echoed the sentinel: {combined}"
+    )
+
+    # Positive control (AC7's lesson): a populated, MEANINGFUL envelope, not
+    # merely an absent sentinel -- which an early exit or empty stdout could
+    # satisfy vacuously.
+    assert combined.strip(), f"{flag} {verb} {_b068_shape_id(shape)} produced no output at all"
+    assert '"code": 2' in combined or "error:" in combined, combined
+    assert '"kind": "usage"' in combined or "error:" in combined, combined
+    assert flag in combined, (
+        f"{flag} {verb} {_b068_shape_id(shape)} did not name the flag: {combined}"
+    )
+    # The message still names a supported input -- refusing to echo the
+    # value must not degrade it into an unhelpful "no" with no next step.
+    assert "'-'" in combined, (
+        f"{flag} {verb} {_b068_shape_id(shape)} message dropped the stdin ('-') input: {combined}"
+    )
+
+
+def test_b068_password_file_flag_registry_matches_reachable_verbs() -> None:
+    """Structural tie: every flag in `PASSWORD_FILE_FLAGS` (the completeness
+    registry at `cli/common.py`, companion to `REFUSED_PASSWORD_FLAGS`) has
+    an entry in `_B068_FLAG_VERBS` above, and vice versa -- so a flag added
+    to the registry without gaining a non-echo proof here fails the suite
+    instead of shipping quietly, and a stale entry here without a matching
+    registry member fails just as loudly."""
+    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+
+    assert set(PASSWORD_FILE_FLAGS) == {flag for flag, _verb in _B068_FLAG_VERBS}
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", [*VERBS, "info"])
+def test_b068_rendered_help_names_no_password_flag_outside_the_registry(verb: str) -> None:
+    """The AC18 idiom (B-052's lesson: grep rendered `--help`, never source)
+    applied in the OTHER direction from `test_ac18_rendered_help_names_no_
+    password_flag_other_than_password_file` above: that test guards against
+    a REMOVED spelling reappearing; this one guards against a NEW
+    password-bearing flag landing without a completeness-registry entry (and
+    therefore without the non-echo proof above)."""
+    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+
+    result = run_cli(verb, "--help")
+    assert result.returncode == 0
+    normalized = re.sub(r"-[ \t]*\n[ \t]*", "-", result.stdout)
+    offenders = [
+        flag
+        for flag in re.findall(r"--[a-z-]*password[a-z-]*", normalized)
+        if flag not in PASSWORD_FILE_FLAGS
+    ]
+    assert offenders == [], f"`{verb} --help` names {offenders}, outside PASSWORD_FILE_FLAGS"

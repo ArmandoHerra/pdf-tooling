@@ -33,6 +33,7 @@ from pdf_toolkit.safety.policy import SafetyPolicy
 __all__ = [
     "GLOBAL_OPTIONS",
     "OUTPUT_FLAGS",
+    "PASSWORD_FILE_FLAGS",
     "REFUSED_PASSWORD_FLAGS",
     "CliState",
     "GlobalConfig",
@@ -40,6 +41,7 @@ __all__ = [
     "current_error_format",
     "get_config",
     "global_options",
+    "not_a_readable_file",
     "root_global_options",
 ]
 
@@ -135,6 +137,68 @@ REFUSED_PASSWORD_FLAGS: Final[tuple[str, ...]] = (
     "--user-password",
     "--owner-password",
 )
+
+#: B-068's completeness lever, companion to :data:`REFUSED_PASSWORD_FLAGS`
+#: above: every flag in this product that takes a *path to a file holding a
+#: password* (never the password itself). Unlike :data:`REFUSED_PASSWORD_
+#: FLAGS`, these are real, supported, non-hidden flags that DO appear in
+#: rendered ``--help`` — ``--password-file`` is global (declared below,
+#: reachable on every verb); ``--owner-password-file`` /
+#: ``--user-password-file`` are declared on ``encrypt`` alone
+#: (``cmd_encrypt.py``).
+#:
+#: Every member's shape refusal is proven, by
+#: ``tests/test_password_leaks.py``'s B-068 section, to route through
+#: :func:`not_a_readable_file` below and never echo the value it was given —
+#: that test also asserts this tuple's membership against every verb's
+#: *rendered* ``--help`` (the AC18 idiom: an observable-behaviour check, not
+#: a source grep) and against its own per-flag coverage map, so a flag
+#: landing here without gaining that proof fails the suite rather than
+#: shipping quietly.
+PASSWORD_FILE_FLAGS: Final[tuple[str, ...]] = (
+    "--password-file",
+    "--owner-password-file",
+    "--user-password-file",
+)
+
+
+def not_a_readable_file(flag: str) -> UsageError:
+    """The never-echo error for a flag in :data:`PASSWORD_FILE_FLAGS`.
+
+    ``path=`` is deliberately absent, for the same reason
+    :func:`_password_flag_refusal` above gives: at the moment of refusal we
+    cannot tell a typo'd path from a literal password, and a rendered
+    ``path=`` field would print it either way.
+
+    Defined HERE rather than in ``cli/password.py`` (B-068): that is where
+    this exact error was already built for ``--owner-password-file`` /
+    ``--user-password-file`` before this fix, and the natural move is to
+    have ``--password-file``'s check (below, in THIS module) call it. But
+    ``cli/password.py`` imports :mod:`pdf_toolkit.ops.crypto` (for
+    ``PasswordSource``), which imports :class:`~pdf_toolkit.safety.atomic.
+    AtomicWriter` -- the write chokepoint. ``cli/common.py`` is imported by
+    *every* verb's callback module, and ``tests/registry.py``'s
+    ``is_mutating`` classification is a **static, transitive** AST-import
+    reachability scan for that same name (`ast.walk` sees every import
+    statement in a file regardless of nesting, so a deferred/local import
+    does not avoid it either) -- so importing ``cli.password`` from
+    ``cli.common`` would have made ``AtomicWriter`` reachable from every
+    verb, including ``doctor``/``info``/``version``, and reclassified all
+    three as mutating (verified against a clean worktree at ``73f6722``: it
+    flips exactly those three, and ``doctor``'s own pre-existing
+    ``--dry-run`` impurity -- out of B-068's scope -- would have started
+    failing ``test_c9`` / ``test_c10`` as a side effect of a password-leak
+    fix). ``cli/password.py`` importing THIS module instead carries no such
+    risk: ``cli/common.py`` does not import anything that reaches
+    ``AtomicWriter``, and the three verbs that already import
+    ``cli.password`` (``encrypt``, ``decrypt``, ``permissions``) were
+    already classified mutating before this fix.
+    """
+    return UsageError(
+        f"{flag} takes a file path or '-'; the given value is not a readable file. "
+        "Refusing to echo it, in case it is the password itself.",
+        redacted=True,
+    )
 
 
 def _password_flag_refusal(flag: str) -> UsageError:
@@ -549,14 +613,21 @@ def _validate_name_template(template: str) -> None:
 
 
 def _validate_password_file(value: str) -> None:
-    """A password is a *path* or ``-``. A literal password is never accepted."""
+    """A password is a *path* or ``-``. A literal password is never accepted.
+
+    Routes through :func:`not_a_readable_file` above (B-068) -- the same
+    never-echo constructor ``--owner-password-file`` / ``--user-password-
+    file`` already use (via ``cli/password.py``'s own import of it) --
+    rather than building its own ``UsageError`` with ``path=value`` here.
+    The two were parallel refusal paths for the same class of flag; only one
+    of them was hardened, and ``--password-file`` (the shared/global
+    spelling, reached from every verb through this shared option layer) was
+    the one that leaked.
+    """
     if value == "-":
         return
     if not Path(value).is_file():
-        raise UsageError(
-            "--password-file takes a path to a file holding the password, or '-' for stdin",
-            path=value,
-        )
+        raise not_a_readable_file("--password-file")
 
 
 def _apply(ctx: typer.Context, values: dict[str, Any]) -> GlobalConfig:

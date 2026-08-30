@@ -20,6 +20,7 @@ from pdf_toolkit.cli.exit_codes import (
     REFUSED,
     USAGE,
 )
+from pdf_toolkit.secret import REDACTED
 
 __all__ = [
     "AuthError",
@@ -48,9 +49,11 @@ class PdfToolkitError(Exception):
         message: Human-readable, already safe to print.
         path: The filesystem path the error is about, when there is one.
         redacted: Set when the message was built from a value that must never
-            be echoed verbatim. Renderers honour it from the first commit so
-            that the password work can register secrets rather than retrofit a
-            redaction path around a live credential.
+            be echoed verbatim. Honoured at the single :meth:`to_dict`
+            chokepoint (B-068) rather than by each renderer or each call
+            site, so the password work registers secrets by construction
+            instead of retrofitting a redaction path around a live
+            credential after the fact.
     """
 
     exit_code: ClassVar[int] = FAILURE
@@ -69,12 +72,31 @@ class PdfToolkitError(Exception):
         self.redacted = redacted
 
     def to_dict(self) -> dict[str, object]:
-        """The structured error payload. The only thing a renderer consumes."""
+        """The structured error payload. The only thing a renderer consumes.
+
+        ``redacted`` is honoured HERE, not by each call site (B-068): a
+        refusal built with ``redacted=True`` and a populated ``path`` renders
+        ``path`` as :data:`pdf_toolkit.secret.REDACTED` rather than the value
+        itself, so a future password-bearing flag that (mistakenly) passes
+        ``path=value`` alongside ``redacted=True`` cannot leak through this
+        envelope the way ``--password-file``'s did. Every renderer
+        (``render_error_json`` -- which serves ``-o json`` *and* ``-o
+        ndjson`` -- and ``render_error_table``) consumes this method's
+        output and nothing else, so one change here covers every output
+        shape uniformly.
+
+        A caller that passes no ``path`` at all -- the convention every
+        never-echo constructor in this codebase already follows -- is
+        unaffected: ``path`` stays ``None``, exactly as before.
+        """
+        path: object = self.path
+        if self.redacted and path is not None:
+            path = REDACTED
         return {
             "code": self.exit_code,
             "kind": self.kind,
             "message": self.message,
-            "path": self.path,
+            "path": path,
         }
 
 

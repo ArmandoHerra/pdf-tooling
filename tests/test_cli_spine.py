@@ -413,7 +413,13 @@ def test_an_error_reaches_the_single_handler_end_to_end() -> None:
     assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["error"]["code"] == 2
     assert payload["error"]["kind"] == "usage"
-    assert payload["error"]["path"] == "/no/such/file"
+    # B-068: `--password-file` is a never-echo flag (like every flag in
+    # `PASSWORD_FILE_FLAGS`) -- the given value must never appear in the
+    # envelope, so `path` is `None` here rather than the literal argument.
+    # `tests/test_password_leaks.py`'s B-068 section is the adversarial
+    # proof; this assertion is this file's own pin of the same contract.
+    assert payload["error"]["path"] is None
+    assert "/no/such/file" not in structured.stdout
 
 
 def test_renderers_consume_only_to_dict(monkeypatch: pytest.MonkeyPatch) -> None:
