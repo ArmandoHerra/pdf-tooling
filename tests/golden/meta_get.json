@@ -1,0 +1,29 @@
+{
+  "disagreements": [],
+  "dry_run": false,
+  "info": {
+    "Author": "pdf-toolkit test corpus",
+    "CreationDate": "D:20000101000000+00'00'",
+    "Creator": "tests/corpus.py",
+    "CustomField": "custom-value",
+    "Keywords": "pdf-toolkit,fixture,metadata",
+    "ModDate": "D:20000101000000+00'00'",
+    "Producer": "pdf-toolkit test corpus",
+    "Subject": "PDF-06 fixture corpus",
+    "Title": "pdf-toolkit corpus: metadata_rich",
+    "Trapped": "/False"
+  },
+  "path": "metadata_typed.pdf",
+  "residual_surfaces": {
+    "annotation_authors": 0,
+    "doc_piece_info": false,
+    "embedded_files": 0,
+    "page_piece_info_pages": [],
+    "page_xmp_pages": [],
+    "trailer_id": true
+  },
+  "schema_version": 1,
+  "verb": "meta get",
+  "xmp": null,
+  "xmp_raw": null
+}

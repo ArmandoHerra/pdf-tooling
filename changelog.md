@@ -19,6 +19,22 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-14] fix: add the missing `meta get` golden (AC18/Scope > Tests) — 2026-08-30
+- The initial landing implemented and tested every acceptance criterion but
+  never added the `tests/golden/meta_get.json` golden file the spec's own
+  Scope > Tests row and AC18 both name explicitly. Added
+  `tests/unit/test_metadata.py::test_ac18_the_meta_get_golden`, built from
+  the **generated** `metadata_typed` corpus fixture only (never a sample,
+  per `tests/golden/README.md`'s own rule) via `cli/cmd_meta_get.build_
+  payload`, with `path` canonicalised to the bare filename before comparison
+  (mirrors `tests/unit/test_textract.py::_canonical`'s `_PATH_KEYS`
+  treatment — the raw value carries the session's own `tmp_path` and would
+  otherwise make the golden un-reviewable noise). Regenerated with
+  `--update-golden`, diff reviewed (11 keys, all generated-corpus content,
+  nothing from a sample), then re-run without the flag to confirm the
+  comparison itself passes.
+- No product code changed; `src/pdf_toolkit/**` is untouched by this commit.
+
 ## [PDF-14] feat: `meta get`/`meta set` over /Info + XMP; `watermark`/`stamp` via the compositing port — 2026-08-30
 - `meta` is the CLI's first grouping parent — `meta get`/`meta set` each live
   in their own `cli/cmd_meta_{get,set}.py` module (D8.1), with `cli/cmd_meta.py`

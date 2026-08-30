@@ -371,3 +371,21 @@ def test_meta_set_in_place_writes_a_byte_identical_backup(corpus, tmp_path: Path
     backup = target.with_name(target.name + ".bak")
     assert backup.exists()
     assert backup.read_bytes() == original_bytes
+
+
+# --------------------------------------------------------------------------- #
+# AC18 -- the `meta get` golden, over the GENERATED corpus only (never a
+# sample -- `tests/golden/README.md`'s own rule). `path` is canonicalised to
+# the bare filename before comparison: it is `str(source)`, which carries the
+# session's own `tmp_path`, so it differs run to run by construction and
+# would otherwise make the golden un-reviewable noise (mirrors
+# `tests/unit/test_textract.py::_canonical`'s `_PATH_KEYS` treatment).
+# --------------------------------------------------------------------------- #
+
+
+def test_ac18_the_meta_get_golden(corpus, golden) -> None:
+    from pdf_toolkit.cli.cmd_meta_get import build_payload
+
+    payload = build_payload(corpus.path("metadata_typed"), xmp=False, dry_run=False)
+    payload["path"] = Path(payload["path"]).name
+    golden.compare("meta_get", payload)
