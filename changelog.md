@@ -19,6 +19,62 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-09] rasterize — PDF pages to images — 2026-08-30
+- Added `src/pdf_toolkit/ops/raster.py` + `cli/cmd_rasterize.py`: `rasterize`
+  renders every selected page of one or more PDFs to PNG/JPEG/TIFF/WEBP,
+  `--dpi`/`--width` (mutually exclusive), `--quality` (lossy formats only),
+  `--grayscale`, `--pages` (a **set** — PLAN §4.3, the product's first
+  `--pages` verb). `consumes=("--out-dir", "--name")` (Design §D10) —
+  `-O/--output` and `--in-place` exit 2 **for free** from the shared option
+  layer; `cmd_rasterize.py` contains no check for either flag (AC23).
+  Default `--name` template `{stem}-{page:04}.{ext}`.
+- `src/pdf_toolkit/ports/raster.py` gains `RasterEngine.render_page()` and
+  the `RenderedPage` carrier (in-memory pixels only — encoding/naming/write
+  stay outside the port, D2), the interface PDF-15's `ocr` will reuse.
+  `src/pdf_toolkit/adapters/pdfium_raster.py` fills in the render path PDF-05
+  left probe-and-version-only: per-page open/render/close, rotation honoured
+  via the page's own declared `/Rotate`, and a round()-vs-pdfium's-own-ceil()
+  pixel-dimension correction (pypdfium2's `math.ceil(page_pt * scale)` can
+  overshoot by one pixel on a scale like `300/72` that isn't exactly
+  representable as an IEEE double — confirmed live, corrected by cropping
+  down to the independently-computed exact target, never padding).
+- **PLAN §12 R-08's per-worker-document-handle requirement, live-tested and
+  the executor swapped as a result.** `_render_chunk` is a module-level,
+  picklable-argument worker (proven by driving it through both a
+  `ThreadPoolExecutor` and a `ProcessPoolExecutor` in the test suite).
+  Live-testing found that real concurrent multi-threaded pdfium rendering —
+  even with each thread opening and closing its own separate document,
+  exactly as designed — reliably corrupts the process heap (`free(): invalid
+  pointer`, `malloc(): unaligned tcache chunk detected`, `double free or
+  corruption`, reproduced with 2 and with 8 concurrent threads on pypdfium2
+  5.13.0). Production therefore dispatches `_render_chunk` through a
+  `ProcessPoolExecutor`, not a `ThreadPoolExecutor` — a deviation from the
+  spec's literal prose, in the direction the evidence pointed. `--threads 1`
+  and `--threads 8` are proven byte-identical, same file order, over both a
+  local 8-page fixture and a real 108-page scanned sample.
+- Registered the sixth verb: the CLI-contract `C14` matrix moves 20→24
+  automatically; `tests/unit/test_registry.py`'s three pins fire as designed
+  (six-verb set, `rasterize` added to the mutating set — classified through
+  the **existing** `_MAX_IMPORT_HOPS = 4`, never raised — and a new explicit
+  page-addressing set) and are updated, never deleted.
+- Added `tests/unit/test_raster.py` (ops/ports/adapter, in-process) and
+  `tests/integration/test_rasterize_cli.py` (subprocess, flag contract,
+  OR-3). Appended one `@pytest.mark.samples` section to `tests/test_samples.py`
+  over a copy of `1888-10.pdf` (AC20): page 1 at `--dpi 72` renders the exact
+  956×1435 px the sample's own point geometry predicts, and the thread-count
+  identity proof re-run at `--pages 1-12` over the real scan.
+- **Reported to the PM, not reconciled here (the spec is the carrier, not
+  this commit):** AC9's "`--grayscale` reads back mode `L` for webp too" is
+  physically unsatisfiable — WebP's own bitstream format has no
+  single-channel pixel mode at all (Pillow 12.3.0's WebP encoder
+  unconditionally converts any non-RGB(A/X) source to RGB before handing it
+  to libwebp); the produced file is still perceptually grayscale (R≈G≈B
+  throughout), which is what the test asserts instead. My own help text
+  mentioning "Ghostscript" (prose, matching the spec's own D8 wording)
+  tripped `tests/test_cli_spine.py`'s literal, case-insensitive,
+  whole-source-tree forbidden-name scan — reworded to name no forbidden tool
+  at all, even in prose.
+
 ## [PDF-07] merge + split — the OR-3 output-flag consumption mechanism — 2026-08-30
 - **OR-3 (`decision.md` §0.5, Design §D12), built here before either verb
   existed.** `cli/common.py` gains `OUTPUT_FLAGS` (`--output`, `--out-dir`,

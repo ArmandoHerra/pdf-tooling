@@ -21,11 +21,12 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_five_landed_verbs() -> None:
-    """AC28: `merge`/`split` (PDF-07) join the three PDF-06-landing verbs."""
+def test_discover_verbs_finds_exactly_the_six_landed_verbs() -> None:
+    """AC24: `rasterize` (PDF-09) joins `merge`/`split` (PDF-07) and the three
+    PDF-06-landing verbs -- six total."""
     verbs = discover_verbs()
     names = {verb.name for verb in verbs}
-    assert names == {"version", "doctor", "info", "merge", "split"}
+    assert names == {"version", "doctor", "info", "merge", "split", "rasterize"}
 
 
 def test_discover_verbs_returns_no_duplicates() -> None:
@@ -41,23 +42,40 @@ def test_info_is_the_only_verb_that_takes_input_paths() -> None:
     assert verbs["version"].takes_input_paths is False
 
 
-def test_no_current_verb_is_page_addressing() -> None:
+def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
+    """AC24 (E13): `rasterize` (PDF-09) is the product's FIRST `--pages` verb
+    -- the tripwire this pin exists to catch, firing as designed. Updated to
+    an explicit named set, the same shape `test_the_expected_verbs_are_
+    classified_mutating_or_not` already uses, so it keeps failing loudly on
+    the next unclassified verb rather than silently passing forever. Was
+    `test_no_current_verb_is_page_addressing`, asserting `is_page_addressing
+    is False` for every verb -- that pin failed BY DESIGN the moment
+    `rasterize` was registered, and is updated here rather than deleted."""
+    expected_page_addressing = {"rasterize"}
+    expected_not = {"version", "doctor", "info", "merge", "split"}
     for verb in discover_verbs():
-        assert verb.is_page_addressing is False
+        if verb.name in expected_page_addressing:
+            assert verb.is_page_addressing is True, f"{verb.name} should be page-addressing"
+        elif verb.name in expected_not:
+            assert verb.is_page_addressing is False, f"{verb.name} should not be page-addressing"
+        else:  # pragma: no cover - a new verb landing without updating this pin
+            raise AssertionError(f"{verb.name} is not in either expected set -- update this pin")
 
 
 def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
-    """AC28 (B-031, E12): `merge`/`split` are the product's first verbs to
-    reach `AtomicWriter`, classified `is_mutating=True` through the EXISTING
-    `_MAX_IMPORT_HOPS = 4` scan -- `cmd_merge -> ops.merge -> safety.atomic`
-    and `cmd_split -> ops.split -> safety.atomic` are each two hops, well
-    inside the bound, so the bound was never raised (see this spec's
-    Implementation Log). `version`/`doctor`/`info` still write nothing.
+    """AC24/AC28 (B-031, E10/E12): `merge`/`split` (PDF-07) and `rasterize`
+    (PDF-09) are the product's verbs that reach `AtomicWriter`, every one
+    classified `is_mutating=True` through the EXISTING `_MAX_IMPORT_HOPS = 4`
+    scan -- `cmd_merge -> ops.merge -> safety.atomic`, `cmd_split ->
+    ops.split -> safety.atomic` and `cmd_rasterize -> ops.raster ->
+    safety.atomic` are each two hops, well inside the bound, so the bound was
+    never raised for any of the three (see this spec's Implementation Log).
+    `version`/`doctor`/`info` still write nothing.
     Was `test_no_current_verb_is_mutating`, asserting `is_mutating is False`
     for every verb -- that pin failed BY DESIGN the moment `merge`/`split`
     were registered (a tripwire, not a defect), and is updated here to the
     explicit expected set rather than deleted."""
-    expected_mutating = {"merge", "split"}
+    expected_mutating = {"merge", "split", "rasterize"}
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():
         if verb.name in expected_mutating:

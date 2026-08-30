@@ -326,12 +326,26 @@ def _split_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+def _rasterize_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`rasterize` (PDF-09) consumes `--out-dir`/`--name`, never `--output`
+    (Design §D10) -- no mode flag is required, unlike `split`: the default
+    selection is every page, so a bare `--out-dir` is already a valid,
+    honoured invocation."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "rasterize-invocation-out"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
-#: PDF; `split` needs one PDF plus a mode flag. `merge` is `destructive=False`
-#: (PDF-07's spec, Scope > Out: a second destructive invocation shape for C13
-#: is a separate backlog candidate, not built here) -- C13 keeps collecting
-#: zero cases, a stated fact rather than a silent one.
+#: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
+#: mode flag -- the default page selection is every page). `merge`/`split`/
+#: `rasterize` are all `destructive=False` (PDF-07's spec, Scope > Out: a
+#: second destructive invocation shape for C13 is a separate backlog
+#: candidate, not built here) -- C13 keeps collecting zero cases, a stated
+#: fact rather than a silent one.
 #: `test_every_verb_is_registered` (AC10) is what forces new-verb registration
 #: to happen rather than lapse.
 INVOCATIONS: Final[dict[str, Invocation]] = {
@@ -340,6 +354,7 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "info": Invocation(build=_info_invocation),
     "merge": Invocation(build=_merge_invocation, destructive=False),
     "split": Invocation(build=_split_invocation, destructive=False),
+    "rasterize": Invocation(build=_rasterize_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -364,6 +379,18 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         "--each-page",
         "--out-dir",
         str(tmp_path / "or3-split-name"),
+        "--name",
+        "or3-custom-{page}.{ext}",
+    ],
+    ("rasterize", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-rasterize-out-dir"),
+    ],
+    ("rasterize", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-rasterize-name"),
         "--name",
         "or3-custom-{page}.{ext}",
     ],

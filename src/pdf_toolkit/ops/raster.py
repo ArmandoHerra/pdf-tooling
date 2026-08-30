@@ -1,0 +1,400 @@
+"""``rasterize`` — PDF pages to images, one file per page (Design §D2-D6).
+
+Framework-free per L2: no typer/click import (PDF-06's AST test enforces it).
+Everything above the port is naming, planning, parallelism and encoding; the
+render itself is one call into ``ports.raster.require_raster()`` (X-76:
+selected by capability, never by adapter name).
+
+**Plan-then-write (Design §D4).** Every target path is resolved — through
+``safety.naming.render_name``, containment-checked by the shared renderer
+itself — and every no-clobber/collision check runs, all **before the first
+page is rendered**. A planning failure writes nothing.
+
+**PLAN §12 R-08, the core of this module (Design §D5).** Per-worker document
+handles, never shared: a worker receives a path and page numbers, never a
+document. ``ops/raster.py`` never opens a pdfium document itself — planning
+uses ``StructureEngine`` only, for ``page_count``, opened and closed in this
+module before any worker starts; rendering happens entirely inside
+:func:`_render_chunk`, a **module-level**, picklable-argument function so the
+same code path serves both ``--threads 1`` (the documented reproduction
+switch, D5.6) and ``--threads 8``.
+
+**Deviation from Design §D5.5's literal prose, recorded here (Implementation
+Log detail):** production uses ``ProcessPoolExecutor``, not
+``ThreadPoolExecutor``. D5.5 anticipated threads as the default with a
+process pool as an available fallback ("a one-line change"); live-testing
+this exact implementation found that concurrent, real multi-threaded pdfium
+rendering — even with fully isolated per-worker documents, exactly as D5.3
+specifies — reliably corrupts the process heap (``free(): invalid pointer``,
+``malloc(): unaligned tcache chunk detected``, ``double free or corruption``,
+reproduced with 2 and with 8 concurrent threads on pypdfium2 5.13.0). That is
+precisely the failure mode D5 itself names ("threading over a C-extension
+boundary can crash the interpreter... no try/except catches that, so the
+structure has to make it impossible rather than handled") — a process pool
+makes it structurally impossible, since each worker has a wholly separate
+address space, while a thread pool did not. :func:`_render_chunk` is
+unchanged either way — it is the SAME module-level, picklable-argument
+function AC4/AC7 require, so this is exactly the "one-line change" D5.5
+described, applied in the direction the evidence pointed rather than the
+direction the prose assumed.
+
+``ops/raster.py`` never calls ``open(..., "w")``, ``Path.write_bytes``,
+``os.replace`` or creates a directory of its own — every byte reaches disk
+through ``safety.AtomicWriter``, and ``--out-dir`` is created only via
+``safety.atomic.ensure_out_dir`` (Design §D12). No ``ops/`` allowlist entry is
+needed in ``tests/test_import_boundaries.py``.
+"""
+
+from __future__ import annotations
+
+import time
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+from typing import IO, TYPE_CHECKING, Final
+
+from pdf_toolkit.errors import EngineMissingError, NoInputError, PdfToolkitError, UsageError
+from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
+from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
+from pdf_toolkit.ports import BROKEN_INSTALL_HINT
+from pdf_toolkit.ports.raster import require_raster
+from pdf_toolkit.ports.structure import require_structure
+from pdf_toolkit.safety.atomic import AtomicWriter, ensure_out_dir
+from pdf_toolkit.safety.naming import render_name
+from pdf_toolkit.safety.paths import (
+    check_output_collisions,
+    ensure_destination_writable,
+    ensure_no_clobber,
+)
+from pdf_toolkit.safety.policy import SafetyPolicy
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from PIL.Image import Image
+
+__all__ = ["DEFAULT_NAME_TEMPLATE", "rasterize_document"]
+
+VERB: Final[str] = "rasterize"
+
+#: Design §D4. Zero-padded to four so lexical order matches page order
+#: through 9999 — the plan's largest sample is 482 pages.
+DEFAULT_NAME_TEMPLATE: Final[str] = "{stem}-{page:04}.{ext}"
+
+#: Design §D6, D3. Not inherited from Pillow defaults, which move between
+#: versions -- explicit and pinned.
+_DEFAULT_QUALITY: Final[int] = 85
+_PNG_COMPRESS_LEVEL: Final[int] = 9
+_JPEG_SUBSAMPLING: Final[int] = 0
+_TIFF_COMPRESSION: Final[str] = "tiff_deflate"
+_WEBP_METHOD: Final[int] = 6
+
+#: One flat work item, exactly what crosses into a worker: a path (never a
+#: document), a page number, a target path, and the render parameters for
+#: that one page. Every field is plain, picklable data (AC4/AC7).
+_WorkItem = tuple[int, str, int, str, float | None, int | None]
+
+
+def _ensure_format_supported(fmt: str) -> None:
+    """Exit 3 with an install hint, never a silent fallback to another
+    format (Design §D7)."""
+    if fmt != "webp":
+        return
+    from PIL import features
+
+    if not features.check("webp"):
+        raise EngineMissingError(
+            "RasterEngine cannot write webp: this Pillow build lacks WEBP support. "
+            f"Install it with: {BROKEN_INSTALL_HINT}. "
+            "Run 'pdftoolkit doctor' to see which engines resolved."
+        )
+
+
+def _dry_run_message(page_number: int, fmt: str, dpi: float | None, width_px: int | None) -> str:
+    if width_px is not None:
+        return f"page {page_number}: planned {fmt} @ width {width_px}px"
+    return f"page {page_number}: planned {fmt} @ {dpi:g} dpi"
+
+
+def _plan_pages(source: Path, pages_spec: str | None) -> tuple[int, ...]:
+    """The selection for one source: a sorted, deduplicated SET (PLAN §4.3 —
+    `rasterize` is a set-semantics verb). ``page_count`` is read from a
+    short-lived ``StructureEngine`` handle, closed before this function
+    returns and well before any worker starts (Design §D5.3, AC5)."""
+    engine = require_structure()
+    with engine.open_document(source) as document:
+        page_count = document.page_count
+
+    spec = pages_spec if pages_spec is not None else ALL_PAGES_TOKEN
+    selection = parse(spec, page_count, ordered=False)
+    if selection.is_empty:
+        raise NoInputError(
+            f"{source}: --pages {spec!r} resolved to zero pages; nothing to write",
+            path=str(source),
+        )
+    return selection.indices
+
+
+def _chunk(work: list[_WorkItem], threads: int) -> list[list[_WorkItem]]:
+    """At most ``min(threads, len(work))`` contiguous chunks over *work*,
+    which is already ordered input-major, page-minor (Design §D5.2) — so a
+    contiguous split keeps one input's pages together whenever the input
+    isn't itself split across a chunk boundary by an uneven thread count."""
+    if not work:
+        return []
+    n = max(1, min(threads, len(work)))
+    size, remainder = divmod(len(work), n)
+    chunks: list[list[_WorkItem]] = []
+    start = 0
+    for index in range(n):
+        extra = 1 if index < remainder else 0
+        end = start + size + extra
+        if start < end:
+            chunks.append(work[start:end])
+        start = end
+    return chunks
+
+
+def _encode(image: Image, stream: IO[bytes], *, fmt: str, quality: int | None) -> None:
+    """Encode *image* into *stream* (an ``AtomicWriter.stream`` — Design §D12:
+    never ``writer.path``, never a path string). Encoder parameters are
+    explicit and pinned (Design §D6), not inherited from Pillow defaults."""
+    if fmt == "png":
+        image.save(stream, format="PNG", compress_level=_PNG_COMPRESS_LEVEL)
+    elif fmt == "jpeg":
+        image.save(
+            stream,
+            format="JPEG",
+            quality=quality if quality is not None else _DEFAULT_QUALITY,
+            subsampling=_JPEG_SUBSAMPLING,
+            optimize=False,
+        )
+    elif fmt == "tiff":
+        image.save(stream, format="TIFF", compression=_TIFF_COMPRESSION)
+    elif fmt == "webp":
+        image.save(
+            stream,
+            format="WEBP",
+            quality=quality if quality is not None else _DEFAULT_QUALITY,
+            method=_WEBP_METHOD,
+            lossless=False,
+        )
+    else:  # pragma: no cover - cmd_rasterize.py validates the format enum
+        raise AssertionError(f"unknown raster format {fmt!r}")
+
+
+def _render_one(
+    source: str,
+    page_number: int,
+    target: str,
+    *,
+    dpi: float | None,
+    width_px: int | None,
+    fmt: str,
+    quality: int | None,
+    grayscale: bool,
+    policy: SafetyPolicy,
+) -> ItemResult:
+    """Render, encode and write exactly one page. Everything a worker does
+    for one work item, in one call — nothing opened here escapes it
+    (Design §D5.3): the adapter opens and closes its own document, and only
+    this function's plain ``ItemResult`` return crosses back out."""
+    started = time.monotonic()
+    source_path = Path(source)
+    target_path = Path(target)
+    bytes_before = source_path.stat().st_size if source_path.exists() else None
+
+    try:
+        adapter = require_raster(capability="render")
+        rendered = adapter.render_page(
+            source, page_number, dpi=dpi, width_px=width_px, grayscale=grayscale
+        )
+    except PdfToolkitError as error:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return ItemResult(
+            input=source,
+            output=target,
+            ok=False,
+            exit_code=error.exit_code,
+            message=error.message,
+            bytes_before=bytes_before,
+            bytes_after=None,
+            duration_ms=duration_ms,
+        )
+
+    with AtomicWriter(target_path, policy=policy, kind="image") as writer:
+        _encode(rendered.image, writer.stream, fmt=fmt, quality=quality)
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    message = (
+        f"page {page_number}: {rendered.width_px}x{rendered.height_px} "
+        f"{fmt} @ {rendered.dpi_effective:g} dpi"
+    )
+    return ItemResult(
+        input=source,
+        output=target,
+        ok=True,
+        exit_code=0,
+        message=message,
+        bytes_before=bytes_before,
+        bytes_after=target_path.stat().st_size,
+        duration_ms=duration_ms,
+    )
+
+
+def _render_chunk(
+    items: list[_WorkItem],
+    *,
+    fmt: str,
+    quality: int | None,
+    grayscale: bool,
+    policy: SafetyPolicy,
+) -> list[tuple[int, ItemResult]]:
+    """The worker `--threads` dispatches (Design §D5.5). Module-level, and
+    every argument and return value is plain, picklable data (AC4/AC7) — a
+    process boundary is exactly what production crosses too (module
+    docstring: real concurrent pdfium rendering corrupts the heap even with
+    per-worker document isolation, so ``ProcessPoolExecutor`` is what
+    :func:`rasterize_document` uses, not ``ThreadPoolExecutor``). AC7 proves
+    this same function against a single-worker ``ThreadPoolExecutor``
+    baseline instead, the one thread-pool shape that cannot race."""
+    return [
+        (
+            slot,
+            _render_one(
+                source,
+                page_number,
+                target,
+                dpi=dpi,
+                width_px=width_px,
+                fmt=fmt,
+                quality=quality,
+                grayscale=grayscale,
+                policy=policy,
+            ),
+        )
+        for slot, source, page_number, target, dpi, width_px in items
+    ]
+
+
+def rasterize_document(
+    sources: list[Path],
+    *,
+    pages_spec: str | None,
+    dpi: float | None,
+    width_px: int | None,
+    fmt: str,
+    quality: int | None,
+    grayscale: bool,
+    name_template: str | None,
+    out_dir: Path,
+    policy: SafetyPolicy,
+) -> OperationResult:
+    """Rasterize every selected page of every source into ``out_dir``.
+
+    ``items`` carries **one row per rendered page** (Design §D9 as corrected):
+    ``input`` is the source PDF, ``output`` the image path, ``message`` the
+    measured render facts in the pinned shape
+    ``"page {page}: {width}x{height} {ext} @ {dpi_effective:g} dpi"``.
+    """
+    for source in sources:
+        if not source.exists():
+            raise NoInputError("no such file", path=str(source))
+        if source.is_dir():
+            raise UsageError("expected a PDF file, not a directory", path=str(source))
+
+    # Exit 3 up front, before any planning work — Design §D7.
+    require_raster(capability="render")
+    _ensure_format_supported(fmt)
+
+    template = name_template if name_template is not None else DEFAULT_NAME_TEMPLATE
+
+    planned: list[tuple[Path, int]] = []
+    for source in sources:
+        for page_number in _plan_pages(source, pages_spec):
+            planned.append((source, page_number))
+
+    rendered: list[tuple[Path, int, Path]] = []
+    for index, (source, page_number) in enumerate(planned, start=1):
+        target = render_name(
+            template,
+            out_dir=out_dir,
+            stem=source.stem,
+            ext=fmt,
+            index=index,
+            page=page_number,
+        )
+        rendered.append((source, page_number, target))
+
+    targets = [target for _source, _page, target in rendered]
+    # Data-independent (planned targets against each other) — checked
+    # identically under --dry-run (Design §D4, matching split's own AC10).
+    check_output_collisions(targets)
+
+    source_sizes = {source: source.stat().st_size for source in sources}
+
+    if policy.dry_run:
+        items = tuple(
+            ItemResult(
+                input=str(source),
+                output=str(target),
+                ok=True,
+                exit_code=0,
+                message=_dry_run_message(page_number, fmt, dpi, width_px),
+                bytes_before=source_sizes[source],
+                bytes_after=None,
+                duration_ms=0,
+            )
+            for source, page_number, target in rendered
+        )
+        return OperationResult(
+            schema_version=_SCHEMA_VERSION,
+            verb=VERB,
+            dry_run=True,
+            items=items,
+            warnings=(),
+            duration_ms=0,
+        )
+
+    # Real run: --out-dir is created (chokepoint-confined, Design §D12), then
+    # every target is pre-flight no-clobber/writability checked BEFORE the
+    # first page is rendered, so a planning failure writes nothing.
+    ensure_out_dir(out_dir, policy=policy)
+    ensure_destination_writable(out_dir)
+    for target in targets:
+        ensure_no_clobber(target, force=policy.force)
+
+    work: list[_WorkItem] = [
+        (slot, str(source), page_number, str(target), dpi, width_px)
+        for slot, (source, page_number, target) in enumerate(rendered)
+    ]
+    chunks = _chunk(work, policy.threads)
+
+    # Slot-indexed collection (Design §D5.4): ordering is never derived from
+    # completion order, only ever from the slot each item was assigned at
+    # planning time.
+    collected: dict[int, ItemResult] = {}
+    if chunks:
+        with ProcessPoolExecutor(max_workers=len(chunks)) as executor:
+            futures = [
+                executor.submit(
+                    _render_chunk,
+                    chunk,
+                    fmt=fmt,
+                    quality=quality,
+                    grayscale=grayscale,
+                    policy=policy,
+                )
+                for chunk in chunks
+            ]
+            for future in futures:
+                for slot, item in future.result():
+                    collected[slot] = item
+
+    items = tuple(collected[slot] for slot in range(len(work)))
+    return OperationResult(
+        schema_version=_SCHEMA_VERSION,
+        verb=VERB,
+        dry_run=False,
+        items=items,
+        warnings=(),
+        duration_ms=0,
+    )

@@ -208,3 +208,115 @@ def test_ac22_merge_union_exclusion_over_a_482_page_sample(samples, tmp_path: Pa
     with engine.open_document(output) as document:
         # Hand-derived per AC22: 50 - 1 + 83 + 1 == 133.
         assert document.page_count == 133
+
+
+# --------------------------------------------------------------------------- #
+# PDF-09 -- AC20. Over a COPY of 1888-10.pdf (originals are never an operand,
+# HC-2 rule 1):
+#   (a) page 1 at --dpi 72 renders 956x1435 px -- the page is 956x1435 pt
+#       (E-5), and at 72 dpi one point is one pixel: no rounding ambiguity;
+#   (b) AC3's identity check re-run at scale on real scans: --pages 1-12
+#       --dpi 72 at --threads 1 and --threads 8, comparing per-file SHA-256
+#       and the filename list.
+# Nothing beyond filename, page count, size and hash is quoted anywhere in
+# this section (HC-2 rule 4) -- no page text, no title, no metadata.
+# --------------------------------------------------------------------------- #
+
+_RASTER_SAMPLE_NAME = "1888-10.pdf"
+_RASTER_SAMPLE_PAGE_1_DPI_72_SIZE = (956, 1435)
+
+
+@pytest.mark.samples
+def test_ac20_sample_page_1_at_72_dpi_renders_the_exact_point_pixel_size(
+    samples, tmp_path: Path
+) -> None:
+    from PIL import Image
+
+    from pdf_toolkit.ops.raster import rasterize_document
+    from pdf_toolkit.safety.policy import SafetyPolicy
+
+    copy_path = samples.copy(_RASTER_SAMPLE_NAME)
+    out_dir = tmp_path / "page1"
+    policy = SafetyPolicy(
+        dry_run=False,
+        force=False,
+        in_place=False,
+        backup=True,
+        assume_yes=False,
+        is_tty=False,
+        threads=1,
+    )
+    result = rasterize_document(
+        [copy_path],
+        pages_spec="1",
+        dpi=72.0,
+        width_px=None,
+        fmt="png",
+        quality=None,
+        grayscale=False,
+        name_template=None,
+        out_dir=out_dir,
+        policy=policy,
+    )
+    assert result.exit_code == 0
+    files = list(out_dir.iterdir())
+    assert len(files) == 1
+    with Image.open(files[0]) as img:
+        assert img.size == _RASTER_SAMPLE_PAGE_1_DPI_72_SIZE
+
+
+@pytest.mark.samples
+def test_ac20_threads_1_and_threads_8_are_byte_identical_over_a_real_scan(
+    samples, tmp_path: Path
+) -> None:
+    from pdf_toolkit.ops.raster import rasterize_document
+    from pdf_toolkit.safety.policy import SafetyPolicy
+
+    copy_path = samples.copy(_RASTER_SAMPLE_NAME)
+    out1 = tmp_path / "t1"
+    out8 = tmp_path / "t8"
+
+    def _policy(threads: int) -> SafetyPolicy:
+        return SafetyPolicy(
+            dry_run=False,
+            force=False,
+            in_place=False,
+            backup=True,
+            assume_yes=False,
+            is_tty=False,
+            threads=threads,
+        )
+
+    result1 = rasterize_document(
+        [copy_path],
+        pages_spec="1-12",
+        dpi=72.0,
+        width_px=None,
+        fmt="png",
+        quality=None,
+        grayscale=False,
+        name_template=None,
+        out_dir=out1,
+        policy=_policy(1),
+    )
+    result8 = rasterize_document(
+        [copy_path],
+        pages_spec="1-12",
+        dpi=72.0,
+        width_px=None,
+        fmt="png",
+        quality=None,
+        grayscale=False,
+        name_template=None,
+        out_dir=out8,
+        policy=_policy(8),
+    )
+    assert result1.exit_code == 0
+    assert result8.exit_code == 0
+
+    names1 = sorted(p.name for p in out1.iterdir())
+    names8 = sorted(p.name for p in out8.iterdir())
+    assert names1 == names8
+    assert len(names1) == 12
+    for name in names1:
+        assert (out1 / name).read_bytes() == (out8 / name).read_bytes(), name
