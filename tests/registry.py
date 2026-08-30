@@ -338,6 +338,50 @@ def _rasterize_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+def _fixture_jpeg(tmp_path: Path, name: str) -> Path:
+    """A tiny baseline JPEG, generated rather than committed.
+
+    `compose` is the product's first verb whose operand is not a PDF, so the
+    generated PDF corpus cannot supply one. Pillow builds it here for the same
+    reason `tests/corpus.py` builds the PDFs: PDF-06's generate-don't-commit
+    posture, and no binary fixture in the tree.
+    """
+    from PIL import Image
+
+    path = tmp_path / name
+    Image.new("RGB", (64, 48), (200, 30, 30)).save(path, format="JPEG", quality=85)
+    return path
+
+
+def _fixture_text(tmp_path: Path, name: str) -> Path:
+    path = tmp_path / name
+    path.write_text("registered invocation for the create verb\n")
+    return path
+
+
+def _compose_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`compose` (PDF-10) consumes `--output` and produces exactly one PDF, so
+    its row mirrors `merge`'s shape: a fresh `-O` target keeps C10/C12 valid on
+    their own, and C11's own trailing `-O` still wins (Click takes the LAST
+    occurrence of a scalar option)."""
+    return [
+        str(_fixture_jpeg(tmp_path, "registered-invocation-compose.jpg")),
+        "-O",
+        str(tmp_path / "registered-invocation-compose.pdf"),
+    ]
+
+
+def _create_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`create` (PDF-10) takes ONE operand, and this row deliberately uses a
+    real `.txt` file rather than the `-` stdin sentinel: a harness case that
+    passed `-` would block reading standard input that no test writes."""
+    return [
+        str(_fixture_text(tmp_path, "registered-invocation-create.txt")),
+        "-O",
+        str(tmp_path / "registered-invocation-create.pdf"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -355,6 +399,8 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "merge": Invocation(build=_merge_invocation, destructive=False),
     "split": Invocation(build=_split_invocation, destructive=False),
     "rasterize": Invocation(build=_rasterize_invocation, destructive=False),
+    "compose": Invocation(build=_compose_invocation, destructive=False),
+    "create": Invocation(build=_create_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -393,5 +439,15 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         str(tmp_path / "or3-rasterize-name"),
         "--name",
         "or3-custom-{page}.{ext}",
+    ],
+    ("compose", "--output"): lambda corpus, tmp_path: [
+        str(_fixture_jpeg(tmp_path, "or3-compose.jpg")),
+        "-O",
+        str(tmp_path / "or3-compose-output.pdf"),
+    ],
+    ("create", "--output"): lambda corpus, tmp_path: [
+        str(_fixture_text(tmp_path, "or3-create.txt")),
+        "-O",
+        str(tmp_path / "or3-create-output.pdf"),
     ],
 }

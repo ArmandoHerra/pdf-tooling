@@ -11,6 +11,7 @@ so two engineers editing this file concurrently cannot race on one line.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -230,8 +231,32 @@ class ItemResult:
     bytes_after: int | None
     duration_ms: int
 
+    detail: Mapping[str, object] | None = None
+    """Verb-specific per-item facts, or ``None``. **Omitted from
+    :meth:`to_dict` entirely when ``None``**, so adding this field moved no
+    existing verb's JSON by a byte — which is what PDF-06's ``info``/``doctor``
+    goldens passing unmodified proves, rather than an inspection claiming it.
+
+    The cycle-wide convention (``decision.md`` §8 X-26): *any verb needing
+    per-item facts uses this field; nobody adds a second mechanism.* ``compose``
+    reports ``embed``/``stream_bytes_identical``/``source_format``/``dpi_source``/
+    ``page`` here; ``text``/``tables`` and ``compress``/``repair``/``linearize``
+    are its next consumers.
+
+    Declared **last**, with a default, because no other field on this frozen,
+    slotted dataclass carries one — a non-default field after a defaulted one is
+    a ``TypeError`` at import. Annotated ``Mapping`` rather than ``dict`` as a
+    signpost, not a guarantee: ``frozen=True`` synthesizes ``__hash__``, and a
+    mapping value is unhashable, so ``hash(ItemResult(detail={...}))`` raises.
+    Nothing in this product hashes an ``ItemResult`` (verified: no ``set()``,
+    ``frozenset()`` or ``hash()`` over items anywhere under ``src/``), so the
+    constraint is latent rather than live. It is recorded here instead of being
+    worked around with ``eq=False``, ``unsafe_hash`` or a custom ``__hash__`` —
+    redesigning a shared model to suit one verb is the larger defect.
+    """
+
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "input": self.input,
             "output": self.output,
             "ok": self.ok,
@@ -241,6 +266,9 @@ class ItemResult:
             "bytes_after": self.bytes_after,
             "duration_ms": self.duration_ms,
         }
+        if self.detail is not None:
+            payload["detail"] = dict(self.detail)
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

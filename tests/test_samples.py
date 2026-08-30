@@ -320,3 +320,83 @@ def test_ac20_threads_1_and_threads_8_are_byte_identical_over_a_real_scan(
     assert len(names1) == 12
     for name in names1:
         assert (out1 / name).read_bytes() == (out8 / name).read_bytes(), name
+
+
+# --------------------------------------------------------------------------- #
+# PDF-10 -- AC18/AC28, the lossless proof against real scans. Over a COPY of
+# the `1888-10/` directory (originals are never an operand, HC-2 rule 1):
+#   (a) the copy holds 108 .jpg entries and nothing else;
+#   (b) composing all 108 in sorted() filename order yields 108 pages;
+#   (c) for EVERY page i, the stored stream is byte-identical to copied input
+#       i, and every page's filter chain is exactly ('/DCTDecode',);
+#   (d) corroborating only: the output is at least the sum of the input sizes.
+# Nothing beyond filename, page count, size and hash is quoted anywhere in
+# this section (HC-2 rule 4) -- no page content of any kind.
+# --------------------------------------------------------------------------- #
+
+_COMPOSE_SAMPLE_TREE = "1888-10"
+_COMPOSE_SAMPLE_PAGES = 108
+
+
+@pytest.mark.samples
+def test_ac18_the_sample_tree_holds_exactly_the_expected_jpeg_count(samples) -> None:
+    copied = samples.copy_tree(_COMPOSE_SAMPLE_TREE)
+    entries = sorted(copied.iterdir())
+    jpegs = [entry for entry in entries if entry.suffix.lower() == ".jpg"]
+    assert len(jpegs) == _COMPOSE_SAMPLE_PAGES
+    assert len(entries) == _COMPOSE_SAMPLE_PAGES, "the tree holds something other than the scans"
+
+
+@pytest.mark.samples
+def test_ac18_every_one_of_108_real_scans_is_stored_byte_for_byte(samples, tmp_path) -> None:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from helpers.pdfstream import embedded_image_streams
+    from pdf_toolkit.ops.compose import compose_document, parse_page_size
+    from pdf_toolkit.safety.policy import SafetyPolicy
+
+    copied = samples.copy_tree(_COMPOSE_SAMPLE_TREE)
+    # sorted() over fixed-width names is a total, deterministic order; the test
+    # never relies on a shell glob or on filesystem order.
+    scans = sorted(entry for entry in copied.iterdir() if entry.suffix.lower() == ".jpg")
+    assert len(scans) == _COMPOSE_SAMPLE_PAGES
+
+    output = tmp_path / "1888-10-recomposed.pdf"
+    result = compose_document(
+        scans,
+        output=output,
+        page=parse_page_size("from-image"),
+        fit="contain",
+        margin_pt=0.0,
+        dpi=None,
+        policy=SafetyPolicy(
+            dry_run=False,
+            force=False,
+            in_place=False,
+            backup=True,
+            assume_yes=False,
+            is_tty=False,
+            threads=1,
+        ),
+    )
+    assert result.exit_code == 0
+    assert result.warnings == (), result.warnings
+
+    from pypdf import PdfReader
+
+    assert len(PdfReader(str(output)).pages) == _COMPOSE_SAMPLE_PAGES
+
+    for index, scan in enumerate(scans):
+        streams = embedded_image_streams(output, index)
+        assert len(streams) == 1, f"page {index + 1} carries {len(streams)} images"
+        assert streams[0].filters == ("/DCTDecode",), f"page {index + 1}: {streams[0].filters}"
+        assert streams[0].dct_payload == scan.read_bytes(), (
+            f"page {index + 1} ({scan.name}) is NOT the source bytes -- the tool re-encoded a scan"
+        )
+
+    # Corroborating, never the evidence: a document holding 108 originals
+    # verbatim cannot be smaller than the originals.
+    assert output.stat().st_size >= sum(scan.stat().st_size for scan in scans)

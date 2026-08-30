@@ -631,6 +631,19 @@ def _parse_dimensions(message: str | None) -> tuple[int, int]:
 
 
 def test_ac27_models_py_has_no_rasterize_specific_field() -> None:
+    """PDF-09's pin, EXTENDED by PDF-10 rather than deleted.
+
+    The property PDF-09 was protecting -- *no verb bolts its own field onto the
+    shared item model* -- is unchanged and still asserted exactly. What changed
+    is that the cycle-wide `detail` seam now exists: `decision.md` §8 X-26 ruled
+    one optional, verb-agnostic field for exactly this need, X-92 established it
+    did not yet exist in code, and PDF-10 is the consumer that landed it. So the
+    set is still EXACT, and the second assertion below states the original
+    intent directly: nothing in this model is named after a verb.
+
+    This pin was NOT in PDF-10's own §13 fallout table -- it is a ninth
+    tripwire, found by running rather than by reading, and reported as such.
+    """
     from pdf_toolkit.models import ItemResult
 
     fields = set(ItemResult.__dataclass_fields__)
@@ -643,7 +656,14 @@ def test_ac27_models_py_has_no_rasterize_specific_field() -> None:
         "bytes_before",
         "bytes_after",
         "duration_ms",
+        "detail",
     }
+    verb_shaped = {
+        name
+        for name in fields
+        if any(token in name for token in ("raster", "dpi", "image", "compose", "create", "px"))
+    }
+    assert verb_shaped == set(), f"{sorted(verb_shaped)} names a verb on a shared model"
 
 
 def test_ac27_message_matches_the_produced_file_for_dpi_and_width_modes(

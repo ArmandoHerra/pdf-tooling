@@ -21,12 +21,23 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_six_landed_verbs() -> None:
-    """AC24: `rasterize` (PDF-09) joins `merge`/`split` (PDF-07) and the three
-    PDF-06-landing verbs -- six total."""
+def test_discover_verbs_finds_exactly_the_eight_landed_verbs() -> None:
+    """AC24: `compose`/`create` (PDF-10) join `rasterize` (PDF-09),
+    `merge`/`split` (PDF-07) and the three PDF-06-landing verbs -- eight total.
+    Renamed and extended rather than deleted: this pin failed BY DESIGN the
+    moment verbs seven and eight registered, which is the tripwire working."""
     verbs = discover_verbs()
     names = {verb.name for verb in verbs}
-    assert names == {"version", "doctor", "info", "merge", "split", "rasterize"}
+    assert names == {
+        "version",
+        "doctor",
+        "info",
+        "merge",
+        "split",
+        "rasterize",
+        "compose",
+        "create",
+    }
 
 
 def test_discover_verbs_returns_no_duplicates() -> None:
@@ -52,7 +63,10 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
     is False` for every verb -- that pin failed BY DESIGN the moment
     `rasterize` was registered, and is updated here rather than deleted."""
     expected_page_addressing = {"rasterize"}
-    expected_not = {"version", "doctor", "info", "merge", "split"}
+    expected_not = {"version", "doctor", "info", "merge", "split", "compose", "create"}
+    # PDF-10 extends `expected_not`: neither `compose` nor `create` is page
+    # addressing (`PLAN.md` §4.1 -- both "no"), so the set grows and nothing in
+    # this pin is removed.
     for verb in discover_verbs():
         if verb.name in expected_page_addressing:
             assert verb.is_page_addressing is True, f"{verb.name} should be page-addressing"
@@ -70,12 +84,16 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
     ops.split -> safety.atomic` and `cmd_rasterize -> ops.raster ->
     safety.atomic` are each two hops, well inside the bound, so the bound was
     never raised for any of the three (see this spec's Implementation Log).
+    `compose`/`create` (PDF-10) join them at the SAME bound: `cmd_compose ->
+    ops.compose -> safety.atomic` and `cmd_create -> ops.compose ->
+    safety.atomic` are two hops each, so `_MAX_IMPORT_HOPS` was not raised for
+    either (B-031 / AC26).
     `version`/`doctor`/`info` still write nothing.
     Was `test_no_current_verb_is_mutating`, asserting `is_mutating is False`
     for every verb -- that pin failed BY DESIGN the moment `merge`/`split`
     were registered (a tripwire, not a defect), and is updated here to the
     explicit expected set rather than deleted."""
-    expected_mutating = {"merge", "split", "rasterize"}
+    expected_mutating = {"merge", "split", "rasterize", "compose", "create"}
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():
         if verb.name in expected_mutating:

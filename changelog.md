@@ -19,6 +19,51 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-10] compose + create — 2026-08-30
+- Added `src/pdf_toolkit/ops/compose.py` (framework-free ops for BOTH verbs) +
+  `cli/cmd_compose.py` and `cli/cmd_create.py`. `compose` builds a PDF from
+  images, one page per operand in argv order (duplicates allowed, no sorting,
+  no globbing — a directory operand is exit 2 naming the shell as the fix);
+  `create` renders one plain-text input, including `-` for standard input.
+  Both declare `consumes=("--output",)` (OR-3), so `--out-dir`, `--name` and
+  `--in-place` exit 2 **for free** from the shared option layer — neither
+  command module contains a check for any of them, and neither names them.
+  One operand with no explicit destination writes beside the input; two or
+  more is exit 2 rather than a guess.
+- **The lossless guarantee, asserted byte-for-byte rather than visually.** A
+  baseline JPEG is stored as its own compressed bytes under a `/DCTDecode`
+  filter with no decode and no re-encode; the chain is pinned to exactly
+  `("/DCTDecode",)` by disabling reportlab's ASCII85 transport layer inside a
+  save/restore context manager that spans every `drawImage` call (the toggle
+  is read there, not at canvas construction) and restores on the exception
+  path. Greyscale, RGB **and** CMYK pass through — reportlab emits the Adobe
+  `/Decode [1 0 1 0 1 0 1 0]` inversion array, so the page renders correctly
+  AND the bytes survive. A **progressive** JPEG is diverted to Flate with a
+  per-file warning; the op sniffs the SOF marker itself, because the renderer
+  sniffs nothing and would otherwise pass everything through silently.
+- **Defect found on the 108-scan real-document corpus and fixed here:**
+  `drawImage` de-duplicates image XObjects by a digest computed from the
+  DECODED PIXELS when handed an `ImageReader`, so two inputs with identical
+  pixels but different compressed bytes collapsed onto one XObject and the
+  second page silently rendered the first file's bytes — with the filter chain
+  still reading `/DCTDecode` and the item still claiming a passthrough.
+  Handing the path itself to `drawImage` keys the cache on the filename;
+  a repeated operand still, correctly, shares one XObject. Regression test
+  reproduces it without the corpus and was proven to go red without the fix.
+- `src/pdf_toolkit/ports/compose.py` gains `ComposeEngine.compose_images()` and
+  `.render_text()` plus the `ImagePlacement`/`TextLayout`/`ComposeReport`
+  carriers; both render into a **caller-supplied binary stream**, never a path,
+  so every byte still reaches disk through `safety.AtomicWriter` and
+  `tests/test_import_boundaries.py` stays green unedited. Geometry is placement
+  — a CTM scale and a PDF clip path — never a pixel operation, so byte
+  identity survives `--fit cover`.
+- `src/pdf_toolkit/models.py` gains **one** optional field, `ItemResult.detail`
+  (last, defaulted `None`, omitted from `to_dict()` when `None`) — the
+  cycle-wide per-item-facts seam. `SCHEMA_VERSION` is unchanged and PDF-06's
+  `info`/`doctor` goldens pass byte-identical, which is the proof the change is
+  additive rather than a claim that it is. `compose` reports `embed`,
+  `stream_bytes_identical`, `source_format`, `dpi_source` and `page` through it.
+
 ## [PDF-09] rasterize — PDF pages to images — 2026-08-30
 - Added `src/pdf_toolkit/ops/raster.py` + `cli/cmd_rasterize.py`: `rasterize`
   renders every selected page of one or more PDFs to PNG/JPEG/TIFF/WEBP,
