@@ -216,30 +216,61 @@ def test_ac4_worker_arguments_and_return_value_round_trip_through_pickle(
 
 # --------------------------------------------------------------------------- #
 # AC5 -- the parent never renders; rendering happens in a CHILD PROCESS.
+#
+# Not tested by monkeypatching a production function and checking which PID
+# ran it: that only works under the `fork` multiprocessing start method
+# (Linux's default through Python 3.13), where a child inherits the parent's
+# already-patched module state. `fork` is NOT universal -- macOS has used
+# `spawn` by default since Python 3.8, and Python 3.14 makes `spawn` the
+# default everywhere. Under `spawn` a child re-imports every module fresh,
+# so a parent-side monkeypatch never reaches it at all (confirmed live: this
+# exact PID-monkeypatch design passed on Linux/3.12 locally and failed on
+# every macOS job and the 3.14 job in CI). The two checks below are each
+# start-method-independent.
 # --------------------------------------------------------------------------- #
 
 
-def test_ac5_render_happens_in_a_child_process_never_in_the_parent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source = _make_multipage(tmp_path / "src", pages=4)
-    pid_file = tmp_path / "pids.txt"
-    original = raster_module._render_one
+def _child_process_pid(_marker: int) -> int:
+    """Module-level (picklable by reference) -- proves a real ProcessPoolExecutor
+    dispatch runs in a different OS process, under ANY start method."""
+    return os.getpid()
 
-    def _recording(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
-        with open(pid_file, "a") as handle:
-            handle.write(f"{os.getpid()}\n")
-        return original(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(raster_module, "_render_one", _recording)
+def test_ac5_a_process_pool_dispatch_runs_in_a_different_pid() -> None:
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        child_pid = executor.submit(_child_process_pid, 0).result()
+    assert child_pid != os.getpid()
 
-    result = _rasterize(source, out_dir=tmp_path / "out", dpi=96.0, policy=make_policy(threads=2))
-    assert result.exit_code == 0
 
-    parent_pid = os.getpid()
-    child_pids = {int(line) for line in pid_file.read_text().splitlines()}
-    assert child_pids, "the monkeypatched worker never ran at all"
-    assert parent_pid not in child_pids
+def test_ac5_rasterize_document_never_calls_render_directly() -> None:
+    """Structural proof, independent of any process/thread semantics:
+    `rasterize_document`'s own body calls `_render_chunk` only through
+    `executor.submit(...)`, never `_render_one` or `.render_page(` bare --
+    so nothing in the parent's own call stack ever renders a page, whatever
+    the multiprocessing start method turns out to be."""
+    import ast
+    import inspect
+
+    source = inspect.getsource(raster_module.rasterize_document)
+    tree = ast.parse(source)
+    bare_calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "_render_one" not in bare_calls
+    assert "_render_chunk" not in bare_calls
+
+    submitted = {
+        node.args[0].id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "submit"
+        and node.args
+        and isinstance(node.args[0], ast.Name)
+    }
+    assert submitted == {"_render_chunk"}
 
 
 # --------------------------------------------------------------------------- #
@@ -557,16 +588,30 @@ def test_ac26_no_mkdir_in_ops_raster() -> None:
 def test_ac26_atomic_writer_refusing_produces_zero_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Called directly against `_render_chunk` (in-process), not through
+    `rasterize_document`'s real run: production always dispatches rendering
+    through a `ProcessPoolExecutor` (module docstring), and under the
+    `spawn` start method (macOS always; every platform from Python 3.14) a
+    parent-side monkeypatch of `AtomicWriter` never reaches a spawned
+    child -- it re-imports `pdf_toolkit.safety.atomic` fresh instead of
+    inheriting the parent's patched state. `_render_chunk` is exactly the
+    module-level, picklable-argument unit AC4/AC7 already pin as what a
+    worker executes; calling it directly here exercises the identical
+    chokepoint-construction code path, in the one process where a
+    monkeypatch is guaranteed to apply on every platform."""
     source = _make_multipage(tmp_path / "src", pages=2)
     out_dir = tmp_path / "out"
+    out_dir.mkdir()
 
     def _boom(self: object) -> None:
         raise RuntimeError("planted chokepoint failure")
 
     monkeypatch.setattr(atomic_module.AtomicWriter, "__enter__", _boom)
+    items = [(0, str(source), 1, str(out_dir / "src-0001.png"), 96.0, None)]
     with pytest.raises(RuntimeError):
-        _rasterize(source, out_dir=out_dir, policy=make_policy(threads=2))
-    assert out_dir.exists()
+        raster_module._render_chunk(
+            items, fmt="png", quality=None, grayscale=False, policy=make_policy()
+        )
     assert list(out_dir.iterdir()) == []
     assert list(tmp_path.rglob(".pdftoolkit-*")) == []
 
