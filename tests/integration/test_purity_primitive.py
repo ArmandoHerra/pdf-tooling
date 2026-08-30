@@ -226,6 +226,52 @@ def test_a_dry_run_over_an_existing_target_is_still_pure(tmp_path: Path) -> None
         assert result.returncode == 0, result.stderr
 
 
+def test_a_dry_run_that_predicts_a_refusal_is_still_pure(tmp_path: Path) -> None:
+    """X-67 made this assertion mean something, so it is asserted separately.
+
+    Before X-67 the purity arms above passed *vacuously* over a refusal: the gate
+    was the first statement of ``__enter__``, so a dry run over an occupied
+    target executed no filesystem code at all and "zero differences" was
+    guaranteed by doing nothing. The plan now genuinely runs — ``exists()``,
+    ``lexists()``, ``is_dir()``, ``os.access`` and two device stats — and this
+    arm is what proves every one of those is a read.
+
+    Deliberately without ``--in-place``, unlike the arm above: ``--in-place``
+    suppresses the no-clobber check by definition, so that arm never exercised
+    the capture path. If this test ever reports differences, the planning helpers
+    are not read-only and that is a defect in them, never a reason to relax what
+    is asserted here.
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "doc.pdf").write_bytes(b"original")
+    env, redirected = redirected_environment(tmp_path)
+
+    with assert_pure(work, *redirected):
+        result = run_harness(
+            ["--dry-run", "write", "--target", str(work / "doc.pdf"), "-o", "json"],
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert '"would_exit": 5' in result.stdout, result.stdout
+
+
+def test_a_dry_run_over_a_missing_destination_is_still_pure(tmp_path: Path) -> None:
+    """The exit-1 arm of the same guarantee: predicting is not creating."""
+    work = tmp_path / "work"
+    work.mkdir()
+    env, redirected = redirected_environment(tmp_path)
+
+    with assert_pure(work, *redirected):
+        result = run_harness(
+            ["--dry-run", "write", "--target", str(work / "nope" / "doc.pdf"), "-o", "json"],
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert '"would_exit": 1' in result.stdout, result.stdout
+    assert not (work / "nope").exists()
+
+
 def test_a_refused_run_leaves_the_tree_untouched(tmp_path: Path) -> None:
     """A refusal is not a partial write. Nothing at all should have moved."""
     work = tmp_path / "work"

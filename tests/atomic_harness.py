@@ -18,6 +18,13 @@ Run it as a module from the repository root::
     uv run python -m tests.atomic_harness write --target out.pdf ; echo $?
     uv run python -m tests.atomic_harness write --target out.pdf --no-backup ; echo $?
 
+X-67: a ``--dry-run`` reports what the real run *would* do rather than a fixed
+"nothing happened". Against an occupied target the two agree, which is the whole
+point — the dry run still exits 0, and its ``would_exit`` is the real run's 5::
+
+    uv run python -m tests.atomic_harness --dry-run write --target taken.pdf -o json
+    uv run python -m tests.atomic_harness          write --target taken.pdf -o json
+
 Errors are routed through the product's own ``emit_error`` and its own
 ``exit_code``, so the exit statuses these commands produce are the exact
 statuses the CLI produces for the same errors — the mapping is exercised, never
@@ -113,7 +120,12 @@ def _cmd_write(args: argparse.Namespace, fmt: OutputFormat) -> int:
     target = Path(args.target)
     with AtomicWriter(target, policy=policy, _temp_dir=args.temp_dir) as writer:
         if writer.is_dry_run:
-            _report({"target": str(target), "dry_run": True, "written": False}, fmt)
+            # X-67. The old payload here was three constants and a path: it said
+            # "written: false" against an occupied target and nothing else, while
+            # the real run refused with exit 5. That literal payload WAS the lie.
+            # ``plan_item()`` carries ``would_exit`` and, when there is one, the
+            # refusal the real run would have printed verbatim.
+            _report({"dry_run": True, "written": False, **writer.plan_item()}, fmt)
             return 0
         with open(writer.path, "wb") as handle:
             handle.write(content.encode("utf-8"))

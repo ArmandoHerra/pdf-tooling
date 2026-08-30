@@ -19,6 +19,49 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-04] Ruling X-67 fix-forward: `--dry-run` now runs the plan and predicts the refusal — 2026-08-29
+- **The preview lied.** The dry-run gate was the first statement of
+  `AtomicWriter.__enter__`, so `_plan()` never ran under `--dry-run` and a dry
+  run could not predict any of the three conditions this module owns. Against an
+  occupied target a `--dry-run` entered cleanly and reported
+  `{"target": ..., "dry_run": true, "written": false}` — while the real run
+  refused with `TargetExistsError`, exit **5**. Same for
+  `DestinationUnwritableError` (exit **1**) and the cross-filesystem `atomicity
+  degraded` warning, which was unreachable under `--dry-run` entirely. Ruling
+  X-67 settled this during the cycle and was never carried into the PDF-04 spec,
+  so the original implementation was a faithful build of an incomplete spec.
+- **The gate moved to immediately above `_open_temp()`** — the first genuinely
+  mutating call — so `_plan()` now runs in *both* modes. Under `--dry-run` its
+  refusals are **computed and captured** rather than raised: `planned_refusal`
+  holds the exception the real run would have thrown, `would_exit` is the status
+  it would have exited with, and `plan_item()` renders both as one item whose
+  `would_refuse` is the *identical* payload the real run prints under `-o json`.
+  Capture stops at the first refusal, exactly where a real run would have
+  stopped. The dry run itself still exits **0**; mirroring the predicted status
+  into the dry run's own exit code is filed as **B-025**, not implemented here.
+- **Real-run behaviour is unchanged** — same classes, codes, messages and
+  ordering — and a test asserts a real run raises and captures nothing, so the
+  capture path cannot quietly become the raise path. No runtime dependency, no
+  `SCHEMA_VERSION` change, and no `ItemResult.detail`: X-26 approved that seam as
+  a convention but PDF-10 has not landed and no verb consumes `AtomicWriter`, so
+  the writer carries the fact and `tests/atomic_harness.py` is the machine-
+  readable surface. (`EngineReport.detail` is PDF-05's unrelated `str` field.)
+- **`--dry-run` purity is unchanged and now means something.** `_plan()` calls
+  only `ensure_no_clobber`, `ensure_destination_writable` and
+  `_warn_if_destination_moved`, which between them use `resolve()`, `.exists()`,
+  `os.path.lexists()`, `.is_dir()`, `os.access` and two device stats — reads,
+  every one. `assert_pure()` still reports zero differences, and two new arms
+  assert it over a dry run that *does* capture a refusal (the pre-existing arm
+  used `--in-place`, which suppresses no-clobber by definition and so never
+  exercised the capture path at all).
+- 16 tests added across `tests/unit/test_atomic_writer.py`,
+  `tests/integration/test_purity_primitive.py` and
+  `tests/integration/test_cross_filesystem.py`; the regression arms assert the
+  prediction against a *second, real* process rather than against a hand-written
+  expectation. `test_the_gate_fires_even_when_the_run_would_have_been_refused`
+  was rewritten (not deleted): its "a dry run never reaches a filesystem check at
+  all" docstring was the superseded contract, while its assertions still hold.
+
 
 ## [PDF-06] Coverage floor fix-forward: subprocess-executed CLI code was unmeasured — 2026-08-29
 - `[tool.coverage.run]` gained `patch = ["subprocess"]` and `parallel = true`.

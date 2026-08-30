@@ -2,12 +2,21 @@
 
 Two things are proven here that are easy to *state* and easy to get wrong.
 
-**The dry-run gate is unforgettable.** It is the first statement of
-``__enter__``, so a verb cannot skip it by forgetting to check a flag — there is
+**The dry-run gate is unforgettable.** It sits immediately above the first
+mutating call, so a verb cannot skip it by forgetting to check a flag — there is
 no code path into the writer that does not pass it, and the object handed back
 raises rather than offering a path that leads nowhere. Asserted directly,
 because "we will remember to check ``policy.dry_run``" is exactly the kind of
 guarantee that survives one spec and then quietly does not.
+
+**And the plan runs above the gate, in both modes (X-67).** Which is the same
+argument applied once more: real runs are protected by construction, dry runs
+would be protected only by convention. A verb author cannot forget the gate, but
+*can* forget to call the planning helpers — so a ``--dry-run`` that skipped the
+plan predicted nothing against an occupied target while the real run refused with
+exit 5. The section at the bottom of this file pins the prediction against the
+outcome for all three conditions the writer owns, and pins it by comparing the
+*same payload object* rather than two shapes that agree by luck.
 
 **The temp lives beside the destination.** Not in ``/tmp``. That is not a
 preference: ``os.replace`` is atomic within a filesystem and nowhere else, so a
@@ -94,7 +103,15 @@ def test_a_dry_run_creates_nothing_at_all(tmp_path: Path) -> None:
 
 
 def test_the_gate_fires_even_when_the_run_would_have_been_refused(tmp_path: Path) -> None:
-    """The gate is FIRST. A dry run never reaches a filesystem check at all."""
+    """The gate holds over a target the real run would refuse.
+
+    Superseded in one respect by X-67 and rewritten rather than deleted: a dry
+    run *does* now reach the read-only filesystem checks, so the old claim that
+    it "never reaches a filesystem check at all" is no longer the contract. What
+    this test still pins is the part that never changed — entering is not
+    raising, and the occupied file is byte-identical afterwards. The prediction
+    it now also computes is asserted below.
+    """
     target = tmp_path / "doc.pdf"
     target.write_bytes(b"original")
     with AtomicWriter(target, policy=make_policy(dry_run=True)) as writer:
@@ -362,3 +379,187 @@ def test_a_refusal_under_json_goes_to_stdout_with_its_code(tmp_path: Path) -> No
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == REFUSED
     assert payload["error"]["kind"] == "refused"
+
+
+# --------------------------------------------------------------------------- #
+# X-67 — the plan runs under --dry-run, and the preview stops lying
+#
+# The defect this section exists to prevent recurring: the gate used to be the
+# first statement of __enter__, so _plan() never ran under --dry-run and a dry
+# run could not predict the three conditions this module owns. Against an
+# occupied target it entered cleanly and reported {"written": false}, while the
+# real run refused with exit 5. Every arm below therefore asserts the PREDICTION
+# against the OUTCOME rather than against a hand-written expectation, because a
+# preview is only worth anything if it agrees with the run it previews.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_dry_run_over_an_occupied_target_predicts_the_refusal(tmp_path: Path) -> None:
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original")
+    before = sha256(target)
+
+    with AtomicWriter(target, policy=make_policy(dry_run=True)) as writer:
+        assert writer.is_dry_run
+        assert writer.would_exit == REFUSED
+        assert isinstance(writer.planned_refusal, errors.TargetExistsError)
+
+    assert sha256(target) == before
+
+
+def test_a_dry_run_over_a_missing_destination_predicts_exit_one(tmp_path: Path) -> None:
+    """Exit 1, not 5. The filesystem cannot accept the write; nothing declined."""
+    with AtomicWriter(tmp_path / "nope" / "doc.pdf", policy=make_policy(dry_run=True)) as writer:
+        assert writer.would_exit == FAILURE
+        assert isinstance(writer.planned_refusal, errors.DestinationUnwritableError)
+    assert not (tmp_path / "nope").exists()
+
+
+def test_a_clean_plan_predicts_nothing(tmp_path: Path) -> None:
+    """The non-vacuity control: would_exit must not be a constant 5."""
+    with AtomicWriter(tmp_path / "fresh.pdf", policy=make_policy(dry_run=True)) as writer:
+        assert writer.would_exit == OK
+        assert writer.planned_refusal is None
+        assert writer.plan_item() == {
+            "target": str(tmp_path / "fresh.pdf"),
+            "would_exit": OK,
+            "warnings": [],
+        }
+
+
+def test_force_makes_the_dry_run_predict_no_refusal(tmp_path: Path) -> None:
+    """The prediction tracks the policy, not merely the state of the disk."""
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original")
+    with AtomicWriter(target, policy=make_policy(dry_run=True, force=True)) as writer:
+        assert writer.would_exit == OK
+        assert writer.planned_refusal is None
+
+
+def test_a_real_run_still_raises_and_captures_nothing(tmp_path: Path) -> None:
+    """The hard requirement: real-run behaviour is UNCHANGED by X-67.
+
+    Capture is a dry-run affordance only. A real run raises the same class with
+    the same message it always did, and never leaves a swallowed refusal behind
+    for a caller to have to remember to check.
+    """
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original")
+    writer = AtomicWriter(target, policy=make_policy())
+    with pytest.raises(errors.TargetExistsError, match="pass --force to overwrite it"):
+        with writer:
+            pass
+    assert writer.planned_refusal is None
+    assert writer.would_exit == OK
+
+
+def test_the_prediction_stops_where_the_real_run_would_have_stopped(tmp_path: Path) -> None:
+    """Both conditions true at once must predict the FIRST one, as ordered.
+
+    A real run checks no-clobber before writability, so an occupied target in an
+    unwritable directory is exit 5 and never reaches exit 1. A dry run that
+    reported the second refusal, or both, would be lying in the other direction.
+    """
+    directory = tmp_path / "locked"
+    directory.mkdir()
+    target = directory / "doc.pdf"
+    target.write_bytes(b"original")
+    directory.chmod(0o500)
+    try:
+        if os.access(directory, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        with AtomicWriter(target, policy=make_policy(dry_run=True)) as writer:
+            assert writer.would_exit == REFUSED
+            assert isinstance(writer.planned_refusal, errors.TargetExistsError)
+    finally:
+        directory.chmod(0o700)
+
+
+def test_the_plan_item_uses_the_key_name_the_ruling_fixed(tmp_path: Path) -> None:
+    """``would_exit`` is the contract's spelling; a rename is a breaking change."""
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original")
+    with AtomicWriter(target, policy=make_policy(dry_run=True)) as writer:
+        item = writer.plan_item()
+        refusal = writer.planned_refusal
+    assert refusal is not None
+    assert item["would_exit"] == REFUSED
+    assert item["would_refuse"] == refusal.to_dict()
+
+
+def test_a_dry_run_writer_still_refuses_to_hand_out_a_path_after_planning(
+    tmp_path: Path,
+) -> None:
+    """Planning does not open a temp. There is still nowhere to write."""
+    with AtomicWriter(tmp_path / "doc.pdf", policy=make_policy(dry_run=True)) as writer:
+        with pytest.raises(RuntimeError, match="dry-run"):
+            _ = writer.path
+
+
+# --- the machine-readable surface, through a real process ------------------- #
+
+
+def test_the_dry_run_json_predicts_the_refusal_the_real_run_produces(tmp_path: Path) -> None:
+    """THE regression test for this defect, and it compares run against run.
+
+    The dry run's ``would_refuse`` is asserted equal to the real run's ``error``
+    — the same payload, not a restatement of it. Nothing can drift the preview
+    away from the outcome without failing here.
+    """
+    import json
+
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original")
+
+    preview = run_harness(["--dry-run", "write", "--target", str(target), "-o", "json"])
+    assert preview.returncode == OK, preview.stderr
+    predicted = json.loads(preview.stdout)
+    assert predicted["would_exit"] == REFUSED
+    assert predicted["written"] is False
+
+    actual = run_harness(["write", "--target", str(target), "-o", "json"])
+    assert actual.returncode == REFUSED, actual.stderr
+
+    assert predicted["would_exit"] == actual.returncode
+    assert predicted["would_refuse"] == json.loads(actual.stdout)["error"]
+    assert target.read_bytes() == b"original"
+
+
+def test_the_dry_run_json_predicts_the_unwritable_destination_too(tmp_path: Path) -> None:
+    import json
+
+    target = tmp_path / "nope" / "doc.pdf"
+
+    preview = run_harness(["--dry-run", "write", "--target", str(target), "-o", "json"])
+    assert preview.returncode == OK, preview.stderr
+    predicted = json.loads(preview.stdout)
+
+    actual = run_harness(["write", "--target", str(target), "-o", "json"])
+    assert actual.returncode == FAILURE, actual.stderr
+
+    assert predicted["would_exit"] == FAILURE == actual.returncode
+    assert predicted["would_refuse"] == json.loads(actual.stdout)["error"]
+
+
+def test_a_dry_run_exits_zero_even_when_it_predicts_a_refusal(tmp_path: Path) -> None:
+    """X-67 ruled exit 0 and this cycle does not mirror the predicted status.
+
+    Whether ``cmd --dry-run && cmd`` should short-circuit is a real ergonomic
+    question and it is filed rather than answered here. This test is what makes
+    answering it later a deliberate, visible change instead of a silent one.
+    """
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original")
+    result = run_harness(["--dry-run", "write", "--target", str(target)])
+    assert result.returncode == OK, result.stderr
+
+
+def test_the_predicted_status_is_absent_from_a_real_run_payload(tmp_path: Path) -> None:
+    """A real run reports what happened; only a plan reports what would happen."""
+    import json
+
+    result = run_harness(["write", "--target", str(tmp_path / "doc.pdf"), "-o", "json"])
+    assert result.returncode == OK, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["written"] is True
+    assert "would_exit" not in payload

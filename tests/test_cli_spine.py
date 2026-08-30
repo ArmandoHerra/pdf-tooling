@@ -577,6 +577,25 @@ def test_changelog_prepends_every_spec_entry_below_the_anchor() -> None:
     it. Generalized in PDF-02 to assert the INVARIANT the original was reaching
     for -- entries are PREPENDED, never appended -- which is strictly stronger,
     because it now also catches an out-of-order insert that the count never could.
+
+    Generalized once more by PDF-04's X-67 fix-forward, for the same reason and
+    in the same direction. "Spec numbers descend as you read down" was a PROXY
+    for "prepended", sound only while no spec was ever remediated after a
+    higher-numbered one landed. `changelog.md`'s own header rules that a
+    correction is a NEW ENTRY WITH A NEW DATE, so a PDF-04 fix-forward landing
+    after PDF-06 makes the sequence [4, 6, 6, 5, 4, 3, 2, 1] -- correctly
+    newest-first, and correctly non-descending. Left as it was, the assertion
+    would have forced a choice between an honest changelog and a green suite,
+    which is how a guard starts getting worked around instead of trusted.
+
+    The replacement is two checks that are together stronger, not weaker:
+
+    * **dates are non-increasing** as you read down, which is what "newest
+      first" literally claims and what the number check was only approximating;
+    * **each spec's ORIGINAL landing entry still descends.** The original is the
+      bottom-most entry carrying that number, remediations being prepended above
+      it, so a genuinely misfiled entry -- PDF-07's first entry appended at the
+      bottom, say -- still fails exactly as it did before.
     """
     text = (REPO_ROOT / "changelog.md").read_text()
     anchor = "<!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->"
@@ -588,9 +607,27 @@ def test_changelog_prepends_every_spec_entry_below_the_anchor() -> None:
     # PDF-01's entry is never lost or edited — a lost prepend is exactly what
     # this file's own header warns a HEAD-level heading grep would hide.
     assert any(h.startswith("## [PDF-01] Project scaffold & CLI spine") for h in headings)
-    # Newest first: spec numbers descend as you read down the file.
-    numbers = [int(m) for m in re.findall(r"^## \[PDF-(\d\d)\]", text, re.MULTILINE)]
-    assert numbers == sorted(numbers, reverse=True), f"entries are not newest-first: {numbers}"
+
+    # Every heading carries its spec number and its date, so neither check below
+    # can silently pass over an entry whose heading is malformed.
+    entries = re.findall(
+        r"^## \[PDF-(\d\d)\][^\n]*\u2014 (\d{4}-\d{2}-\d{2})\s*$", text, re.MULTILINE
+    )
+    assert len(entries) == len(headings), (
+        f"{len(headings) - len(entries)} entry heading(s) lack a trailing "
+        f"'\u2014 YYYY-MM-DD'; the format is fixed by this file's own header"
+    )
+
+    # Newest first, literally: dates never increase as you read down.
+    dates = [date for _, date in entries]
+    assert dates == sorted(dates, reverse=True), f"entries are not newest-first: {dates}"
+
+    # Original landing entries -- the bottom-most entry per spec number -- descend.
+    numbers = [int(number) for number, _ in entries]
+    originals = [n for index, n in enumerate(numbers) if n not in numbers[index + 1 :]]
+    assert originals == sorted(originals, reverse=True), (
+        f"a spec's original entry is misfiled: {originals} (all entries: {numbers})"
+    )
 
 
 # --------------------------------------------------------------------------- #

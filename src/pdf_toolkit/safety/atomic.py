@@ -18,16 +18,18 @@ past the writer.
 
 The seven steps, exactly (``PLAN.md`` §5.3)
 -------------------------------------------
-1. **Dry-run gate** — literally the first statement of ``__enter__``, before any
-   filesystem call at all. In a dry run the writer records the planned action
-   and hands back an object whose ``.path`` raises: there is nothing to write
-   to, so asking for somewhere to write is a bug the writer names immediately
-   rather than a directory it silently invents. The read-only planning helpers
-   in ``paths.py`` are separately callable, so a dry run can still *report* the
-   refusals it would hit without this module touching anything.
+1. **Dry-run gate** — the statement immediately above ``_open_temp()``, which is
+   the first genuinely *mutating* call. It is deliberately **not** the first
+   statement of ``__enter__``: step 2 runs above it, in both modes. In a dry run
+   the writer hands back an object whose ``.path`` raises — there is nothing to
+   write to, so asking for somewhere to write is a bug the writer names
+   immediately rather than a directory it silently invents.
 2. **Plan** — resolve the destination, refuse an existing target without
    ``--force`` (exit 5), and fail early if the destination directory cannot
-   accept a write (exit 1). Both happen before an engine runs.
+   accept a write (exit 1). Both happen before an engine runs, **and both are
+   computed under ``--dry-run`` as well** (X-67). See "A dry run predicts the
+   refusal" below; this is the ordering rule to read before touching
+   ``__enter__``.
 3. **Temp** — a temp file **beside the resolved destination**, never in the
    system temp directory. That co-location is not a preference; it is what makes
    step 6 atomic, and a test asserts the temp's parent directly rather than
@@ -52,6 +54,37 @@ is why a ``SIGKILL`` mid-write leaves the original byte-identical for
 ``--in-place`` exactly as it does for a fresh output, and it is why the product
 ships without a transaction log (D-07): safety here is immutability, not
 reversibility.
+
+A dry run predicts the refusal (X-67)
+-------------------------------------
+Real runs are protected by construction; dry runs would be protected only by
+convention. A verb author cannot forget the gate — there is no path into the
+writer that misses it — but a verb author *can* forget to call the read-only
+planning helpers themselves, and then a ``--dry-run`` against an occupied target
+would enter cleanly, predict nothing, and be contradicted by the real run's exit
+5. A preview that lies is worse than no preview, so the planning step moved
+above the gate rather than being left to each caller's diligence.
+
+Under ``--dry-run`` the plan is therefore **computed and captured** instead of
+raised: :attr:`planned_refusal` holds the exception the real run *would* have
+raised, :attr:`would_exit` is the status it *would* have exited with, and
+:meth:`plan_item` renders both as one machine-readable item. The dry run itself
+still exits 0 — the prediction completed successfully, and ``-o json`` carries a
+richer answer than an exit code can. Mirroring the predicted status into the dry
+run's own exit code is a separate ergonomic question, deliberately not settled
+here.
+
+Capture stops at the **first** refusal, exactly where a real run would have
+stopped. A real run that refuses at no-clobber never reaches the writability
+check and never emits the cross-filesystem warning, so a dry run that reported
+them anyway would be lying in the other direction.
+
+**Nothing about this makes a dry run touch the filesystem.** The three helpers
+the plan calls use ``resolve()``, ``.exists()``, ``os.path.lexists()``,
+``.is_dir()``, ``os.access`` and ``stat`` — reads, every one. Access time is the
+only thing they can move, and the purity comparator excludes it deliberately
+(``PLAN.md`` §D2), so the snapshot assertion stays at zero differences and now
+means something, because the plan actually executes.
 
 Recorded simplification (OR-1)
 ------------------------------
@@ -92,7 +125,13 @@ from pathlib import Path
 from types import TracebackType
 from typing import IO, Final
 
-from pdf_toolkit.errors import BackupExistsError, FailureError, TargetExistsError
+from pdf_toolkit.cli.exit_codes import OK
+from pdf_toolkit.errors import (
+    BackupExistsError,
+    FailureError,
+    PdfToolkitError,
+    TargetExistsError,
+)
 from pdf_toolkit.safety._faults import checkpoint
 from pdf_toolkit.safety.paths import (
     canonical,
@@ -175,6 +214,10 @@ class AtomicWriter:
         self.kind = kind
         self.warnings: list[str] = []
         self.backup_path: Path | None = None
+        #: X-67. Under ``--dry-run``, the refusal the real run *would* have
+        #: raised, computed rather than thrown. ``None`` when the plan is clean,
+        #: and always ``None`` after a real run — a real run raises instead.
+        self.planned_refusal: PdfToolkitError | None = None
         self.destination: Path = canonical(target)
         self._warn_sink = warn if warn is not None else _default_warn
         self._temp_dir = Path(_temp_dir) if _temp_dir is not None else None
@@ -198,15 +241,51 @@ class AtomicWriter:
 
     @property
     def is_dry_run(self) -> bool:
-        """Whether this writer short-circuited on the dry-run gate."""
+        """Whether this writer stopped at the dry-run gate.
+
+        A dry-run writer has still *planned*: consult :attr:`would_exit` and
+        :meth:`plan_item` for what the real run would have done.
+        """
         return self._dry_run
 
+    @property
+    def would_exit(self) -> int:
+        """The status a real run of this invocation would have exited with.
+
+        ``OK`` when the plan found nothing to refuse. Under ``--dry-run`` over an
+        occupied target this is ``5``; over an unwritable destination, ``1``. The
+        dry run's *own* exit status is 0 either way — this is the prediction, not
+        the verdict on the prediction.
+        """
+        refusal = self.planned_refusal
+        return OK if refusal is None else refusal.exit_code
+
+    def plan_item(self) -> dict[str, object]:
+        """The plan as one machine-readable item (X-67).
+
+        ``would_refuse`` is the product's own structured error payload — the
+        *identical* object the real run prints under ``-o json`` — so a caller
+        comparing a prediction against the outcome is comparing like with like
+        rather than two hand-rolled shapes that agree by luck.
+        """
+        item: dict[str, object] = {
+            "target": str(self.target),
+            "would_exit": self.would_exit,
+            "warnings": list(self.warnings),
+        }
+        refusal = self.planned_refusal
+        if refusal is not None:
+            item["would_refuse"] = refusal.to_dict()
+        return item
+
     def __enter__(self) -> AtomicWriter:
-        # THE GATE. First statement, before any filesystem call, unconditionally.
-        if self.policy.dry_run:
-            self._dry_run = True
-            return self
+        # X-67: the plan runs in BOTH modes. Everything it calls is read-only,
+        # and a dry run that skipped it could not predict its own refusals.
+        self._dry_run = self.policy.dry_run
         self._plan()
+        # THE GATE. Immediately above _open_temp(), the first mutating call.
+        if self._dry_run:
+            return self
         self._open_temp()
         return self
 
@@ -230,15 +309,29 @@ class AtomicWriter:
     # -- steps 2 and 3 ------------------------------------------------------ #
 
     def _plan(self) -> None:
-        ensure_no_clobber(
-            self.target,
-            force=self.policy.force,
-            in_place=self.policy.in_place,
-        )
-        ensure_destination_writable(
-            self.destination.parent,
-            as_written=self.target.parent,
-        )
+        """Steps 2 and 3 — read-only, and run under ``--dry-run`` too (X-67).
+
+        A real run raises: same classes, same codes, same messages, same order as
+        before this method learned about dry runs. A dry run captures the first
+        refusal into :attr:`planned_refusal` and returns, stopping exactly where
+        the real run would have stopped — which is why the warning below sits
+        after the ``except`` and not inside a ``finally``.
+        """
+        try:
+            ensure_no_clobber(
+                self.target,
+                force=self.policy.force,
+                in_place=self.policy.in_place,
+            )
+            ensure_destination_writable(
+                self.destination.parent,
+                as_written=self.target.parent,
+            )
+        except PdfToolkitError as refusal:
+            if not self._dry_run:
+                raise
+            self.planned_refusal = refusal
+            return
         self._warn_if_destination_moved()
 
     def _warn_if_destination_moved(self) -> None:

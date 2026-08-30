@@ -139,8 +139,49 @@ def test_an_out_dir_symlinked_onto_another_mount_warns_on_stderr(
     assert find_stray_temps(real_out) == ()
 
 
+def test_a_dry_run_reaches_the_degradation_warning_too(tmp_path: Path, xdev_dir: Path) -> None:
+    """X-67: the third condition the writer owns, now reachable under --dry-run.
+
+    This one is a warning rather than an exit code, so the prediction is the
+    warning itself and ``would_exit`` stays 0 — a degraded write still succeeds.
+    Before X-67 the plan never ran under ``--dry-run``, so a preview of a write
+    that was about to land on a filesystem the user did not name said nothing at
+    all; the user learned about it only from the real run, after the bytes moved.
+
+    The warning text is asserted equal to the real run's, not merely similar.
+    """
+    import json
+
+    real_out = xdev_dir / "out"
+    real_out.mkdir()
+    out_dir = tmp_path / "outdir"
+    out_dir.symlink_to(real_out)
+    target = out_dir / "doc.pdf"
+
+    preview = run_harness(["--dry-run", "write", "--target", str(target), "-o", "json"])
+    assert preview.returncode == 0, preview.stderr
+    predicted = json.loads(preview.stdout)
+
+    assert DEGRADED_PREFIX in preview.stderr
+    assert predicted["would_exit"] == 0, "degradation warns; it does not refuse"
+    assert "would_refuse" not in predicted
+    assert not (real_out / "doc.pdf").exists(), "the preview wrote the document"
+    assert find_stray_temps(real_out) == ()
+
+    actual = run_harness(["write", "--target", str(target), "-o", "json"])
+    assert actual.returncode == 0, actual.stderr
+    assert predicted["warnings"] == json.loads(actual.stdout)["warnings"]
+
+
 def test_a_same_filesystem_destination_warns_about_nothing(tmp_path: Path) -> None:
     result = run_harness(["write", "--target", str(tmp_path / "doc.pdf")])
+    assert result.returncode == 0, result.stderr
+    assert DEGRADED_PREFIX not in result.stderr
+
+
+def test_a_same_filesystem_dry_run_warns_about_nothing_either(tmp_path: Path) -> None:
+    """Non-vacuity for the arm above: the dry-run warning is not unconditional."""
+    result = run_harness(["--dry-run", "write", "--target", str(tmp_path / "doc.pdf")])
     assert result.returncode == 0, result.stderr
     assert DEGRADED_PREFIX not in result.stderr
 
