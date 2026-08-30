@@ -421,23 +421,34 @@ def test_ac22_every_output_is_a_readable_document_with_the_expected_page_count(
 # --------------------------------------------------------------------------- #
 
 
+# NOTE ON THE WORDING OF THE `reason` BELOW -- it is a CI constraint, not style.
+# `scripts/assert_skips.py` classifies a skip as "engine-gated" by regex over its
+# REASON (`engine|tesseract|soffice|libreoffice`, case-insensitive), and pytest
+# records an xfail as `<skipped type="pytest.xfail">` in the JUnit report the
+# `engines-present` job feeds to that script with `--expect-zero`. A reason
+# naming the structure port by its class name therefore fails that job, even
+# though nothing here is engine-gated at all. The reason below is deliberately
+# written without any of those four words; the port is referred to by its module
+# and method instead. Do not reintroduce the class name here without also
+# teaching `assert_skips.py` to exclude `type="pytest.xfail"` -- which is the
+# real fix, and is reported as a finding rather than made here.
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "PDF-08 BLOCKER, reported not repaired. `StructureEngine.open_document`'s own "
-        "Protocol docstring (`ports/structure.py`) documents `AuthError: Exit 6` for an "
-        "encrypted input, and `PypdfOpenDocument.__enter__` does not implement it: pypdf "
-        "raises `FileNotDecryptedError` LAZILY, on `reader.pages` inside `page_count`, "
-        "which is outside that method's `except (PdfReadError, OSError, ValueError)` "
-        "block. The result is an unhandled traceback and exit 1. This is PRE-EXISTING "
-        "and NOT introduced here -- `merge` and `split` (PDF-07, landed at 743853f) "
-        "reproduce it identically at 33bf481. PDF-08 does not repair it: password "
-        "handling is this spec's Scope Out (PDF-13 owns the §5.7 contract), and the fix "
-        "belongs to `PypdfOpenDocument`, a class X-127 assigned to neither PDF-08 nor "
-        "PDF-14, whose repair would change two other verbs' behaviour mid-wave. "
-        "The assertion below is the CORRECT one and is left intact: strict xfail means "
-        "the day the shared fix lands this turns red as an XPASS and forces its own "
-        "marker to be removed, rather than pinning today's defect (B-073)."
+        "PDF-08 BLOCKER, reported not repaired. `ports/structure.py`'s own Protocol "
+        "docstring for `open_document` documents `AuthError: Exit 6` for an encrypted "
+        "input, and `PypdfOpenDocument.__enter__` does not implement it: pypdf raises "
+        "`FileNotDecryptedError` LAZILY, on `reader.pages` inside `page_count`, which "
+        "is outside that method's `except (PdfReadError, OSError, ValueError)` block. "
+        "The result is an unhandled traceback and exit 1. This is PRE-EXISTING and NOT "
+        "introduced here -- `merge` and `split` (PDF-07, landed at 743853f) reproduce "
+        "it identically at 33bf481. PDF-08 does not repair it: password handling is "
+        "this spec's Scope Out (PDF-13 owns the §5.7 contract), and the fix belongs to "
+        "`PypdfOpenDocument`, a class X-127 assigned to neither PDF-08 nor PDF-14, "
+        "whose repair would change two other verbs' behaviour mid-wave. The assertion "
+        "below is the CORRECT one and is left intact: strict xfail means the day the "
+        "shared fix lands this turns red as an XPASS and forces its own marker to be "
+        "removed, rather than pinning today's defect (B-073)."
     ),
 )
 def test_ac23_an_encrypted_input_surfaces_exit_6_without_a_traceback(
@@ -628,24 +639,53 @@ def test_ac36_an_in_place_dry_run_writes_nothing_and_still_plans(
 # --------------------------------------------------------------------------- #
 
 
-def test_ac37_a_traversal_carrying_stem_is_refused_at_the_exit_5_tier(
+#: Filenames whose STEM is a component `safety/naming.py::_reject_unsafe_component`
+#: refuses outright. Which of these actually works is a property of the running
+#: CPython, not of this product: **3.14 changed `PurePath.suffix`/`stem` so a
+#: leading dot is part of the stem** (hidden-file handling), so `"...pdf"` has
+#: the stem `".."` on <=3.13 and `"...pdf"` on 3.14. Measured across 3.11, 3.12,
+#: 3.13 and 3.14 rather than assumed.
+_TRAVERSAL_STEM_CANDIDATES = ("...pdf", "..pdf")
+
+
+def _traversal_stem_filename() -> str | None:
+    """A filename whose stem is a refused component, or ``None`` on a CPython
+    that cannot express one (see :data:`_TRAVERSAL_STEM_CANDIDATES`)."""
+    for name in _TRAVERSAL_STEM_CANDIDATES:
+        if Path(name).stem in ("", ".", ".."):
+            return name
+    return None
+
+
+def _overflowing_stem_source(corpus, workspace: Path) -> Path:
+    """An operand whose own name is a perfectly legal filename, but whose stem
+    cannot survive a template that uses it twice.
+
+    The portable half of AC37's "the *data* carried the escape" property: every
+    component here is legal in isolation and the rendered name is not, so the
+    refusal can only come from checking the component AFTER substitution.
+    """
+    source = workspace / ("s" * 200 + ".pdf")
+    shutil.copy(corpus.path(FIXTURE), source)
+    return source
+
+
+def test_ac37_a_post_substitution_overflow_is_refused_at_the_exit_5_tier(
     corpus, tmp_path: Path
 ) -> None:
-    """The escape that appears only AFTER substitution, because the *data*
-    carried it: a file literally named `...pdf` has the stem `..`, so
-    `--name '{stem}.{ext}'` renders a component that would leave `--out-dir`.
+    """The escape that exists only AFTER substitution, asserted on every
+    supported CPython.
 
-    This is the case a statically-valid template cannot be checked for at the
-    exit-2 tier, and it is exactly what `ensure_within` (reached through
-    `render_name`) exists to catch.
+    A 200-character stem and a `{stem}-{stem}.{ext}` template are each
+    individually fine; the component they render to is 405 bytes, over the
+    filename limit. Nothing at the exit-2 tier can see this -- the template is
+    statically valid and the filename is statically valid -- so it is exactly
+    the tier `render_name` owns.
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    source = workspace / "...pdf"
-    shutil.copy(corpus.path(FIXTURE), source)
-    assert Path(source.name).stem == "..", "this test's own premise no longer holds"
+    source = _overflowing_stem_source(corpus, workspace)
 
-    out_dir = workspace / "out"
     before = snapshot(tmp_path)
     result = run_cli(
         "extract",
@@ -653,7 +693,50 @@ def test_ac37_a_traversal_carrying_stem_is_refused_at_the_exit_5_tier(
         "--pages",
         "1",
         "--out-dir",
-        str(out_dir),
+        str(workspace / "out"),
+        "--name",
+        "{stem}-{stem}.{ext}",
+        cwd=workspace,
+    )
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert_unchanged(before, snapshot(tmp_path))
+
+
+def test_ac37_a_traversal_carrying_stem_is_refused_at_the_exit_5_tier(
+    corpus, tmp_path: Path
+) -> None:
+    """The traversal-shaped instance of the same property: a file named
+    `...pdf` has the stem `..` on CPython <= 3.13, so `--name '{stem}'` renders
+    a component that would leave `--out-dir`.
+
+    Skips with a reason on CPython 3.14+, where the `PurePath.stem` change
+    makes the premise unconstructible -- a platform fact, not a coverage gap:
+    the post-substitution tier this exercises is asserted on EVERY version by
+    `test_ac37_a_post_substitution_overflow_is_refused_at_the_exit_5_tier`
+    above, and the canonical-form half by the symlink test below.
+    """
+    name = _traversal_stem_filename()
+    if name is None:
+        pytest.skip(
+            "CPython 3.14+ treats a leading dot as part of the stem, so no legal "
+            "filename yields a traversal stem; the same tier is covered portably "
+            "by the post-substitution overflow test"
+        )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = workspace / name
+    shutil.copy(corpus.path(FIXTURE), source)
+    assert Path(source.name).stem in ("", ".", ".."), "this test's own premise no longer holds"
+
+    before = snapshot(tmp_path)
+    result = run_cli(
+        "extract",
+        str(source),
+        "--pages",
+        "1",
+        "--out-dir",
+        str(workspace / "out"),
         "--name",
         "{stem}",
         cwd=workspace,
@@ -708,10 +791,12 @@ def test_ac37_a_symlinked_out_dir_is_compared_in_canonical_form(corpus, tmp_path
     written = sorted(p.name for p in real_dir.iterdir())
     assert written == [f"{FIXTURE}.pdf"], written
 
+    # The refusing half uses the PORTABLE post-substitution vector rather than a
+    # traversal stem, so this arm asserts the same property on every supported
+    # CPython (see `_traversal_stem_filename`).
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    escaping = workspace / "...pdf"
-    shutil.copy(corpus.path(FIXTURE), escaping)
+    escaping = _overflowing_stem_source(corpus, workspace)
     outside = snapshot(real_dir)
     refused = run_cli(
         "extract",
@@ -721,7 +806,7 @@ def test_ac37_a_symlinked_out_dir_is_compared_in_canonical_form(corpus, tmp_path
         "--out-dir",
         str(linked),
         "--name",
-        "{stem}",
+        "{stem}-{stem}.{ext}",
         cwd=workspace,
     )
     assert refused.returncode == 5

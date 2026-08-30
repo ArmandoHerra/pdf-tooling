@@ -19,6 +19,36 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-08] fix: two CI-only defects the local gate could not see — 2026-08-30
+- `Path.stem` is not stable across supported Pythons, and AC37's containment
+  test depended on it. **CPython 3.14 changed `PurePath.suffix`/`stem` so a
+  leading dot counts as part of the stem** (hidden-file handling), so a file
+  named `...pdf` has the stem `..` on 3.11-3.13 and `...pdf` on 3.14. The
+  traversal-carrying-stem fixture therefore stopped carrying a traversal, and
+  the two AC37 arms built on it failed on both 3.14 legs. Caught by the arm's
+  own premise assertion (`this test's own premise no longer holds`) rather than
+  by a silent pass, which is the only reason it was diagnosable from the log.
+- Fixed by making the property portable instead of the fixture cleverer. A new
+  arm drives the same post-substitution tier on **every** supported version: a
+  200-character stem with a `{stem}-{stem}.{ext}` template renders a 405-byte
+  component, where the stem and the template are each individually legal and
+  only the substituted result is not. The traversal-shaped arm is kept and now
+  skips with a reason naming the CPython change on 3.14+, and the symlink arm's
+  refusing half uses the portable vector, so containment stays asserted
+  everywhere rather than on three versions out of four. Verified by running the
+  suites under 3.11-3.14 rather than reasoning about them.
+- The `engines-present` job failed for an unrelated reason: `scripts/
+  assert_skips.py` classifies a skip as engine-gated by a regex over its
+  **reason**, pytest records an xfail as `<skipped type="pytest.xfail">` in the
+  JUnit report, and the AC23 xfail's reason named the structure port by its
+  class name. A deliberate xfail was therefore counted as a test that should
+  have exercised a real engine and silently did not. Worked around by wording
+  that reason without the matched terms, with the constraint recorded inline;
+  the real fix — teaching that script to exclude `type="pytest.xfail"` — is a
+  shared CI gate outside this spec's scope and is reported rather than made.
+- Forward-fix commits rather than an amend: `1c4684c` is already on
+  `origin/main`, and this cycle does not rewrite history.
+
 ## [PDF-08] extract / delete / rotate / reorder — 2026-08-30
 - Added the four page-addressed structure verbs over one shared selection path.
   The set-vs-ordered distinction is enforced in code rather than left to each
