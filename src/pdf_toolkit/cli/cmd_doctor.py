@@ -85,7 +85,7 @@ def _render(payload: dict[str, Any], fmt: OutputFormat) -> str:
     return render_payload(streamed, fmt)
 
 
-@global_options
+@global_options(consumes=())
 def doctor_command(
     ctx: typer.Context,
     strict: Annotated[

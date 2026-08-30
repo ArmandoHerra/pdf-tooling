@@ -19,6 +19,85 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-07] merge + split — the OR-3 output-flag consumption mechanism — 2026-08-30
+- **OR-3 (`decision.md` §0.5, Design §D12), built here before either verb
+  existed.** `cli/common.py` gains `OUTPUT_FLAGS` (`--output`, `--out-dir`,
+  `--name`, `--in-place`) and turns `global_options` into a decorator
+  **factory** taking a required `consumes=` keyword; a bare `@global_options`
+  now raises `TypeError` at import time, and an unknown flag name raises
+  `ValueError` — both at import time, never at runtime. The central check
+  (`_check_output_flag_consumption`) runs once, inside `validate_config()`, in
+  a pinned order: `--output`/`--out-dir` mutual exclusion, then OR-3, then the
+  existing shape checks. `version`/`doctor`/`info` are retrofitted to declare
+  `consumes=()` — the proof the mechanism actually refuses. Closes **B-035**
+  (QA fingerprint `54500b06e5`).
+- Added `src/pdf_toolkit/ops/merge.py` and `cli/cmd_merge.py`: `merge`
+  concatenates PDFs with per-input `path:range` selection (last-colon
+  disambiguation, `:all` escape), `--bookmarks per-file|preserve|none`,
+  fail-closed on any input (all inputs opened and resolved before the first
+  byte is written), `consumes=("--output",)`.
+- Added `src/pdf_toolkit/ops/split.py` and `cli/cmd_split.py`: `split` splits
+  one PDF into many by `--every`, `--ranges` (comma is the part separator,
+  not a union), `--each-page` or `--at-bookmarks` (including the documented
+  no-outline-at-all case, exit 4), `--name` templating into `--out-dir`,
+  plan-then-write (all parts resolved and no-clobber/collision-checked before
+  the first write), `consumes=("--out-dir", "--name")`.
+- Added `src/pdf_toolkit/safety/naming.py`: the `--name` template renderer
+  (X-70 resolves Design §D6's branch — PDF-04 shipped only
+  `ensure_within()`, no renderer, so this module is new, not consumed).
+  Token substitution plus the binding containment invariant; calls
+  `ensure_within()` on every rendered path before it ever reaches
+  `AtomicWriter`. Owns only the substituted-value/255-byte exit-5 tier;
+  `cli/common.py::_validate_name_template`'s exit-2 tier is untouched.
+- `src/pdf_toolkit/safety/atomic.py`: added `AtomicWriter.stream` (the open
+  file handle, never a path — D7's fix for `pypdf.PdfWriter.write(path)`
+  opening its own handle and bypassing the tracked one) and `ensure_out_dir()`
+  (the one confined `Path.mkdir` call site for `--out-dir`, gated on
+  `--dry-run`, chokepoint-confined per the existing AST-walk boundary).
+- `src/pdf_toolkit/safety/paths.py`: added `target_exists()`, a boolean
+  existence predicate (dangling-symlink-aware) for the bulk-destructive
+  confirmation gate to consult before deciding whether a run is destructive.
+- `src/pdf_toolkit/ports/structure.py` + `adapters/pypdf_structure.py`: D10's
+  minimal method set — `open_document()`/`OpenStructureDocument`
+  (context-managed, page count, top-level outline as 1-based
+  `(title, page)` pairs) and `new_writer()`/`StructureWriter`
+  (`append_pages`, `add_outline_entry`, `import_outline`, `write`). No new
+  adapter, no second engine.
+- `src/pdf_toolkit/ops/pagerange.py`: added `is_valid_spec()` (syntax-only,
+  no bounds check, no materialization — reuses the existing regex/keyword
+  constants) and `ALL_PAGES_TOKEN`. **Neither is added to `__all__`** —
+  `tests/test_pagerange.py::test_ac1_public_surface` pins that list exactly
+  and that file is unedited (AC6/HC-3); both stay directly importable.
+- `tests/registry.py` (PDF-06's, edited under the ruling's own
+  authorization): `VerbSpec` gained `consumes`; `merge`/`split` rows added to
+  `INVOCATIONS`; added `OUTPUT_FLAG_INVOCATIONS` for the three OR-3-honoured
+  pairs.
+- `tests/test_cli_contract.py` (PDF-06's): added `C14`, the OR-3 matrix arm —
+  `discover_verbs()` × `OUTPUT_FLAGS`, no skip list — 5×4=20 cases at
+  landing, 3 honoured / 17 exit-2. `C11` re-parameterized off the live
+  `consumes` declaration instead of a hard-coded `-O` (`OUTPUT_CONSUMING_
+  MUTATING`), so it no longer drives `-O` at `split`.
+- `tests/unit/test_registry.py`: the two pins the tripwire hit (B-031, E12)
+  updated to the explicit expected set, never deleted —
+  `test_discover_verbs_finds_exactly_the_five_landed_verbs` and
+  `test_the_expected_verbs_are_classified_mutating_or_not`
+  (`merge`/`split` classify `is_mutating=True` through the **existing**
+  `_MAX_IMPORT_HOPS = 4` scan; the bound was never raised).
+- `tests/test_cli_spine.py`: the two E13-vacuous cases repaired, not
+  deleted — the `-O`/`--out-dir` row now has a dedicated message assertion
+  proving the mutual-exclusion ordering rule; the `--name` row is re-pointed
+  at `split` (which declares `--name`) with a dedicated template-shape
+  message assertion.
+- Added `tests/unit/test_merge.py`, `tests/unit/test_split.py`,
+  `tests/unit/test_name_template.py` (hypothesis, 1000 examples),
+  `tests/unit/test_output_flags.py` (AC26), `tests/unit/test_verb_help_
+  content.py` (AC23), `tests/integration/test_split_merge_roundtrip.py`
+  (AC1, in-process and subprocess), `tests/integration/test_split_merge_
+  atomicity.py` (AC17/AC20), `tests/integration/test_split_merge_cli.py`
+  (AC9/AC18/AC19/AC21/AC30), `tests/pdfium_text.py` (the pypdfium2 per-page
+  text helper AC1/AC4/AC5/AC15 share). Appended PDF-07's `@samples` section
+  to `tests/test_samples.py` (AC22, over a copy of `PrendiniLoria2020.pdf`).
+
 ## [B-034] `make ci` was locally unrunnable under coverage instrumentation — 2026-08-30
 - **Measurement (identical band both arms, `tests/test_info.py` +
   `tests/test_doctor.py` + `tests/test_cli_contract.py`, 84 tests):**

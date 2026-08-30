@@ -46,10 +46,12 @@ from typing import Final
 
 import typer
 
+from pdf_toolkit.cli import common as _common
 from pdf_toolkit.cli.main import PROG_NAME, app
 
 __all__ = [
     "INVOCATIONS",
+    "OUTPUT_FLAG_INVOCATIONS",
     "REPO_ROOT",
     "Invocation",
     "VerbSpec",
@@ -84,6 +86,11 @@ class VerbSpec:
     takes_input_paths: bool
     is_page_addressing: bool
     is_mutating: bool
+    consumes: tuple[str, ...] = ()
+    """OR-3 (Design §D12, PDF-07): the ``OUTPUT_FLAGS`` this verb declared it
+    consumes, read off the live command's own callback module via
+    ``cli.common.consumed_output_flags``. Defaulted so a `VerbSpec` built by
+    hand (a unit test's own throwaway) does not have to name it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +217,7 @@ def discover_verbs(root: object | None = None) -> tuple[VerbSpec, ...]:
             return
         module = _module_dotted_name(cmd)
         mutating = reaches_atomic_writer(module) if module else False
+        consumes = _common.consumed_output_flags(module) if module else ()
         found.append(
             VerbSpec(
                 name=" ".join(path),
@@ -218,6 +226,7 @@ def discover_verbs(root: object | None = None) -> tuple[VerbSpec, ...]:
                 takes_input_paths=_takes_input_paths(cmd),
                 is_page_addressing=_is_page_addressing(cmd),
                 is_mutating=mutating,
+                consumes=consumes,
             )
         )
 
@@ -291,14 +300,71 @@ def _info_invocation(corpus: object, tmp_path: Path) -> list[str]:
     return [str(corpus.path("single_page"))]  # type: ignore[attr-defined]
 
 
-#: Every verb `discover_verbs()` can find at PDF-06 landing time. `version`
-#: and `doctor` take no positional arguments; `info` needs one existing PDF.
-#: None is `destructive` -- none is `is_mutating` (see the module docstring),
-#: so C11/C13 collect zero cases today and gain real coverage the moment a
-#: verb reaches `AtomicWriter` (`PDF-07` onward). `test_every_verb_is_registered`
-#: (AC10) is what forces that registration to happen rather than lapse.
+def _merge_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`merge` requires `-O`; a fresh target makes C10/C12 valid on their own.
+
+    C11 appends its OWN ``-O <already-existing target>`` after this build's
+    result — Click takes the LAST occurrence of a scalar option, so that
+    still exercises no-clobber against the test's target, not this one.
+    """
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "registered-invocation-merge.pdf"),
+    ]
+
+
+def _split_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`split` consumes `--out-dir`/`--name`, never `--output` -- E13/AC29:
+    C11 is re-parameterized off the OR-3 declaration precisely so it never
+    drives `-O` at this verb (that would be exit 2, not 5)."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--each-page",
+        "--out-dir",
+        str(tmp_path / "split-invocation-parts"),
+    ]
+
+
+#: Every verb `discover_verbs()` can find on the live tree. `version` and
+#: `doctor` take no positional arguments; `info`/`merge` need one existing
+#: PDF; `split` needs one PDF plus a mode flag. `merge` is `destructive=False`
+#: (PDF-07's spec, Scope > Out: a second destructive invocation shape for C13
+#: is a separate backlog candidate, not built here) -- C13 keeps collecting
+#: zero cases, a stated fact rather than a silent one.
+#: `test_every_verb_is_registered` (AC10) is what forces new-verb registration
+#: to happen rather than lapse.
 INVOCATIONS: Final[dict[str, Invocation]] = {
     "version": Invocation(build=lambda corpus, tmp_path: []),
     "doctor": Invocation(build=lambda corpus, tmp_path: []),
     "info": Invocation(build=_info_invocation),
+    "merge": Invocation(build=_merge_invocation, destructive=False),
+    "split": Invocation(build=_split_invocation, destructive=False),
+}
+
+#: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
+#: every **declared** pair only. A declared pair with no row here fails
+#: `test_c14_output_flag_matrix` by name (AC25's own anti-lapse guard,
+#: mirroring `test_every_verb_is_registered`'s shape) -- a future verb that
+#: declares a flag is forced to show it honoured.
+OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], list[str]]]] = {
+    ("merge", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "or3-merge-output.pdf"),
+    ],
+    ("split", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--each-page",
+        "--out-dir",
+        str(tmp_path / "or3-split-out-dir"),
+    ],
+    ("split", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--each-page",
+        "--out-dir",
+        str(tmp_path / "or3-split-name"),
+        "--name",
+        "or3-custom-{page}.{ext}",
+    ],
 }

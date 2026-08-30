@@ -45,6 +45,7 @@ __all__ = [
     "identity_key",
     "resolved_device",
     "same_destination",
+    "target_exists",
 ]
 
 
@@ -123,6 +124,21 @@ def ensure_within(base: Path | str, candidate: Path | str) -> None:
         f"the resolved output {candidate} escapes the output directory {base}",
         path=str(candidate),
     )
+
+
+def target_exists(target: Path | str) -> bool:
+    """Whether *target* already occupies a directory entry — a plain read.
+
+    The same existence test :func:`ensure_no_clobber` uses (a dangling symlink
+    counts as occupied), exposed as a boolean predicate for a caller that
+    needs to know *whether* a refusal is coming rather than trigger one. The
+    non-TTY bulk-destructive confirmation gate (`PLAN.md` §5.3) is the first
+    consumer: it must decide whether a run is "destructive" — `--force` over
+    an *existing* target — before deciding whether to prompt at all, and
+    prompting is a CLI-layer concern this module has no business making.
+    """
+    written = Path(target).expanduser().absolute()
+    return canonical(target).exists() or os.path.lexists(written)
 
 
 def ensure_no_clobber(target: Path | str, *, force: bool, in_place: bool = False) -> None:

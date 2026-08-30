@@ -32,8 +32,10 @@ from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
     "GLOBAL_OPTIONS",
+    "OUTPUT_FLAGS",
     "CliState",
     "GlobalConfig",
+    "consumed_output_flags",
     "current_error_format",
     "get_config",
     "global_options",
@@ -62,6 +64,19 @@ GLOBAL_OPTIONS: Final[tuple[str, ...]] = (
 
 #: Default worker cap for multi-file operations.
 DEFAULT_THREADS: Final[int] = min(8, os.cpu_count() or 1)
+
+#: OR-3 (`decision.md` §0.5, Design §D12) — the global flags whose *consumption*
+#: a verb must declare. NOT the whole :data:`GLOBAL_OPTIONS` block: `--force`,
+#: `--no-backup`, `-y`, `--threads`, `--password-file`, `-o/--output-format`,
+#: `--dry-run`, `-q`, `-v`, `--no-color` and `--version` are ungoverned by
+#: design (PDF-07's spec, Scope > Out) — widening this tuple is a defect, not
+#: an improvement. `-O` is `--output`'s short spelling and is governed with it.
+OUTPUT_FLAGS: Final[tuple[str, ...]] = ("--output", "--out-dir", "--name", "--in-place")
+
+#: Attribute name the OR-3 declaration is recorded under on a verb module's
+#: dict, keyed by that module's own `__name__` -- see :func:`global_options`
+#: and :func:`consumed_output_flags`.
+_CONSUMES_BY_MODULE: dict[str, tuple[str, ...]] = {}
 
 
 def _version_callback(value: bool) -> None:
@@ -343,7 +358,12 @@ def build_config(values: dict[str, Any]) -> GlobalConfig:
     )
 
 
-def validate_config(config: GlobalConfig) -> None:
+def validate_config(
+    config: GlobalConfig,
+    *,
+    verb: str | None = None,
+    consumes: tuple[str, ...] | None = None,
+) -> None:
     """Reject invalid flag combinations. Every failure here is exit 2.
 
     ``--no-backup`` without ``--in-place`` is deliberately a usage error and not
@@ -351,9 +371,31 @@ def validate_config(config: GlobalConfig) -> None:
     as any other mutually exclusive pair, and nothing has been attempted yet.
     That rule is owned by ``SafetyPolicy.validate()`` and delegated to below;
     everything else here is about flags the policy does not carry.
+
+    ``verb``/``consumes`` are OR-3's declaration (Design §D12) — ``None`` skips
+    the check entirely, which is what the root callback (ungoverned; it is not
+    a verb) and direct unit-test construction both want. A real verb always
+    passes both, via :func:`global_options`'s ``consumes=`` requirement.
+
+    **Ordering is pinned** (§D12), because two shipped tests depend on it:
+
+    1. ``--output``/``--out-dir`` mutual exclusion — a verb-independent
+       contradiction, diagnosed first regardless of what the verb can honour.
+    2. The OR-3 consumption check — before every shape check below, so a verb
+       that cannot honour ``--name`` at all does not lecture the user about
+       template syntax.
+    3. ``SafetyPolicy.validate()``, the name-template shape check, the
+       password-file shape check, ``--threads``, ``--quiet``/``--verbose`` —
+       unchanged, just now reached after 1 and 2.
+
+    All three tiers exit 2, so no exit code changes anywhere — only which
+    message is emitted.
     """
     if config.output is not None and config.out_dir is not None:
         raise UsageError("--output and --out-dir are mutually exclusive")
+
+    if consumes is not None:
+        _check_output_flag_consumption(config, verb=verb or "this command", consumes=consumes)
 
     # Delegated, not duplicated: ``SafetyPolicy`` owns this rule, so the CLI and
     # any other construction of a policy cannot drift apart. Still exit 2 —
@@ -371,6 +413,41 @@ def validate_config(config: GlobalConfig) -> None:
 
     if config.password_file is not None:
         _validate_password_file(config.password_file)
+
+
+#: OR-3: whether each governed flag was actually given, read off the resolved
+#: config. A flag "counts as given" when its merged value differs from
+#: ``GLOBAL_PARAMS``'s own default -- the same idiom the mutual-exclusion check
+#: above already uses for ``--output``/``--out-dir``.
+_OUTPUT_FLAG_GIVEN: Final[dict[str, Callable[[GlobalConfig], bool]]] = {
+    "--output": lambda config: config.output is not None,
+    "--out-dir": lambda config: config.out_dir is not None,
+    "--name": lambda config: config.name is not None,
+    "--in-place": lambda config: config.in_place is True,
+}
+
+
+def _check_output_flag_consumption(
+    config: GlobalConfig, *, verb: str, consumes: tuple[str, ...]
+) -> None:
+    """OR-3 (`decision.md` §0.5, Design §D12) — the central refusal.
+
+    A global output flag a verb cannot honour is a usage error, exit 2, never
+    silently ignored (B-035 / QA fingerprint ``54500b06e5``). One line on
+    stderr naming the verb and the long spelling of every offending flag, in
+    :data:`OUTPUT_FLAGS` order.
+    """
+    offending = tuple(
+        flag for flag in OUTPUT_FLAGS if flag not in consumes and _OUTPUT_FLAG_GIVEN[flag](config)
+    )
+    if not offending:
+        return
+    flags_text = ", ".join(offending)
+    if consumes:
+        detail = f"{verb} only accepts {', '.join(consumes)} among the output flags"
+    else:
+        detail = "this verb writes no files"
+    raise UsageError(f"{verb} does not accept {flags_text} ({detail})")
 
 
 def _validate_name_template(template: str) -> None:
@@ -426,7 +503,21 @@ def _was_given_explicitly(ctx: typer.Context, name: str) -> bool:
     return getattr(source, "name", None) == _COMMANDLINE_SOURCE
 
 
-def _verb_handler(ctx: typer.Context, values: dict[str, Any]) -> None:
+def _verb_name(ctx: typer.Context) -> str:
+    """The invoked verb's own command name, e.g. ``"merge"``.
+
+    Read off the live Click command rather than passed around separately, so
+    the OR-3 message always names the verb that was actually typed. Falls
+    back to a generic label rather than raising -- a message that says "this
+    command" is a smaller defect than an unrelated crash inside error
+    handling.
+    """
+    command = getattr(ctx, "command", None)
+    name = getattr(command, "name", None)
+    return name if isinstance(name, str) else "this command"
+
+
+def _verb_handler(ctx: typer.Context, values: dict[str, Any], *, consumes: tuple[str, ...]) -> None:
     parent_state = getattr(ctx.parent, "obj", None) if ctx.parent is not None else None
     merged: dict[str, Any] = {}
     for spec in GLOBAL_PARAMS:
@@ -436,7 +527,7 @@ def _verb_handler(ctx: typer.Context, values: dict[str, Any]) -> None:
         else:
             merged[spec.name] = parent_state.raw[spec.name]
     config = _apply(ctx, merged)
-    validate_config(config)
+    validate_config(config, verb=_verb_name(ctx), consumes=consumes)
 
 
 def _attach(
@@ -493,9 +584,53 @@ def root_global_options(func: Callable[..., Any]) -> Callable[..., Any]:
     return _attach(func, _root_handler)
 
 
-def global_options(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Declare the global block on a verb. Every verb is decorated with this."""
-    return _attach(func, _verb_handler)
+def global_options(
+    *, consumes: tuple[str, ...]
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Declare the global block on a verb, and which output flags it consumes (D12).
+
+    ``consumes`` is **required** and keyword-only. A bare ``@global_options``
+    (no call — so the decorated function itself lands where ``consumes`` must
+    be) raises ``TypeError`` at import time rather than shipping a verb OR-3
+    silently never checks: this function accepts no positional argument at
+    all, so Python's own call-binding rejects that shape before a line of this
+    module's logic runs (AC26). Every name in ``consumes`` must be one of
+    :data:`OUTPUT_FLAGS`; an unknown name raises ``ValueError`` at import
+    time too, so a typo is a build failure rather than a silent no-op.
+    """
+    unknown = [flag for flag in consumes if flag not in OUTPUT_FLAGS]
+    if unknown:
+        raise ValueError(
+            f"global_options(consumes=...) names unknown flag(s) {unknown!r}; "
+            f"must be a subset of OUTPUT_FLAGS {OUTPUT_FLAGS!r}"
+        )
+
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        # Keyed by the UNDECORATED function's own module -- exactly the
+        # granularity `tests/registry.py::discover_verbs()` already resolves a
+        # verb to (`_module_dotted_name`), and each `cli/cmd_*.py` module
+        # declares exactly one command, so this can never collide.
+        _CONSUMES_BY_MODULE[func.__module__] = consumes
+
+        def handler(ctx: typer.Context, values: dict[str, Any]) -> None:
+            _verb_handler(ctx, values, consumes=consumes)
+
+        return _attach(func, handler)
+
+    return decorator
+
+
+def consumed_output_flags(module: str) -> tuple[str, ...]:
+    """The :data:`OUTPUT_FLAGS` the verb defined in *module* declared it consumes.
+
+    Read by ``tests/registry.py`` to build the OR-3 matrix (AC25) and to
+    re-parameterize the no-clobber contract check off the real declaration
+    instead of a hand-maintained list (AC29). ``()`` for any module that never
+    called :func:`global_options` — the same "declares nothing" default a
+    verb's own decoration would have recorded, so a caller never has to
+    special-case the root callback or an unrelated module.
+    """
+    return _CONSUMES_BY_MODULE.get(module, ())
 
 
 def get_config(ctx: typer.Context) -> GlobalConfig:

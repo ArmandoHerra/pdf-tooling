@@ -113,7 +113,7 @@ def build_result(*, dry_run: bool = False) -> OperationResult:
     )
 
 
-@global_options
+@global_options(consumes=())
 def version_command(ctx: typer.Context) -> None:
     """Report the tool, runtime and engine versions."""
     config = get_config(ctx)

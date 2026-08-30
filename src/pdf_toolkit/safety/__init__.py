@@ -33,7 +33,7 @@ somewhere unexpected" impossible to express, and the ``--dry-run`` purity
 snapshot is the empirical backstop for the rest.
 """
 
-from pdf_toolkit.safety.atomic import DEGRADED_PREFIX, AtomicWriter
+from pdf_toolkit.safety.atomic import DEGRADED_PREFIX, AtomicWriter, ensure_out_dir
 from pdf_toolkit.safety.confirm import require_confirmation
 from pdf_toolkit.safety.paths import (
     canonical,
@@ -43,6 +43,7 @@ from pdf_toolkit.safety.paths import (
     ensure_within,
     identity_key,
     same_destination,
+    target_exists,
 )
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.safety.tempnames import TEMP_PREFIX, find_stray_temps, is_toolkit_temp
@@ -56,10 +57,12 @@ __all__ = [
     "check_output_collisions",
     "ensure_destination_writable",
     "ensure_no_clobber",
+    "ensure_out_dir",
     "ensure_within",
     "find_stray_temps",
     "identity_key",
     "is_toolkit_temp",
     "require_confirmation",
     "same_destination",
+    "target_exists",
 ]

@@ -134,7 +134,7 @@ def _render(payload: dict[str, Any], fmt: OutputFormat) -> str:
     return render_payload({**payload, "items": _table_rows(payload)}, fmt)
 
 
-@global_options
+@global_options(consumes=())
 def info_command(
     ctx: typer.Context,
     paths: Annotated[

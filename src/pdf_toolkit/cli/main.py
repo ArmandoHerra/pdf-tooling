@@ -21,7 +21,7 @@ from collections.abc import Sequence
 
 import typer
 
-from pdf_toolkit.cli import cmd_doctor, cmd_info, cmd_version
+from pdf_toolkit.cli import cmd_doctor, cmd_info, cmd_merge, cmd_split, cmd_version
 from pdf_toolkit.cli.common import current_error_format, global_options, root_global_options
 from pdf_toolkit.cli.exit_codes import OK
 from pdf_toolkit.errors import PdfToolkitError
@@ -59,6 +59,8 @@ def root(ctx: typer.Context) -> None:
 app.command(name="version", help=cmd_version.version_command.__doc__)(cmd_version.version_command)
 app.command(name="doctor", help=cmd_doctor.doctor_command.__doc__)(cmd_doctor.doctor_command)
 app.command(name="info", help=cmd_info.info_command.__doc__)(cmd_info.info_command)
+app.command(name="merge", help=cmd_merge.merge_command.__doc__)(cmd_merge.merge_command)
+app.command(name="split", help=cmd_split.split_command.__doc__)(cmd_split.split_command)
 
 
 def build_rerun_hint(argv: Sequence[str] | None = None) -> str:

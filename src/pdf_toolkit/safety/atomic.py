@@ -143,7 +143,7 @@ from pdf_toolkit.safety.paths import (
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.safety.tempnames import TEMP_PREFIX
 
-__all__ = ["AtomicWriter", "DEGRADED_PREFIX"]
+__all__ = ["AtomicWriter", "DEGRADED_PREFIX", "ensure_out_dir"]
 
 #: The one warning class both cross-filesystem conditions are reported under, so
 #: a caller can match on a stable prefix instead of on prose.
@@ -183,6 +183,27 @@ def _digest(path: Path) -> tuple[int, str]:
             size += len(chunk)
             hasher.update(chunk)
     return size, hasher.hexdigest()
+
+
+def ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
+    """Create ``--out-dir`` if it does not exist, unless ``--dry-run`` (`PLAN.md` §4.2).
+
+    PDF-07 is the first spec to consume this: `split` is the CLI's first verb
+    with a ``--out-dir`` shared by many targets, so creating it once, as its
+    own plan step before the per-target loop, is the correct place for this —
+    folding it into :class:`AtomicWriter`'s own per-target gate would create
+    it once per part instead of once per run.
+
+    ``Path.mkdir`` is a row-11 mutation the write chokepoint's own AST walk
+    forbids everywhere outside this file; this is that mutation's one
+    confined call site, mirroring every other step this module already owns.
+    A dry run never calls the real ``mkdir`` — the function returns having
+    done nothing at all, which is what keeps a non-existent ``--out-dir``
+    non-existent under ``--dry-run`` (AC18).
+    """
+    if policy.dry_run:
+        return
+    out_dir.mkdir(parents=True, exist_ok=True)
 
 
 class AtomicWriter:
@@ -238,6 +259,28 @@ class AtomicWriter:
         if self._temp_path is None:
             raise RuntimeError("AtomicWriter.path is only valid inside the with-block")
         return self._temp_path
+
+    @property
+    def stream(self) -> IO[bytes]:
+        """The open file handle an engine should write through — never a path.
+
+        PDF-07 Design §D7's specific trap: a third-party writer that accepts a
+        path (``pypdf.PdfWriter.write("out.pdf")``) opens it itself, which
+        bypasses this chokepoint from inside a call a source-level AST walk
+        cannot see. Handing the writer THIS handle instead keeps the write on
+        the one file descriptor this class already tracks, so the
+        flush/fsync/close sequence :meth:`_commit` runs is the sequence that
+        actually matters, rather than a second, untracked handle to the same
+        path.
+        """
+        if self._dry_run:
+            raise RuntimeError(
+                "--dry-run writes nothing: this writer has no stream to hand out. "
+                "Render the plan instead of asking for a destination."
+            )
+        if self._handle is None:
+            raise RuntimeError("AtomicWriter.stream is only valid inside the with-block")
+        return self._handle
 
     @property
     def is_dry_run(self) -> bool:

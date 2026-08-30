@@ -31,8 +31,8 @@ from pathlib import Path
 import pytest
 
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot
-from pdf_toolkit.cli.common import GLOBAL_OPTIONS
-from registry import INVOCATIONS, discover_groups, discover_verbs, run_cli
+from pdf_toolkit.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS
+from registry import INVOCATIONS, OUTPUT_FLAG_INVOCATIONS, discover_groups, discover_verbs, run_cli
 
 pytestmark = pytest.mark.e2e
 
@@ -44,6 +44,13 @@ TAKES_INPUT_PATHS = tuple(verb for verb in VERBS if verb.takes_input_paths)
 REGISTERED = tuple(verb for verb in VERBS if verb.name in INVOCATIONS)
 DESTRUCTIVE = tuple(
     verb for verb in VERBS if verb.name in INVOCATIONS and INVOCATIONS[verb.name].destructive
+)
+#: AC29 — C11 re-parameterized off the §D12 declaration itself rather than a
+#: hard-coded `-O`: a mutating verb only earns a no-clobber-over-`-O` case
+#: when it actually *declares* `--output` (E13 — driving `-O` at `split`,
+#: which does not consume it, is exit 2, not 5).
+OUTPUT_CONSUMING_MUTATING = tuple(
+    verb for verb in MUTATING if verb.name in INVOCATIONS and "--output" in verb.consumes
 )
 
 
@@ -186,11 +193,15 @@ def test_c10_registered_invocation_dry_run_purity(verb, corpus, tmp_path: Path) 
 
 # --------------------------------------------------------------------------- #
 # C11 -- (reg) no-clobber: writing over an existing target without --force
-# exits 5.
+# exits 5. Re-parameterized (AC29, E13) over mutating verbs that *declare*
+# `--output` in the OR-3 sense (Design §D12) -- reading the declaration
+# rather than hard-coding `-O` for every mutating verb, which would drive it
+# at `split` (exit 2, since split does not consume `--output`) instead of
+# exercising the no-clobber refusal C11 exists to prove.
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("verb", MUTATING, ids=_ids(MUTATING))
+@pytest.mark.parametrize("verb", OUTPUT_CONSUMING_MUTATING, ids=_ids(OUTPUT_CONSUMING_MUTATING))
 def test_c11_no_clobber_exits_5(verb, corpus, tmp_path: Path) -> None:
     invocation = INVOCATIONS[verb.name]
     args = invocation.build(corpus, tmp_path)
@@ -232,6 +243,85 @@ def test_c13_bulk_destructive_requires_y_on_a_non_tty(verb, corpus, tmp_path: Pa
     assert refused.returncode == 5
     confirmed = run_cli(verb.name, "-y", *args)
     assert confirmed.returncode != 5
+
+
+# --------------------------------------------------------------------------- #
+# C14 -- the OR-3 matrix arm (AC25, Design §D12). Every verb in the LIVE
+# registry x every OUTPUT_FLAGS entry -> honoured (a file appears) or exit 2.
+# No skip list, no filter, no hard-coded verb name -- driven off
+# `discover_verbs()` x `OUTPUT_FLAGS`, exactly like every other check in this
+# module. A future verb is covered the day it registers, not the day someone
+# remembers to extend a list.
+# --------------------------------------------------------------------------- #
+
+OUTPUT_FLAG_CASES = tuple((verb, flag) for verb in VERBS for flag in OUTPUT_FLAGS)
+
+
+def _output_flag_ids(cases: tuple) -> list[str]:
+    return [f"{verb.name}:{flag}" for verb, flag in cases]
+
+
+def _base_args_for(verb_name: str, corpus) -> list[str]:
+    """The minimal positional argv a verb needs to reach the OR-3 check at
+    all -- never a mode flag, never the offending flag itself, so a verb's
+    OWN "which flag was given" logic is what the test is exercising."""
+    if verb_name in ("doctor", "version"):
+        return []
+    return [str(corpus.path("single_page"))]
+
+
+def _offending_flag_args(flag: str, tmp_path: Path) -> list[str]:
+    if flag == "--output":
+        return ["-O", str(tmp_path / "not-declared-output.pdf")]
+    if flag == "--out-dir":
+        return ["--out-dir", str(tmp_path / "not-declared-out-dir")]
+    if flag == "--name":
+        return ["--name", "not-declared-{index}.{ext}"]
+    if flag == "--in-place":
+        return ["--in-place"]
+    raise AssertionError(f"unknown OUTPUT_FLAGS entry {flag!r}")  # pragma: no cover
+
+
+@pytest.mark.parametrize(
+    ("verb", "flag"), OUTPUT_FLAG_CASES, ids=_output_flag_ids(OUTPUT_FLAG_CASES)
+)
+def test_c14_output_flag_matrix(verb, flag: str, corpus, tmp_path: Path) -> None:
+    declared = flag in verb.consumes
+    before = set(tmp_path.rglob("*"))
+
+    if declared:
+        key = (verb.name, flag)
+        if key not in OUTPUT_FLAG_INVOCATIONS:
+            pytest.fail(
+                f"{verb.name} declares {flag!r} consumed but has no "
+                f"tests/registry.py::OUTPUT_FLAG_INVOCATIONS[{key!r}] row -- "
+                "add one so this pair's honoured side is actually proven"
+            )
+        args = OUTPUT_FLAG_INVOCATIONS[key](corpus, tmp_path)
+        result = run_cli(verb.name, *args, cwd=tmp_path)
+        assert result.returncode == 0, (
+            f"{verb.name} declares {flag!r} but the invocation refused: {result.stderr}"
+        )
+        after = set(tmp_path.rglob("*"))
+        assert after - before, (
+            f"{verb.name} declares {flag!r} but no new file appeared under the target "
+            "-- this is B-035's own shape (exit 0, nothing written)"
+        )
+    else:
+        args = [*_base_args_for(verb.name, corpus), *_offending_flag_args(flag, tmp_path)]
+        result = run_cli(verb.name, *args, cwd=tmp_path)
+        assert result.returncode == 2, (
+            f"{verb.name} does not declare {flag!r}; expected exit 2, got "
+            f"{result.returncode}: {result.stdout}{result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        assert verb.name in combined, f"OR-3 message does not name the verb: {combined}"
+        assert flag in combined, f"OR-3 message does not name the flag: {combined}"
+        after = set(tmp_path.rglob("*"))
+        assert after == before, (
+            f"{verb.name} refused {flag!r} (exit 2) but still wrote something: "
+            f"{sorted(str(p) for p in after - before)}"
+        )
 
 
 # --------------------------------------------------------------------------- #

@@ -218,7 +218,14 @@ def test_base_error_defaults_to_failure_and_carries_the_redaction_marker() -> No
         (("version", "--no-backup"), 2),
         (("-O", "x.pdf", "--out-dir", "d", "version"), 2),
         (("--password-file", "/no/such/file", "version"), 2),
-        (("--name", "a/b", "version"), 2),
+        # AC27/E13: re-pointed at `split`, which DOES declare `--name` in its
+        # OR-3 consumption set (`version` does not) -- against `version` this
+        # case would now be answered by OR-3's own refusal first, going
+        # vacuous for `_validate_name_template`'s path-separator rule. Against
+        # `split` it still reaches that rule, so the CLI-level shape check
+        # stays exercised. See test_name_template_shape_message_is_still_
+        # reachable_through_a_flag_consuming_verb below for the message half.
+        (("--name", "a/b", "split", "x.pdf"), 2),
         (("--threads", "0", "version"), 2),
     ],
     ids=lambda value: str(value),
@@ -226,6 +233,35 @@ def test_base_error_defaults_to_failure_and_carries_the_redaction_marker() -> No
 def test_command_surface_exit_codes(argv: tuple[str, ...], expected: int) -> None:
     result = run_cli(*argv)
     assert result.returncode == expected, f"{argv} -> {result.returncode}\n{result.stderr}"
+
+
+@pytest.mark.e2e
+def test_output_and_out_dir_mutual_exclusion_message_wins_over_or3() -> None:
+    """AC27/E13: `-O`/`--out-dir` together is a verb-independent contradiction
+    (Design §D12's ordering rule, position 1) -- diagnosed BEFORE the OR-3
+    output-flag-consumption check (position 2), even on `version`, which
+    consumes neither flag and would otherwise report its own OR-3 refusal
+    instead. Both are exit 2; this proves WHICH message fires, which is what
+    proves the ordering rule rather than assuming it."""
+    result = run_cli("-O", "x.pdf", "--out-dir", "d", "version")
+    assert result.returncode == 2
+    combined = result.stdout + result.stderr
+    assert "mutually exclusive" in combined
+    assert "--output" in combined
+    assert "--out-dir" in combined
+
+
+@pytest.mark.e2e
+def test_name_template_shape_message_is_still_reachable_through_a_flag_consuming_verb() -> None:
+    """AC27/E13: `split` declares `--name`, so `_validate_name_template`'s
+    path-separator rule is still exercised through the CLI rather than being
+    pre-empted by OR-3's own refusal (which is what `version` -- not
+    declaring `--name` -- would answer with instead, per
+    test_command_surface_exit_codes[('--name', 'a/b', 'split', 'x.pdf')])."""
+    result = run_cli("--name", "a/b", "split", "x.pdf")
+    assert result.returncode == 2
+    combined = result.stdout + result.stderr
+    assert "path separator" in combined
 
 
 @pytest.mark.e2e

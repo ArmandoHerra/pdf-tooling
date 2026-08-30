@@ -13,18 +13,19 @@ a test that fails if importing ``cli.main`` leaves an engine in ``sys.modules``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import IO, TYPE_CHECKING, Any, BinaryIO, Final
 
 from pdf_toolkit.adapters import AdapterProbe, package_probe
-from pdf_toolkit.errors import AuthError, FailureError
+from pdf_toolkit.errors import AuthError, FailureError, NoInputError, UsageError
 from pdf_toolkit.models import DocumentInfo, PageInfo
 from pdf_toolkit.output.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from pypdf import PdfReader
 
-__all__ = ["ADAPTER", "PypdfStructureAdapter"]
+__all__ = ["ADAPTER", "PypdfOpenDocument", "PypdfStructureAdapter", "PypdfStructureWriter"]
 
 _NAME: Final[str] = "pypdf"
 _DISTRIBUTION: Final[str] = "pypdf"
@@ -298,6 +299,134 @@ class PypdfStructureAdapter:
             fonts=font_names,
             pages=page_details,
         )
+
+    def open_document(self, path: Path) -> PypdfOpenDocument:
+        """D10's read half — see :class:`PypdfOpenDocument` for the shape.
+
+        Existence and directory checks are the caller's job (they need to know
+        how many operands there were, per `ops/inspect.py`'s own precedent) --
+        this method's own contract starts at "the path exists and is a file."
+        """
+        return PypdfOpenDocument(path)
+
+    def new_writer(self) -> PypdfStructureWriter:
+        """D10's write half — see :class:`PypdfStructureWriter`."""
+        return PypdfStructureWriter()
+
+
+class PypdfOpenDocument:
+    """D10 — one already-open document: page count, top-level outline.
+
+    Opens its own file handle (never lets pypdf open the path itself) so the
+    handle this class owns is closeable deterministically on ``__exit__``
+    rather than left to pypdf's own lifecycle, which does not expose one.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._handle: BinaryIO | None = None
+        self._reader: PdfReader | None = None
+
+    def __enter__(self) -> PypdfOpenDocument:
+        from pypdf import PdfReader
+        from pypdf.errors import PdfReadError
+
+        if not self._path.exists():
+            raise NoInputError("no such file", path=str(self._path))
+        if self._path.is_dir():
+            raise UsageError("expected a PDF file, not a directory", path=str(self._path))
+
+        handle = open(self._path, "rb")  # closed in __exit__, kept open for lazy page reads
+        try:
+            self._reader = PdfReader(handle)
+        except PdfReadError as error:
+            handle.close()
+            raise FailureError(f"could not read PDF: {error}", path=str(self._path)) from error
+        except (OSError, ValueError) as error:
+            handle.close()
+            raise FailureError(f"could not read PDF: {error}", path=str(self._path)) from error
+        self._handle = handle
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self._reader = None
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+
+    @property
+    def _open_reader(self) -> PdfReader:
+        if self._reader is None:
+            raise RuntimeError("PypdfOpenDocument is only valid inside its own with-block")
+        return self._reader
+
+    @property
+    def page_count(self) -> int:
+        return len(self._open_reader.pages)
+
+    def top_level_outline(self) -> tuple[tuple[str, int], ...]:
+        """1-based ``(title, destination page)`` pairs, top-level only.
+
+        pypdf represents a nested (non-top-level) entry as a Python ``list``
+        interleaved with the top-level entries in ``reader.outline`` — those
+        are skipped here rather than descended into, which is what makes this
+        "top-level only" rather than "every entry flattened." A document with
+        no outline at all reports ``reader.outline == []``, which this
+        iterates over trivially into an empty tuple — no special-casing.
+        """
+        reader = self._open_reader
+        entries: list[tuple[str, int]] = []
+        for item in reader.outline:
+            if isinstance(item, list):
+                continue
+            resolved = self._resolved_outline_entry(reader, item)
+            if resolved is not None:
+                entries.append(resolved)
+        return tuple(entries)
+
+    @staticmethod
+    def _resolved_outline_entry(reader: PdfReader, item: Any) -> tuple[str, int] | None:
+        """One outline entry as ``(title, 1-based page)``, or ``None`` when it
+        cannot be resolved -- a malformed single entry, not a bad document."""
+        title = str(getattr(item, "title", "") or "")
+        try:
+            zero_based = reader.get_destination_page_number(item)
+        except Exception:
+            return None
+        if zero_based is None:
+            return None
+        return title, zero_based + 1
+
+
+class PypdfStructureWriter:
+    """D10 — the write half: accumulate pages (and an outline), then serialize.
+
+    Never chooses a destination path (D7) — :meth:`write` takes the stream
+    ``AtomicWriter`` already opened.
+    """
+
+    def __init__(self) -> None:
+        from pypdf import PdfWriter
+
+        self._writer = PdfWriter()
+
+    def append_pages(self, document: PypdfOpenDocument, page_numbers: Sequence[int]) -> None:
+        reader = document._open_reader  # same adapter's own internal pair
+        for number in page_numbers:
+            self._writer.add_page(reader.pages[number - 1])
+
+    def add_outline_entry(self, title: str, page_number: int) -> None:
+        self._writer.add_outline_item(title, page_number - 1)
+
+    def import_outline(self, document: PypdfOpenDocument, *, page_map: Mapping[int, int]) -> None:
+        for title, source_page in document.top_level_outline():
+            destination = page_map.get(source_page)
+            if destination is None:
+                continue  # dropped: not selected (Design §D3, `--bookmarks preserve`)
+            self._writer.add_outline_item(title, destination - 1)
+
+    def write(self, stream: IO[bytes]) -> None:
+        self._writer.write(stream)
 
 
 def _has_signature(acroform: Any, fields: Any) -> bool:

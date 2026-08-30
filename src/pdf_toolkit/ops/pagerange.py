@@ -53,6 +53,12 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, PageRangeError
 from pdf_toolkit.models import PageRange
 
+#: `tests/test_pagerange.py::test_ac1_public_surface` pins this list EXACTLY
+#: (PDF-03's own public-surface contract, AC6: that file is unedited and
+#: passes unchanged). `is_valid_spec` and `ALL_PAGES_TOKEN` below are PDF-07
+#: additions that stay OUT of `__all__` for exactly that reason — still
+#: directly importable (`__all__` only governs `from module import *`), just
+#: not part of the pinned surface. Recorded in this spec's Implementation Log.
 __all__ = [
     "EMPTY_SELECTION_EXIT_CODE",
     "GRAMMAR_HELP",
@@ -60,6 +66,12 @@ __all__ = [
     "parse",
     "render",
 ]
+
+#: The §4.3 keyword meaning "every page", exported (though not via `__all__`
+#: — see above) so a caller needing "no selection given, so select
+#: everything" (`merge`'s per-input default) never has to spell the token
+#: itself — AC7 forbids the literal string "all" outside this file.
+ALL_PAGES_TOKEN: Final[str] = "all"
 
 _LOG = logging.getLogger(__name__)
 
@@ -319,6 +331,64 @@ def parse(spec: str, page_count: int, *, ordered: bool = False) -> PageRange:
 
     indices: tuple[int, ...] = tuple(running) if ordered else tuple(sorted(set(running)))
     return PageRange(spec=spec, indices=indices, ordered=ordered, page_count=page_count)
+
+
+def _is_valid_body_shape(body: str) -> bool:
+    """Whether *body* matches one of §4.3's five token shapes -- no bounds check.
+
+    Mirrors :func:`_resolve_body`'s dispatch exactly, reusing the SAME
+    keyword set and the SAME compiled regexes so a grammar change can never
+    leave this answer out of step with ``parse()``'s. Deliberately does
+    **not** call ``_resolve_body`` itself: that function materializes a range
+    (``list(range(first, second + step, step))``), and a syntax-only check
+    must never do that -- an unbounded shape check that materialized would
+    let a spec like ``"1-99999999999"`` try to build a 100-billion-element
+    list before any page count is even known.
+    """
+    lowered = body.lower()
+    if lowered in _KEYWORDS:
+        return True
+    return bool(
+        _NEGATIVE_RE.match(body)
+        or _OPEN_END_RE.match(body)
+        or _RANGE_RE.match(body)
+        or _SINGLE_RE.match(body)
+    )
+
+
+def is_valid_spec(spec: str) -> bool:
+    """Whether *spec* is syntactically well-formed per §4.3 -- bounds ignored.
+
+    The syntax-only wrapper Design §D2 asks for: `merge`'s ``path:range``
+    disambiguation must answer "is the text after the last colon a
+    page-range expression" **before** a document, and therefore a page
+    count, is even known. Grammar knowledge stays in this one file (G6) --
+    the caller (``ops/merge.py``) never inspects a token shape itself.
+
+    Bounds (page 0, an out-of-range endpoint, a negative index past the
+    start) are deliberately **not** checked here: whether ``"500"`` is a
+    valid page depends on a document this function never sees, and §D2 is
+    explicit that an out-of-range value is a resolution-time concern, not a
+    step-2 concern. A token that is bounds-doomed on every conceivable
+    document (``"0"``) is still reported as syntactically valid here for the
+    same reason — it is *shaped* like a page number, and only `parse()`,
+    resolved against a real page count, is positioned to say it never
+    survives.
+
+    An empty or blank spec is not valid (nothing to split at); a spec is
+    valid only when **every** comma-separated token is one of the five
+    shapes.
+    """
+    if not spec.strip():
+        return False
+    tokens = _split_tokens(spec)
+    if not tokens:
+        return False
+    for raw_token, _column in tokens:
+        body = raw_token[1:] if raw_token.startswith("!") else raw_token
+        if not _is_valid_body_shape(body):
+            return False
+    return True
 
 
 def render(selection: PageRange) -> str:
