@@ -382,6 +382,42 @@ def _create_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+def _text_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`text` (PDF-11) consumes `--output`, `--out-dir` and `--name`, and this
+    row deliberately names `-O` rather than `--out-dir`.
+
+    Two live checks constrain it from opposite directions and `-O` is the only
+    shape that satisfies both. C15's `_discover_target` `pytest.fail`s unless
+    the registered invocation's own `--dry-run` plan carries a discoverable
+    `items[0].output`, so a stdout-only row is refused by name -- the row must
+    name SOME destination. C11 then appends its own `-O <existing target>` to
+    whatever this returns; had the row named `--out-dir`, that appended `-O`
+    would hit the `--output`/`--out-dir` mutual-exclusion check and C11 would
+    measure exit 2 instead of the no-clobber 5 it exists to prove. With `-O`
+    here, Click takes the LAST occurrence of a scalar option and C11's target
+    wins -- exactly the mechanism `_merge_invocation` above already documents.
+    """
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "registered-invocation-text.txt"),
+    ]
+
+
+def _tables_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`tables` (PDF-11) -- same `-O` reasoning as `_text_invocation`, plus one
+    constraint of its own: the operand must be a selection yielding EXACTLY ONE
+    table. `tables` declares `--output`, so two or more planned tables onto one
+    path is an output collision (exit 5), and a row built on a multi-table
+    selection would fail C10/C12 for the right reason at the wrong time. The
+    `tabular` fixture draws one ruled grid on one page."""
+    return [
+        str(corpus.path("tabular")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "registered-invocation-tables.csv"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -401,6 +437,11 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "rasterize": Invocation(build=_rasterize_invocation, destructive=False),
     "compose": Invocation(build=_compose_invocation, destructive=False),
     "create": Invocation(build=_create_invocation, destructive=False),
+    # PDF-11. Both are read verbs toward their INPUT and producing verbs toward
+    # their destination, so both are `is_mutating` (they reach the write
+    # chokepoint) and both land in C15's PRODUCING population.
+    "text": Invocation(build=_text_invocation, destructive=False),
+    "tables": Invocation(build=_tables_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -449,5 +490,45 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         str(_fixture_text(tmp_path, "or3-create.txt")),
         "-O",
         str(tmp_path / "or3-create-output.pdf"),
+    ],
+    # PDF-11 -- six rows, one per (verb, flag) pair `text`/`tables` declare.
+    # C14's honoured side asserts a file APPEARS, so every row below must be a
+    # complete, succeeding invocation; the `("tables", "--output")` row in
+    # particular uses the single-table `tabular` fixture, because a multi-table
+    # selection onto one `-O` path is an output collision (exit 5) and the row
+    # would then fail for the right reason at the wrong time.
+    ("text", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "or3-text-output.txt"),
+    ],
+    ("text", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-text-out-dir"),
+    ],
+    ("text", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-text-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
+    ],
+    ("tables", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("tabular")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "or3-tables-output.csv"),
+    ],
+    ("tables", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("tabular")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-tables-out-dir"),
+    ],
+    ("tables", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("tabular")),  # type: ignore[attr-defined]
+        "--out-dir",
+        str(tmp_path / "or3-tables-name"),
+        "--name",
+        "or3-custom-p{page:03}-t{index}.{ext}",
     ],
 }

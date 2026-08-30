@@ -29,6 +29,8 @@ from pdf_toolkit.cli import (
     cmd_merge,
     cmd_rasterize,
     cmd_split,
+    cmd_tables,
+    cmd_text,
     cmd_version,
 )
 from pdf_toolkit.cli.common import current_error_format, global_options, root_global_options
@@ -75,6 +77,8 @@ app.command(name="rasterize", help=cmd_rasterize.rasterize_command.__doc__)(
 )
 app.command(name="compose", help=cmd_compose.compose_command.__doc__)(cmd_compose.compose_command)
 app.command(name="create", help=cmd_create.create_command.__doc__)(cmd_create.create_command)
+app.command(name="text", help=cmd_text.text_command.__doc__)(cmd_text.text_command)
+app.command(name="tables", help=cmd_tables.tables_command.__doc__)(cmd_tables.tables_command)
 
 
 def build_rerun_hint(argv: Sequence[str] | None = None) -> str:

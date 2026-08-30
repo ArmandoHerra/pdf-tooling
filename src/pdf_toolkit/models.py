@@ -26,6 +26,9 @@ __all__ = [
     "OperationResult",
     "PageInfo",
     "PageRange",
+    "PageText",
+    "TableGrid",
+    "TextBlock",
 ]
 
 #: Bumped only per the output stability policy: the ``-o json``/``ndjson``
@@ -345,4 +348,140 @@ class EngineReport:
             "kind": self.kind,
             "detail": self.detail,
             "hint": self.hint,
+        }
+
+
+# --- ANCHOR: PDF-11 text and table models ----------------------------------
+# Appended by PDF-11 (`text` + `tables`), never inserted: `models.py` is shared
+# with five sibling wave-5 specs, and an append can never move a line another
+# engineer's diff is anchored on. The three models below are the payload shapes
+# `ops/textract.py` produces and `cli/cmd_text.py` / `cli/cmd_tables.py`
+# render. Each carries an explicit ``to_dict()`` (D-11) — the renderers consume
+# nothing else.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class TextBlock:
+    """One text line of a ``text --layout`` page, with its bounding box.
+
+    **Coordinate convention, stated on the model because "increasing ``y``" is
+    meaningless without it:** ``x``/``y`` are the box's **top-left corner**, in
+    PDF points, measured from the **page's top-left origin**, with ``y``
+    increasing **downward** (pdfplumber's ``x0``/``top``). ``width``/``height``
+    are the box's extent in points. The convention is chosen precisely so that
+    *down the page* equals *increasing ``y``*.
+
+    On a rotated page the coordinates are reported in the space the layout
+    engine presents for that page. The tool does not re-map them and makes no
+    claim to; the block **ordering** invariant is unaffected, because the
+    ordering is imposed by a sort in ``ops/textract.py`` rather than inherited
+    from the engine.
+
+    There is deliberately **no** confidence, score or quality field here, or
+    anywhere else in this spec's payloads (`PLAN.md` §12 R-03): a fabricated
+    number is worse than no number, and a test greps for one.
+    """
+
+    index: int
+    """0-based position in the page's emitted, sorted block list."""
+
+    text: str
+    x: float
+    y: float
+    width: float
+    height: float
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "index": self.index,
+            "text": self.text,
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PageText:
+    """One page of a ``text`` run, on either extraction path.
+
+    ``blocks`` is ``None`` on the fast path and a tuple on the layout path, and
+    :meth:`to_dict` emits ``text`` **xor** ``blocks`` accordingly — the shape
+    `PLAN.md` §3's own documented ``jq '.pages[0].blocks | length'`` expression
+    resolves against. ``text`` is carried on both paths regardless, because the
+    file a destination-bearing run writes is the same text either way; it is the
+    *payload* that differs, not what the tool extracted.
+
+    ``char_count`` is present on both paths and is the length of the page's
+    normalized text (on the layout path, the newline-joined block texts). A page
+    that exists and yields nothing is ``char_count == 0`` with an empty
+    ``text``/``blocks`` — an empty-but-valid result, never a fabricated string.
+    """
+
+    source: str
+    page: int
+    """1-based, matching the page-range grammar."""
+
+    char_count: int
+    text: str
+    blocks: tuple[TextBlock, ...] | None
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "source": self.source,
+            "page": self.page,
+            "char_count": self.char_count,
+        }
+        if self.blocks is None:
+            payload["text"] = self.text
+        else:
+            payload["blocks"] = [block.to_dict() for block in self.blocks]
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class TableGrid:
+    """One detected table, as found — no header row, no merged-cell repair.
+
+    ``rows`` preserves the engine's own ``None`` for a cell it found no text in.
+    JSON keeps that distinction; CSV cannot represent it and writes the empty
+    string, which is a documented, one-directional loss rather than a hidden
+    one.
+
+    ``bbox`` is ``[x0, top, x1, bottom]`` in the same top-left-origin convention
+    as :class:`TextBlock`. ``path`` is the artifact this grid was written to, or
+    ``None`` when the run wrote no files.
+    """
+
+    source: str
+    page: int
+    index: int
+    """0-based position among the tables detected on that page."""
+
+    bbox: tuple[float, float, float, float]
+    rows: tuple[tuple[str | None, ...], ...]
+    path: str | None
+
+    @property
+    def row_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def col_count(self) -> int:
+        """The widest row's width. Never inferred from a header, because this
+        product does not claim to know which row is a header."""
+        return max((len(row) for row in self.rows), default=0)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "page": self.page,
+            "index": self.index,
+            "bbox": list(self.bbox),
+            "row_count": self.row_count,
+            "col_count": self.col_count,
+            "rows": [list(row) for row in self.rows],
+            "path": self.path,
         }

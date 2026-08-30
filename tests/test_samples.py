@@ -400,3 +400,135 @@ def test_ac18_every_one_of_108_real_scans_is_stored_byte_for_byte(samples, tmp_p
     # Corroborating, never the evidence: a document holding 108 originals
     # verbatim cannot be smaller than the originals.
     assert output.stat().st_size >= sum(scan.stat().st_size for scan in scans)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-11 -- AC14/AC15, the honest-empty case. Over a COPY of 1888-10.pdf
+# (originals are never an operand, HC-2 rule 1):
+#   (a) `text` exits 0 and every one of the 108 page objects reports
+#       char_count == 0 with empty text, on BOTH extraction paths;
+#   (b) one `no extractable text` warning is emitted per empty page -- 108 of
+#       them, not one summary line;
+#   (c) `tables` on the same copy exits 0 with an empty table list and its own
+#       per-page warning naming the strategy it used;
+#   (d) AC15: `info --pages-detail` reports has_text false for every page while
+#       `text` returns empty for every page -- the two surfaces AGREE. A
+#       disagreement here is a finding reported to the PM, never a fix made to
+#       `info` (PDF-05's surface) from inside this spec.
+#
+# This is the BEFORE state of another spec's proof: the later `ocr` verb's
+# acceptance signal is "`text` returns non-empty text where it returned empty
+# before". Anything that made this arm non-empty would silently invalidate it.
+#
+# Nothing beyond filename, page count, size and hash is quoted anywhere in this
+# section (HC-2 rule 4) -- and asserting that a page's extracted text is EMPTY
+# is a structural fact about the document, not a content string taken from it.
+# --------------------------------------------------------------------------- #
+
+_EMPTY_SAMPLE_NAME = "1888-10.pdf"
+_EMPTY_SAMPLE_PAGES = 108
+
+
+def _read_only_policy():
+    from pdf_toolkit.safety.policy import SafetyPolicy
+
+    return SafetyPolicy(
+        dry_run=False,
+        force=False,
+        in_place=False,
+        backup=True,
+        assume_yes=False,
+        is_tty=False,
+        threads=1,
+    )
+
+
+@pytest.mark.samples
+@pytest.mark.parametrize("layout", [False, True], ids=["fast", "layout"])
+def test_ac14_every_page_of_an_image_only_scan_is_empty_and_exits_0(samples, layout: bool) -> None:
+    from pdf_toolkit.ops.textract import extract_text_run
+
+    copy_path = samples.copy(_EMPTY_SAMPLE_NAME)
+    outcome = extract_text_run(
+        [copy_path],
+        pages_spec=None,
+        layout=layout,
+        output=None,
+        out_dir=None,
+        name_template=None,
+        policy=_read_only_policy(),
+    )
+
+    assert outcome.result.exit_code == 0, "an empty-but-valid extraction is exit 0, never 1 or 4"
+    assert outcome.strategy == ("layout" if layout else "fast")
+    assert len(outcome.pages) == _EMPTY_SAMPLE_PAGES
+
+    assert [page.char_count for page in outcome.pages] == [0] * _EMPTY_SAMPLE_PAGES
+    assert {page.text for page in outcome.pages} == {""}
+    if layout:
+        assert {page.blocks for page in outcome.pages} == {()}
+    else:
+        assert {page.blocks for page in outcome.pages} == {None}
+
+    # One warning per empty page, not one summary line for the document.
+    warnings = outcome.result.warnings
+    assert len(warnings) == _EMPTY_SAMPLE_PAGES
+    assert all("no extractable text" in warning for warning in warnings)
+
+
+@pytest.mark.samples
+def test_ac14_tables_finds_nothing_on_an_image_only_scan_and_exits_0(samples) -> None:
+    from pdf_toolkit.ops.textract import extract_tables_run
+
+    copy_path = samples.copy(_EMPTY_SAMPLE_NAME)
+    outcome = extract_tables_run(
+        [copy_path],
+        pages_spec=None,
+        strategy="lines",
+        fmt=None,
+        output=None,
+        out_dir=None,
+        name_template=None,
+        policy=_read_only_policy(),
+    )
+
+    assert outcome.result.exit_code == 0, "zero tables is a legitimate answer, not an error"
+    assert outcome.tables == ()
+    warnings = outcome.result.warnings
+    assert len(warnings) == _EMPTY_SAMPLE_PAGES
+    assert all("no tables detected" in warning for warning in warnings)
+    assert all("heuristic" in warning for warning in warnings)
+    assert all("'lines'" in warning for warning in warnings)
+
+
+@pytest.mark.samples
+def test_ac15_info_has_text_and_text_emptiness_agree_on_the_same_copy(samples) -> None:
+    """AC15. `info --pages-detail` says has_text false for every page; `text`
+    returns empty for every page. If these ever disagree it is a FINDING for the
+    PM about PDF-05's surface, not something this spec fixes."""
+    from pdf_toolkit.cli.cmd_info import build_payload
+    from pdf_toolkit.ops.textract import extract_text_run
+
+    copy_path = samples.copy(_EMPTY_SAMPLE_NAME)
+
+    payload, _outcomes = build_payload((copy_path,), fonts=False, pages_detail=True, dry_run=False)
+    pages_detail = payload["documents"][0]["pages"]
+    assert len(pages_detail) == _EMPTY_SAMPLE_PAGES
+    info_has_text = {page["number"]: bool(page["has_text"]) for page in pages_detail}
+
+    outcome = extract_text_run(
+        [copy_path],
+        pages_spec=None,
+        layout=False,
+        output=None,
+        out_dir=None,
+        name_template=None,
+        policy=_read_only_policy(),
+    )
+    text_has_text = {page.page: page.char_count > 0 for page in outcome.pages}
+
+    assert info_has_text == text_has_text, (
+        "info --pages-detail's has_text and text's emptiness disagree -- report this to "
+        "the PM as a finding about PDF-05's surface; do not adjust either side here"
+    )
+    assert set(info_has_text.values()) == {False}

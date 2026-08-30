@@ -1,0 +1,57 @@
+{
+  "dry_run": false,
+  "duration_ms": 0,
+  "engine": {
+    "adapter": "pdfplumber",
+    "version": "<version>"
+  },
+  "exit_code": 0,
+  "items": [
+    {
+      "bytes_after": 45,
+      "bytes_before": 1447,
+      "duration_ms": 0,
+      "exit_code": 0,
+      "input": "tabular.pdf",
+      "message": "page 1 table 0: 3x3",
+      "ok": true,
+      "output": "tabular-p001-t0.csv"
+    }
+  ],
+  "strategy": "lines",
+  "tables": [
+    {
+      "bbox": [
+        "<float>",
+        "<float>",
+        "<float>",
+        "<float>"
+      ],
+      "col_count": 3,
+      "index": 0,
+      "page": 1,
+      "path": "tabular-p001-t0.csv",
+      "row_count": 3,
+      "rows": [
+        [
+          "R1C1",
+          "R1C2",
+          "R1C3"
+        ],
+        [
+          "R2C1",
+          "R2C2",
+          "R2C3"
+        ],
+        [
+          "R3C1",
+          "R3C2",
+          "R3C3"
+        ]
+      ],
+      "source": "tabular.pdf"
+    }
+  ],
+  "verb": "tables",
+  "warnings": []
+}

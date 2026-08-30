@@ -87,6 +87,9 @@ MAKEFILE_TARGETS = {
     # wave -- no overlap with PDF-01's 18 targets.
     "samples-scratch",
     "samples-check",
+    # PDF-11 (decision.md §8 X-115): the @samples ordering, encoded ONCE as a
+    # target instead of re-typed into every spec's Validation block.
+    "samples-gate",
     "ci",
     "clean",
 }

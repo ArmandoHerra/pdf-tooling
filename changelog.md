@@ -19,6 +19,48 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [PDF-11] text + tables — 2026-08-30
+- Added `text` (pypdfium2 fast path; `--layout` via pdfplumber, one block per
+  line with top-left-origin geometry) and `tables` (`--strategy lines|text`,
+  `--format csv|json`), over one `TextEngine` port extended in place —
+  `LayoutTextEngine` is a second Protocol in the same file, not a seventh port,
+  so the licence claim still reads as six files. New frozen models `TextBlock`,
+  `PageText`, `TableGrid`; new op layer `ops/textract.py`.
+- Every result DECLARES the strategy and the engine that produced it, in
+  `-o json`, on every `-o ndjson` line, and as a one-line banner in `-o table`
+  (stdout when a destination was given, stderr when stdout is carrying the
+  payload). `--layout` with the layout adapter unresolved exits **3** and never
+  falls back. Table extraction is documented as a heuristic in `--help`, and no
+  number claiming how sure the engine was is invented anywhere — enforced by a
+  grep over the five source files and both goldens, not by review. A page that
+  exists and yields nothing returns empty, exits **0** and warns; that is the
+  before-state the later `ocr` verb's acceptance signal depends on.
+- Block extraction uses pdfplumber's own `Page.extract_text_lines()` — present
+  across the whole pinned `>=0.11.10,<0.12` range, so the spec's documented
+  word-grouping fallback is deliberately NOT carried as unreachable code; its
+  absence is reported as a coded exit-3 engine failure instead of an
+  `AttributeError` traceback. Block ORDER is imposed by a stable sort on
+  `(y, x)`, so `y` is non-decreasing on every page including rotated ones — a
+  guarantee the tool makes rather than a property it hopes the engine has.
+- Contract row `C15` found a real gap while this landed: `plan_output_set`
+  deliberately skips the writability tier when there is no shared `--out-dir`,
+  so a `-O` dry run predicted 0 where the real run exited 1. Closed by
+  consulting BOTH shared primitives — the planner for the `--out-dir` tier and
+  `AtomicWriter`'s own plan for the single-destination tier that `merge`,
+  `compose` and `create` already predict through. No per-verb prediction logic
+  and no per-verb exit-code logic was added; `--in-place` is refused by the OR-3
+  declaration alone, and neither command module mentions it.
+- Makefile: `make samples-gate` now encodes the `@samples` ordering ONCE
+  (`decision.md` §8 X-115) — assert-no-stale-manifest, `samples-scratch`,
+  the arm with the corpus present, the arm with it absent, `samples-check` —
+  so no spec has to re-type the four steps that let B-046 propagate. Its
+  unset arm asserts on junit COUNTS, failing on any pass and on zero collected
+  tests, because an exit code cannot tell "all skipped" from "all passed".
+  `make samples-scratch` now REFUSES over an existing manifest naming
+  `make clean`, instead of silently overwriting the snapshot that
+  `samples-check` compares against (X-108). `samples-gate` is deliberately not
+  part of `make ci`: it needs the real-document corpus, which CI has not got.
+
 ## [B-055] widen the SIGTERM/SIGINT/SIGHUP teardown grace window and make its own test spawn-safe — 2026-08-30
 - CI's `macos-14` leg (`test (3.13, macos-14)`) caught a real gap on the
   first push of the landed `[B-055]` entry below: stray `.pdftoolkit-*`

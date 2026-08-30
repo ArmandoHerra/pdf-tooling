@@ -1,0 +1,71 @@
+{
+  "dry_run": false,
+  "duration_ms": 0,
+  "engine": {
+    "adapter": "pdfplumber",
+    "version": "<version>"
+  },
+  "exit_code": 0,
+  "items": [
+    {
+      "bytes_after": null,
+      "bytes_before": 2292,
+      "duration_ms": 0,
+      "exit_code": 0,
+      "input": "multipage_text.pdf",
+      "message": "3 page(s)",
+      "ok": true,
+      "output": null
+    }
+  ],
+  "pages": [
+    {
+      "blocks": [
+        {
+          "height": "<float>",
+          "index": 0,
+          "text": "multipage_text fixture -- page 1 of 3.",
+          "width": "<float>",
+          "x": "<float>",
+          "y": "<float>"
+        }
+      ],
+      "char_count": 38,
+      "page": 1,
+      "source": "multipage_text.pdf"
+    },
+    {
+      "blocks": [
+        {
+          "height": "<float>",
+          "index": 0,
+          "text": "multipage_text fixture -- page 2 of 3.",
+          "width": "<float>",
+          "x": "<float>",
+          "y": "<float>"
+        }
+      ],
+      "char_count": 38,
+      "page": 2,
+      "source": "multipage_text.pdf"
+    },
+    {
+      "blocks": [
+        {
+          "height": "<float>",
+          "index": 0,
+          "text": "multipage_text fixture -- page 3 of 3.",
+          "width": "<float>",
+          "x": "<float>",
+          "y": "<float>"
+        }
+      ],
+      "char_count": 38,
+      "page": 3,
+      "source": "multipage_text.pdf"
+    }
+  ],
+  "strategy": "layout",
+  "verb": "text",
+  "warnings": []
+}

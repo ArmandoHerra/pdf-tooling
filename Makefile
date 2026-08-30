@@ -11,7 +11,8 @@ SHELL := /bin/bash
 ARGS ?=
 
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
-        typecheck vulncheck sast secret-scan licenses samples-scratch samples-check ci clean
+        typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
+        samples-gate ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -89,6 +90,16 @@ samples-scratch: ## Copy $$PDF_TOOLKIT_SAMPLES_DIR into .scratch/samples/ + writ
 		echo "make samples-scratch: $$PDF_TOOLKIT_SAMPLES_DIR is not a directory." >&2; \
 		exit 1; \
 	fi
+	@if [ -e .scratch/samples.MANIFEST.sha256 ]; then \
+		echo "make samples-scratch: .scratch/samples.MANIFEST.sha256 already exists." >&2; \
+		echo "  Overwriting it would silently replace the snapshot that 'make samples-check'" >&2; \
+		echo "  compares the originals against -- which is exactly how a STALE manifest lets" >&2; \
+		echo "  that check report 'originals unchanged' for a run that never snapshotted" >&2; \
+		echo "  anything. Refusing rather than overwriting is what makes that impossible" >&2; \
+		echo "  instead of merely discouraged." >&2; \
+		echo "  Clear .scratch/ with 'make clean', then re-run this target." >&2; \
+		exit 1; \
+	fi
 	@mkdir -p .scratch
 	@rm -rf .scratch/samples
 	@cp -R "$$PDF_TOOLKIT_SAMPLES_DIR" .scratch/samples
@@ -108,6 +119,71 @@ samples-check: ## Re-hash $$PDF_TOOLKIT_SAMPLES_DIR against .scratch/samples.MAN
 	fi
 	@cd "$$PDF_TOOLKIT_SAMPLES_DIR" && sha256sum -c --quiet "$(CURDIR)/.scratch/samples.MANIFEST.sha256"
 	@echo "originals unchanged"
+
+# The @samples control chain, encoded ONCE (decision.md §8 X-115).
+#
+# B-046 did not propagate because one engineer mis-ordered four steps; it
+# propagated because the ordering was RE-TYPED into every spec's Validation
+# block, three specs deep, and a re-typed recipe is a recipe that can be got
+# wrong. So the ordering lives here and a spec invokes one target -- the same
+# protected-by-construction lever as OR-3's central flag declaration and
+# B-054's `plan_output_set`. There is then no recipe left for a spec to get
+# wrong, which is the only version of this fix that survives a later wave's
+# spec being written by a different engineer.
+#
+# Deliberately NOT part of `ci`: it needs the real-document corpus and copies
+# every original, so wiring it into the gate would both slow the gate (B-061)
+# and break CI, which has no corpus and must not have one.
+#
+# Step 4 needs a real ASSERTION and not an exit code. With the variable unset,
+# "all skipped" and "all passed" both exit 0, so an exit-code check would be
+# one more control that cannot control (X-68, X-92, X-102, X-108 -- four times
+# now). The junit counts below fail on any pass AND on zero collected tests: a
+# typo in the -m selector would otherwise let this step succeed vacuously,
+# which is the same defect family wearing a different hat.
+define SAMPLES_UNSET_ASSERT
+import sys, xml.etree.ElementTree as ET
+root = ET.parse(".scratch/samples-unset.xml").getroot()
+suite = root if root.tag == "testsuite" else root.find("testsuite")
+total = int(suite.get("tests", 0))
+skipped = int(suite.get("skipped", 0))
+broken = int(suite.get("failures", 0)) + int(suite.get("errors", 0))
+passed = total - skipped - broken
+if total == 0:
+    sys.exit(
+        "make samples-gate: the unset arm COLLECTED ZERO samples tests. An exit code "
+        "alone cannot tell that apart from 'every test skipped', which is precisely how "
+        "a green control stops controlling. Check the -m selector."
+    )
+if passed or broken:
+    sys.exit(
+        "make samples-gate: with PDF_TOOLKIT_SAMPLES_DIR unset every samples test must "
+        "SKIP, with a reason. Got %d test(s): %d skipped, %d passed, %d failed. "
+        "A pass here IS the defect (PLAN.md 10.1 rule 5)." % (total, skipped, passed, broken)
+    )
+print("samples-gate: unset arm skipped all %d samples test(s), zero passes" % total)
+endef
+export SAMPLES_UNSET_ASSERT
+
+samples-gate: ## Run the whole @samples chain in the one correct order (PLAN.md §10.1, B-046/X-108)
+	@if [ -e .scratch/samples.MANIFEST.sha256 ]; then \
+		echo "make samples-gate: a manifest already exists at .scratch/samples.MANIFEST.sha256." >&2; \
+		echo "  A LEFTOVER manifest makes step 5 compare the originals against an artefact" >&2; \
+		echo "  from an EARLIER run -- it reports 'originals unchanged' before this run has" >&2; \
+		echo "  snapshotted anything, so the control passes without controlling (X-108)." >&2; \
+		echo "  Clear .scratch/ with 'make clean', then re-run this target." >&2; \
+		exit 1; \
+	fi
+	@echo "samples-gate 1/5: no stale manifest"
+	@echo "samples-gate 2/5: snapshotting the originals BEFORE anything runs"
+	$(MAKE) samples-scratch
+	@echo "samples-gate 3/5: with the corpus present the arm must RUN and pass"
+	uv run pytest -m samples -rs --junitxml=.scratch/samples-set.xml
+	@echo "samples-gate 4/5: with the corpus absent the arm must SKIP, with zero passes"
+	env -u PDF_TOOLKIT_SAMPLES_DIR uv run pytest -m samples -rs --junitxml=.scratch/samples-unset.xml
+	@uv run python -c "$$SAMPLES_UNSET_ASSERT"
+	@echo "samples-gate 5/5: only NOW is the originals comparison meaningful"
+	$(MAKE) samples-check
 
 ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate
 

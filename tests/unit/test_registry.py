@@ -21,11 +21,12 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_eight_landed_verbs() -> None:
-    """AC24: `compose`/`create` (PDF-10) join `rasterize` (PDF-09),
-    `merge`/`split` (PDF-07) and the three PDF-06-landing verbs -- eight total.
-    Renamed and extended rather than deleted: this pin failed BY DESIGN the
-    moment verbs seven and eight registered, which is the tripwire working."""
+def test_discover_verbs_finds_exactly_the_ten_landed_verbs() -> None:
+    """`text`/`tables` (PDF-11) join `compose`/`create` (PDF-10), `rasterize`
+    (PDF-09), `merge`/`split` (PDF-07) and the three PDF-06-landing verbs -- ten
+    total. Renamed and extended rather than deleted, for the third time and for
+    the same reason: this pin fails BY DESIGN the moment a verb registers, which
+    is the tripwire working, not a defect."""
     verbs = discover_verbs()
     names = {verb.name for verb in verbs}
     assert names == {
@@ -37,6 +38,8 @@ def test_discover_verbs_finds_exactly_the_eight_landed_verbs() -> None:
         "rasterize",
         "compose",
         "create",
+        "text",
+        "tables",
     }
 
 
@@ -62,7 +65,10 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
     `test_no_current_verb_is_page_addressing`, asserting `is_page_addressing
     is False` for every verb -- that pin failed BY DESIGN the moment
     `rasterize` was registered, and is updated here rather than deleted."""
-    expected_page_addressing = {"rasterize"}
+    # PDF-11: `text`/`tables` are `--pages` verbs (PLAN.md §4.1) and, with
+    # `rasterize`, are the product's set-semantics verbs (§4.3) -- so the
+    # page-addressing set grows and nothing in this pin is removed.
+    expected_page_addressing = {"rasterize", "text", "tables"}
     expected_not = {"version", "doctor", "info", "merge", "split", "compose", "create"}
     # PDF-10 extends `expected_not`: neither `compose` nor `create` is page
     # addressing (`PLAN.md` §4.1 -- both "no"), so the set grows and nothing in
@@ -93,7 +99,12 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
     for every verb -- that pin failed BY DESIGN the moment `merge`/`split`
     were registered (a tripwire, not a defect), and is updated here to the
     explicit expected set rather than deleted."""
-    expected_mutating = {"merge", "split", "rasterize", "compose", "create"}
+    # PDF-11: `text`/`tables` are read verbs toward their INPUT but PRODUCING
+    # verbs toward a destination, so both reach the chokepoint and both classify
+    # mutating -- `cmd_text -> ops.textract -> safety.atomic` and `cmd_tables ->
+    # ops.textract -> safety.atomic` are two hops each, so `_MAX_IMPORT_HOPS`
+    # was not raised for either (B-031).
+    expected_mutating = {"merge", "split", "rasterize", "compose", "create", "text", "tables"}
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():
         if verb.name in expected_mutating:
