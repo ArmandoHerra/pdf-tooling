@@ -30,9 +30,15 @@ from __future__ import annotations
 
 import re
 import shutil
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from pdf_toolkit.adapters import AdapterProbe, package_probe, subprocess_util
+from pdf_toolkit.errors import FailureError
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from pathlib import Path
+
+    from PIL.Image import Image
 
 __all__ = ["ADAPTER", "BINARY", "PROBE_TIMEOUT_S", "TesseractOcrAdapter"]
 
@@ -57,6 +63,18 @@ _CAPABILITIES: Final[frozenset[str]] = frozenset({"ocr", "hocr", "languages"})
 #: binary cannot be mistaken for a version line.
 _VERSION_RE: Final[re.Pattern[str]] = re.compile(r"^tesseract\s+v?([0-9][0-9A-Za-z.\-]*)")
 
+#: PDF-15 (`ocr`), Design D3 -- the ``-c`` config that makes tesseract's PDF
+#: output TEXT-ONLY (invisible render mode, no re-rasterized image of its
+#: own). This is what makes "pixels are never touched" achievable at all:
+#: without it tesseract's PDF output embeds its OWN copy of the page image.
+_TEXTONLY_CONFIG: Final[str] = "textonly_pdf=1"
+
+#: The scratch filenames `text_layer` reuses across every page of a run
+#: (Design §D2: pages are processed sequentially, one at a time, so reusing
+#: one name keeps disk usage bounded rather than growing with page count).
+_SCRATCH_INPUT_NAME: Final[str] = "ocr-input.png"
+_SCRATCH_OUTPUT_BASENAME: Final[str] = "ocr-output"
+
 
 def _parse_version(line: str) -> str | None:
     match = _VERSION_RE.match(line.strip())
@@ -72,6 +90,110 @@ def _parse_languages(stdout: str) -> tuple[str, ...]:
     lines = [line.strip() for line in stdout.splitlines() if line.strip()]
     body = [line for line in lines[1:] if " " not in line]
     return tuple(sorted(set(body)))
+
+
+#: PDF-15 (`ocr`), Design D4 route (a) -- the four page rotations ISO 32000
+#: permits. Anything else is a defect elsewhere (`PageInfo.rotation` is
+#: normalised to this set at the source), not a value this function guesses
+#: at.
+_SUPPORTED_ROTATIONS: Final[frozenset[int]] = frozenset({0, 90, 180, 270})
+
+
+def _normalize_layer_geometry(
+    raw_pdf_bytes: bytes,
+    *,
+    page_width_pt: float,
+    page_height_pt: float,
+    rotation: int,
+) -> bytes:
+    """Design §D4 route (a) -- the one genuine design gap this spec closes.
+
+    ``StructureEngine.composite_layer`` (`ports/structure.py:606`) merges a
+    one-page layer onto the original page via a raw ``page.merge_page`` --
+    no transform, no matrix argument. So the layer handed to it must
+    ALREADY be sized to the original page's own UNROTATED ``MediaBox``
+    (*page_width_pt* x *page_height_pt*) and, when the page carries a
+    non-zero ``/Rotate``, must already carry the geometric INVERSE of that
+    rotation baked into its content -- otherwise the text lands rotated
+    and/or off the page it was read from.
+
+    tesseract's own page is sized to the DISPLAYED (post-rotation) view,
+    because `RasterEngine.render_page` renders in that same orientation
+    (Design §D2 step 2; `pdfium_raster.py`'s own ``_displayed_size``). This
+    function measures that box back (never assumes it -- tesseract's own
+    rounding is not trusted) and applies ONE composed transform:
+
+    1. **Scale** the measured box to the EXACT expected display dimensions
+       (``page_height_pt`` x ``page_width_pt`` swapped for a 90/270
+       rotation, unchanged otherwise) -- this is what makes the final box
+       exact rather than merely within the 0.5 pt tolerance D4 names.
+    2. **Rotate + translate** by the geometric inverse of *rotation*, so
+       that when the merged page is later displayed with the ORIGINAL
+       page's own ``/Rotate`` re-applied, the text lands back on the exact
+       picture tesseract read. Derived directly from the PDF ``/Rotate``
+       convention (clockwise-for-display) rather than from
+       ``PageObject.transfer_rotation_to_content`` (which solves the
+       opposite direction and, critically, is not reachable from ``ops/``
+       at all -- it is a pypdf method and this whole function exists
+       precisely because ``ops/ocr.py`` cannot import pypdf).
+
+    Verified against a live ``/Rotate 90`` fixture end to end (this spec's
+    Implementation Log) rather than by derivation alone -- AC7 is exactly
+    this function's own acceptance signal.
+    """
+    import io
+
+    from pypdf import PdfReader, PdfWriter, Transformation
+    from pypdf.errors import PdfReadError
+
+    if rotation not in _SUPPORTED_ROTATIONS:
+        raise FailureError(f"unsupported page rotation {rotation} (expected one of 0/90/180/270)")
+
+    try:
+        reader = PdfReader(io.BytesIO(raw_pdf_bytes))
+        page = reader.pages[0]
+    except (PdfReadError, IndexError, OSError, ValueError) as error:
+        raise FailureError(
+            f"tesseract's text-layer page could not be read back: {error}"
+        ) from error
+
+    raw_box = page.mediabox
+    raw_width, raw_height = float(raw_box.width), float(raw_box.height)
+    if raw_width <= 0 or raw_height <= 0:
+        raise FailureError("tesseract produced a degenerate (zero-area) text-layer page")
+
+    display_width, display_height = (
+        (page_height_pt, page_width_pt)
+        if rotation in (90, 270)
+        else (page_width_pt, page_height_pt)
+    )
+
+    # Step 0: move the measured box's own origin to (0, 0) before scaling --
+    # tesseract's own output is expected at (0, 0) already, but this makes
+    # no assumption of it.
+    trsf = Transformation().translate(-float(raw_box.left), -float(raw_box.bottom))
+    # Step 1: scale the measured box to the EXACT expected display size.
+    trsf = trsf.scale(display_width / raw_width, display_height / raw_height)
+    # Step 2: rotate + translate by the inverse of `rotation` -- see the
+    # docstring above for the derivation. `rotation == 0` needs neither.
+    if rotation == 90:
+        trsf = trsf.rotate(90).translate(page_width_pt, 0)
+    elif rotation == 180:
+        trsf = trsf.rotate(180).translate(page_width_pt, page_height_pt)
+    elif rotation == 270:
+        trsf = trsf.rotate(270).translate(0, page_height_pt)
+
+    page.add_transformation(trsf, expand=False)
+    page.mediabox.lower_left = (0, 0)
+    page.mediabox.upper_right = (page_width_pt, page_height_pt)
+    page.cropbox.lower_left = (0, 0)
+    page.cropbox.upper_right = (page_width_pt, page_height_pt)
+
+    writer = PdfWriter()
+    writer.add_page(page)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
 
 
 class TesseractOcrAdapter:
@@ -141,6 +263,83 @@ class TesseractOcrAdapter:
         package identically.
         """
         return package_probe(_BINDING_MODULE, _BINDING_DISTRIBUTION)
+
+    # -- PDF-15 (`ocr`), appended at the end of the class -------------------- #
+
+    def text_layer(
+        self,
+        image: Image,
+        *,
+        lang: str,
+        psm: int,
+        dpi: float,
+        page_width_pt: float,
+        page_height_pt: float,
+        rotation: int,
+        timeout: float,
+        scratch_dir: Path,
+    ) -> bytes:
+        """See the Protocol docstring in ``ports/ocr.py``."""
+        input_path = scratch_dir / _SCRATCH_INPUT_NAME
+        output_base = scratch_dir / _SCRATCH_OUTPUT_BASENAME
+        output_path = output_base.with_suffix(".pdf")
+
+        # `image.save` -- not one of Section 1's forbidden names (a stdlib
+        # write chokepoint violation), and this is scratch space, never a
+        # product destination: see `safety.atomic.ScratchDir`'s own
+        # docstring for the boundary this stays inside of. `dpi=` is set
+        # too, belt-and-braces alongside the CLI `--dpi` below.
+        image.save(input_path, format="PNG", dpi=(dpi, dpi))
+
+        # argv[0] is the module-level `Final[str]` constant -- see the note
+        # on the same line in `probe()`. `--dpi` is D3's one deliberate
+        # deviation from pytesseract's own emitted argv (Design §D4 route
+        # (a)): forcing resolution explicitly, rather than leaving it to
+        # the saved image's own metadata, is what makes the produced page's
+        # own box a function of OUR chosen render DPI rather than of
+        # whatever a given image format happens to embed.
+        # The list literal is inlined directly into the call -- not built up
+        # in a local `argv` variable first -- because
+        # `tests/test_import_boundaries.py` Section 2's `_static_argv0` reads
+        # `node.args[0]` at the CALL SITE itself; a variable reference is not
+        # statically resolvable even though its value is (see the identical
+        # note on the same shape in `probe()` above).
+        run = subprocess_util.run(
+            [
+                BINARY,
+                str(input_path),
+                str(output_base),
+                "-l",
+                lang,
+                "--psm",
+                str(psm),
+                "--dpi",
+                str(round(dpi)),
+                "-c",
+                _TEXTONLY_CONFIG,
+                "pdf",
+            ],
+            timeout=timeout,
+            check=False,
+        )
+        if run.timed_out:
+            raise FailureError(f"tesseract timed out after {timeout:g}s recognising one page")
+        if run.returncode != 0:
+            tail = "\n".join(run.stderr.strip().splitlines()[-5:])
+            detail = f": {tail}" if tail else ""
+            raise FailureError(f"tesseract exited {run.returncode}{detail}")
+        if not output_path.is_file() or output_path.stat().st_size == 0:
+            raise FailureError(
+                f"tesseract exited 0 but produced no readable text layer at {output_path}"
+            )
+
+        raw_pdf_bytes = output_path.read_bytes()
+        return _normalize_layer_geometry(
+            raw_pdf_bytes,
+            page_width_pt=page_width_pt,
+            page_height_pt=page_height_pt,
+            rotation=rotation,
+        )
 
 
 ADAPTER: Final[TesseractOcrAdapter] = TesseractOcrAdapter()

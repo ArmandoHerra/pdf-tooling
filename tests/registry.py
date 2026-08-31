@@ -694,6 +694,81 @@ def _stamp_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+# --------------------------------------------------------------------------- #
+# PDF-15 -- `ocr` + `convert`, the two system-binary verbs. Both rows below
+# are deliberately ENGINE-INDEPENDENT (work identically whether tesseract/
+# soffice are present or absent), which is what lets them join the generic
+# C1-C16 population unconditionally, exactly like every other row here.
+#
+# `ocr` -- `--skip-text-pages` over `single_page` (a TEXT page, has_text=True)
+# makes every selected page skip-eligible, so `ops/ocr.py`'s own lazy engine
+# demand (its module docstring: "the engine is demanded lazily") is NEVER
+# reached -- the run succeeds via the ordinary append-through path with zero
+# spawns, regardless of whether tesseract is installed. Verified: with
+# PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice, `ocr`'s own C9-C16 rows
+# are unaffected by the hide.
+#
+# `convert` has no equivalent trick -- its whole job IS the conversion, so
+# its registered row genuinely NEEDS soffice for the "declared flag honoured"
+# (C14) and "json on a pipe" (C12) arms. This is recorded, not hidden: the
+# CI `engines-present` job is where those two arms are meaningfully proven
+# for `convert` (`scripts/assert_skips.py --expect-zero` on that job already
+# asserts no engine-gated skip silently substituted for real coverage); the
+# `without-engines` job's own `--pages`-style OR-3 refusal arms (C14's
+# UNDECLARED side, C3, C5, C7, C9, C11, C15's refusal rows, C16) all stay
+# engine-independent (verified below) since every one of those refuses
+# BEFORE `require_office()` is ever reached.
+# --------------------------------------------------------------------------- #
+
+
+def _ocr_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`ocr` (PDF-15) consumes `--output`/`--out-dir`/`--name`/`--in-place`
+    (the `compress` set, D11.1/D11.2) -- this row names `-O` (same C11
+    reasoning as `_text_invocation`) AND `--skip-text-pages` over the
+    text-only `single_page` fixture, so the run needs no OCR engine at all
+    (see this section's own module-level note)."""
+    return [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--skip-text-pages",
+        "-O",
+        str(tmp_path / "registered-invocation-ocr.pdf"),
+    ]
+
+
+def _ocr_destructive_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """B-079's C13 arm for `ocr` (spec Amendment 1: `ocr --in-place` over two
+    inputs JOINS the C13 population `compress` already seeded, and the arm
+    is shown to fire for `ocr` specifically). TWO `tmp_path`-local COPIES of
+    `single_page` (never the shared corpus fixture directly -- see
+    `_copy_corpus_fixture`'s own docstring) plus `--skip-text-pages` (engine
+    -independent, same reasoning as `_ocr_invocation`) and `--in-place`.
+    Bulk (`input_count=2`) and destructive (`in_place=True`) simultaneously,
+    exactly what `safety/confirm.py::require_confirmation` refuses without
+    `-y` on a non-TTY and permits with it -- and even though every page is
+    skip-eligible, the confirmed write still goes through `new_writer()` +
+    `append_pages()` + `write()`, which is NOT byte-identical to the
+    original (measured: a pypdf round-trip changes serialized bytes even for
+    a pure pass-through, e.g. numeric formatting), so the mutation the C13
+    contract requires is real, not vacuous."""
+    first = _copy_corpus_fixture(corpus, tmp_path, "single_page", "c13-ocr-a.pdf")
+    second = _copy_corpus_fixture(corpus, tmp_path, "single_page", "c13-ocr-b.pdf")
+    return [str(first), str(second), "--skip-text-pages", "--in-place"]
+
+
+def _convert_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`convert` (PDF-15) consumes `--output`/`--out-dir`/`--name` (the
+    `text` set, D11.2 -- `--in-place` is deliberately excluded). Its own
+    operand is never a PDF, so this row reuses `_fixture_text` (a plain
+    `.txt` file -- LibreOffice converts arbitrary text input, verified
+    against this host's LibreOffice 26.2.5.2) rather than the generated PDF
+    corpus."""
+    return [
+        str(_fixture_text(tmp_path, "registered-invocation-convert.txt")),
+        "-O",
+        str(tmp_path / "registered-invocation-convert.pdf"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -762,6 +837,19 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     "meta set": Invocation(build=_meta_set_invocation, destructive=False),
     "watermark": Invocation(build=_watermark_invocation, destructive=False),
     "stamp": Invocation(build=_stamp_invocation, destructive=False),
+    # PDF-15. `ocr` is multi-input, page-addressing, and `--in-place`-capable
+    # (the `compress` shape, D11.1) -- `destructive=True`, joining C13's
+    # population `compress` already seeded (Amendment 1: the arm is shown to
+    # fire for `ocr` specifically, via its own `destructive_build`). `convert`
+    # is multi-input but never `--in-place` (D11.2) -- `destructive=False`,
+    # matching every other producing verb's own note above (a single input
+    # writing to `-O` is neither bulk nor destructive).
+    "ocr": Invocation(
+        build=_ocr_invocation,
+        destructive=True,
+        destructive_build=_ocr_destructive_invocation,
+    ),
+    "convert": Invocation(build=_convert_invocation, destructive=False),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for
@@ -1125,6 +1213,56 @@ OUTPUT_FLAG_INVOCATIONS: Final[dict[tuple[str, str], Callable[[object, Path], li
         "--from",
         str(corpus.path("single_page")),  # type: ignore[attr-defined]
         "--in-place",
+    ],
+    # PDF-15 -- seven rows: `ocr` x {--output, --out-dir, --name, --in-place},
+    # `convert` x {--output, --out-dir, --name}. Every `ocr` row carries
+    # `--skip-text-pages` over the text-only `single_page` fixture, engine
+    # -independent for the same reason `_ocr_invocation` is (this file's own
+    # PDF-15 section note); every `convert` row uses `_fixture_text` (plain
+    # `.txt`, LibreOffice converts it) since `convert`'s operand is never a
+    # PDF. Every `--in-place` row copies its fixture into `tmp_path` FIRST,
+    # same reason every earlier `--in-place` row does.
+    ("ocr", "--output"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--skip-text-pages",
+        "-O",
+        str(tmp_path / "or3-ocr-output.pdf"),
+    ],
+    ("ocr", "--out-dir"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--skip-text-pages",
+        "--out-dir",
+        str(tmp_path / "or3-ocr-out-dir"),
+    ],
+    ("ocr", "--name"): lambda corpus, tmp_path: [
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "--skip-text-pages",
+        "--out-dir",
+        str(tmp_path / "or3-ocr-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
+    ],
+    ("ocr", "--in-place"): lambda corpus, tmp_path: [
+        str(_copy_corpus_fixture(corpus, tmp_path, "single_page", "or3-ocr-in-place.pdf")),
+        "--skip-text-pages",
+        "--in-place",
+    ],
+    ("convert", "--output"): lambda corpus, tmp_path: [
+        str(_fixture_text(tmp_path, "or3-convert-output.txt")),
+        "-O",
+        str(tmp_path / "or3-convert-output.pdf"),
+    ],
+    ("convert", "--out-dir"): lambda corpus, tmp_path: [
+        str(_fixture_text(tmp_path, "or3-convert-out-dir.txt")),
+        "--out-dir",
+        str(tmp_path / "or3-convert-out-dir"),
+    ],
+    ("convert", "--name"): lambda corpus, tmp_path: [
+        str(_fixture_text(tmp_path, "or3-convert-name.txt")),
+        "--out-dir",
+        str(tmp_path / "or3-convert-name"),
+        "--name",
+        "or3-custom-{stem}.{ext}",
     ],
 }
 

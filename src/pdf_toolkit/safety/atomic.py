@@ -169,7 +169,13 @@ from pdf_toolkit.safety.paths import (
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.safety.tempnames import TEMP_PREFIX
 
-__all__ = ["AtomicWriter", "DEGRADED_PREFIX", "PlannedOutputs", "plan_output_set"]
+__all__ = [
+    "AtomicWriter",
+    "DEGRADED_PREFIX",
+    "PlannedOutputs",
+    "ScratchDir",
+    "plan_output_set",
+]
 
 #: The one warning class both cross-filesystem conditions are reported under, so
 #: a caller can match on a stable prefix instead of on prose.
@@ -645,3 +651,75 @@ class AtomicWriter:
     def _warn(self, message: str) -> None:
         self.warnings.append(message)
         self._warn_sink(message)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-15 -- ``ScratchDir``: a private, per-invocation SCRATCH directory for an
+# external engine's own working files. Additive; nothing above this comment
+# changes.
+# --------------------------------------------------------------------------- #
+
+
+#: Deliberately NOT :data:`TEMP_PREFIX` and does not contain its literal
+#: (``.pdftoolkit-``): that prefix means *crash residue beside a destination*
+#: (``find_stray_temps`` / ``doctor --strict``), a promise this class must not
+#: make -- a :class:`ScratchDir` never sits beside any destination and is
+#: reliably removed on every exit path, so a leftover one here would be a
+#: bug report, not evidence ``doctor`` is designed to surface.
+_SCRATCH_PREFIX: Final[str] = "pdftoolkit-scratch-"
+
+
+class ScratchDir:
+    """A private, per-invocation working directory for an external engine
+    (``convert``'s LibreOffice profile + conversion outdir; PDF-15, Design
+    §D6) -- never a product destination.
+
+    **Why this lives here, in the write chokepoint, rather than in the
+    adapter that needs it.** ``tests/test_import_boundaries.py`` Section 1
+    forbids ``tempfile.mkdtemp``/``shutil.rmtree`` (and every other
+    filesystem-mutating stdlib call) anywhere under ``src/`` except this one
+    file -- ``pdf_toolkit.safety.atomic`` is the single module the walk's
+    own ``CHOKEPOINT`` constant exempts, on both tiers. Scattering a SECOND,
+    parallel raw-mutation site into ``adapters/soffice_office.py`` would be
+    exactly the "verb creates its own tempfile" defect shape that module's
+    docstring names -- even though this scratch space is never the user's
+    OWN output (``convert``'s actual PDF bytes still cross the destination
+    through :class:`AtomicWriter`, unchanged), keeping the raw ``tempfile``/
+    ``shutil.rmtree`` calls themselves confined to the one auditable file is
+    what the chokepoint's whole design is for: every filesystem mutation the
+    product performs stays in one place, whatever it is *for*.
+
+    **Not a second write chokepoint.** This class never resolves, plans or
+    writes a user-visible destination; it hands back one throwaway directory
+    an external process may use as it likes, and guarantees it is gone
+    afterwards (``shutil.rmtree(..., ignore_errors=True)`` in
+    ``__exit__`` -- errors are swallowed deliberately, mirroring
+    :meth:`AtomicWriter._discard`'s own best-effort cleanup posture, because
+    a cleanup failure must never mask the real error a ``with`` block is
+    already unwinding for).
+
+    LibreOffice creates both the ``-env:UserInstallation`` profile directory
+    and a ``--outdir`` target directory itself when they do not yet exist
+    (verified empirically against LibreOffice 26.2.5), so the caller never
+    needs to create the two *subdirectories* it hands soffice as argv values
+    -- only this one root, which is genuinely needed so ``__exit__`` has a
+    single tree to remove.
+    """
+
+    def __init__(self, *, prefix: str = _SCRATCH_PREFIX) -> None:
+        self._prefix = prefix
+        self.path: Path | None = None
+
+    def __enter__(self) -> Path:
+        self.path = Path(tempfile.mkdtemp(prefix=self._prefix))
+        return self.path
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if self.path is not None:
+            shutil.rmtree(self.path, ignore_errors=True)
+            self.path = None

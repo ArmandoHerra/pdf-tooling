@@ -36,6 +36,8 @@ from pdf_toolkit.cli import (
     cmd_meta,
     cmd_meta_get,
     cmd_meta_set,
+    cmd_ocr,
+    cmd_office,
     cmd_permissions,
     cmd_rasterize,
     cmd_reorder,
@@ -127,6 +129,10 @@ app.command(name="watermark", help=cmd_watermark.watermark_command.__doc__)(
     cmd_watermark.watermark_command
 )
 app.command(name="stamp", help=cmd_stamp.stamp_command.__doc__)(cmd_stamp.stamp_command)
+
+# PDF-15 -- the two system-binary verbs.
+app.command(name="ocr", help=cmd_ocr.ocr_command.__doc__)(cmd_ocr.ocr_command)
+app.command(name="convert", help=cmd_office.convert_command.__doc__)(cmd_office.convert_command)
 
 
 def build_rerun_hint(argv: Sequence[str] | None = None) -> str:

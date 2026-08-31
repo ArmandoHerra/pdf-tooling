@@ -1128,3 +1128,159 @@ def test_pdf14_the_original_is_never_an_operand(samples, tmp_path: Path) -> None
     copy_path = samples.copy(_META_SAMPLE_NAME)
     assert copy_path.parent == tmp_path
     assert os.access(copy_path, os.W_OK)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-15 -- AC19/AC20. Over COPIES of `1888-10.pdf` and the
+# `ArmandoHerra_Cloud_Architect_2026_CV.docx`/`.pdf` pair (originals are
+# never an operand, HC-2 rule 1):
+#   (a) `ocr --pages 1-2` on the 108-page real scan: 0 words before, non-empty
+#       text on pages 1-2 after, page 1's image XObject byte-identical
+#       (AC3 on a real scan, D13's instrument), page count still 108;
+#   (b) `convert` of the CV `.docx` against the Google-Docs-produced `.pdf`
+#       of the SAME document: 3 pages, normalised-token `SequenceMatcher`
+#       ratio >= 0.90.
+# HC-2 rule 4 is load-bearing in the failure path, not just the success path
+# (D7): the assertion message carries ONLY the filename and the ratio --
+# `f"{name}: token overlap {ratio:.2f}"` -- never the extracted text, on any
+# path, pass or fail. Nothing beyond filename, page count, size and hash is
+# quoted anywhere in this section.
+# --------------------------------------------------------------------------- #
+
+_OCR_SAMPLE_NAME = "1888-10.pdf"
+_OCR_SAMPLE_PAGES = 108
+_OCR_SAMPLE_DPI = 150
+
+_CONVERT_SAMPLE_DOCX = "ArmandoHerra_Cloud_Architect_2026_CV.docx"
+_CONVERT_SAMPLE_PDF = "ArmandoHerra_Cloud_Architect_2026_CV.pdf"
+_CONVERT_SAMPLE_PAGES = 3
+_CONVERT_SAMPLE_MIN_RATIO = 0.90
+
+
+@pytest.mark.samples
+@pytest.mark.requires("tesseract")
+def test_ac19_ocr_pages_1_2_of_a_real_scan_preserves_the_image_and_recovers_text(
+    samples, tmp_path: Path
+) -> None:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from helpers.pdfstream import embedded_image_streams
+    from pdf_toolkit.ops.ocr import ocr_run
+    from pdf_toolkit.ports.structure import require_structure
+    from pdf_toolkit.ports.text import require_text
+    from pdf_toolkit.safety.policy import SafetyPolicy
+
+    policy = SafetyPolicy(
+        dry_run=False,
+        force=False,
+        in_place=False,
+        backup=True,
+        assume_yes=False,
+        is_tty=False,
+        threads=1,
+    )
+
+    copy_path = samples.copy(_OCR_SAMPLE_NAME)
+    engine = require_structure()
+    with engine.open_document(copy_path) as document:
+        assert document.page_count == _OCR_SAMPLE_PAGES
+
+    text_engine = require_text()
+    before_page1 = "".join(text_engine.extract_text(str(copy_path), [1]))
+    before_page2 = "".join(text_engine.extract_text(str(copy_path), [2]))
+    assert before_page1 == ""
+    assert before_page2 == ""
+
+    before_page1_image = embedded_image_streams(copy_path, 0)
+    assert len(before_page1_image) == 1
+
+    output = tmp_path / "1888-10-ocrd.pdf"
+    result = ocr_run(
+        [copy_path],
+        lang="eng",
+        dpi=_OCR_SAMPLE_DPI,
+        psm=3,
+        skip_text_pages=False,
+        pages_spec="1-2",
+        output=output,
+        out_dir=None,
+        name_template=None,
+        in_place=False,
+        policy=policy,
+    )
+    assert result.exit_code == 0, result.items[0].message
+
+    with engine.open_document(output) as document:
+        assert document.page_count == _OCR_SAMPLE_PAGES
+
+    after_page1 = "".join(text_engine.extract_text(str(output), [1]))
+    after_page2 = "".join(text_engine.extract_text(str(output), [2]))
+    assert after_page1 != ""
+    assert after_page2 != ""
+
+    after_page1_image = embedded_image_streams(output, 0)
+    assert len(after_page1_image) == 1
+    assert after_page1_image[0].raw == before_page1_image[0].raw
+
+
+@pytest.mark.samples
+@pytest.mark.requires("soffice")
+def test_ac20_convert_docx_matches_the_google_docs_pdf_of_the_same_document(
+    samples, tmp_path: Path
+) -> None:
+    import difflib
+
+    from pdf_toolkit.ops.office import convert_run
+    from pdf_toolkit.ports.structure import require_structure
+    from pdf_toolkit.ports.text import require_text
+    from pdf_toolkit.safety.policy import SafetyPolicy
+
+    policy = SafetyPolicy(
+        dry_run=False,
+        force=False,
+        in_place=False,
+        backup=True,
+        assume_yes=False,
+        is_tty=False,
+        threads=1,
+    )
+
+    docx_copy = samples.copy(_CONVERT_SAMPLE_DOCX)
+    reference_pdf_copy = samples.copy(_CONVERT_SAMPLE_PDF)
+
+    structure_engine = require_structure()
+    with structure_engine.open_document(reference_pdf_copy) as document:
+        assert document.page_count == _CONVERT_SAMPLE_PAGES
+
+    output = tmp_path / "cv-converted.pdf"
+    result = convert_run(
+        [docx_copy],
+        filter_name=None,
+        timeout=120.0,
+        output=output,
+        out_dir=None,
+        name_template=None,
+        policy=policy,
+    )
+    assert result.exit_code == 0, result.items[0].message
+
+    with structure_engine.open_document(output) as document:
+        assert document.page_count == _CONVERT_SAMPLE_PAGES
+
+    text_engine = require_text()
+    converted_pages = text_engine.extract_text(
+        str(output), list(range(1, _CONVERT_SAMPLE_PAGES + 1))
+    )
+    reference_pages = text_engine.extract_text(
+        str(reference_pdf_copy), list(range(1, _CONVERT_SAMPLE_PAGES + 1))
+    )
+    converted_tokens = " ".join(converted_pages).lower().split()
+    reference_tokens = " ".join(reference_pages).lower().split()
+
+    ratio = difflib.SequenceMatcher(a=converted_tokens, b=reference_tokens).ratio()
+    # HC-2 rule 4: the message carries ONLY the filename and the ratio --
+    # never the extracted text, on any path, pass or fail.
+    assert ratio >= _CONVERT_SAMPLE_MIN_RATIO, f"{_CONVERT_SAMPLE_DOCX}: token overlap {ratio:.2f}"

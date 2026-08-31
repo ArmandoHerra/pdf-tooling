@@ -16,9 +16,13 @@ from __future__ import annotations
 
 import re
 import shutil
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from pdf_toolkit.adapters import AdapterProbe, subprocess_util
+from pdf_toolkit.errors import FailureError
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from pathlib import Path
 
 __all__ = ["ADAPTER", "BINARY", "PROBE_TIMEOUT_S", "SofficeOfficeAdapter"]
 
@@ -37,6 +41,15 @@ _CAPABILITIES: Final[frozenset[str]] = frozenset({"office-convert", "to-pdf"})
 
 #: ``LibreOffice 26.2.5.2 620(Build:2)`` -> ``26.2.5.2``.
 _VERSION_RE: Final[re.Pattern[str]] = re.compile(r"([0-9]+(?:\.[0-9]+)+)")
+
+#: PDF-15 (`convert`), Design §D6 -- the two SUBdirectories `convert_to_pdf`
+#: creates under its caller's `scratch_dir`. LibreOffice creates both itself
+#: on first use (verified empirically against LibreOffice 26.2.5.2: an
+#: absent `-env:UserInstallation` directory AND an absent `--outdir` are
+#: both bootstrapped by soffice without error) -- so neither is pre-created
+#: here, matching `ScratchDir`'s own docstring.
+_PROFILE_SUBDIR: Final[str] = "profile"
+_OUTPUT_SUBDIR: Final[str] = "out"
 
 
 def _parse_version(line: str) -> str | None:
@@ -69,6 +82,63 @@ class SofficeOfficeAdapter:
             detail = f"version line not recognised: {first!r}" if first else "no version line"
             return AdapterProbe(available=True, version=None, detail=detail)
         return AdapterProbe(available=True, version=version, detail=first or None)
+
+    # -- PDF-15 (`convert`), appended at the end of the class ---------------- #
+
+    def convert_to_pdf(
+        self,
+        source: Path,
+        *,
+        scratch_dir: Path,
+        filter_name: str | None,
+        timeout: float,
+    ) -> Path:
+        """See the Protocol docstring in ``ports/office.py``."""
+        profile_dir = scratch_dir / _PROFILE_SUBDIR
+        out_dir = scratch_dir / _OUTPUT_SUBDIR
+        convert_to = f"pdf:{filter_name}" if filter_name else "pdf"
+
+        # argv[0] is the module-level constant -- see the note on the same
+        # line in `probe()`. Isolated profile per invocation (Design §D6):
+        # LibreOffice serialises on a shared user profile, and a shared or
+        # absent one causes intermittent failures under concurrency.
+        # The list literal is inlined directly into the call -- not built up
+        # in a local `argv` variable first -- because
+        # `tests/test_import_boundaries.py` Section 2's `_static_argv0` reads
+        # `node.args[0]` at the CALL SITE itself; a variable reference is not
+        # statically resolvable even though its value is (see the identical
+        # note on the same shape in `probe()` above).
+        run = subprocess_util.run(
+            [
+                BINARY,
+                "--headless",
+                "--norestore",
+                "--invisible",
+                f"-env:UserInstallation=file://{profile_dir}",
+                "--convert-to",
+                convert_to,
+                "--outdir",
+                str(out_dir),
+                str(source),
+            ],
+            timeout=timeout,
+            check=False,
+        )
+        if run.timed_out:
+            raise FailureError(f"{source}: soffice timed out after {timeout:g}s")
+
+        # D6: exit 0 with no output file is a FAILURE -- LibreOffice
+        # frequently exits 0 having converted nothing. Success is measured
+        # by the artefact, never by the return code.
+        expected = out_dir / f"{source.stem}.pdf"
+        if not expected.is_file() or expected.stat().st_size == 0:
+            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-5:])
+            detail = f": {tail}" if tail else ""
+            raise FailureError(
+                f"{source}: soffice exited {run.returncode} but produced no "
+                f"non-empty PDF at {expected}{detail}"
+            )
+        return expected
 
 
 ADAPTER: Final[SofficeOfficeAdapter] = SofficeOfficeAdapter()

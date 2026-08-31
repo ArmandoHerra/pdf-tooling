@@ -21,19 +21,19 @@ from registry import (  # noqa: E402
 )
 
 
-def test_discover_verbs_finds_exactly_the_twenty_four_landed_verbs() -> None:
-    """`meta get`/`meta set`/`watermark`/`stamp` (PDF-14) join
-    `extract`/`delete`/`rotate`/`reorder` (PDF-08),
+def test_discover_verbs_finds_exactly_the_twenty_six_landed_verbs() -> None:
+    """`ocr`/`convert` (PDF-15) join `meta get`/`meta set`/`watermark`/`stamp`
+    (PDF-14), `extract`/`delete`/`rotate`/`reorder` (PDF-08),
     `encrypt`/`decrypt`/`permissions` (PDF-13),
     `compress`/`repair`/`linearize` (PDF-12), `text`/`tables` (PDF-11),
     `compose`/`create` (PDF-10), `rasterize` (PDF-09), `merge`/`split`
-    (PDF-07) and the three PDF-06-landing verbs -- twenty-four total.
-    Renamed and extended rather than deleted, for the seventh time and for
+    (PDF-07) and the three PDF-06-landing verbs -- twenty-six total.
+    Renamed and extended rather than deleted, for the eighth time and for
     the same reason: this pin fails BY DESIGN the moment a verb registers,
-    which is the tripwire working, not a defect. `meta get`/`meta set` are
-    the FIRST two-word verb names this pin has ever carried -- `meta` is
-    the CLI's only grouping parent (`discover_verbs()` space-joins a
-    leaf's full path, per its own docstring)."""
+    which is the tripwire working, not a defect. `ocr`/`convert` are the
+    FIRST two verbs whose own engine (`OcrEngine`/`OfficeConverter`) can be
+    legitimately absent -- `discover_verbs()` itself does not care, it is a
+    structural walk of the live Typer tree."""
     verbs = discover_verbs()
     names = {verb.name for verb in verbs}
     assert names == {
@@ -61,6 +61,8 @@ def test_discover_verbs_finds_exactly_the_twenty_four_landed_verbs() -> None:
         "meta set",
         "watermark",
         "stamp",
+        "ocr",
+        "convert",
     }
 
 
@@ -114,6 +116,7 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
         "reorder",
         "watermark",
         "stamp",
+        "ocr",
     }
     expected_not = {
         "version",
@@ -130,6 +133,7 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
         "permissions",
         "meta get",
         "meta set",
+        "convert",
     }
     # PDF-10 extends `expected_not`: neither `compose` nor `create` is page
     # addressing (`PLAN.md` §4.1 -- both "no"), so the set grows and nothing in
@@ -137,6 +141,10 @@ def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:
     # PDF-14: `watermark`/`stamp` both carry `--pages` (Design D4.2) and join
     # `expected_page_addressing`; `meta get`/`meta set` carry no `--pages` at
     # all (metadata is a whole-document property) and join `expected_not`.
+    # PDF-15: `ocr` carries `--pages` (Design §D5, set semantics, PLAN.md
+    # §4.1) and joins `expected_page_addressing`; `convert` declares no
+    # `--pages` option at all (PLAN.md §4.1 -- not page-range aware) and
+    # joins `expected_not`.
     for verb in discover_verbs():
         if verb.name in expected_page_addressing:
             assert verb.is_page_addressing is True, f"{verb.name} should be page-addressing"
@@ -222,7 +230,13 @@ def test_the_expected_verbs_are_classified_mutating_or_not() -> None:
         "meta set",
         "watermark",
         "stamp",
+        "ocr",
+        "convert",
     }
+    # PDF-15: `ocr` reaches `AtomicWriter` via `cmd_ocr -> ops.ocr ->
+    # safety.atomic` and `convert` via `cmd_office -> ops.office ->
+    # safety.atomic` -- two hops each, so `_MAX_IMPORT_HOPS` was not raised
+    # for either.
     expected_pure = {"version", "doctor", "info"}
     for verb in discover_verbs():
         if verb.name in expected_mutating:
