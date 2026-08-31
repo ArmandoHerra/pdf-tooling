@@ -493,8 +493,14 @@ def test_ac8_rotated_page_rasterizes_landscape(tmp_path: Path) -> None:
 # the page -- it re-swapped `get_size()`'s already-displayed dimensions and
 # passed `rotation=page.get_rotation()` into `render()`. The two second
 # applications agreed with each other on the DIMENSIONS, so every
-# size-or-aspect assertion in the suite stayed green while the PIXELS came
-# out 180 degrees from correct for 90/270 (and cancelled out at 0/180).
+# size-or-aspect assertion in the suite stayed green while the PIXELS came out
+# an ADDITIONAL `/Rotate` degrees clockwise: 90 degrees out at `/Rotate 90`,
+# 180 degrees out at `/Rotate 180` -- it did NOT cancel -- and 270 degrees out
+# at `/Rotate 270`. Only `/Rotate 0` was ever correct. (The "cancels at 0/180"
+# reading this comment carried until B-102 was the pre-B-094 one, taken from
+# image SIZES, which the second swap had already put back; the commit that
+# added this matrix disproved it, and `adapters/pdfium_raster.py`'s module
+# docstring -- written in that same commit -- says so.)
 #
 # So the matrix below covers all four angles and asserts WHERE THE CONTENT
 # LANDED, not only how big the image is. Either half alone is blind: the size
