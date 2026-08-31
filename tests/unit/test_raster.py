@@ -22,6 +22,7 @@ import pickle
 import sys
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
+from typing import Final
 
 import pytest
 from PIL import Image
@@ -89,18 +90,116 @@ def _make_multipage(directory: Path, pages: int, *, name: str = "multi.pdf") -> 
     return path
 
 
+def _stamp_rotate(path: Path, angle: int) -> Path:
+    """Set ``/Rotate`` on page 1 **without touching the MediaBox** (B-094).
+
+    reportlab's ``Canvas.setPageRotation()`` cannot express this shape: it
+    pre-swaps the page's own MediaBox so that the *displayed* page keeps the
+    requested ``pagesize``. A ``letter`` canvas with ``setPageRotation(90)``
+    therefore writes ``MediaBox [0 0 792 612]`` + ``/Rotate 90``, i.e. a
+    LANDSCAPE raw box that displays PORTRAIT -- the exact opposite of what its
+    call site reads like, and the reason AC8's own fixture did not test what
+    AC8 says it tests (see that test's comment). This is the same class of
+    generated-fixture limit B-084 recorded for the *absence* of ``/Rotate``.
+
+    pypdf's ``page.rotation`` setter writes the ``/Rotate`` key and nothing
+    else, so a portrait page stays portrait in raw space and genuinely
+    displays landscape.
+    """
+    from pypdf import PdfReader, PdfWriter
+
+    reader = PdfReader(str(path))
+    writer = PdfWriter()
+    page = reader.pages[0]
+    page.rotation = angle
+    writer.add_page(page)
+    with open(path, "wb") as handle:
+        writer.write(handle)
+    return path
+
+
 def _make_rotated(directory: Path, *, name: str = "rotated.pdf") -> Path:
-    """AC8's fixture: one portrait Letter page carrying ``/Rotate 90``."""
+    """AC8's fixture: one **portrait** Letter page carrying ``/Rotate 90``.
+
+    B-094: the ``/Rotate`` is stamped with pypdf rather than written by
+    ``Canvas.setPageRotation()`` precisely so the raw MediaBox stays portrait
+    (612x792) -- AC8's own wording is *"rasterizes landscape ... where the
+    unrotated page is portrait"*, and the reportlab spelling silently supplied
+    a landscape one.
+    """
     from reportlab.lib.pagesizes import letter
 
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
     made = _new_canvas(path, letter)
-    made.setPageRotation(90)
     made.drawString(72, 700, "rotated fixture -- one page, /Rotate 90.")
     made.showPage()
     made.save()
-    return path
+    return _stamp_rotate(path, 90)
+
+
+#: B-094's fixture geometry: a tall PORTRAIT page with a black band across its
+#: top fifth. Portrait-and-banded is what makes every angle distinguishable --
+#: the size alone separates 0/180 from 90/270, and the band's edge separates 0
+#: from 180 and 90 from 270. An aspect-ratio assertion can do neither.
+_BAND_WIDTH_PT: Final[float] = 200.0
+_BAND_HEIGHT_PT: Final[float] = 600.0
+
+#: Where the band lands once ``/Rotate`` is applied. Derived from the format,
+#: not from the renderer: ISO 32000 defines ``/Rotate`` as the number of
+#: degrees the page is turned **clockwise when displayed**, and turning a sheet
+#: clockwise carries its top edge to the right, then the bottom, then the left.
+_BAND_EDGE_AFTER_ROTATE: Final[dict[int, str]] = {
+    0: "top",
+    90: "right",
+    180: "bottom",
+    270: "left",
+}
+
+#: The displayed ``(width_pt, height_pt)`` of that page at each angle.
+_DISPLAYED_PT_AFTER_ROTATE: Final[dict[int, tuple[float, float]]] = {
+    0: (_BAND_WIDTH_PT, _BAND_HEIGHT_PT),
+    90: (_BAND_HEIGHT_PT, _BAND_WIDTH_PT),
+    180: (_BAND_WIDTH_PT, _BAND_HEIGHT_PT),
+    270: (_BAND_HEIGHT_PT, _BAND_WIDTH_PT),
+}
+
+
+def _make_banded(directory: Path, *, rotation: int, name: str | None = None) -> Path:
+    """A portrait page, black band on the TOP fifth, carrying ``/Rotate``."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (name or f"banded-{rotation}.pdf")
+    made = _new_canvas(path, (_BAND_WIDTH_PT, _BAND_HEIGHT_PT))
+    made.setFillColorRGB(0, 0, 0)
+    made.rect(0, _BAND_HEIGHT_PT * 0.8, _BAND_WIDTH_PT, _BAND_HEIGHT_PT * 0.2, stroke=0, fill=1)
+    made.showPage()
+    made.save()
+    return _stamp_rotate(path, rotation)
+
+
+def _darkest_edge(image: Image.Image) -> str:
+    """Which of the four edge strips carries the band.
+
+    Mean luminance over the outer tenth of each edge; the band is pure black
+    on white, so the minimum is unambiguous (measured separations are
+    0 vs 204+, not a close call).
+    """
+    grey = image.convert("L")
+    width, height = grey.size
+    pixels = grey.load()
+    assert pixels is not None
+
+    def mean(x0: int, y0: int, x1: int, y1: int) -> float:
+        values = [pixels[x, y] for y in range(y0, y1) for x in range(x0, x1)]
+        return sum(values) / len(values)
+
+    strips = {
+        "top": mean(0, 0, width, max(1, height // 10)),
+        "bottom": mean(0, height - max(1, height // 10), width, height),
+        "left": mean(0, 0, max(1, width // 10), height),
+        "right": mean(width - max(1, width // 10), 0, width, height),
+    }
+    return min(strips, key=lambda key: strips[key])
 
 
 def _rasterize(
@@ -346,11 +445,32 @@ def test_ac7_process_pool_and_thread_pool_produce_byte_identical_output(
 
 # --------------------------------------------------------------------------- #
 # AC8 -- rotation is honoured: a /Rotate 90 page rasterizes landscape.
+#
+# B-094 CORRECTED THIS TEST'S FIXTURE, and the correction is the finding.
+# Until B-094 this test built its page with `Canvas.setPageRotation(90)`,
+# which pre-swaps the MediaBox to 792x612 -- so the "portrait page" in its
+# own docstring was landscape in raw space and PORTRAIT when displayed. The
+# assertion `width > height` therefore passed only because the adapter
+# double-applied `/Rotate` and rendered the RAW box; it was pinning the
+# defect, and it goes red the moment the adapter is right. The fixture now
+# stamps `/Rotate 90` onto a genuinely portrait page (`_stamp_rotate`), which
+# is what AC8's own wording -- "where the unrotated page is portrait" --
+# always said. The assertion below is unchanged; only the fixture is, and now
+# it means what it reads like.
 # --------------------------------------------------------------------------- #
 
 
 def test_ac8_rotated_page_rasterizes_landscape(tmp_path: Path) -> None:
     source = _make_rotated(tmp_path / "src")
+
+    from pypdf import PdfReader
+
+    raw_box = PdfReader(str(source)).pages[0].mediabox
+    # The precondition AC8 states, asserted rather than assumed (this is the
+    # half the reportlab spelling silently inverted).
+    assert float(raw_box.width) < float(raw_box.height), raw_box
+    assert PdfReader(str(source)).pages[0].rotation == 90  # present, non-zero (B-084)
+
     out_dir = tmp_path / "out"
     result = _rasterize(source, out_dir=out_dir, dpi=150.0)
     assert result.exit_code == 0
@@ -362,6 +482,152 @@ def test_ac8_rotated_page_rasterizes_landscape(tmp_path: Path) -> None:
     item = result.items[0]
     parsed_width, parsed_height = _parse_dimensions(item.message)
     assert (parsed_width, parsed_height) == (width, height)
+
+
+# --------------------------------------------------------------------------- #
+# B-094 -- `/Rotate` is applied EXACTLY ONCE, at every one of the four angles.
+#
+# The defect these tests exist for was a wrong answer on the happy path with
+# a success exit code: `adapters/pdfium_raster.py` re-applied the page's own
+# `/Rotate` on top of pdfium's internal application, in BOTH places it read
+# the page -- it re-swapped `get_size()`'s already-displayed dimensions and
+# passed `rotation=page.get_rotation()` into `render()`. The two second
+# applications agreed with each other on the DIMENSIONS, so every
+# size-or-aspect assertion in the suite stayed green while the PIXELS came
+# out 180 degrees from correct for 90/270 (and cancelled out at 0/180).
+#
+# So the matrix below covers all four angles and asserts WHERE THE CONTENT
+# LANDED, not only how big the image is. Either half alone is blind: the size
+# cannot separate 0 from 180, and the band edge alone would not have caught a
+# transposed bitmap. The expected values come from ISO 32000's definition of
+# `/Rotate` (clockwise-when-displayed), written down in
+# `_BAND_EDGE_AFTER_ROTATE`, not from what the renderer happens to produce.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_b094_rotate_is_applied_exactly_once_at_every_angle(tmp_path: Path, rotation: int) -> None:
+    source = _make_banded(tmp_path / "src", rotation=rotation)
+
+    from pypdf import PdfReader
+
+    page = PdfReader(str(source)).pages[0]
+    # The fixture really is portrait in raw space at every angle -- the shape
+    # reportlab cannot write, and the reason this matrix can tell 90 from 270.
+    assert (float(page.mediabox.width), float(page.mediabox.height)) == (
+        _BAND_WIDTH_PT,
+        _BAND_HEIGHT_PT,
+    )
+    assert page.rotation == rotation
+
+    dpi = 150.0
+    out_dir = tmp_path / "out"
+    result = _rasterize(source, out_dir=out_dir, dpi=dpi)
+    assert result.exit_code == 0
+    files = list(out_dir.iterdir())
+    assert len(files) == 1
+
+    displayed_width_pt, displayed_height_pt = _DISPLAYED_PT_AFTER_ROTATE[rotation]
+    expected = (
+        round(displayed_width_pt * dpi / 72.0),
+        round(displayed_height_pt * dpi / 72.0),
+    )
+    with Image.open(files[0]) as img:
+        assert img.size == expected, (rotation, img.size, expected)
+        assert _darkest_edge(img) == _BAND_EDGE_AFTER_ROTATE[rotation], rotation
+    assert _parse_dimensions(result.items[0].message) == expected
+
+
+def test_b094_displayed_size_agrees_with_pdfiums_own_unrotated_render(
+    tmp_path: Path,
+) -> None:
+    """`_displayed_size` must equal the box pdfium itself renders into.
+
+    Stated against the engine rather than against this module's arithmetic:
+    pdfium sizes its bitmap `ceil(get_size() * scale)` and honours `/Rotate`
+    with no argument, so a no-argument render at scale 1 IS the displayed box
+    in points. The pre-B-094 `_displayed_size` disagreed with it by a swap on
+    90/270 -- which is the half of the defect a pixel assertion alone would
+    not localise.
+    """
+    import pypdfium2 as pdfium
+
+    from pdf_toolkit.adapters.pdfium_raster import _displayed_size
+
+    for rotation in (0, 90, 180, 270):
+        source = _make_banded(tmp_path / "src", rotation=rotation)
+        document = pdfium.PdfDocument(str(source))
+        try:
+            page = document.get_page(0)
+            try:
+                bitmap = page.render(scale=1.0)
+                try:
+                    engine_size = bitmap.to_pil().size
+                finally:
+                    bitmap.close()
+                assert _displayed_size(page) == _DISPLAYED_PT_AFTER_ROTATE[rotation], rotation
+                assert engine_size == _DISPLAYED_PT_AFTER_ROTATE[rotation], rotation
+            finally:
+                page.close()
+        finally:
+            document.close()
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_b094_the_ceiling_correction_is_still_a_crop_and_never_a_pad(
+    tmp_path: Path, rotation: int
+) -> None:
+    """The module docstring's crop proof, re-derived at every angle.
+
+    `PIL.Image.crop` past the edge PADS WITH BLACK rather than failing, so
+    "target never exceeds pdfium's bitmap" is the invariant standing between
+    this adapter and a second silent-wrong-answer defect. Before B-094 the
+    target and the bitmap were computed from different boxes and merely
+    happened to agree on 90/270; now both derive from `get_size()`, and this
+    asserts the consequence directly against the engine.
+    """
+    import math
+
+    import pypdfium2 as pdfium
+
+    source = _make_banded(tmp_path / "src", rotation=rotation)
+    document = pdfium.PdfDocument(str(source))
+    try:
+        page = document.get_page(0)
+        try:
+            displayed_width, displayed_height = page.get_size()
+            for dpi in (72.0, 96.0, 150.0, 200.0, 300.0, 600.0):
+                scale = dpi / 72.0
+                bitmap = (
+                    math.ceil(displayed_width * scale),
+                    math.ceil(displayed_height * scale),
+                )
+                target = (
+                    round(displayed_width * dpi / 72.0),
+                    round(displayed_height * dpi / 72.0),
+                )
+                slack = (bitmap[0] - target[0], bitmap[1] - target[1])
+                assert slack[0] >= 0 and slack[1] >= 0, (rotation, dpi, bitmap, target)
+                assert slack[0] <= 1 and slack[1] <= 1, (rotation, dpi, bitmap, target)
+        finally:
+            page.close()
+    finally:
+        document.close()
+
+    # And the end-to-end consequence: --width mode lands on the requested
+    # width exactly at every angle, which is the crop actually firing.
+    for width_px in (100, 333):
+        out_dir = tmp_path / f"out-{rotation}-{width_px}"
+        result = _rasterize(source, out_dir=out_dir, dpi=None, width_px=width_px)
+        assert result.exit_code == 0
+        displayed_width_pt, displayed_height_pt = _DISPLAYED_PT_AFTER_ROTATE[rotation]
+        expected = (
+            width_px,
+            max(1, round(width_px * displayed_height_pt / displayed_width_pt)),
+        )
+        with Image.open(next(iter(out_dir.iterdir()))) as img:
+            assert img.size == expected, (rotation, width_px, img.size, expected)
+            assert _darkest_edge(img) == _BAND_EDGE_AFTER_ROTATE[rotation], (rotation, width_px)
 
 
 # --------------------------------------------------------------------------- #

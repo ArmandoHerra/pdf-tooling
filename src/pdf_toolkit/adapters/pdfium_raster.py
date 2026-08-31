@@ -18,6 +18,41 @@ document in a ``finally`` before returning — no pdfium object crosses this
 method's return; only :class:`~pdf_toolkit.ports.raster.RenderedPage`'s plain
 data does.
 
+Why nothing here applies ``/Rotate`` (B-094)
+--------------------------------------------
+pdfium applies the page's own ``/Rotate`` **internally, twice over**, and both
+halves are load-bearing here:
+
+* ``PdfPage.get_size()`` is ``FPDF_GetPage{Width,Height}F``, which reports the
+  **displayed** box — already swapped relative to the ``MediaBox`` for a 90/270
+  page. Measured on pypdfium2 5.13.0 against a page whose ``MediaBox`` is
+  ``[0 0 792 612]`` with ``/Rotate 90``: ``get_mediabox() == (0, 0, 792, 612)``
+  while ``get_size() == (612.0, 792.0)``.
+* ``PdfPage.render()`` honours ``/Rotate`` with no argument at all; its
+  ``rotation=`` parameter is documented by pypdfium2 as *"**Additional**
+  rotation in degrees"* and is applied **on top of** ``/Rotate``.
+
+Until B-094 this module applied the rotation a second time in **both** places —
+it re-swapped ``get_size()``'s already-displayed dimensions and passed
+``rotation=page.get_rotation()`` into ``render()``. The two second applications
+agreed with each other on the *dimensions*, which is why the crop below never
+fired and why every size-and-aspect assertion in the suite stayed green while
+the pixels were wrong.
+
+The error was an **additional clockwise turn of ``/Rotate`` degrees**, so it was
+90° at ``/Rotate 90``, **180° at ``/Rotate 180`` — it did not cancel** — and
+270° at ``/Rotate 270``; only ``/Rotate 0`` was ever right. (The earlier reading
+of "180° out at 90/270, cancels at 180" came from comparing image *sizes*, which
+the second swap had already put back.) Measured on a 200×600 portrait page with
+a black band on its top fifth: correct renders put the band top/right/bottom/left
+at 0/90/180/270, and this module put it top/bottom/top/bottom. Downstream,
+``ocr`` on a ``/Rotate 90`` page exited 0 and wrote an unreadable text layer.
+
+The fix is not a compensating counter-rotation: it is to stop applying
+``/Rotate`` here at all and let pdfium's single, internal application stand.
+``tests/unit/test_raster.py`` asserts the band's edge as well as the size, at
+all four angles, because either half alone is blind to some of this.
+
 The ceiling-vs-round correction (why this file crops)
 -------------------------------------------------------
 pypdfium2's own ``PdfPage.render()`` computes its bitmap's pixel dimensions as
@@ -28,9 +63,18 @@ one pixel more than the mathematically exact ``page_pt/72*dpi`` this product
 promises (Design §D3), independently of anything this file does. AC1 requires
 **exactly** 2550×3300 for a US-Letter page at 300 dpi, so :func:`_render`
 always crops the bitmap down to the independently-computed, round()-based
-target — a real() value's ``round()`` is provably never greater than its
+target — a real value's ``round()`` is provably never greater than its
 ``ceil()``, so this crop only ever removes at most one row/column of slack
 that ceiling introduced and never truncates real content.
+
+That proof holds for every rotation only because :func:`_displayed_size` and
+pdfium's own bitmap sizing now read the *same* ``get_size()`` floats: target is
+``round(displayed * scale)``, bitmap is ``ceil(displayed * scale)``. Before
+B-094 the two were derived from different boxes and merely happened to agree.
+The crop is therefore still a crop and never a pad — and :func:`_render`
+now *asserts* that rather than trusting it, because a silent
+:meth:`PIL.Image.Image.crop` past the edge pads with black, which is precisely
+the shape of defect B-094 was: a wrong answer carrying a success exit code.
 
 ``pdfium_text`` is a second module over the same engine, backing ``TextEngine``'s
 fast path. Two modules, one backend, two ports — which is why the eight adapter
@@ -62,8 +106,12 @@ _POINTS_PER_INCH: Final[float] = 72.0
 #: this verb writes carries an alpha channel.
 _FILL_WHITE: Final[tuple[int, int, int, int]] = (255, 255, 255, 255)
 
-#: Page rotations pdfium's own ``PdfPage.render(rotation=...)`` accepts.
-_ROTATIONS_SWAPPING_AXES: Final[frozenset[int]] = frozenset({90, 270})
+#: How much slack pdfium's ``math.ceil()`` bitmap sizing may leave over this
+#: module's own ``round()``-based target before the difference stops being a
+#: rounding artefact and starts being a geometry defect. ``ceil(x) - round(x)``
+#: is at most 1 for every real ``x``, so anything past this is the B-094 shape
+#: — a mismatch the crop would paper over — and is refused rather than cropped.
+_MAX_CEIL_SLACK_PX: Final[int] = 1
 
 
 class PdfiumRasterAdapter:
@@ -128,17 +176,24 @@ class PdfiumRasterAdapter:
         )
 
 
-def _displayed_size(page: Any) -> tuple[float, float, int]:
-    """The page's own ``(width_pt, height_pt)`` as it will be DISPLAYED, plus
-    its declared rotation — i.e. swapped when ``/Rotate`` is 90 or 270
-    (Design §D6, AC8). pdfium's ``get_size()`` always reports the raw,
-    pre-rotation MediaBox, matching :class:`~pdf_toolkit.models.PageInfo`'s
-    own convention."""
-    raw_width, raw_height = page.get_size()
-    rotation = page.get_rotation()
-    if rotation in _ROTATIONS_SWAPPING_AXES:
-        return raw_height, raw_width, rotation
-    return raw_width, raw_height, rotation
+def _displayed_size(page: Any) -> tuple[float, float]:
+    """The page's own ``(width_pt, height_pt)`` as it will be DISPLAYED — i.e.
+    already swapped relative to the ``MediaBox`` when ``/Rotate`` is 90 or 270
+    (Design §D6, AC8).
+
+    That contract is unchanged by B-094; what changed is that this function no
+    longer performs the swap **itself**. pdfium's ``get_size()`` is the
+    displayed box already (module docstring, "Why nothing here applies
+    ``/Rotate``"), so swapping it again produced the raw ``MediaBox`` back —
+    the opposite of this function's own name. It deliberately does **not**
+    match :class:`~pdf_toolkit.models.PageInfo`'s convention: ``PageInfo``
+    reports the raw ``MediaBox`` with ``rotation`` beside it, and
+    ``tesseract_ocr._normalize_layer_geometry`` reconstructs this displayed
+    view from that pair — the two conventions are complementary, not equal,
+    and the earlier docstring's claim that they agreed was the defect stated
+    in prose."""
+    width, height = page.get_size()
+    return float(width), float(height)
 
 
 def _target_dimensions(
@@ -167,7 +222,7 @@ def _target_dimensions(
 def _render(
     page: Any, *, dpi: float | None, width_px: int | None, grayscale: bool
 ) -> tuple[Image, float]:
-    displayed_width, displayed_height, rotation = _displayed_size(page)
+    displayed_width, displayed_height = _displayed_size(page)
     target_width, target_height, dpi_effective = _target_dimensions(
         displayed_width, displayed_height, dpi=dpi, width_px=width_px
     )
@@ -177,9 +232,10 @@ def _render(
     # crop below then trims to exactly target_width.
     scale = dpi_effective / _POINTS_PER_INCH
 
+    # NO `rotation=` argument. pdfium has already applied the page's own
+    # `/Rotate`; passing it again is B-094. See the module docstring.
     bitmap = page.render(
         scale=scale,
-        rotation=rotation,
         grayscale=grayscale,
         rev_byteorder=True,
         fill_color=_FILL_WHITE,
@@ -192,7 +248,20 @@ def _render(
     if image.size != (target_width, target_height):
         # Always a crop, never a pad: round(x) <= ceil(x) for every real x, so
         # pdfium's ceil()-based bitmap is never smaller than our target — see
-        # the module docstring's "ceiling-vs-round correction".
+        # the module docstring's "ceiling-vs-round correction". PIL's crop()
+        # will happily extend past the edge and pad with black instead of
+        # saying so, so the invariant is checked rather than assumed: a bitmap
+        # that disagrees with the target by more than ceil()'s one pixel of
+        # slack means the two are no longer derived from the same box, and
+        # that is a geometry defect to surface, not slack to trim.
+        slack_width = image.width - target_width
+        slack_height = image.height - target_height
+        if not (0 <= slack_width <= _MAX_CEIL_SLACK_PX and 0 <= slack_height <= _MAX_CEIL_SLACK_PX):
+            raise FailureError(
+                f"rendered bitmap {image.size} cannot be cropped to the "
+                f"expected {(target_width, target_height)}: the renderer's page "
+                "geometry disagrees with this adapter's"
+            )
         image = image.crop((0, 0, target_width, target_height))
     return image, dpi_effective
 

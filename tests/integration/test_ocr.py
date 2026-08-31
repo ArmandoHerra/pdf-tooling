@@ -32,6 +32,7 @@ from pdf_toolkit.ops.compose import compose_document, parse_page_size  # noqa: E
 from pdf_toolkit.ops.ocr import ocr_run  # noqa: E402
 from pdf_toolkit.ops.pages import rotate_run  # noqa: E402
 from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdfium_text import page_text  # noqa: E402
 from registry import run_cli  # noqa: E402
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -74,12 +75,12 @@ def _compose_scanned_page(tmp_path: Path, *, name: str = "scanned.pdf") -> Path:
     return output
 
 
-def _rotate90(source: Path, tmp_path: Path, *, name: str = "rotated.pdf") -> Path:
-    output = tmp_path / name
+def _rotate(source: Path, tmp_path: Path, angle: int, *, name: str | None = None) -> Path:
+    output = tmp_path / (name or f"rotated-{angle}.pdf")
     result = rotate_run(
         [source],
         pages_spec="1",
-        angle=90,
+        angle=angle,
         absolute=False,
         output=output,
         out_dir=None,
@@ -89,6 +90,50 @@ def _rotate90(source: Path, tmp_path: Path, *, name: str = "rotated.pdf") -> Pat
     )
     assert result.exit_code == 0, result
     return output
+
+
+def _rotate90(source: Path, tmp_path: Path, *, name: str = "rotated.pdf") -> Path:
+    return _rotate(source, tmp_path, 90, name=name)
+
+
+def _collapse_whitespace(text: str) -> str:
+    """The comparison AC6 and AC10 already use in this suite.
+
+    It matters on a rotated page and nowhere else: `pdftoolkit text`'s engine
+    groups characters into lines in the page's DISPLAYED frame, so a text
+    layer that is correct in the page's own unrotated space -- which is the
+    only place it can be correct, since that is where the glyphs it was read
+    from live -- comes back with the words separated by newlines rather than
+    spaces. That is a property of the extractor, not of the layer, and
+    `test_b094_the_rotated_layer_is_upright_and_aligned` proves it with a
+    control rather than asserting it here.
+    """
+    return " ".join(text.split())
+
+
+def _layer_word_boxes(path: Path) -> list[tuple[float, float, float, float]]:
+    """Every text rect on page 1, in the page's own unrotated coordinates.
+
+    pypdfium2 directly, for the same reason `tests/pdfium_text.py` exists: this
+    reads back geometry the product does not expose through any verb, and it is
+    a SECOND engine-level view of the layer -- independent of the `TextEngine`
+    the assertions above go through.
+    """
+    import pypdfium2 as pdfium
+
+    document = pdfium.PdfDocument(str(path))
+    try:
+        page = document.get_page(0)
+        try:
+            textpage = page.get_textpage()
+            try:
+                return [textpage.get_rect(index) for index in range(textpage.count_rects())]
+            finally:
+                textpage.close()
+        finally:
+            page.close()
+    finally:
+        document.close()
 
 
 def _extract_text(path: Path) -> str:
@@ -330,48 +375,26 @@ def test_ac6_matches_the_pytesseract_oracle(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# AC7 -- a genuinely rotated page. SKIPPED: `RasterEngine.render_page`
-# (`adapters/pdfium_raster.py`, out of this spec's permitted edit scope --
-# see D1's "NO EDIT" row) double-applies `/Rotate` for 90/270-degree pages.
-# Verified live (this spec's Implementation Log): `pdfium.PdfPage.render()`
-# ALREADY auto-applies `/Rotate` internally (confirmed: `rotation=0` on a
-# `/Rotate 90` page still renders the CORRECT, poppler-matching 200x600
-# portrait image), and `pdfium_raster.py::_render` ALSO passes
-# `rotation=page.get_rotation()` explicitly -- a SECOND application. Net
-# effect measured: for `/Rotate 90` the output is rotated 180 DEGREES from
-# correct (dims wrongly unswapped, content upside down); for `/Rotate 180`
-# the double-application cancels out (0/180/360 are all equivalent modulo
-# 360), which is exactly why no earlier spec's test caught this -- PDF-09's
-# own rotation test only asserts an aspect-ratio CLASS (`width > height`)
-# against a fixture whose OWN mediabox reportlab already pre-swaps, and
-# renders BLANK (no visible pixels) under inspection, so it never actually
-# validated pixel placement. This spec's own geometry-normalisation
-# (`adapters/tesseract_ocr.py::_normalize_layer_geometry`, Design §D4 route
-# (a)) is implemented against the DOCUMENTED, INTENDED contract of
-# `render_page` and is not itself in question -- reported as a BLOCKER for
-# AC7 rather than papered over with a compensating hack tied to a bug in a
-# file this spec may not edit.
+# AC7 -- a genuinely rotated page. UNSKIPPED by B-094.
+#
+# This test shipped under an unconditional `@pytest.mark.skip` because
+# `adapters/pdfium_raster.py` (a PDF-09 file, outside PDF-15's edit scope)
+# applied the page's own `/Rotate` a SECOND time on top of pdfium's internal
+# one, corrupting the fixture's pixels before OCR ever saw them. B-094 fixed
+# that adapter; the skip is gone and the marker is now the ordinary
+# `requires("tesseract")` gate every other arm in this module carries, so the
+# test RUNS with engines present and skips VISIBLY without them -- which is
+# also what puts it back on the right side of `scripts/assert_skips.py` in
+# both CI configurations (see that script's `--expect-zero` mode).
+#
+# The geometry the skip was blocking on is proven separately and with a
+# control by `test_b094_the_rotated_layer_is_upright_and_aligned` below. This
+# test stays exactly what AC7 says: OCR a `/Rotate 90` page, get the text back
+# through the product's own text engine.
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.requires("tesseract")
-@pytest.mark.skip(
-    # Deliberately spelled to avoid the substrings `scripts/assert_skips.py`'s
-    # own ENGINE_REASON regex (`engine|tesseract|soffice|libreoffice`, case
-    # -insensitive) matches: this skip is UNCONDITIONAL (fires with or
-    # without tesseract installed), so a reason naming "RasterEngine" would
-    # be misread by the `engines-present` CI job's `--expect-zero` check as
-    # "a test that should have exercised a real engine silently did not" --
-    # a false positive, verified live against the actual regex before this
-    # wording was chosen.
-    reason=(
-        "BLOCKED by a pre-existing defect in adapters/pdfium_raster.py (out of "
-        "PDF-15's permitted edit scope): its render_page() function double-"
-        "applies /Rotate for 90/270-degree pages, corrupting the fixture's own "
-        "pixels before OCR ever sees them. See this test's own module-level "
-        "comment and the spec's Implementation Log for the live reproduction."
-    )
-)
 def test_ac7_rotated_page_returns_the_expected_text(tmp_path: Path) -> None:
     source = _compose_scanned_page(tmp_path)
     rotated = _rotate90(source, tmp_path)
@@ -395,7 +418,196 @@ def test_ac7_rotated_page_returns_the_expected_text(tmp_path: Path) -> None:
         policy=_policy(),
     )
     assert result.exit_code == 0, result
-    assert EXPECTED_TEXT in _extract_text(output)
+    assert EXPECTED_TEXT in _collapse_whitespace(_extract_text(output))
+
+
+# --------------------------------------------------------------------------- #
+# B-094 -- the text layer on a rotated page is UPRIGHT and ALIGNED.
+#
+# AC7 above proves the letters come back. This proves they came back because
+# the geometry is right and not by luck, and it is the assertion that would
+# survive a future extractor changing how it groups lines.
+#
+# The oracle is the layer produced from the SAME page without the rotation:
+# `/Rotate` changes nothing about where the glyphs physically sit in the
+# page's own coordinate space, so the OCR layer for the rotated page must land
+# in the same boxes as the layer for the unrotated one. Anything else is
+# misalignment -- and the pre-B-094 render put it 180 degrees out.
+#
+# The same test carries the control for AC7's whitespace normalisation:
+# stamping `/Rotate 90` onto the ALREADY-OCR'd unrotated file changes nothing
+# but one dictionary key, and the product's text engine starts separating the
+# words with newlines there too. So the separator is the extractor's doing,
+# not the layer's, and normalising it is a measurement rather than a
+# concession.
+# --------------------------------------------------------------------------- #
+
+
+def test_b094_the_quarter_turn_matrix_is_exact_not_trigonometric() -> None:
+    """No engine, no tesseract -- pure matrix arithmetic (B-094).
+
+    The zeros must be EXACTLY 0.0. `pypdf.Transformation.rotate(90)` yields
+    `6.123233995736766e-17` there instead, and `pdfplumber` reads that residue
+    as "this character is not upright", which changes what `pdftoolkit text`
+    returns for a rotated page. This guard is what stops a future edit from
+    reverting to `Transformation.rotate()` for the readable-looking reason.
+    """
+    from pdf_toolkit.adapters.tesseract_ocr import _quarter_turn
+
+    identity = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    assert _quarter_turn(identity, 90) == (0.0, 1.0, -1.0, 0.0, 0.0, 0.0)
+    assert _quarter_turn(identity, 180) == (-1.0, -0.0, -0.0, -1.0, -0.0, -0.0)
+    assert _quarter_turn(identity, 270) == (0.0, -1.0, 1.0, 0.0, 0.0, 0.0)
+    assert _quarter_turn(identity, 0) == identity
+
+    # Same composition order as the function it replaces, so it is a drop-in.
+    from pypdf import Transformation
+
+    for degrees in (90, 180, 270):
+        reference = Transformation(identity).rotate(degrees).ctm
+        exact = _quarter_turn(identity, degrees)
+        for want, got in zip(reference, exact, strict=True):
+            assert abs(want - got) < 1e-9, (degrees, reference, exact)
+        # ... and strictly better: the reference is NOT exact.
+        assert any(entry not in (-1.0, 0.0, 1.0) for entry in reference), degrees
+        assert all(entry in (-1.0, -0.0, 0.0, 1.0) for entry in exact), degrees
+
+
+@pytest.mark.requires("tesseract")
+def test_b094_the_rotated_layer_is_upright_and_aligned(tmp_path: Path) -> None:
+    from pypdf import PdfReader, PdfWriter
+
+    source = _compose_scanned_page(tmp_path)
+
+    upright_out = tmp_path / "upright-ocrd.pdf"
+    assert (
+        ocr_run(
+            [source],
+            lang="eng",
+            dpi=200,
+            psm=3,
+            skip_text_pages=False,
+            pages_spec=None,
+            output=upright_out,
+            out_dir=None,
+            name_template=None,
+            in_place=False,
+            policy=_policy(),
+        ).exit_code
+        == 0
+    )
+
+    rotated = _rotate90(source, tmp_path)
+    rotated_out = tmp_path / "rotated-ocrd.pdf"
+    assert (
+        ocr_run(
+            [rotated],
+            lang="eng",
+            dpi=200,
+            psm=3,
+            skip_text_pages=False,
+            pages_spec=None,
+            output=rotated_out,
+            out_dir=None,
+            name_template=None,
+            in_place=False,
+            policy=_policy(),
+        ).exit_code
+        == 0
+    )
+
+    # (1) ALIGNED -- same words, same boxes, in the page's own space.
+    upright_boxes = _layer_word_boxes(upright_out)
+    rotated_boxes = _layer_word_boxes(rotated_out)
+    assert len(upright_boxes) == len(rotated_boxes) > 0
+    for index, (expected, actual) in enumerate(zip(upright_boxes, rotated_boxes, strict=True)):
+        for axis, (want, got) in enumerate(zip(expected, actual, strict=True)):
+            assert abs(want - got) < 0.5, (index, axis, expected, actual)
+
+    # (2) UPRIGHT -- read back through a second, independent engine view, the
+    # rotated page's layer spells the fixture's string with its spaces intact.
+    # (The pre-fix render produced upside-down nonsense here, not a spacing
+    # difference.)
+    assert EXPECTED_TEXT in page_text(rotated_out, 1)
+
+    # (3) The control for AC7's whitespace normalisation: take the KNOWN-GOOD
+    # unrotated layer, change nothing but `/Rotate`, and the product's own text
+    # engine regroups the words the same way.
+    reader = PdfReader(str(upright_out))
+    writer = PdfWriter()
+    stamped_page = reader.pages[0]
+    stamped_page.rotation = 90
+    writer.add_page(stamped_page)
+    stamped = tmp_path / "upright-ocrd-then-stamped.pdf"
+    with open(stamped, "wb") as handle:
+        writer.write(handle)
+
+    stamped_text = _extract_text(stamped)
+    assert EXPECTED_TEXT not in stamped_text  # the newlines are the extractor's
+    assert EXPECTED_TEXT in _collapse_whitespace(stamped_text)
+
+
+# --------------------------------------------------------------------------- #
+# B-094 -- the real-world rotated scan: sideways pixels that `/Rotate` puts
+# upright. This is the shape a scanner actually produces, and it is the one
+# where a render that ignores (or double-applies) `/Rotate` is unambiguously
+# fatal: OCR sees a sideways page and returns nothing usable.
+#
+# Both 90 and 270 are covered because they are the only two angles the defect
+# could distinguish -- and because `_rotate90`'s fixture alone leaves 270
+# untested, which is how a half-fixed rotation would slip through.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.requires("tesseract")
+@pytest.mark.parametrize("rotation", [90, 270])
+def test_b094_a_sideways_scan_that_rotate_makes_upright_is_readable(
+    tmp_path: Path, rotation: int
+) -> None:
+    from PIL import Image
+    from pypdf import PdfReader
+
+    # Lay the pixels down sideways so that applying `/Rotate` DISPLAYS them
+    # upright: `/Rotate` turns the page clockwise, so the raw content must be
+    # pre-turned by the same amount counter-clockwise.
+    sideways_png = tmp_path / f"sideways-{rotation}.png"
+    with Image.open(SCANNED_RASTER) as scan:
+        scan.rotate(rotation, expand=True).save(sideways_png)
+
+    page = tmp_path / f"sideways-{rotation}.pdf"
+    composed = compose_document(
+        [sideways_png],
+        output=page,
+        page=parse_page_size("from-image"),
+        fit="contain",
+        margin_pt=0.0,
+        dpi=None,
+        policy=_policy(),
+    )
+    assert composed.exit_code == 0, composed
+    rotated = _rotate(page, tmp_path, rotation)
+    assert PdfReader(str(rotated)).pages[0].rotation == rotation
+
+    output = tmp_path / f"sideways-{rotation}-ocrd.pdf"
+    result = ocr_run(
+        [rotated],
+        lang="eng",
+        dpi=200,
+        psm=3,
+        skip_text_pages=False,
+        pages_spec=None,
+        output=output,
+        out_dir=None,
+        name_template=None,
+        in_place=False,
+        policy=_policy(),
+    )
+    assert result.exit_code == 0, result
+    assert _extract_text(rotated) == ""  # the honest before-state: image only
+    assert EXPECTED_TEXT in _collapse_whitespace(_extract_text(output))
+    # And through the second, independent engine view -- spaces intact, which
+    # is the shape a page that genuinely DISPLAYS upright must produce.
+    assert EXPECTED_TEXT in page_text(output, 1)
 
 
 # --------------------------------------------------------------------------- #

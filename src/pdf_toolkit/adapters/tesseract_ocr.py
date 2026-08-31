@@ -99,6 +99,44 @@ def _parse_languages(stdout: str) -> tuple[str, ...]:
 _SUPPORTED_ROTATIONS: Final[frozenset[int]] = frozenset({0, 90, 180, 270})
 
 
+def _quarter_turn(
+    ctm: tuple[float, float, float, float, float, float], degrees: int
+) -> tuple[float, float, float, float, float, float]:
+    """*ctm* composed with an EXACT counter-clockwise turn of *degrees* (B-094).
+
+    *degrees* is one of 90/180/270; anything else is returned unchanged, which
+    is what makes ``rotation == 0`` a no-op at the call site.
+
+    ``pypdf.Transformation.rotate()`` builds its matrix from
+    ``math.cos``/``math.sin``, so a 90 degree turn carries
+    ``cos(pi/2) == 6.123233995736766e-17`` rather than ``0`` into the layer's
+    ``cm`` operator. That residue is far too small to move a glyph — it is
+    ~1e-14 pt across a Letter page — but it is not too small to be *read*:
+    ``pdfplumber`` derives each character's ``upright`` flag from those matrix
+    entries by comparing them against zero, so the epsilon flips ``upright``
+    and its word grouping then emits one character per line instead of whole
+    words. Measured on the AC7 fixture: with ``rotate(90)`` the product's own
+    ``TextEngine`` returned ``'P\\nD\\nF\\nT\\nO...'``; with the exact matrix
+    below it returns ``'PDF\\nTOOLKIT\\nOCR\\nFIXTURE'``, and the layer's
+    per-character matrices become exactly those of the same layer stamped onto
+    an unrotated page (``(0, -0.99980004, 0.99920064, 0)``, translations within
+    0.16 pt) rather than merely close to them.
+
+    Composition order matches ``Transformation.rotate``'s own
+    (``self.matrix @ rotation``), so this is a drop-in for it at the four
+    right angles and nothing else changes. Kept pure and pypdf-free so it can
+    be unit-tested without an engine (``adapters/__init__``'s import rule).
+    """
+    a, b, c, d, e, f = ctm
+    if degrees == 90:
+        return (-b, a, -d, c, -f, e)
+    if degrees == 180:
+        return (-a, -b, -c, -d, -e, -f)
+    if degrees == 270:
+        return (b, -a, d, -c, f, -e)
+    return ctm
+
+
 def _normalize_layer_geometry(
     raw_pdf_bytes: bytes,
     *,
@@ -176,12 +214,15 @@ def _normalize_layer_geometry(
     trsf = trsf.scale(display_width / raw_width, display_height / raw_height)
     # Step 2: rotate + translate by the inverse of `rotation` -- see the
     # docstring above for the derivation. `rotation == 0` needs neither.
+    # The quarter turn goes through `_quarter_turn`, not
+    # `Transformation.rotate()`: see that function's docstring for the
+    # trigonometric residue this avoids and what it was measured to break.
     if rotation == 90:
-        trsf = trsf.rotate(90).translate(page_width_pt, 0)
+        trsf = Transformation(_quarter_turn(trsf.ctm, 90)).translate(page_width_pt, 0)
     elif rotation == 180:
-        trsf = trsf.rotate(180).translate(page_width_pt, page_height_pt)
+        trsf = Transformation(_quarter_turn(trsf.ctm, 180)).translate(page_width_pt, page_height_pt)
     elif rotation == 270:
-        trsf = trsf.rotate(270).translate(0, page_height_pt)
+        trsf = Transformation(_quarter_turn(trsf.ctm, 270)).translate(0, page_height_pt)
 
     page.add_transformation(trsf, expand=False)
     page.mediabox.lower_left = (0, 0)
