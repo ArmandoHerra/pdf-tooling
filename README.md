@@ -4,7 +4,7 @@ An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftoolkit
 
 Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write-to-temp-then-rename, and inputs that are never mutated unless you ask for `--in-place`.
 
-**Current phase:** Phase 1 (v1) — per-spec status lives in `ai_plans/pdf-toolkit/specs/SPEC-INDEX.md`; history in `changelog.md`.
+**Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-toolkit/specs/SPEC-INDEX.md`; history in `changelog.md`.
 
 - **Website:** https://armandoherra.github.io/pdf-toolkit/ — the public landing page (source in `website/`).
 
@@ -28,16 +28,18 @@ uv run pdftoolkit --help
 
 ## What exists today
 
-The CLI spine is in place and end-to-end: the global flag block, the output contract, the exit-code contract, and one verb that exercises all of them.
+The CLI spine, the output contract and the exit-code contract are in place end-to-end, and every verb named at the top of this file — structure, raster, compose, text, optimize, crypto and overlay operations alike — is shipped behind them, not merely specified.
 
 ```bash
+uv run pdftoolkit --help               # the full verb tree; always the authoritative list
+uv run pdftoolkit doctor               # which engines resolved, and how
+uv run pdftoolkit merge a.pdf b.pdf -O merged.pdf
+uv run pdftoolkit rotate report.pdf --pages 2-4 --angle 90 -O rotated.pdf
+uv run pdftoolkit compress report.pdf -O small.pdf
 uv run pdftoolkit --version            # tool, Python and engine versions on one line
-uv run pdftoolkit version              # the same, as a rendered payload
-uv run pdftoolkit version -o json      # structured, one object
-uv run pdftoolkit version -o ndjson    # structured, one object per line
 ```
 
-The document verbs listed at the top of this file are planned, not shipped. `uv run pdftoolkit --help` is the authoritative list of what is actually available at any moment — if a verb is not printed there, it does not exist yet.
+`uv run pdftoolkit --help` is the authoritative list of what is actually available at any moment — if a verb is not printed there, it does not exist yet.
 
 ## Output contract
 

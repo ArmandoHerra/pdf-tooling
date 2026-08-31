@@ -1,9 +1,23 @@
 ---
-// Re-derived from src/pdf_toolkit/cli/exit_codes.py at landing (PDF-16 Phase
-// A, 2026-08-29) — seven codes, matching PLAN.md §5.6 and ALL_EXIT_CODES
-// exactly. The donor sites show six; this product adds AUTH.
+// Re-derived from src/pdf_toolkit/cli/exit_codes.py at PDF-16 Phase B
+// (2026-08-31) — codes, names and count are unchanged from Phase A: seven
+// codes, matching PLAN.md §5.6 and ALL_EXIT_CODES exactly. The donor sites
+// show six; this product adds AUTH.
+//
+// Cell 0's meaning prose deliberately DIVERGES from exit_codes.py's own
+// docstring and does so on purpose — do not "correct" it back. The source
+// docstring still reads "Also: a completed --dry-run, and an empty-but-valid
+// report", but operator ruling OR-7 struck that --dry-run clause
+// (PLAN.md:325, "superseded by OR-7, 2026-08-30"): under OR-7 a dry run
+// mirrors the exit code the real run would produce, so a completed
+// --dry-run is emphatically not always 0 (e.g. `convert --dry-run` with no
+// soffice present completes and exits 3). Per ruling X-142, the CODE and
+// NAME still come from exit_codes.py, but the meaning prose must not
+// restate a clause a ruling has struck — so this cell states OK truthfully
+// instead. The stale source docstring is backlog B-101 and is out of scope
+// here (src/ is not touched by this pass).
 const codes = [
-  { code: '0', name: 'OK', label: 'Success. Also a completed --dry-run, and an empty-but-valid report.' },
+  { code: '0', name: 'OK', label: 'Success — including an empty-but-valid report. A --dry-run mirrors the code the real run would return, so it is not always 0.' },
   { code: '1', name: 'FAILURE', label: 'The operation ran and failed — corrupt input, engine error, unwritable destination.' },
   { code: '2', name: 'USAGE', label: 'Bad invocation — unknown flag, mutually exclusive flags, malformed page range, unknown subcommand.' },
   { code: '3', name: 'ENGINE_MISSING', label: 'A required engine or binary is unavailable. The message always carries an install hint.' },

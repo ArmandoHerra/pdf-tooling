@@ -1,41 +1,48 @@
 ---
-// Data-driven verb roster. `status` is derived from `pdftoolkit --help`
-// (re-run at implementation time, PDF-16 Phase A, 2026-08-29), NOT from
-// PLAN.md §4.1 or this spec's text — that is the whole point of honesty
-// rule 7. At Phase A the CLI prints exactly one command: `version`
-// (PDF-01's placeholder). Every verb in PLAN.md §4.1 (25 rows) is therefore
-// `planned`; `version` joins `doctor` and `info` in the `diagnostics` group
-// per PDF-16 spec §D5, so the roster totals 26, not the 25 the spec's own
-// prose assumed. See the PDF-16 Implementation Log for this divergence.
+// Data-driven verb roster. `status` is derived from `pdftoolkit --help` AND
+// each verb's own `--help` (re-derived at implementation time, PDF-16
+// Phase B, 2026-08-31), NOT from PLAN.md §4.1 or this spec's text — that is
+// the whole point of honesty rule 7. All sixteen pdf-toolkit specs have now
+// landed: every one of the 25 top-level commands `pdftoolkit --help` prints
+// resolves with a working `--help` of its own, so every entry below is
+// `available` and `planned.length` is 0.
+//
+// `meta` is a grouping parent — `pdftoolkit meta --help` prints `get` and
+// `set` as its own two subcommands, both independently verified — so the
+// roster keeps `meta get` and `meta set` as two separate rows rather than
+// collapsing them into one `meta` row: both are real, distinct invocations,
+// and collapsing them would be a data-model change beyond this pass's
+// remit that loses purpose granularity. 25 top-level commands, minus the
+// `meta` parent, plus its two children, is 26 — the array's row count.
 type Verb = { name: string; port: string; purpose: string; status: 'available' | 'planned' };
 
 const verbs: Verb[] = [
-  { name: 'doctor', port: 'diagnostics', purpose: "Report each port's resolved adapter, version, and OS-aware install hint for what is missing.", status: 'planned' },
-  { name: 'info', port: 'diagnostics', purpose: 'Page count/sizes, encryption + permission bits, metadata, producer, font list, signature presence, per-page rotation.', status: 'planned' },
+  { name: 'doctor', port: 'diagnostics', purpose: "Report each port's resolved adapter, version, and OS-aware install hint for what is missing.", status: 'available' },
+  { name: 'info', port: 'diagnostics', purpose: 'Page count/sizes, encryption + permission bits, metadata, producer, font list, signature presence, per-page rotation.', status: 'available' },
   { name: 'version', port: 'diagnostics', purpose: 'Report the tool, runtime and engine versions.', status: 'available' },
-  { name: 'merge', port: 'structure', purpose: 'Concatenate PDFs; per-input page selection via path:range; outline entry per source file.', status: 'planned' },
-  { name: 'split', port: 'structure', purpose: 'One PDF → many, by fixed chunk size, explicit ranges, per page, or at top-level bookmarks.', status: 'planned' },
-  { name: 'extract', port: 'structure', purpose: 'Write the selected pages to a new PDF, in the order given.', status: 'planned' },
-  { name: 'delete', port: 'structure', purpose: 'Write everything except the selected pages.', status: 'planned' },
-  { name: 'rotate', port: 'structure', purpose: 'Rotate the selected pages by a multiple of 90°, absolute or relative.', status: 'planned' },
-  { name: 'reorder', port: 'structure', purpose: 'Rewrite page order from an explicit sequence; duplicates allowed, order preserved.', status: 'planned' },
-  { name: 'repair', port: 'structure', purpose: "Structural recovery of a damaged/malformed PDF via libqpdf's recovery parser.", status: 'planned' },
-  { name: 'linearize', port: 'structure', purpose: 'Rewrite for byte-serving ("fast web view").', status: 'planned' },
-  { name: 'permissions', port: 'structure', purpose: 'Report the permission bits and encryption algorithm of an encrypted PDF.', status: 'planned' },
-  { name: 'meta get', port: 'structure', purpose: 'Read the document information dictionary + XMP.', status: 'planned' },
-  { name: 'meta set', port: 'structure', purpose: 'Write/clear document information fields and XMP.', status: 'planned' },
-  { name: 'rasterize', port: 'raster', purpose: 'PDF → PNG/JPEG/TIFF/WEBP at a chosen DPI or pixel width.', status: 'planned' },
-  { name: 'compose', port: 'compose', purpose: 'Images → PDF. JPEG inputs embed as DCTDecode streams (byte-preserving, no re-encode).', status: 'planned' },
-  { name: 'create', port: 'compose', purpose: 'Text (v1) → PDF. Markdown/HTML behind the [html] extra (Phase 2).', status: 'planned' },
-  { name: 'text', port: 'text', purpose: 'Extract text: fast path (pdfium) or layout-aware (pdfplumber) with per-block geometry.', status: 'planned' },
-  { name: 'tables', port: 'text', purpose: 'Detect and extract tables to CSV/JSON.', status: 'planned' },
-  { name: 'compress', port: 'optimize', purpose: 'Shrink: libqpdf object streams plus stream recompression (lossless), optional Pillow image downsample/recompress (lossy).', status: 'planned' },
-  { name: 'encrypt', port: 'crypto', purpose: 'Apply AES-256 (or RC4-128 with --legacy) with user/owner passwords and a permission set.', status: 'planned' },
-  { name: 'decrypt', port: 'crypto', purpose: 'Remove encryption given the correct password.', status: 'planned' },
-  { name: 'watermark', port: 'overlay', purpose: 'Overlay/underlay generated text across the selected pages.', status: 'planned' },
-  { name: 'stamp', port: 'overlay', purpose: 'Overlay/underlay an existing PDF page onto the selected pages.', status: 'planned' },
-  { name: 'ocr', port: 'overlay', purpose: 'Add a Tesseract text layer over untouched pixels — a text-only PDF generated per page and merged.', status: 'planned' },
-  { name: 'convert', port: 'external', purpose: 'Office → PDF via headless LibreOffice.', status: 'planned' },
+  { name: 'merge', port: 'structure', purpose: 'Concatenate PDFs; per-input page selection via path:range; outline entry per source file.', status: 'available' },
+  { name: 'split', port: 'structure', purpose: 'One PDF → many, by fixed chunk size, explicit ranges, per page, or at top-level bookmarks.', status: 'available' },
+  { name: 'extract', port: 'structure', purpose: 'Write the selected pages to a new PDF, in the order given.', status: 'available' },
+  { name: 'delete', port: 'structure', purpose: 'Write everything except the selected pages.', status: 'available' },
+  { name: 'rotate', port: 'structure', purpose: 'Rotate the selected pages by a multiple of 90°, absolute or relative.', status: 'available' },
+  { name: 'reorder', port: 'structure', purpose: 'Rewrite page order from an explicit sequence; duplicates allowed, order preserved.', status: 'available' },
+  { name: 'repair', port: 'structure', purpose: "Structural recovery of a damaged/malformed PDF via libqpdf's recovery parser.", status: 'available' },
+  { name: 'linearize', port: 'structure', purpose: 'Rewrite for byte-serving ("fast web view").', status: 'available' },
+  { name: 'permissions', port: 'structure', purpose: 'Report the permission bits and encryption algorithm of an encrypted PDF.', status: 'available' },
+  { name: 'meta get', port: 'structure', purpose: 'Read the document information dictionary + XMP.', status: 'available' },
+  { name: 'meta set', port: 'structure', purpose: 'Write/clear document information fields and XMP.', status: 'available' },
+  { name: 'rasterize', port: 'raster', purpose: 'PDF → PNG/JPEG/TIFF/WEBP at a chosen DPI or pixel width.', status: 'available' },
+  { name: 'compose', port: 'compose', purpose: 'Images → PDF. JPEG inputs embed as DCTDecode streams (byte-preserving, no re-encode).', status: 'available' },
+  { name: 'create', port: 'compose', purpose: 'Text (v1) → PDF. Markdown/HTML behind the [html] extra (Phase 2).', status: 'available' },
+  { name: 'text', port: 'text', purpose: 'Extract text: fast path (pdfium) or layout-aware (pdfplumber) with per-block geometry.', status: 'available' },
+  { name: 'tables', port: 'text', purpose: 'Detect and extract tables to CSV/JSON.', status: 'available' },
+  { name: 'compress', port: 'optimize', purpose: 'Shrink: libqpdf object streams plus stream recompression (lossless), optional Pillow image downsample/recompress (lossy).', status: 'available' },
+  { name: 'encrypt', port: 'crypto', purpose: 'Apply AES-256 (or RC4-128 with --legacy) with user/owner passwords and a permission set.', status: 'available' },
+  { name: 'decrypt', port: 'crypto', purpose: 'Remove encryption given the correct password.', status: 'available' },
+  { name: 'watermark', port: 'overlay', purpose: 'Overlay/underlay generated text across the selected pages.', status: 'available' },
+  { name: 'stamp', port: 'overlay', purpose: 'Overlay/underlay an existing PDF page onto the selected pages.', status: 'available' },
+  { name: 'ocr', port: 'overlay', purpose: 'Add a Tesseract text layer over untouched pixels — a text-only PDF generated per page and merged.', status: 'available' },
+  { name: 'convert', port: 'external', purpose: 'Office → PDF via headless LibreOffice.', status: 'available' },
 ];
 
 const available = verbs.filter((v) => v.status === 'available');
@@ -53,7 +60,10 @@ const groups = portOrder
       {available.length} shipped &middot; {planned.length} planned
     </h2>
     <p class="mt-4 text-lg text-surface-100">
-      Verbs marked <strong>planned</strong> are specified and not yet shipped. This list is
+      {planned.length > 0 && (
+        <>Verbs marked <strong>planned</strong> are specified and not yet shipped. </>
+      )}
+      This list is
       checked against <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftoolkit --help</code> at every deploy.
     </p>
   </div>

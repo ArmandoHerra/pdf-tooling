@@ -19,6 +19,28 @@ Audit this file per commit with `git show <sha> -- changelog.md`, never with a h
 grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
+## [Task: PDF-16 — Project website (GitHub Pages), Phase B] - 2026-08-31
+- Re-derived `Verbs.astro`'s roster entirely from `pdftoolkit --help` and each verb's own
+  `--help`, entry by entry: all 16 pdf-toolkit specs have now landed, so all 26 rows
+  (25 top-level commands, with the `meta` grouping parent kept expanded as its own
+  `meta get`/`meta set` rows) are `available`; `planned.length` is 0, and the
+  "Verbs marked planned..." sentence is now rendered conditionally on that count while
+  the anti-drift sentence stays unconditional.
+- Corrected `ExitCodes.astro`'s `OK` cell prose per operator ruling X-142: the code and
+  name still come from `src/pdf_toolkit/cli/exit_codes.py`, but the meaning text no
+  longer restates the `--dry-run` clause struck by OR-7 (a completed `--dry-run` mirrors
+  the code the real run would return, so it is not always 0). The other six cells and
+  the source docstring's remaining staleness are unchanged (`B-101`, out of `src/` scope).
+- Regenerated `website/src/data/licenses.json` via `make licenses`; both it and
+  `THIRD_PARTY_LICENSES` came back byte-identical to what CI already has at `327b4ad`
+  (no drift to commit).
+- Rewrote `QuickStart.astro`'s example block to three shipped invocations (`merge`,
+  `rotate`, `compress`), every flag checked against that verb's own `--help`; per
+  backlog `B-097`, neither `ocr` nor `watermark --pages N` appears in any example.
+  Refreshed `README.md`'s "What exists today" section and both `README.md`/`CLAUDE.md`
+  `Current phase:` lines (phase-name clause only, to "Phase 1 (v1) complete" — the
+  trailing pointer clause is byte-identical in both files, per X-124/HC-5).
+
 ## [B-102] fix: a `test_raster.py` comment contradicted the commit that wrote it — 2026-08-31
 - The comment heading B-094's four-angle matrix (`tests/unit/test_raster.py`) still said the double `/Rotate` application *"cancelled out at 0/180"*. **B-094 disproved that in the same commit**: the second application is an additional clockwise turn of `/Rotate` degrees, so the error was 90° at `/Rotate 90`, **180° at `/Rotate 180` — it did not cancel** — and 270° at `/Rotate 270`; only `/Rotate 0` was ever correct. `adapters/pdfium_raster.py`'s module docstring, written in that same commit, already says so, so the two read in opposite directions.
 - The corrected comment also records **where the wrong reading came from** — comparing image *sizes*, which the second swap had already put back — because that is the part a future reader needs in order not to re-derive it. This is why the matrix asserts the band edge as well as the size: `_BAND_EDGE_AFTER_ROTATE`'s expectations only make sense against the corrected description, not against "cancels at 0/180".

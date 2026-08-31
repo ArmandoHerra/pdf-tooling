@@ -1,16 +1,24 @@
 ---
-// PDF-16 Phase A — R-6: only commands that exist in wave 3. `merge` /
-// `rasterize` / `compose` land in wave 5 and do not exist yet; showing them
-// here would violate honesty rule 7. Re-derived from `uv run pdftoolkit
-// --help`, 2026-08-29: the entire Commands: block is `version`.
+// PDF-16 Phase B (2026-08-31) — re-derived from `uv run pdftoolkit --help`
+// and each example verb's own `--help`. All sixteen pdf-toolkit specs have
+// now landed, so the Phase A caveat this comment used to carry ("only
+// commands that exist in wave 3 ... the entire Commands: block is
+// `version`") no longer holds. `merge`, `rotate` and `compress` below are
+// real, shipped invocations; every flag used in every example was checked
+// against that verb's own `--help` before being written here.
+//
+// Architectural constraint (backlog B-097): neither `ocr` nor
+// `watermark --pages N` appears in any example below, because both also
+// modify pages sharing a /Contents object — see PLAN.md §11.1.6. Other
+// verbs' page selection (as used by `rotate` here) is unaffected.
 const install = `# Install (the repository is public; this line is live today)
 uv tool install git+https://github.com/ArmandoHerra/pdf-toolkit
 # or: pipx install git+https://github.com/ArmandoHerra/pdf-toolkit`;
 
-const commands = `pdftoolkit --version        # version, Python, and resolved adapter versions
-pdftoolkit --help           # the global flags and the verbs available today
-pdftoolkit version          # the same information, as a rendered payload
-pdftoolkit version -o json  # structured, one object with schema_version`;
+const commands = `pdftoolkit doctor                                                    # which engines resolved, and how
+pdftoolkit merge a.pdf b.pdf -O merged.pdf                           # concatenate PDFs into one file
+pdftoolkit rotate report.pdf --pages 2-4 --angle 90 -O rotated.pdf   # rotate pages 2-4 by 90°
+pdftoolkit compress report.pdf -O small.pdf                          # lossless structural shrink`;
 ---
 
 <section id="quickstart" class="border-t border-surface-800 bg-surface-800/20 py-24">
@@ -40,7 +48,7 @@ pdftoolkit version -o json  # structured, one object with schema_version`;
     <p class="mt-6 text-sm text-surface-100">
       Until the first PyPI release, install straight from the repository — no package-index
       install, no Homebrew formula, no system package, no container image yet.
-      The document verbs are <a href="#verbs" class="text-primary-400 underline hover:text-primary-300">specified and not yet shipped</a> —
+      Every verb <a href="#verbs" class="text-primary-400 underline hover:text-primary-300">listed below</a> is shipped —
       <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdftoolkit --help</code> is the authoritative
       list of what actually exists.
     </p>

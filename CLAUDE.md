@@ -6,7 +6,7 @@
 
 `pdf-toolkit` is an Apache-2.0 command-line tool for the common PDF chores. It **orchestrates** permissively licensed PDF engines; it does not implement PDF parsing, rendering or codecs, and it never will — that is a multi-year project and the classic memory-safety attack surface.
 
-**Current phase:** Phase 1 (v1) — per-spec status lives in `ai_plans/pdf-toolkit/specs/SPEC-INDEX.md`; history in `changelog.md`.
+**Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-toolkit/specs/SPEC-INDEX.md`; history in `changelog.md`.
 
 Do not restate status here. This file carries exactly one phase line, and that line is a pointer, not a status: it is written so that landing work requires editing it zero times. A status chain in a prime prompt rots within a week and then actively misleads.
 
