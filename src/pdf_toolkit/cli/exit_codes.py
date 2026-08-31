@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from typing import Final
 
-#: Success. Also: a completed ``--dry-run``, and an empty-but-valid report.
+#: Success — including an empty-but-valid report. A ``--dry-run`` mirrors the
+#: exit code the real run would return, so it is not always 0.
 OK: Final[int] = 0
 
 #: The operation ran and failed — corrupt input, engine error, unwritable

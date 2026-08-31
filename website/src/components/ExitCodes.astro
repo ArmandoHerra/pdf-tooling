@@ -4,18 +4,19 @@
 // codes, matching PLAN.md §5.6 and ALL_EXIT_CODES exactly. The donor sites
 // show six; this product adds AUTH.
 //
-// Cell 0's meaning prose deliberately DIVERGES from exit_codes.py's own
-// docstring and does so on purpose — do not "correct" it back. The source
-// docstring still reads "Also: a completed --dry-run, and an empty-but-valid
-// report", but operator ruling OR-7 struck that --dry-run clause
-// (PLAN.md:325, "superseded by OR-7, 2026-08-30"): under OR-7 a dry run
-// mirrors the exit code the real run would produce, so a completed
+// Cell 0's meaning prose deliberately omits the struck "a dry run is also
+// 0" clause — do not "correct" it back in. Operator ruling OR-7 struck that
+// clause (PLAN.md:325, "superseded by OR-7, 2026-08-30"): under OR-7 a dry
+// run mirrors the exit code the real run would produce, so a completed
 // --dry-run is emphatically not always 0 (e.g. `convert --dry-run` with no
 // soffice present completes and exits 3). Per ruling X-142, the CODE and
 // NAME still come from exit_codes.py, but the meaning prose must not
 // restate a clause a ruling has struck — so this cell states OK truthfully
-// instead. The stale source docstring is backlog B-101 and is out of scope
-// here (src/ is not touched by this pass).
+// instead. When this note was written the source docstring still carried the
+// struck clause and this cell knowingly diverged from it; B-101 (2026-08-31)
+// has since corrected exit_codes.py, so the two now AGREE. The note stays as
+// the guard that keeps an honest re-derivation from any older copy of the
+// docstring from walking the clause back in.
 const codes = [
   { code: '0', name: 'OK', label: 'Success — including an empty-but-valid report. A --dry-run mirrors the code the real run would return, so it is not always 0.' },
   { code: '1', name: 'FAILURE', label: 'The operation ran and failed — corrupt input, engine error, unwritable destination.' },

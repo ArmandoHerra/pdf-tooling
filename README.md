@@ -61,7 +61,7 @@ Uniform across every verb.
 
 | Code | Name | Meaning |
 |---|---|---|
-| 0 | `OK` | Success. Also a completed `--dry-run`, and an empty-but-valid report. |
+| 0 | `OK` | Success — including an empty-but-valid report. A `--dry-run` mirrors the code the real run would return, so it is not always 0. |
 | 1 | `FAILURE` | The operation ran and failed — corrupt input, engine error, unwritable destination. |
 | 2 | `USAGE` | Bad invocation — unknown flag, mutually exclusive flags, malformed page range, unknown subcommand. |
 | 3 | `ENGINE_MISSING` | A required engine or binary is unavailable. The message always carries an install hint. |
