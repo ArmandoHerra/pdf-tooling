@@ -399,6 +399,61 @@ def test_c13_bulk_destructive_requires_y_on_a_non_tty(verb, corpus, tmp_path: Pa
         )
 
 
+@pytest.mark.parametrize("verb", DESTRUCTIVE, ids=_ids(DESTRUCTIVE))
+def test_c13_dry_run_predicts_the_bulk_destructive_refusal(verb, corpus, tmp_path: Path) -> None:
+    """B-093 -- OR-7 over C13's own population: `dry == real == 5`, AS A PAIR.
+
+    PDF-15 §D12.2 lists "bulk-destructive, non-TTY, no `-y`" among the rows
+    KNOWABLE at plan time, and it was the last one still splitting: every CLI
+    call site guarded `require_confirmation` with `if not config.dry_run and
+    ...`, so the preview skipped the gate, exited 0, and green-lit
+    `cmd --dry-run && cmd` into a run that then refused.
+
+    Deliberately parameterized over `DESTRUCTIVE` rather than written against
+    one verb: this is the same generic-population discipline every other row in
+    this module follows, so the sixteenth destructive verb is covered the day it
+    registers a `destructive_build`, not the day someone remembers it. The
+    matching per-verb pairs for PDF-15's own two verbs (including `convert`,
+    whose destructive shape is `--force` over occupied targets and so cannot
+    join C13's `--in-place` population) live in
+    `tests/integration/test_or7_bulk_destructive.py`.
+
+    Purity is asserted alongside the code, under a redirected `HOME`/`TMPDIR`
+    (C10's own instrument): predicting a refusal must not become a licence to
+    touch the filesystem, and a gate that read stdin here would hang rather
+    than fail.
+    """
+    invocation = INVOCATIONS[verb.name]
+    args = (invocation.destructive_build or invocation.build)(corpus, tmp_path)
+    operands = [Path(tok) for tok in args if not tok.startswith("-")]
+    operands = [op for op in operands if op.is_file()]
+    assert operands, f"{verb.name}: destructive invocation names no discoverable operand file"
+
+    env, roots = redirected_environment(tmp_path)
+    before = snapshot(*roots)
+    dry = run_cli(verb.name, "--dry-run", *args, env=env, cwd=tmp_path)
+    assert_unchanged(before, snapshot(*roots))
+
+    real = run_cli(verb.name, *args, env=env, cwd=tmp_path)
+    assert dry.returncode == real.returncode, (
+        f"{verb.name}: OR-7 violated at the confirmation gate -- "
+        f"dry={dry.returncode} real={real.returncode}; "
+        f"`{verb.name} --dry-run && {verb.name}` would green-light a refused run. "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+    assert dry.returncode == 5, (
+        f"{verb.name}: a bulk-destructive non-TTY run without -y is knowable at "
+        f"plan time (D12.2) and must predict exit 5, got {dry.returncode}: "
+        f"{dry.stdout}{dry.stderr}"
+    )
+
+    dry_payload = json.loads(
+        run_cli(verb.name, "-o", "json", "--dry-run", *args, cwd=tmp_path).stdout
+    )
+    assert dry_payload["error"]["kind"] == "refused", dry_payload
+    assert "-y" in dry_payload["error"]["message"]
+
+
 # --------------------------------------------------------------------------- #
 # C14 -- the OR-3 matrix arm (AC25, Design §D12). Every verb in the LIVE
 # registry x every OUTPUT_FLAGS entry -> honoured (a file appears) or exit 2.

@@ -88,7 +88,7 @@ def merge_command(
 
     merge_inputs = resolve_merge_inputs(tuple(inputs))
 
-    if not config.dry_run and config.force and target_exists(config.output):
+    if config.force and target_exists(config.output):
         # Local import: `cli.main` imports this module at load time to
         # register the command, so a module-level import here would cycle.
         from pdf_toolkit.cli.main import build_rerun_hint

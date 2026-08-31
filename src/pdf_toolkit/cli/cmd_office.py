@@ -130,7 +130,7 @@ def convert_command(
     if not (config.output is not None or config.out_dir is not None):
         raise UsageError("convert requires --output or --out-dir")
 
-    if not config.dry_run and config.force:
+    if config.force:
         planned = resolve_convert_targets(
             sources, output=config.output, out_dir=config.out_dir, name_template=config.name
         )

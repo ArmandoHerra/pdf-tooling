@@ -99,7 +99,7 @@ def delete_command(
     if not (config.output is not None or config.out_dir is not None or config.in_place):
         raise UsageError(f"{VERB} requires --output, --out-dir, or --in-place")
 
-    if not config.dry_run and config.in_place:
+    if config.in_place:
         # Local import: `cli.main` imports this module at load time to register
         # the command, so a module-level import here would cycle.
         from pdf_toolkit.cli.main import build_rerun_hint

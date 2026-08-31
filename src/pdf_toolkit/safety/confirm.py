@@ -26,6 +26,39 @@ subprocess, a never-written stdin pipe and a hard timeout, not asserted in prose
 pure function of its arguments, which is what lets the CLI decide how to spell a
 command that a user can paste back. It also keeps ``SafetyPolicy`` at the seven
 fields ``PLAN.md`` §6 pins — the hint is an argument, not a new field.
+
+Under ``--dry-run`` the gate PREDICTS, and never prompts (OR-7, B-093)
+-----------------------------------------------------------------------
+Operator ruling **OR-7** makes ``--dry-run`` mirror the exit code the real run
+would produce, and PDF-15 §D12.2 lists *"bulk-destructive, non-TTY, no ``-y``"*
+as **knowable at plan time**: nothing has to be attempted to know that this gate
+refuses, so a dry run predicts **5** exactly as the real run exits **5**.
+
+Until B-093 every one of the fifteen CLI call sites guarded this function with
+``if not config.dry_run and …``, so a dry run skipped the gate entirely and
+exited **0** where the real run exited **5** — ``cmd --dry-run && cmd`` green-lit
+a run that then refused. The rule now lives **here**, in the one shared check
+every call site already funnels through, rather than in fifteen guards a
+sixteenth verb would have to rediscover; ``tests/test_cli_spine.py`` asserts,
+against the AST rather than a comment, that no ``cli/cmd_*.py`` module
+re-introduces such a guard.
+
+**This is the only correct home for it.** The gate's own inputs — the resolved
+input count, and which targets already exist — are verb-specific, so the check
+cannot move up into ``cli/common.py::validate_config`` beside its OR-3 siblings;
+and it must not, because *precedence* would then be wrong. ``validate_config``
+runs before a verb has rejected a missing input (exit 4) or an impossible arity
+(exit 2), whereas the real run reaches this gate after both. Leaving the check
+where every verb already calls it keeps the dry run refusing at exactly the tier
+the real run refuses at first, which is the whole of what OR-7 asks for.
+
+**On a TTY, a dry run neither prompts nor refuses.** There the real run asks a
+human, and how that human answers is not a fact about the invocation — it is
+D12.2's carve-out shape ("a preview predicts *resolvability*, never
+*correctness*"), the same one a wrong password takes. Reading stdin under
+``--dry-run`` would also break the non-negotiable purity rule (``CLAUDE.md``
+rule 2): a preview that blocks on an answer is exactly the outage the non-TTY
+branch above exists to prevent.
 """
 
 from __future__ import annotations
@@ -69,6 +102,12 @@ def require_confirmation(
 
     Returns without doing anything at all unless the run is both bulk and
     destructive and ``-y`` was not given.
+
+    Under ``policy.dry_run`` this is a **prediction**: the non-TTY refusal is
+    raised exactly as it would be for real (OR-7 — ``dry == real == 5``), and
+    the interactive branch below is never reached, so no stdin is read, nothing
+    is written and nothing can block. See this module's own docstring for why
+    the rule lives here and not in ``cli/common.py``.
     """
     bulk = input_count > 1
     destructive = in_place or bool(clobbered)
@@ -76,12 +115,27 @@ def require_confirmation(
         return
 
     if not policy.is_tty:
+        # Raised under `--dry-run` TOO, and deliberately with the identical
+        # payload: OR-7 asks for the exit code the real run would produce, and
+        # the closest landed sibling -- B-096's engine tier -- answers the same
+        # way, with the top-level error envelope rather than a synthesized plan
+        # item (`tests/integration/test_or7_engine_absent.py` asserts dry and
+        # real carry the SAME error object). `would_exit` belongs to the
+        # FILESYSTEM tier, which is planned inside `ops/`; this gate fires in
+        # the CLI layer above any plan, so manufacturing an item here would be
+        # a second refusal-reporting mechanism, not a reuse of the existing one.
         raise ConfirmationRequiredError(
             f"refusing a destructive run on {input_count} inputs without confirmation "
             f"(stdin is not a terminal)\n"
             f"hint: re-run with -y to confirm:\n"
             f"  {rerun_hint}"
         )
+
+    # A TTY, no `-y`: the real run asks a human. That answer is not a fact this
+    # invocation carries, so a dry run declines to guess it -- D12.2's carve-out
+    # -- and above all does not read the stdin a preview must leave alone.
+    if policy.dry_run:
+        return
 
     out = stream if stream is not None else sys.stderr
     what = "in place" if in_place else f"over {len(clobbered)} existing file(s)"

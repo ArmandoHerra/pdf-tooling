@@ -1270,3 +1270,247 @@ def test_benign_section_3_mentions_are_never_flagged() -> None:
     discipline."""
     found = scan_cli_framework_imports(BENIGN_SECTION_3, "pdf_toolkit.ops.benign")
     assert found == [], f"false positives: {[str(item) for item in found]}"
+
+
+# --------------------------------------------------------------------------- #
+# Section 4 -- the confirmation gate is never bypassed under `--dry-run` (B-093)
+#
+# APPENDED, never rewritten, per this file's own header rule; it reuses
+# `iter_python_files`, `module_name` and `Boundary` rather than starting a
+# fourth walk.
+#
+# THE DEFECT THIS EXISTS FOR. Every one of the fifteen `require_confirmation`
+# call sites was written as `if not config.dry_run and <destructive>:`, so a
+# bulk-destructive invocation on a non-TTY without `-y` exited 0 under
+# `--dry-run` and 5 for real -- a `dry != real` split (operator ruling OR-7,
+# PDF-15 §D12.2's "bulk-destructive" row, which is KNOWABLE at plan time).
+# Eight of those guards predate the spec that first noticed them.
+#
+# WHY A STRUCTURAL RULE AND NOT ONLY A BEHAVIOURAL ONE. The behavioural pairs
+# (`tests/integration/test_or7_bulk_destructive.py`, C13's dry arm) cover the
+# verbs that exist today. This walk covers the ones that do not: the sixteenth
+# verb's author copies a neighbouring `cmd_*.py`, and copying the old shape back
+# in is exactly how this defect got to fifteen sites. `--dry-run` awareness now
+# lives once, inside `safety/confirm.py::require_confirmation`; a caller's job
+# is to call it unconditionally on the destructive path, and that is the rule
+# below.
+#
+# AST, not grep, for the reason every other section here is: the words
+# "dry_run" and "require_confirmation" appear in the docstrings and comments of
+# most of these modules, and a text scan would be red on prose and blind to
+# `if cfg.dry_run: ...` spelled with a different receiver name.
+# --------------------------------------------------------------------------- #
+
+KIND_DRY_RUN_BYPASS: Final = "dry-run-confirmation-bypass"
+
+#: The shared gate. Matched on the CALL NAME, so both `require_confirmation(...)`
+#: and `confirm.require_confirmation(...)` are seen.
+CONFIRMATION_CALL: Final = "require_confirmation"
+
+#: The attribute/name whose appearance in a GUARD is the bypass. `--dry-run` is
+#: spelled `dry_run` on both `GlobalConfig` and `SafetyPolicy`, and the receiver
+#: name varies by call site (`config`, `cfg`, `policy`), so the walk keys on the
+#: attribute rather than on any one dotted spelling.
+DRY_RUN_NAMES: Final = frozenset({"dry_run"})
+
+
+def _mentions_dry_run(node: ast.AST) -> bool:
+    """Does this expression read a ``dry_run`` flag anywhere inside it?"""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Attribute) and child.attr in DRY_RUN_NAMES:
+            return True
+        if isinstance(child, ast.Name) and child.id in DRY_RUN_NAMES:
+            return True
+    return False
+
+
+def _parent_map(tree: ast.Module) -> dict[int, ast.AST]:
+    parents: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[id(child)] = node
+    return parents
+
+
+def _guarding_conditions(node: ast.AST, parents: dict[int, ast.AST]) -> list[ast.AST]:
+    """Every condition that must hold for *node* to be evaluated.
+
+    Walks up the parent chain and collects the test of each enclosing ``if``
+    (only when *node* really is in a branch of it, never when it is inside the
+    test itself), plus ``a if C else b`` and the short-circuit operands of
+    ``and``/``or``. Those three are the whole grammar for "this call is
+    conditional" in an expression-or-statement position.
+    """
+    conditions: list[ast.AST] = []
+    current: ast.AST | None = node
+    while current is not None:
+        parent = parents.get(id(current))
+        if parent is None:
+            break
+        if isinstance(parent, ast.If) and current is not parent.test:
+            conditions.append(parent.test)
+        elif isinstance(parent, ast.IfExp) and current is not parent.test:
+            conditions.append(parent.test)
+        elif isinstance(parent, ast.BoolOp):
+            index = parent.values.index(current) if current in parent.values else 0
+            conditions.extend(parent.values[:index])
+        current = parent
+    return conditions
+
+
+def scan_dry_run_bypass(source: str, module: str) -> list[Boundary]:
+    """Calls to the confirmation gate that a ``dry_run`` condition can skip."""
+    tree = ast.parse(source, filename=module)
+    parents = _parent_map(tree)
+    found: list[Boundary] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if dotted(node.func).split(".")[-1] != CONFIRMATION_CALL:
+            continue
+        for condition in _guarding_conditions(node, parents):
+            if _mentions_dry_run(condition):
+                found.append(
+                    Boundary(
+                        module,
+                        node.lineno,
+                        CONFIRMATION_CALL,
+                        KIND_DRY_RUN_BYPASS,
+                        "the confirmation gate is guarded by a dry_run condition "
+                        "(OR-7: a dry run must PREDICT the refusal, exit 5)",
+                    )
+                )
+                break
+    return found
+
+
+def scan_confirmation_calls(root: Path) -> list[Boundary]:
+    found: list[Boundary] = []
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        found.extend(scan_dry_run_bypass(path.read_text(), module))
+    return found
+
+
+def _confirmation_call_sites(root: Path) -> list[str]:
+    """Every module under *root* that calls the gate at all."""
+    sites: list[str] = []
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        tree = ast.parse(path.read_text(), filename=module)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and dotted(node.func).split(".")[-1] == CONFIRMATION_CALL:
+                sites.append(f"{module}:{node.lineno}")
+    return sites
+
+
+def test_no_dry_run_guard_wraps_the_confirmation_gate() -> None:
+    found = scan_confirmation_calls(SRC)
+    listed = "\n".join(f"  - {item}" for item in found)
+    assert found == [], (
+        "`--dry-run` awareness belongs to `safety/confirm.py::require_confirmation` "
+        "alone (B-093 / OR-7); a caller must reach it on every destructive path:\n"
+        f"{listed}"
+    )
+
+
+def test_the_walk_actually_finds_the_confirmation_call_sites() -> None:
+    """Non-vacuity. A green Section 4 over zero call sites proves nothing -- the
+    same trap `DESTRUCTIVE` sat in from PDF-06 to PDF-14 (B-079)."""
+    sites = _confirmation_call_sites(SRC)
+    assert len(sites) >= 10, f"Section 4 found only {len(sites)} call site(s): {sites}"
+
+
+PLANTED_SECTION_4: Final = (
+    (
+        "plant-the-original-b093-guard",
+        "pdf_toolkit/cli/cmd_sneaky.py",
+        "from pdf_toolkit.safety.confirm import require_confirmation\n\n\n"
+        "def go(config):\n"
+        "    if not config.dry_run and config.in_place:\n"
+        "        require_confirmation(config.safety, input_count=2, in_place=True,\n"
+        "                             rerun_hint='x')\n",
+    ),
+    (
+        "plant-a-nested-guard",
+        "pdf_toolkit/cli/cmd_nested.py",
+        "from pdf_toolkit.safety import confirm\n\n\n"
+        "def go(config):\n"
+        "    if config.in_place:\n"
+        "        if config.dry_run:\n"
+        "            return\n"
+        "        else:\n"
+        "            confirm.require_confirmation(config.safety, input_count=2,\n"
+        "                                         in_place=True, rerun_hint='x')\n",
+    ),
+    (
+        "plant-a-short-circuit-guard",
+        "pdf_toolkit/cli/cmd_shortcircuit.py",
+        "from pdf_toolkit.safety.confirm import require_confirmation\n\n\n"
+        "def go(cfg):\n"
+        "    cfg.dry_run or require_confirmation(cfg.safety, input_count=2,\n"
+        "                                        in_place=True, rerun_hint='x')\n",
+    ),
+    (
+        "plant-a-ternary-guard",
+        "pdf_toolkit/cli/cmd_ternary.py",
+        "from pdf_toolkit.safety.confirm import require_confirmation\n\n\n"
+        "def go(policy, cfg):\n"
+        "    return None if policy.dry_run else require_confirmation(\n"
+        "        policy, input_count=2, in_place=True, rerun_hint='x')\n",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "relative", "source"),
+    PLANTED_SECTION_4,
+    ids=[row[0] for row in PLANTED_SECTION_4],
+)
+def test_a_planted_section_4_violation_fails_the_walk(
+    label: str,
+    relative: str,
+    source: str,
+    tmp_path: Path,
+) -> None:
+    """Copy src/, plant one dry-run-guarded gate call, confirm Section 4 reddens.
+
+    The first row is the ORIGINAL B-093 defect, verbatim -- the cheapest way to
+    show this instrument detects a case already known to have happened.
+    """
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / relative
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(source)
+
+    found = scan_confirmation_calls(scratch)
+    assert found, f"Section 4 did not notice the planted violation: {label}"
+
+
+BENIGN_SECTION_4 = '''
+"""A module that talks about dry_run near the gate without guarding it.
+
+`if not config.dry_run and config.in_place:` in prose is not a guard.
+"""
+
+from pdf_toolkit.safety.confirm import require_confirmation
+
+
+def go(config):
+    if config.dry_run:
+        note = "planning only"
+    else:
+        note = "writing"
+    if config.in_place:
+        require_confirmation(config.safety, input_count=2, in_place=True, rerun_hint=note)
+'''
+
+
+def test_benign_section_4_mentions_are_never_flagged() -> None:
+    """A sibling `if config.dry_run:` branch, and the defect's own text quoted in
+    a docstring, are not bypasses -- the mechanized proof that Section 4 is an
+    AST walk and not a text grep, matching Sections 1-3's negative-control
+    discipline."""
+    found = scan_dry_run_bypass(BENIGN_SECTION_4, "pdf_toolkit.cli.cmd_benign")
+    assert found == [], f"false positives: {[str(item) for item in found]}"

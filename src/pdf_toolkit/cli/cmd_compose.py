@@ -148,7 +148,7 @@ def compose_command(
     margin_pt = parse_length(margin, flag="--margin")
     output = resolve_single_output(sources, config.output, verb=VERB)
 
-    if not config.dry_run and config.force and target_exists(output):
+    if config.force and target_exists(output):
         # Local import: `cli.main` imports this module at load time to
         # register the command, so a module-level import here would cycle.
         from pdf_toolkit.cli.main import build_rerun_hint

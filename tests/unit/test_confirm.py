@@ -275,3 +275,110 @@ def test_declining_on_a_real_terminal_exits_5() -> None:
 def test_accepting_on_a_real_terminal_proceeds() -> None:
     result = _answer_on_a_pty("y\n")
     assert result.returncode == OK, result.stderr
+
+
+# --------------------------------------------------------------------------- #
+# B-093 -- under `--dry-run` the gate PREDICTS and never prompts (OR-7).
+#
+# PDF-15 §D12.2 lists "bulk-destructive, non-TTY, no -y" as KNOWABLE at plan
+# time, so a dry run must exit the 5 the real run exits. Until B-093 the rule
+# could not even be expressed here: all fifteen CLI call sites guarded this
+# function with `if not config.dry_run and ...`, so `dry_run` never reached it
+# and every arm below would have been vacuous. The rule now lives in this one
+# shared check, which is why these are unit arms and not fifteen CLI probes.
+#
+# The TTY arm is the carve-out, and it is the one that needs a real instrument:
+# "does not prompt" is only proven by a reader that would FAIL if it were read.
+# --------------------------------------------------------------------------- #
+
+
+class _ExplodingReader:
+    """A stdin stand-in that fails the test if anything reads it.
+
+    `--dry-run` purity (CLAUDE.md rule 2) is about more than not writing: a
+    preview that blocks on an answer is the outage the non-TTY branch exists to
+    prevent. A `StringIO` would let a regression pass silently.
+    """
+
+    def readline(self) -> str:  # pragma: no cover - reaching it IS the failure
+        raise AssertionError("--dry-run read stdin at the confirmation gate")
+
+
+def test_a_dry_run_predicts_the_non_terminal_refusal() -> None:
+    """OR-7 / D12.2 -- dry == real == 5, with the identical payload."""
+    with pytest.raises(errors.ConfirmationRequiredError) as dry:
+        require_confirmation(
+            make_policy(dry_run=True, is_tty=False),
+            input_count=2,
+            in_place=True,
+            rerun_hint=HINT,
+            reader=_ExplodingReader(),  # type: ignore[arg-type]
+        )
+    with pytest.raises(errors.ConfirmationRequiredError) as real:
+        require_confirmation(
+            make_policy(dry_run=False, is_tty=False),
+            input_count=2,
+            in_place=True,
+            rerun_hint=HINT,
+        )
+    assert dry.value.exit_code == real.value.exit_code == REFUSED
+    assert dry.value.message == real.value.message
+
+
+def test_a_dry_run_predicts_a_clobbering_refusal_too() -> None:
+    """The `clobbered=` half of "destructive" -- `merge`/`compose`/`convert`'s
+    shape, not just `--in-place`'s."""
+    with pytest.raises(errors.ConfirmationRequiredError):
+        require_confirmation(
+            make_policy(dry_run=True, is_tty=False),
+            input_count=2,
+            clobbered=("a.pdf", "b.pdf"),
+            rerun_hint=HINT,
+            reader=_ExplodingReader(),  # type: ignore[arg-type]
+        )
+
+
+def test_a_dry_run_on_a_terminal_neither_prompts_nor_refuses() -> None:
+    """D12.2's carve-out: how a human answers is not a fact about the
+    invocation, so the preview predicts nothing and -- above all -- reads
+    nothing. The stream is checked as well as the reader: a prompt printed and
+    then abandoned would leave the operator staring at an unanswerable question.
+    """
+    stream = StringIO()
+    require_confirmation(
+        make_policy(dry_run=True, is_tty=True),
+        input_count=4,
+        in_place=True,
+        rerun_hint=HINT,
+        stream=stream,
+        reader=_ExplodingReader(),  # type: ignore[arg-type]
+    )
+    assert stream.getvalue() == "", f"a --dry-run prompted: {stream.getvalue()!r}"
+
+
+@pytest.mark.parametrize(
+    ("label", "kwargs", "policy_kwargs"),
+    [
+        ("dry, single input, in place", {"input_count": 1, "in_place": True}, {}),
+        ("dry, bulk but create-only", {"input_count": 500}, {}),
+        (
+            "dry, bulk destructive with -y",
+            {"input_count": 9, "in_place": True},
+            {"assume_yes": True},
+        ),
+    ],
+    ids=lambda value: value if isinstance(value, str) else "",
+)
+def test_a_dry_run_keeps_every_negative_the_real_run_has(
+    label: str,
+    kwargs: dict[str, object],
+    policy_kwargs: dict[str, object],
+) -> None:
+    """`dry == real` cuts both ways: a preview that refused where the real run
+    proceeds would be exactly as wrong as the defect B-093 fixed."""
+    require_confirmation(
+        make_policy(dry_run=True, **policy_kwargs),  # type: ignore[arg-type]
+        rerun_hint=HINT,
+        reader=_ExplodingReader(),  # type: ignore[arg-type]
+        **kwargs,  # type: ignore[arg-type]
+    )

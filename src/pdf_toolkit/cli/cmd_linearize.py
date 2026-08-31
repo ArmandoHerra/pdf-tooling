@@ -69,7 +69,7 @@ def linearize_command(
     config = get_config(ctx)
     _reject_missing_sources([source])
 
-    if not config.dry_run and config.in_place:
+    if config.in_place:
         # Local import: `cli.main` imports this module at load time.
         from pdf_toolkit.cli.main import build_rerun_hint
 
