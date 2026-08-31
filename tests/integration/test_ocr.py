@@ -26,6 +26,7 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
+from helpers.engine_hiding import hidden_engine_env  # noqa: E402
 from helpers.pdfstream import embedded_image_streams  # noqa: E402
 from pdf_toolkit.ops.compose import compose_document, parse_page_size  # noqa: E402
 from pdf_toolkit.ops.ocr import ocr_run  # noqa: E402
@@ -98,45 +99,16 @@ def _extract_text(path: Path) -> str:
 
 
 def _hidden_engine_env(hidden: str, *, tmp_path: Path) -> dict[str, str]:
-    """A PATH excluding *hidden*'s real binary, for a SUBPROCESS test
-    (AC12's own note: hiding means ``shutil.which`` -> ``None`` -- a PATH
-    that excludes the real binary's directory, never a shadowing shim).
+    """A PATH excluding *hidden*'s real binary, for a SUBPROCESS test.
 
-    `conftest.py::_apply_engine_hiding_shim` does this same thing but
-    mutates the CURRENT (pytest) process's own ``os.environ["PATH"]`` --
-    fine for in-process collection-time skips, wrong here: this helper must
-    return an env dict for a CHILD process without touching this test
-    process's own PATH (which every other test in this session still
-    depends on).
+    The mechanism moved to `tests/helpers/engine_hiding.py` (B-096) once the
+    OR-7 `dry == real` mirror -- a CROSS-VERB contract covering both
+    system-binary verbs -- needed the same hiding from its own module. This
+    thin delegate keeps this module's existing call sites (AC12/AC16) reading
+    exactly as before; see that helper's docstring for why hiding must mean
+    `shutil.which` -> `None` and never a shadowing shim.
     """
-    import os
-    import shutil
-
-    shim_dir = tmp_path / f"hide-{hidden}"
-    shim_dir.mkdir(exist_ok=True)
-    original_path = os.environ.get("PATH", "")
-    for entry in original_path.split(os.pathsep):
-        entry_path = Path(entry)
-        if not entry_path.is_dir():
-            continue
-        try:
-            candidates = list(entry_path.iterdir())
-        except OSError:
-            continue
-        for exe in candidates:
-            if exe.name == hidden:
-                continue
-            link = shim_dir / exe.name
-            if link.exists():
-                continue
-            try:
-                link.symlink_to(exe)
-            except OSError:
-                continue
-    env = dict(os.environ)
-    env["PATH"] = str(shim_dir)
-    assert shutil.which(hidden, path=env["PATH"]) is None, f"{hidden} is still on the shimmed PATH"
-    return env
+    return hidden_engine_env(hidden, tmp_path=tmp_path)
 
 
 # --------------------------------------------------------------------------- #

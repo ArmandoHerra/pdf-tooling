@@ -24,7 +24,7 @@ from pdf_toolkit.errors import FailureError
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pathlib import Path
 
-__all__ = ["ADAPTER", "BINARY", "PROBE_TIMEOUT_S", "SofficeOfficeAdapter"]
+__all__ = ["ADAPTER", "BINARY", "PROBE_TIMEOUT_S", "SofficeOfficeAdapter", "binary_present"]
 
 _NAME: Final[str] = "soffice"
 
@@ -57,6 +57,25 @@ def _parse_version(line: str) -> str | None:
     return match.group(1) if match else None
 
 
+def binary_present() -> bool:
+    """Is ``soffice`` on PATH? Answered WITHOUT spawning anything (B-096).
+
+    This is the exact short-circuit :meth:`SofficeOfficeAdapter.probe` opens
+    with, factored out so it has ONE call site in the codebase and the two
+    cannot drift: ``probe()`` itself calls this, so "the engine is absent"
+    means the same thing to a preview as it does to `doctor`.
+
+    A ``--dry-run`` preview needs this and cannot use the full probe. Presence
+    is all exit 3 turns on, but ``probe()``'s *version* query spawns ``soffice
+    --version`` -- and that command **creates ``$HOME/.config``** (measured
+    against LibreOffice 26.2.5.2), which would break the non-negotiable
+    ``--dry-run`` purity rule (``CLAUDE.md`` rule 2, enforced by the C10
+    contract row against a redirected ``HOME``). ``shutil.which`` writes
+    nothing, so the absent case stays both predictable and pure.
+    """
+    return shutil.which(BINARY) is not None
+
+
 class SofficeOfficeAdapter:
     """The ``soffice``-binary-backed ``OfficeConverter``."""
 
@@ -70,7 +89,9 @@ class SofficeOfficeAdapter:
         return _CAPABILITIES
 
     def probe(self) -> AdapterProbe:
-        if shutil.which(BINARY) is None:
+        # The ONE presence check (`binary_present`), shared with the
+        # `--dry-run` preview path so the two can never disagree.
+        if not binary_present():
             return AdapterProbe(available=False, version=None, detail=None)
 
         # argv[0] is the module-level constant, not the located path -- see the

@@ -199,18 +199,80 @@ def test_c9_unconditional_dry_run_purity(verb, tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# C10 -- (reg) the registered invocation + --dry-run exits 0, tree unchanged
+# C10 -- (reg) the registered invocation + --dry-run is PURE, and PREDICTS the
+# exit code the real run would produce.
+#
+# B-096. The `== 0` this row asserted until now was never a fact about dry
+# runs. It was `PLAN.md` §5.6's *"Also: `--dry-run` completed"* clause -- the
+# clause operator ruling OR-7 STRUCK when it made `--dry-run` mirror the real
+# exit code (`dry == real`) -- encoded here as a UNIVERSAL over a population
+# every new mutating verb joins automatically. It survived the ruling only
+# because, until `convert`, no registered invocation could legitimately predict
+# non-zero on an engine-less host: every verb either needed no engine at all
+# or, like `ocr --skip-text-pages`, had an engine-free path. So this row is not
+# collateral damage from B-096's fix -- B-096 is the first thing to REVEAL that
+# the universal was already wrong, on a second live instance of a struck
+# clause.
+#
+# This row therefore BRANCHES, and never skips. Purity is its actual subject,
+# it holds on every host whatever the exit code, and it is asserted
+# UNCONDITIONALLY below -- so C10 keeps running on every host and every verb.
+# Only the PREDICTED EXIT CODE is derived, and it is derived from the verb's
+# own declared precondition (`Invocation.requires_engine`) resolved through the
+# `pdf_toolkit.ports.resolve()` chokepoint that `doctor`, `conftest.py`'s
+# `requires(engine)` marker and `_skip_unless_engine_available` below all
+# already use -- never an independent `shutil.which`, never an env var, never a
+# platform check. Today only `convert` can take the non-zero arm, and only on a
+# host without soffice; `ocr` declares `requires_engine=None` and stays at 0
+# everywhere, as does every other mutating verb.
 # --------------------------------------------------------------------------- #
+
+#: Exit 3 -- `ENGINE_MISSING` (`PLAN.md` §5.6).
+ENGINE_MISSING = 3
+
+
+def _expected_dry_run_exit(invocation) -> int:
+    """The exit code *invocation*'s ``--dry-run`` must predict ON THIS HOST.
+
+    OR-7 makes ``--dry-run`` mirror the real run, and the real run of a verb
+    that declares an engine exits ``ENGINE_MISSING`` when that engine does not
+    resolve. The expectation is therefore a function of the declared
+    precondition rather than a constant: ``0`` when the verb needs no engine or
+    its engine is present, ``3`` when a genuinely declared engine is absent.
+
+    Resolved through the same ``ports.resolve()`` chokepoint as
+    :func:`_skip_unless_engine_available` below, so a prediction here and
+    ``doctor`` can never disagree about whether an engine is there.
+    """
+    engine = getattr(invocation, "requires_engine", None)
+    if engine is None:
+        return 0
+    from pdf_toolkit.ports import resolve
+
+    return 0 if resolve(engine).available else ENGINE_MISSING
 
 
 @pytest.mark.parametrize("verb", MUTATING, ids=_ids(MUTATING))
 def test_c10_registered_invocation_dry_run_purity(verb, corpus, tmp_path: Path) -> None:
     invocation = INVOCATIONS[verb.name]
+    # Resolved BEFORE the snapshot opens. `resolve()` may spawn a version probe
+    # on an engine-PRESENT host (`soffice --version` creates `$HOME/.config`),
+    # and it runs in THIS process against the real environment rather than the
+    # redirected one under test -- ordering it first keeps that spawn provably
+    # outside the purity window this row measures, instead of relying on the
+    # roots happening not to overlap.
+    expected = _expected_dry_run_exit(invocation)
     args = invocation.build(corpus, tmp_path)
     env, roots = redirected_environment(tmp_path)
     before = snapshot(*roots)
     result = run_cli(verb.name, "--dry-run", *args, env=env, cwd=tmp_path)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == expected, (
+        f"{verb.name}: --dry-run exited {result.returncode}, expected {expected} "
+        f"(OR-7: a dry run mirrors the exit code the real run would produce): "
+        f"{result.stdout}{result.stderr}"
+    )
+    # Purity is unconditional and is this row's real subject: under EITHER arm,
+    # whatever the exit code, a --dry-run writes nothing anywhere.
     assert_unchanged(before, snapshot(*roots))
 
 
@@ -431,6 +493,45 @@ def test_c14_output_flag_matrix(verb, flag: str, corpus, tmp_path: Path) -> None
 # what makes the negative control possible -- and a future producing verb is
 # covered the moment it registers an INVOCATIONS row (already forced by
 # `test_every_verb_is_registered`), with zero action from its author.
+#
+# B-096 -- WHY THE DISCOVERY PREAMBLE IS ENGINE-GATED AND THE ASSERTIONS ARE
+# NOT. C15's own assertions remain true on an engine-less host, and were
+# measured so: with soffice hidden, `convert`'s occupied-target arm still gives
+# dry 5 / real 5 and its unwritable-destination arm still gives dry 1 / real 1,
+# because both refusals are FILESYSTEM-tier and are reached before any engine
+# is demanded. What an engine-less host breaks is strictly the INSTRUMENT:
+# `_discover_target` learns the target by running the invocation under
+# `--dry-run -o json` and requires exit 0, and now that an absent engine is
+# knowable at plan time (OR-7/D12.1) `convert --dry-run` legitimately exits 3
+# before any plan exists. The row cannot be SEEDED there. That is a true
+# property of the verb, not a harness defect, so it skips VISIBLY -- via the
+# already-landed `_skip_unless_engine_available`, the same mechanism and the
+# same `ports.resolve()` chokepoint X-140 authorized for C12 and C14 on
+# identical reasoning.
+#
+# The rule this follows, and the line it draws against C10 above: a row that
+# can still assert something real on an engine-less host BRANCHES and never
+# skips (C10 -- purity holds regardless of any engine); a row that cannot even
+# be SEEDED there skips visibly, and must still RUN where the engine is
+# present.
+#
+# ON THIS MODULE'S "no skip list, no filter, no hard-coded verb name" (AC5,
+# module docstring). That property forbids a HAND-MAINTAINED list of excluded
+# verbs -- an anti-vacuity guarantee. This gate is not that: it hard-codes no
+# verb, reads a per-verb declaration (`Invocation.requires_engine`), and
+# resolves it through the product's own port registry. The guarantee is kept by
+# two properties, and BOTH are required -- the second is what stops this from
+# manufacturing another vacuous control:
+#   1. engine hidden  -> the `convert` rows SKIP with a reason naming the
+#      engine, never a silent pass;
+#   2. engine present -> the `convert` rows still RUN and pass, which CI's
+#      `engines-present` leg keeps honest via
+#      `scripts/assert_skips.py --expect-zero`.
+#
+# Deriving the target from the invocation's argv instead was considered and
+# rejected: it discards `_discover_target`'s anti-lapse property, and cannot
+# work at all for the `--out-dir` + `--name` verbs (`split`, `rasterize`) whose
+# final target never appears in the argv.
 # --------------------------------------------------------------------------- #
 
 
@@ -443,6 +544,11 @@ def _discover_target(verb, args: list[str], tmp_path: Path) -> Path:
     that writes to stdout, say -- fails here BY NAME rather than quietly
     dropping out of C15's coverage.
     """
+    # The gate lives HERE, at the single call site both C15 arms share, so the
+    # two can never drift into disagreeing about whether a target is
+    # discoverable. See this section's own B-096 note for why the preamble --
+    # and only the preamble -- is what an absent engine defeats.
+    _skip_unless_engine_available(INVOCATIONS.get(verb.name))
     result = run_cli(verb.name, "--dry-run", *args, "-o", "json", cwd=tmp_path)
     if result.returncode != 0:
         pytest.fail(

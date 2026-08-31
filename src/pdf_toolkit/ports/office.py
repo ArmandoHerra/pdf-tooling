@@ -20,7 +20,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
     from pdf_toolkit.adapters import AdapterProbe
 
-__all__ = ["OfficeConverter", "adapters", "probe", "require_office"]
+__all__ = ["OfficeConverter", "adapters", "office_binary_present", "probe", "require_office"]
 
 PORT = "OfficeConverter"
 
@@ -72,6 +72,26 @@ def adapters() -> tuple[Adapter, ...]:
     from pdf_toolkit.adapters import soffice_office
 
     return (soffice_office.ADAPTER,)
+
+
+def office_binary_present() -> bool:
+    """Spawn-free presence check for ``soffice`` -- **PDF-15 / B-096.**
+
+    Delegates to the adapter's own :func:`~pdf_toolkit.adapters.soffice_office.
+    binary_present`, which is the same ``shutil.which`` short-circuit its
+    ``probe()`` opens with, so a preview and ``doctor`` cannot disagree about
+    whether the engine is there.
+
+    This exists because :func:`require_office` is only spawn-free when the
+    binary is ABSENT: with it present, resolution runs ``soffice --version``,
+    which creates ``$HOME/.config``. A ``--dry-run`` preview must write nothing
+    anywhere (``CLAUDE.md`` rule 2), so it asks THIS question -- the only one
+    exit 3 turns on -- and demands the engine through :func:`require_office`
+    only on the branch where doing so provably cannot spawn.
+    """
+    from pdf_toolkit.adapters import soffice_office
+
+    return soffice_office.binary_present()
 
 
 def probe() -> EngineReport:

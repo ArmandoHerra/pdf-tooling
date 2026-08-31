@@ -42,7 +42,7 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, PdfToolkitError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
-from pdf_toolkit.ports.office import require_office
+from pdf_toolkit.ports.office import office_binary_present, require_office
 from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_output_set
 from pdf_toolkit.safety.naming import render_name
 from pdf_toolkit.safety.paths import canonical, check_output_collisions, ensure_destination_writable
@@ -201,8 +201,14 @@ def convert_run(
 ) -> OperationResult:
     """Convert every source to PDF, one output per input, in input order.
 
-    Under ``--dry-run`` no operational engine call happens (AC16/D12.1): the
-    filesystem tier alone is predicted; ``soffice`` is never spawned.
+    Under ``--dry-run`` nothing is spawned at all and nothing is written
+    anywhere, yet the run is still predicted to the depth the real run
+    resolves (OR-7 / D12.1, B-096): the filesystem tier first, then -- only
+    when that tier did not already refuse -- whether the engine is even there,
+    via the spawn-free :func:`~pdf_toolkit.ports.office.office_binary_present`.
+    An ABSENT ``soffice`` therefore predicts and exits **3** exactly as the
+    real run does, so ``convert --dry-run && convert`` short-circuits instead
+    of green-lighting a run that then fails.
     """
     _validate_sources(sources)
     if name_template is not None and out_dir is None:
@@ -217,6 +223,37 @@ def convert_run(
     plan = _plan_filesystem(targets, out_dir=out_dir, policy=policy)
 
     if policy.dry_run:
+        # OR-7 / D12.1 (B-096) -- an ABSENT engine is knowable at plan time, so
+        # predict it HERE rather than reporting `would_exit: 0` and letting the
+        # real run discover exit 3. `ops/ocr.py` demands its engine above its
+        # own dry-run return for exactly this reason (`require_ocr()` at its
+        # :328, above `if policy.dry_run:` at :331); this is that ordering,
+        # expressed the one way `convert` can afford it (see below).
+        #
+        # `not plan.refused` keeps the FILESYSTEM tier's precedence, matching
+        # what the real run does: `_plan_filesystem` RAISES for a real run
+        # (`safety/atomic.py:319-320`, and its own widened check at `:182-183`,
+        # both re-raise unless `policy.dry_run`), so a real run never reaches
+        # its engine demand carrying a pending filesystem refusal. Getting this
+        # order wrong regresses an unwritable destination from `dry 1 / real 1`
+        # back to the `dry 1 / real 3` split `_plan_filesystem`'s own docstring
+        # measured.
+        #
+        # Why the PRESENCE check and not `require_office()` itself: the latter
+        # is spawn-free only when the binary is ABSENT. With `soffice` PRESENT,
+        # resolution runs `soffice --version`, and that command CREATES
+        # `$HOME/.config` (measured, LibreOffice 26.2.5.2) -- which would break
+        # the non-negotiable `--dry-run` purity rule (`CLAUDE.md` rule 2), as
+        # the C10 contract row proves against a redirected `HOME`. Presence is
+        # the only fact exit 3 turns on, and `shutil.which` writes nothing, so
+        # this branch is pure AND predictive rather than one or the other.
+        if not plan.refused and not office_binary_present():
+            # Provably zero-spawn on THIS branch: `probe()` short-circuits on
+            # the very `shutil.which` just evaluated (`soffice_office.py::
+            # probe`), so this raises `EngineMissingError` -- exit 3, with the
+            # install hint and the `doctor` pointer -- through the ONE
+            # chokepoint, never a second, drifting copy of that message.
+            require_office()
         detail = plan.detail()
         items = tuple(
             ItemResult(
