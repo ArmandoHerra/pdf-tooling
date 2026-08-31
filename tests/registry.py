@@ -120,6 +120,30 @@ class Invocation:
     ``None`` (the default, and every entry but ``compress`` today) means
     C13 falls back to ``build`` -- the shape every other registration
     already has."""
+    requires_engine: str | None = None
+    """A port name from ``pdf_toolkit.ports.PORTS`` (e.g. ``"OfficeConverter"``)
+    that this verb's registered invocation genuinely needs to REACH exit 0,
+    or ``None`` (the default, and every entry but ``convert`` today).
+
+    This is a property of the VERB, not of any one flag row: `convert`'s
+    whole job is the conversion (unlike `ocr`, which has an engine-free path
+    via `--skip-text-pages` -- see this file's own PDF-15 section note), so
+    every registered invocation and every declared-``OUTPUT_FLAG_INVOCATIONS``
+    row for `convert` needs the same engine. `tests/test_cli_contract.py`
+    reads this single declaration for both C12 (which calls `build` directly)
+    and C14's honoured side (which calls a per-flag `OUTPUT_FLAG_INVOCATIONS`
+    lambda instead) -- one declaration, both consumers, per this fix's own
+    instruction not to duplicate it onto a second registry.
+
+    Resolved the same way `doctor` and `tests/conftest.py`'s own
+    ``@pytest.mark.requires`` marker resolve an engine --
+    ``pdf_toolkit.ports.resolve(port).available`` -- never an independent
+    ``shutil.which`` and never an env var or hard-coded platform check. When
+    unavailable, the consuming test SKIPS with a reason naming the missing
+    engine (never passes vacuously); when available, the row runs for real,
+    which is what keeps `engines-present`'s own
+    ``scripts/assert_skips.py --expect-zero`` green because the rows RAN, not
+    because they vanished."""
 
 
 def _dotted_to_path(dotted: str) -> Path | None:
@@ -708,16 +732,24 @@ def _stamp_invocation(corpus: object, tmp_path: Path) -> list[str]:
 # PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice, `ocr`'s own C9-C16 rows
 # are unaffected by the hide.
 #
-# `convert` has no equivalent trick -- its whole job IS the conversion, so
-# its registered row genuinely NEEDS soffice for the "declared flag honoured"
-# (C14) and "json on a pipe" (C12) arms. This is recorded, not hidden: the
-# CI `engines-present` job is where those two arms are meaningfully proven
-# for `convert` (`scripts/assert_skips.py --expect-zero` on that job already
-# asserts no engine-gated skip silently substituted for real coverage); the
-# `without-engines` job's own `--pages`-style OR-3 refusal arms (C14's
-# UNDECLARED side, C3, C5, C7, C9, C11, C15's refusal rows, C16) all stay
-# engine-independent (verified below) since every one of those refuses
-# BEFORE `require_office()` is ever reached.
+# `convert` has no equivalent trick -- its whole job IS the conversion, so its
+# registered row genuinely NEEDS soffice for the "declared flag honoured"
+# (C14) and "json on a pipe" (C12) arms. FIX-FORWARD (`[PDF-15] fix:`,
+# post-`5bf6e65`): the eight `test (3.x, ubuntu|macos)` legs and
+# `without-engines` have no soffice, and C12/C14 asserted exit 0 unconditionally
+# -- exit 3 (`ENGINE_MISSING`) is the CORRECT behaviour there, not a defect,
+# but the generic contract rows had no way to say so. `INVOCATIONS["convert"]`
+# now declares `requires_engine="OfficeConverter"` (`Invocation`'s own
+# docstring), and `tests/test_cli_contract.py` reads it to SKIP those two
+# checks VISIBLY, by name, whenever `pdf_toolkit.ports.resolve("OfficeConverter")`
+# is unavailable -- never a silent pass. The CI `engines-present` job is where
+# those two arms are still meaningfully PROVEN for `convert`
+# (`scripts/assert_skips.py --expect-zero` on that job asserts no engine-gated
+# skip silently substituted for real coverage -- i.e. the declaration must
+# still let the rows RUN there, not vanish); the `without-engines` job's own
+# `--pages`-style OR-3 refusal arms (C14's UNDECLARED side, C3, C5, C7, C9,
+# C11, C15's refusal rows, C16) all stay engine-independent (verified below)
+# since every one of those refuses BEFORE `require_office()` is ever reached.
 # --------------------------------------------------------------------------- #
 
 
@@ -761,7 +793,9 @@ def _convert_invocation(corpus: object, tmp_path: Path) -> list[str]:
     operand is never a PDF, so this row reuses `_fixture_text` (a plain
     `.txt` file -- LibreOffice converts arbitrary text input, verified
     against this host's LibreOffice 26.2.5.2) rather than the generated PDF
-    corpus."""
+    corpus. Requires `OfficeConverter` (`INVOCATIONS["convert"].requires_engine`,
+    see this section's own fix-forward note) -- unlike every other row here,
+    this one cannot reach exit 0 on a soffice-less host."""
     return [
         str(_fixture_text(tmp_path, "registered-invocation-convert.txt")),
         "-O",
@@ -843,13 +877,20 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     # fire for `ocr` specifically, via its own `destructive_build`). `convert`
     # is multi-input but never `--in-place` (D11.2) -- `destructive=False`,
     # matching every other producing verb's own note above (a single input
-    # writing to `-O` is neither bulk nor destructive).
+    # writing to `-O` is neither bulk nor destructive). `convert` is also the
+    # first (and, at PDF-15 fix-forward, only) row to set `requires_engine`:
+    # unlike `ocr`, it has no engine-free path (this section's own PDF-15
+    # module note).
     "ocr": Invocation(
         build=_ocr_invocation,
         destructive=True,
         destructive_build=_ocr_destructive_invocation,
     ),
-    "convert": Invocation(build=_convert_invocation, destructive=False),
+    "convert": Invocation(
+        build=_convert_invocation,
+        destructive=False,
+        requires_engine="OfficeConverter",
+    ),
 }
 
 #: AC25 — the OR-3 matrix arm's own per-(verb, flag) invocation table, for

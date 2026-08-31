@@ -235,6 +235,41 @@ def test_c11_no_clobber_exits_5(verb, corpus, tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Engine-gated rows -- PDF-15 fix-forward, post-`5bf6e65`.
+#
+# `Invocation.requires_engine` (`tests/registry.py`) names a genuine
+# precondition some verbs have and most do not: `convert`'s whole job IS the
+# conversion (no engine-free path the way `ocr --skip-text-pages` has one),
+# so its registered rows cannot reach exit 0 without `OfficeConverter`
+# (soffice) resolvable. C12 and C14's honoured side are the only two checks
+# that actually RUN a registered/`OUTPUT_FLAG_INVOCATIONS` build expecting
+# exit 0, so they are the only two that need this gate; every other check in
+# this module either never runs `convert`'s row at all or exercises an
+# OR-3 refusal that returns BEFORE `require_office()` is ever reached
+# (`tests/registry.py`'s own PDF-15 section note).
+#
+# This SKIPS VISIBLY, by name, exactly like `tests/conftest.py`'s own
+# `@pytest.mark.requires(engine)` marker -- resolved through the identical
+# `pdf_toolkit.ports.resolve()` chokepoint `doctor` uses, never an
+# independent `shutil.which` and never an env var or platform check. When the
+# engine IS present (the `engines-present` CI job), this returns immediately
+# and the row runs for real -- `scripts/assert_skips.py --expect-zero` on
+# that job is the existing guard that a skip here would trip.
+# --------------------------------------------------------------------------- #
+
+
+def _skip_unless_engine_available(invocation) -> None:
+    engine = getattr(invocation, "requires_engine", None)
+    if engine is None:
+        return
+    from pdf_toolkit.ports import resolve
+
+    report = resolve(engine)
+    if not report.available:
+        pytest.skip(f"{engine} engine unavailable; install with: {report.hint}")
+
+
+# --------------------------------------------------------------------------- #
 # C12 -- (reg) stdout on a pipe with no -o parses as JSON carrying
 # schema_version.
 # --------------------------------------------------------------------------- #
@@ -243,6 +278,7 @@ def test_c11_no_clobber_exits_5(verb, corpus, tmp_path: Path) -> None:
 @pytest.mark.parametrize("verb", REGISTERED, ids=_ids(REGISTERED))
 def test_c12_json_on_a_pipe_by_default(verb, corpus, tmp_path: Path) -> None:
     invocation = INVOCATIONS[verb.name]
+    _skip_unless_engine_available(invocation)
     args = invocation.build(corpus, tmp_path)
     result = run_cli(verb.name, *args)
     assert result.returncode == 0, result.stderr
@@ -353,6 +389,11 @@ def test_c14_output_flag_matrix(verb, flag: str, corpus, tmp_path: Path) -> None
                 f"tests/registry.py::OUTPUT_FLAG_INVOCATIONS[{key!r}] row -- "
                 "add one so this pair's honoured side is actually proven"
             )
+        # The honoured side is the only C14 arm that runs a real invocation
+        # expecting exit 0 -- `_skip_unless_engine_available`'s own module
+        # note above. The UNDECLARED/refusal arm below never reaches this and
+        # stays engine-independent for every verb, `convert` included.
+        _skip_unless_engine_available(INVOCATIONS.get(verb.name))
         args = OUTPUT_FLAG_INVOCATIONS[key](corpus, tmp_path)
         result = run_cli(verb.name, *args, cwd=tmp_path)
         assert result.returncode == 0, (
