@@ -43,9 +43,17 @@ Negative controls are a deliverable
 -----------------------------------
 A comparator that always returned "equal" would make this test green and
 meaningless — the precise failure mode this product's testing strategy exists to
-prevent. ``tests/integration/test_purity_primitive.py`` plants all six mutation
+prevent. ``tests/integration/test_purity_primitive.py`` plants **nine** mutation
 classes and proves each one is detected, and proves the non-dry-run control
 produces a non-empty diff.
+
+Nine, not six: the count in this docstring said *six* from PDF-04's landing
+until PDF-19 measured it (2026-09-02). The six ``control_one``…``control_six``
+arms are joined by create-then-delete (caught only by directory ``mtime``),
+symlink retarget, and ``assert_unchanged`` naming every difference. PDF-19 also
+ablated each compared dimension and confirmed exactly the control that depends
+on it goes blind, so the six fields in :data:`_FIELDS` are load-bearing rather
+than decorative.
 """
 
 from __future__ import annotations

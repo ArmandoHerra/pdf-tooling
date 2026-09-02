@@ -507,6 +507,56 @@ PLANTED: Final = (
         "pdf_toolkit/safety/sneaky.py",
         "from pathlib import Path\n\n\ndef save(p: Path) -> None:\n    p.write_text('x')\n",
     ),
+    (
+        "plant-path-open-write-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "from pathlib import Path\n\n\ndef dump(p: Path) -> None:\n    p.open(mode='w').close()\n",
+    ),
+    (
+        "plant-shutil-copy-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "import shutil\nfrom pathlib import Path\n\n\ndef stash(a: Path, b: Path) -> None:\n"
+        "    shutil.copy(a, b)\n",
+    ),
+    (
+        "plant-shutil-move-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "import shutil\nfrom pathlib import Path\n\n\ndef relocate(a: Path, b: Path) -> None:\n"
+        "    shutil.move(a, b)\n",
+    ),
+    (
+        "plant-os-replace-in-cli",
+        "pdf_toolkit/cli/sneaky.py",
+        "import os\nfrom pathlib import Path\n\n\ndef commit(a: Path, b: Path) -> None:\n"
+        "    os.replace(a, b)\n",
+    ),
+    (
+        "plant-os-rename-via-from-import-in-adapters",
+        "pdf_toolkit/adapters/sneaky.py",
+        "from os import rename\nfrom pathlib import Path\n\n\n"
+        "def shuffle(a: Path, b: Path) -> None:\n    rename(a, b)\n",
+    ),
+    (
+        "plant-unlink-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "from pathlib import Path\n\n\ndef discard(p: Path) -> None:\n    p.unlink()\n",
+    ),
+    (
+        "plant-rmtree-in-ports",
+        "pdf_toolkit/ports/sneaky.py",
+        "import shutil\nfrom pathlib import Path\n\n\ndef purge(p: Path) -> None:\n"
+        "    shutil.rmtree(p)\n",
+    ),
+    (
+        "plant-chmod-in-output",
+        "pdf_toolkit/output/sneaky.py",
+        "import os\n\n\ndef relax(p: str) -> None:\n    os.chmod(p, 0o644)\n",
+    ),
+    (
+        "plant-os-symlink-in-ops",
+        "pdf_toolkit/ops/sneaky.py",
+        "import os\n\n\ndef alias(a: str, b: str) -> None:\n    os.symlink(a, b)\n",
+    ),
 )
 
 
@@ -573,6 +623,163 @@ def test_benign_calls_are_never_flagged() -> None:
     """The negative self-test. A guard with false positives gets allowlisted away."""
     found = scan_write_calls(BENIGN, "pdf_toolkit.ops.benign")
     assert found == [], f"false positives: {[str(call) for call in found]}"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-19 — Section 1 re-derivation (append only; nothing above is rewritten).
+#
+# `PDF-04` shipped five planted violations covering five of the fourteen §D7
+# call groups, and the other nine had never been observed to red. `PDF-19`'s
+# audit added one plant per uncovered group (above, inside `PLANTED`) and then
+# mechanised the coverage claim itself, because "all fourteen groups are
+# planted" is exactly the kind of sentence that is true on the day it is
+# written and quietly false two specs later.
+#
+# The audit also found a real hole while doing it, and it is filed rather than
+# patched here: `_classify_open` reads the mode from `node.args[1]`, which is
+# the BUILTIN `open`'s positional slot. On a METHOD call the receiver is
+# `node.func.value`, so `p.open("w")`'s mode sits at `args[0]` and the check
+# never sees it. The keyword spelling `p.open(mode="w")` is caught; the
+# idiomatic positional one is not. §D7 row 2 is *mandated*, not an extension,
+# so this is a gap in the product's central structural guarantee rather than a
+# missing nicety. `src/` contains no such call today (measured 2026-09-02:
+# `grep -rnE '\.open\(\s*[\x27"][^\x27"]*[wax+]' src/` returns nothing), so the
+# GUARANTEE holds and the GUARD is what is blind.
+# --------------------------------------------------------------------------- #
+
+#: The fourteen §D7 call groups, mapped to the `PLANTED` labels that red them.
+#: A group with an empty tuple is a group nothing has ever been seen to catch.
+D7_GROUP_PLANTS: Final[tuple[tuple[int, str, tuple[str, ...]], ...]] = (
+    (1, "open(...) with a mutating or non-literal mode", ("plant-open-write-in-output",)),
+    (2, ".open(...) (Path.open), same mode rule", ("plant-path-open-write-in-ops",)),
+    (3, "write_bytes", ("plant-write-bytes-in-ops",)),
+    (4, "write_text", ("plant-write-in-safety-but-not-atomic",)),
+    (5, "shutil.copy*", ("plant-shutil-copy-in-ops",)),
+    (6, "shutil.move", ("plant-shutil-move-in-ops",)),
+    (7, "os.replace", ("plant-os-replace-in-cli",)),
+    (8, "os.rename", ("plant-os-rename-via-from-import-in-adapters",)),
+    (9, "Path.unlink / os.remove / os.unlink", ("plant-unlink-in-ops",)),
+    (10, "the tempfile create family", ("plant-mkstemp-in-ops",)),
+    (11, "os.mkdir / os.makedirs / Path.mkdir", ("plant-mkdir-in-cli",)),
+    (12, "os.rmdir / shutil.rmtree", ("plant-rmtree-in-ports",)),
+    (13, "os.truncate / Path.touch / os.utime / os.chmod / os.chown", ("plant-chmod-in-output",)),
+    (14, "os.open / os.symlink / os.link", ("plant-os-symlink-in-ops",)),
+)
+
+
+def test_every_d7_call_group_has_a_planted_violation() -> None:
+    """AC15's own claim, mechanised instead of asserted in a spec document.
+
+    Red: delete a `PLANTED` row, or empty a group's tuple, and this names the
+    group that stopped being proven.
+    """
+    labels = {row[0] for row in PLANTED}
+    assert len(D7_GROUP_PLANTS) == 14, "§D7 declares fourteen call groups"
+    uncovered = [f"group {n} ({what})" for n, what, plants in D7_GROUP_PLANTS if not plants]
+    assert uncovered == [], f"§D7 call groups with no planted violation: {uncovered}"
+    dangling = sorted(
+        f"group {n}: {plant}"
+        for n, _, plants in D7_GROUP_PLANTS
+        for plant in plants
+        if plant not in labels
+    )
+    assert dangling == [], f"D7_GROUP_PLANTS names labels PLANTED does not carry: {dangling}"
+
+
+#: The §D7 row-2 spelling the walk cannot see. `strict=True` so the day the
+#: visitor learns to read a method call's mode this turns RED and the marker
+#: has to be removed -- a gap that closes itself loudly rather than a comment.
+PATH_OPEN_POSITIONAL = (
+    "from pathlib import Path\n\n\ndef dump(p: Path) -> None:\n    p.open('w').close()\n"
+)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "PDF-19 finding: _classify_open reads the mode from node.args[1], the BUILTIN "
+        "open()'s slot. On Path.open the mode is args[0], so the idiomatic positional "
+        "spelling p.open('w') evades §D7 row 2 entirely. Filed, not fixed -- PDF-19 "
+        "makes no repair to the mechanism it audits."
+    ),
+)
+def test_a_positional_mode_on_path_open_is_a_violation() -> None:
+    found = scan_write_calls(PATH_OPEN_POSITIONAL, "pdf_toolkit.ops.positional")
+    assert [call.call for call in found] == ["p.open"]
+
+
+# --------------------------------------------------------------------------- #
+# `PLAN §12 R-07`: the `.pdftoolkit-` namespace has exactly one owner.
+#
+# `PDF-04` AC16 mechanised this as a grep for the LITERAL:
+#
+#     grep -rn "\.pdftoolkit-" src/ | grep -v "^src/pdf_toolkit/safety/tempnames.py"
+#
+# Re-run verbatim at 7522e3e that command returns THREE hits and exits 0 --
+# `ops/procpool.py:47`, `ops/procpool.py:207` and `safety/atomic.py:861`, all
+# three prose, the last one a doc-comment whose whole point is that
+# `_SCRATCH_PREFIX` deliberately does NOT carry the literal. The substance of
+# AC16 holds; the command tests a PHRASE where the criterion is about a
+# PROPOSITION, so a sentinel re-running the recorded ladder would file a defect
+# against a correct tree. `expertise/product.yaml` (2026-08-31) twice:
+# *search by proposition, not by phrase*.
+#
+# This is the proposition: exactly one string-literal DEFINITION of the prefix
+# under `src/`. It also discharges `tempnames.py:8-11`'s claim that "an
+# import-boundary grep asserts it", which until now was backed by nothing.
+# --------------------------------------------------------------------------- #
+
+#: The one module allowed to define the literal.
+TEMP_PREFIX_OWNER: Final = "pdf_toolkit.safety.tempnames"
+
+#: The value `TEMP_PREFIX` must hold, spelled here so a second definition
+#: elsewhere is detectable without importing the product.
+TEMP_PREFIX_LITERAL: Final = ".pdftoolkit-"
+
+
+def literal_prefix_definitions(root: Path) -> list[tuple[str, int]]:
+    """Every module-level assignment of the `.pdftoolkit-` literal under *root*."""
+    found: list[tuple[str, int]] = []
+    for path in iter_python_files(root):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        module = module_name(path, root)
+        for node in ast.walk(tree):
+            value = getattr(node, "value", None)
+            if not isinstance(node, ast.Assign | ast.AnnAssign):
+                continue
+            if isinstance(value, ast.Constant) and value.value == TEMP_PREFIX_LITERAL:
+                found.append((module, node.lineno))
+    return found
+
+
+def test_the_temp_prefix_literal_has_exactly_one_definition() -> None:
+    """`PLAN §12 R-07`, as a proposition rather than as a phrase.
+
+    `ops/discovery.py` cannot hardcode the namespace and must import the
+    predicate; that is what makes "report, never sweep" enforceable in one
+    place instead of in every consumer.
+    """
+    definitions = literal_prefix_definitions(SRC)
+    assert [module for module, _ in definitions] == [TEMP_PREFIX_OWNER], (
+        f"the {TEMP_PREFIX_LITERAL!r} literal is defined at {definitions}; exactly one "
+        f"definition is allowed, in {TEMP_PREFIX_OWNER}"
+    )
+
+
+def test_a_second_prefix_literal_is_caught(tmp_path: Path) -> None:
+    """The red proof for the check above, planted in a `discovery`-shaped module.
+
+    That shape is deliberate: `PLAN §12 R-07`'s exclusion rule exists precisely
+    so a discovery walk cannot grow its own copy of the namespace and drift.
+    """
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / "pdf_toolkit" / "ops" / "discovery.py"
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text('from typing import Final\n\nSCAN_PREFIX: Final[str] = ".pdftoolkit-"\n')
+    definitions = literal_prefix_definitions(scratch)
+    assert len(definitions) == 2, definitions
+    assert ("pdf_toolkit.ops.discovery", 3) in definitions
 
 
 # --------------------------------------------------------------------------- #
@@ -1514,6 +1721,129 @@ def test_benign_section_4_mentions_are_never_flagged() -> None:
     discipline."""
     found = scan_dry_run_bypass(BENIGN_SECTION_4, "pdf_toolkit.cli.cmd_benign")
     assert found == [], f"false positives: {[str(item) for item in found]}"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-19 — Section 4 re-derivation: reachability, not just non-bypass.
+#
+# The walk above forbids a `dry_run`-guarded call. It CANNOT see an ABSENT one,
+# and its non-vacuity floor (`>= 10` sites) is satisfied by fifteen whatever
+# happens to the sixteenth verb. Measured at 7522e3e: **15 call sites** across
+# fifteen `cli/cmd_*.py` modules, and **12** `cmd_*` modules that call the gate
+# zero times. Four of those twelve are `{PDF...}` multi-input producers that
+# consume output-directory flags -- `extract`, `rasterize`, `tables`, `text` --
+# so `bulk` is reachable for them and `destructive` is the open question.
+#
+# WHETHER THOSE FOUR SHOULD GATE IS **B-022 ≡ B-045**, deferred by
+# `roadmap.md` §5 behind `PDF-18`'s unified planner. This section does not
+# decide it. What it does is make the absence an ENTRY A REVIEWER SEES rather
+# than a silence nobody counts -- the same idiom `ALLOWED_WRITE_SITES` uses one
+# section up, for the same reason.
+# --------------------------------------------------------------------------- #
+
+#: Modules that do NOT call the confirmation gate, each with the reason it does
+#: not. Shape mirrors `ALLOWED_WRITE_SITES`: an entry is a deliberate exception
+#: with a stated reason, checked for staleness, living in the test module rather
+#: than as an inline pragma in the source.
+GATE_EXEMPT: Final[frozenset[tuple[str, str]]]
+GATE_EXEMPT = frozenset(
+    {
+        # reason: non-producing. `version` writes nothing and takes no input.
+        ("pdf_toolkit.cli.cmd_version", "non-producing"),
+        # reason: non-producing. `doctor` reports engine availability.
+        # (Its `--dry-run` IMPURITY is a separate finding -- PDF-19's
+        # README.md:74 census -- and is PDF-20's to characterize, B-075/B-100.)
+        ("pdf_toolkit.cli.cmd_doctor", "non-producing"),
+        # reason: non-producing. `info` reads and reports.
+        ("pdf_toolkit.cli.cmd_info", "non-producing"),
+        # reason: grouping parent only; it defines no verb callback of its own.
+        ("pdf_toolkit.cli.cmd_meta", "grouping parent"),
+        # reason: non-producing. `meta get` reads the document information
+        # dictionary; the mutating half is `meta set`, which DOES gate.
+        ("pdf_toolkit.cli.cmd_meta_get", "non-producing"),
+        # reason: single-input ({PDF}), so `bulk = input_count > 1` is
+        # unreachable and the gate could never fire.
+        ("pdf_toolkit.cli.cmd_permissions", "single-input"),
+        # reason: single-input ({PDF}) producer. Same argument as permissions:
+        # `split` fans one document out to many outputs, never many inputs in.
+        ("pdf_toolkit.cli.cmd_split", "single-input"),
+        # reason: creates from {TEXT}, never from existing PDFs; a single
+        # `--output` destination, protected by no-clobber rather than by a gate.
+        ("pdf_toolkit.cli.cmd_create", "non-pdf-input"),
+        # reason: B-022 == B-045 -- OPEN. `{PDF...}` multi-input producer
+        # consuming output-directory flags, so `bulk` IS reachable. Whether an
+        # output-shaped producer is "destructive" is the deferred question.
+        ("pdf_toolkit.cli.cmd_extract", "B-022 == B-045 (deferred)"),
+        # reason: B-022 == B-045 -- OPEN. Same shape as extract.
+        ("pdf_toolkit.cli.cmd_rasterize", "B-022 == B-045 (deferred)"),
+        # reason: B-022 == B-045 -- OPEN. Same shape as extract.
+        ("pdf_toolkit.cli.cmd_tables", "B-022 == B-045 (deferred)"),
+        # reason: B-022 == B-045 -- OPEN. Same shape as extract.
+        ("pdf_toolkit.cli.cmd_text", "B-022 == B-045 (deferred)"),
+    }
+)
+
+
+def _cli_command_modules(root: Path) -> list[str]:
+    """Every `cli/cmd_*.py` module under *root*, dotted."""
+    cli = root / "pdf_toolkit" / "cli"
+    return sorted(module_name(path, root) for path in cli.glob("cmd_*.py"))
+
+
+def gate_reachability(root: Path) -> tuple[list[str], list[str]]:
+    """(modules that neither call the gate nor are exempt, stale exemptions)."""
+    calling = {site.split(":")[0] for site in _confirmation_call_sites(root)}
+    exempt = {module for module, _ in GATE_EXEMPT}
+    unaccounted = sorted(m for m in _cli_command_modules(root) if m not in calling | exempt)
+    stale = sorted(exempt & calling)
+    return unaccounted, stale
+
+
+def test_every_cli_command_either_gates_or_is_exempt_with_a_reason() -> None:
+    """An absent gate becomes visible instead of silent.
+
+    Red (observed, PDF-19): delete the `require_confirmation(...)` call from
+    `cli/cmd_delete.py` in a scratch copy of `src/` and this fails naming
+    `pdf_toolkit.cli.cmd_delete`.
+    """
+    unaccounted, _ = gate_reachability(SRC)
+    assert unaccounted == [], (
+        "these cli/cmd_*.py modules neither call require_confirmation nor carry a "
+        f"GATE_EXEMPT entry: {unaccounted}. Section 4's walk forbids a dry_run-GUARDED "
+        "call and cannot see an ABSENT one -- add the call, or add an exemption with a "
+        "'# reason:' naming the filed finding"
+    )
+
+
+def test_no_gate_exemption_is_stale() -> None:
+    """Exemption rot, the same failure mode `test_no_allowlist_entry_is_stale`
+    exists for: an entry outliving the absence it excused."""
+    _, stale = gate_reachability(SRC)
+    assert stale == [], (
+        f"GATE_EXEMPT entries for modules that DO call the gate now: {stale}; remove the exemption"
+    )
+
+
+def test_every_gate_exemption_carries_a_reason_comment() -> None:
+    """The `# reason:` comment is mandatory, exactly as it is for the two write
+    allowlists. Counted against the entries so a copied block cannot drift."""
+    source = Path(__file__).read_text()
+    start = source.index("GATE_EXEMPT = frozenset(")
+    end = source.index("def _cli_command_modules", start)
+    block = source[start:end]
+    assert block.count("# reason:") == len(GATE_EXEMPT), (
+        f"GATE_EXEMPT has {len(GATE_EXEMPT)} entries but {block.count('# reason:')} "
+        "'# reason:' comments"
+    )
+
+
+def test_the_gate_reachability_helper_actually_finds_the_modules() -> None:
+    """Non-vacuity for the helper itself: an empty module list would make both
+    assertions above pass by iterating nothing -- Section 4's own `>= 10` floor,
+    one level down."""
+    modules = _cli_command_modules(SRC)
+    assert len(modules) >= 20, f"only {len(modules)} cli/cmd_*.py module(s) found"
+    assert "pdf_toolkit.cli.cmd_delete" in modules
 
 
 # --------------------------------------------------------------------------- #

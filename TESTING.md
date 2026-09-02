@@ -206,9 +206,21 @@ There is deliberately no injection point "during the replace". `os.replace` is t
 
 `tests/integration/test_cross_filesystem.py` needs two real mounts, because a monkeypatched device id proves the branch is reachable and not that the kernel does what the branch assumes. The acquisition ladder takes the first candidate on a different device than the test's temporary directory, and writable:
 
-1. `$PDF_TOOLKIT_TEST_XDEV_DIR` — the operator's explicit override.
-2. `/dev/shm`
-3. `$HOME`, then `/var/tmp`, then `/run/user/$UID`
+| Rung | Candidate | Note |
+|---|---|---|
+| `1 ($PDF_TOOLKIT_TEST_XDEV_DIR)` | the operator's explicit override | |
+| `2 (/dev/shm)` | a tmpfs present on effectively every Linux, including GitHub's `ubuntu-*` runners | the rung this host resolves at |
+| `3 ($HOME)` | | |
+| `4 (/var/tmp)` | | |
+| `5 (/run/user/$UID)` | | |
+
+**Five rungs, enumerated discretely — corrected by `PDF-19` on 2026-09-02.**
+This document collapsed rungs 3 to 5 onto one line from `PDF-04`'s landing
+until then, while `_ladder()` (`tests/integration/test_cross_filesystem.py:53-60`)
+always enumerated five. That matters because the fixture *prints* the rung it
+resolved at — `[PDF-04] second filesystem from ladder rung 2 (/dev/shm): /dev/shm`
+— and the skip reason names all five, so an operator reading a three-rung list
+would not recognise the message they were handed.
 
 ```bash
 PDF_TOOLKIT_TEST_XDEV_DIR=/dev/shm uv run pytest tests/integration/test_cross_filesystem.py -v
@@ -220,18 +232,24 @@ PDF_TOOLKIT_TEST_XDEV_DIR=/dev/shm uv run pytest tests/integration/test_cross_fi
 
 `tests/fs_snapshot.py` photographs every root before and after a run — inode, mode, size, mtime, content hash and symlink target — and fails on any difference. `atime` is excluded (a dry run legitimately reads); directory mtime is included (it is the only thing that sees a create-then-delete inside the run). `$TMPDIR` and `$HOME` are redirected into the test's own temporary directory and both are snapshot roots, which is what turns "the temp directory gained nothing" into a whole-tree comparison instead of a glob racing every other process on the machine. `tests/test_cli_contract.py`'s `C9`/`C10` checks consume this primitive directly rather than re-deriving it.
 
-Six planted mutations prove the comparator can fail, and a non-dry-run control proves the guard is live: zero differences has to mean *the run wrote nothing*, never *the run never happened*.
+**Nine** planted mutations prove the comparator can fail, and a non-dry-run control proves the guard is live: zero differences has to mean *the run wrote nothing*, never *the run never happened*. (Nine, not the six this section and both instrument docstrings claimed until `PDF-19` counted them on 2026-09-02: the six named `control_one`…`control_six`, plus create-then-delete caught only by directory `mtime`, symlink retarget, and `assert_unchanged` naming every difference.)
+
+`PDF-19` additionally **ablated** each compared dimension and recorded which control goes blind, because re-running a passing control only proves it still passes. `Entry` carries seven fields and six are compared — `dev` is recorded and never compared. Removing `ino` blinds the identical-content-replacement control and nothing else; removing directory traversal, or `mtime_ns`, blinds the create-then-delete control; *adding* `atime` reds the exclusion control and five legitimate dry-run purity arms at once, which is the measurement that turns the exclusion from an omission into a decision.
 
 ### The write-chokepoint / import-boundary tests
 
-`tests/test_import_boundaries.py` is shared and append-only across three specs: Section 1 (PDF-04) walks the AST of every file under `src/` and fails on any filesystem-mutating call outside `src/pdf_toolkit/safety/atomic.py`; Section 2 (PDF-05) does the same for engine imports outside `adapters/` and spawns outside the one subprocess chokepoint; Section 3 (PDF-06) does the same for `typer`/`click` imports below `cli/` (`PLAN.md` §10, D-03). Every section's allowlists are empty, a test asserts they are empty, and a stale entry — one that no longer resolves to a real call site — fails the test. Planted violations prove each walk bites, and a negative-control test proves none of the three walks is a text grep.
+`tests/test_import_boundaries.py` is shared and append-only, and it now carries **five** sections rather than the three it launched with: Section 1 (PDF-04) walks the AST of every file under `src/` and fails on any filesystem-mutating call outside `src/pdf_toolkit/safety/atomic.py`; Section 2 (PDF-05) does the same for engine imports outside `adapters/` and spawns outside the one subprocess chokepoint; Section 3 (PDF-06) does the same for `typer`/`click` imports below `cli/` (`PLAN.md` §10, D-03); Section 4 (B-093) forbids a `dry_run`-guarded confirmation-gate call; Section 5 (PDF-18) forbids a local filesystem-tier refusal construction under `ops/`. Every section's allowlists are empty, a test asserts they are empty, and a stale entry — one that no longer resolves to a real call site — fails the test. Planted violations prove each walk bites, and a negative-control test proves none of the walks is a text grep.
+
+**All fourteen §D7 call groups now carry a planted violation** (`PDF-19`, 2026-09-02). `PDF-04` shipped five plants covering five groups; the other nine had never been observed to red. `D7_GROUP_PLANTS` maps each group to the plants that red it, and a test asserts the map has no empty group and names no plant `PLANTED` does not carry — so the coverage claim is executed rather than written down.
+
+Two exemption registers live beside the two write allowlists, in the same `# reason:`-per-entry idiom with stale-entry detection: `SAFETY_INNER_ALLOW`/`ALLOWED_WRITE_SITES` (Section 1, both empty) and `GATE_EXEMPT` (Section 4). `GATE_EXEMPT` exists because Section 4's walk forbids a *guarded* confirmation call and structurally cannot see an *absent* one: every `cli/cmd_*.py` module must either call `require_confirmation` or carry an exemption naming its reason. Four of its twelve entries are the deferred question **B-022 ≡ B-045** — `extract`, `rasterize`, `tables` and `text` are `{PDF...}` multi-input producers consuming output-directory flags, so `bulk` is reachable for them and nothing gates it. That is recorded here, not decided here.
 
 ### Expected visible skips (safety-spine arms only)
 
 | Configuration | Skips from these arms |
 |---|---|
-| Linux, engines installed or absent | **0.** Every arm above runs; the cross-filesystem ladder reaches `/dev/shm`. |
-| macOS | **5** — the cross-filesystem arms that need a second mount skip together, with the ladder printed. The sixth arm in that file asserts the *absence* of a warning on one filesystem and always runs. |
+| Linux, engines installed or absent | **0.** Re-measured by `PDF-19` on 2026-09-02 over the eight safety-spine files (`tests/unit/test_atomic_writer.py`, `test_safety_paths.py`, `test_confirm.py`, `test_tempnames.py`, `tests/integration/test_atomic_crash.py`, `test_cross_filesystem.py`, `test_purity_primitive.py`, `tests/test_import_boundaries.py`): **259 passed, 0 skipped, 1 xfailed** with `-rs`. The one `xfail` is not a skip — it is the strict marker on `test_a_positional_mode_on_path_open_is_a_violation`, which turns RED the day the §D7 row-2 blind spot is closed. The cross-filesystem ladder resolved at rung `2 (/dev/shm)`, device 27 against `/tmp`'s 66308. |
+| macOS | **5** — the cross-filesystem arms that need a second mount skip together, with the ladder printed. The sixth arm in that file asserts the *absence* of a warning on one filesystem and always runs. Inherited from `PDF-04`'s landing and **not** re-measured: no macOS host is available to this cycle (`decision.md` X-153). |
 | Any platform, `uid 0` | **1** — the unwritable-destination arm, since directory permissions cannot cause a write to fail for root. |
 | Filesystem without hard links | **1** — the sidecar-keeps-the-inode arm. |
 

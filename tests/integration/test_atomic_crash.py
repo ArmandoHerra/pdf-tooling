@@ -237,3 +237,123 @@ def test_residue_is_reported_rather_than_swept(point: str, tmp_path: Path) -> No
     strays = find_stray_temps(work)
     assert temp in strays
     assert all(stray.exists() for stray in strays)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-19 — the crash arms, re-derived (Design §D4).
+#
+# The rendezvous is real: `os.pipe()` x2 handed down by `pass_fds`, the child
+# announcing on the ready descriptor and blocking on the release one, the parent
+# selecting with a 30 s timeout and delivering `os.kill(pid, SIGKILL)`. Signal 9
+# cannot be caught, so there is no unwind path to get wrong.
+#
+# The vacuity risk is not the kill -- it is WHERE the child was when it arrived.
+# An arm that passes because the writer never reached the commit is
+# indistinguishable from one that passes because the commit is atomic. Two
+# mutations settled it, both observed in a scratch worktree on 2026-09-02:
+#
+#   (1) `os.replace` hoisted ABOVE the `after_fsync` checkpoint in `_commit`:
+#       four arms red, and `test_a_kill_leaves_an_in_place_target_byte_identical`
+#       red with the ORIGINAL's SHA-256 CHANGED
+#       (b5b6b8f3...09a239 -> 26d85e40...33690ca1). The arms observe the
+#       destination, not merely the absence of a fresh file.
+#   (2) `checkpoint()` made a no-op: three arms red in ~1 s with
+#       "the child exited (code 0) before reaching the fault point" -- NOT the
+#       30 s rendezvous timeout §D4 predicted, and better than predicted: the
+#       harness detects a child that ran to completion instead of waiting for
+#       one that never parks. The arms are not green on a race.
+#
+# What was missing, and is added below: `test_every_declared_fault_point_is_
+# reachable` proves DECLARED -> CALLED. Nothing proved CALLED -> DECLARED, so a
+# `checkpoint("after_something_new")` added to `atomic.py` without a
+# `FAULT_POINTS` entry would be a live injection point no arm ever parks at.
+# --------------------------------------------------------------------------- #
+
+import ast  # noqa: E402
+
+CHOKEPOINT_SOURCE = REPO_ROOT / "src" / "pdf_toolkit" / "safety" / "atomic.py"
+
+
+def checkpoint_call_site_names(path: Path = CHOKEPOINT_SOURCE) -> tuple[str, ...]:
+    """Every literal name passed to `checkpoint(...)` in the chokepoint.
+
+    AST rather than grep: the words appear in prose throughout this module and a
+    text scan would be red on the docstrings and blind to a computed argument.
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name != "checkpoint" or not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            names.append(first.value)
+        else:
+            names.append("<computed>")
+    return tuple(names)
+
+
+def test_every_checkpoint_call_site_is_a_declared_fault_point() -> None:
+    """The converse of `test_every_declared_fault_point_is_reachable`.
+
+    Red (observed, PDF-19): adding a fourth name to `FAULT_POINTS` that no
+    writer calls reds the reachability arm above; adding a `checkpoint("x")`
+    call that `FAULT_POINTS` does not declare reds THIS one. Both directions
+    are needed -- an orphan in either set is an injection point nobody parks at.
+    """
+    called = checkpoint_call_site_names()
+    assert called, f"no checkpoint() call site found in {CHOKEPOINT_SOURCE}"
+    assert "<computed>" not in called, (
+        f"a checkpoint() call site takes a non-literal name: {called}; it cannot be "
+        "matched against FAULT_POINTS and cannot be parked at deterministically"
+    )
+    undeclared = sorted(set(called) - set(FAULT_POINTS))
+    assert undeclared == [], (
+        f"{CHOKEPOINT_SOURCE.name} calls checkpoint() at {undeclared}, which "
+        f"safety/_faults.FAULT_POINTS does not declare: {list(FAULT_POINTS)}"
+    )
+
+
+def test_the_declared_points_and_the_call_sites_are_the_same_set() -> None:
+    """§D4's set equality, stated once so neither direction can drift alone."""
+    assert set(checkpoint_call_site_names()) == set(FAULT_POINTS)
+    assert len(FAULT_POINTS) == len(set(FAULT_POINTS)), "FAULT_POINTS carries a duplicate"
+
+
+def test_every_fault_point_precedes_the_replace() -> None:
+    """§D1 step 7's guarantee, as a structural fact rather than a sentence.
+
+    "There is no *during* `os.replace`" is what makes the six crash arms a
+    complete enumeration rather than a sample. If a checkpoint ever landed after
+    the commit, an arm would be parking at a point where the destination has
+    already changed and "byte-identical" would stop being the right assertion.
+    """
+    source = CHOKEPOINT_SOURCE.read_text()
+    tree = ast.parse(source, filename=str(CHOKEPOINT_SOURCE))
+    commit = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_commit"
+    )
+    checkpoints = [
+        node.lineno
+        for node in ast.walk(commit)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", "")) == "checkpoint"
+    ]
+    replaces = [
+        node.lineno
+        for node in ast.walk(commit)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", "") in {"_replace", "_replace_across_devices"}
+    ]
+    assert checkpoints and replaces, (checkpoints, replaces)
+    assert max(checkpoints) < min(replaces), (
+        f"a checkpoint at line {max(checkpoints)} sits at or after the commit at "
+        f"line {min(replaces)}: the crash arms would be parking after the destination "
+        "has already changed"
+    )
