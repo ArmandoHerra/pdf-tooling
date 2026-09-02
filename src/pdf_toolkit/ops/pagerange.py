@@ -337,8 +337,10 @@ def _is_valid_body_shape(body: str) -> bool:
     """Whether *body* matches one of §4.3's five token shapes -- no bounds check.
 
     Mirrors :func:`_resolve_body`'s dispatch exactly, reusing the SAME
-    keyword set and the SAME compiled regexes so a grammar change can never
-    leave this answer out of step with ``parse()``'s. Deliberately does
+    keyword set, the SAME compiled regexes and the SAME numeral-conversion
+    ceiling, so a grammar change can never leave this answer out of step with
+    ``parse()``'s -- a property that is now asserted rather than asserted
+    about, by ``test_syntax_oracle_agrees_with_parse``. Deliberately does
     **not** call ``_resolve_body`` itself: that function materializes a range
     (``list(range(first, second + step, step))``), and a syntax-only check
     must never do that -- an unbounded shape check that materialized would
@@ -348,12 +350,26 @@ def _is_valid_body_shape(body: str) -> bool:
     lowered = body.lower()
     if lowered in _KEYWORDS:
         return True
-    return bool(
+    match = (
         _NEGATIVE_RE.match(body)
         or _OPEN_END_RE.match(body)
         or _RANGE_RE.match(body)
         or _SINGLE_RE.match(body)
     )
+    if match is None:
+        return False
+    try:
+        for numeral in match.groups() or (match.group(0),):
+            int(numeral)
+    except ValueError:
+        # Past CPython's 4300-digit int() ceiling. `parse()` converts the same
+        # failure into a "malformed" PageRangeError through `_safe_int`, so
+        # answering True here would leave the two dispatches out of step on
+        # the one input where they can be: `merge`'s path:range
+        # disambiguation would read a 4400-digit numeral as a page range and
+        # then fail to parse it, instead of reading it as part of a filename.
+        return False
+    return True
 
 
 def is_valid_spec(spec: str) -> bool:
