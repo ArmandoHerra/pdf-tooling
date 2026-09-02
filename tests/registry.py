@@ -61,10 +61,13 @@ single secret-leak case: the cardinality budget is `PDF-22`'s own deliverable.
 from __future__ import annotations
 
 import ast
+import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,13 +87,17 @@ __all__ = [
     "PDF_08_VERBS",
     "REPO_ROOT",
     "Invocation",
+    "PtyResult",
     "VerbSpec",
     "console_script",
+    "derive_password_file_pairs",
     "discover_groups",
     "discover_verbs",
     "expectation",
     "output_formats",
+    "output_shape_states",
     "run_cli",
+    "run_cli_with_pty",
     "tty_modes",
 ]
 
@@ -1440,3 +1447,196 @@ def undeclared_expectations(
     """``(missing, stale)`` — dimension members with no expectation, and
     expectations naming something no longer in the dimension."""
     return sorted(set(dimension) - set(mapping)), sorted(set(mapping) - set(dimension))
+
+
+# --------------------------------------------------------------------------- #
+# PDF-22 -- the code-derived secret-leak regression matrix (X-157, X-243).
+#
+# Two capabilities `PDF-17` did not need and `PDF-22` does: the derived
+# `(flag, verb)` population behind the B-068 guard (D2), and a REAL pty on
+# `stdout`/`stderr` (Correction 3 -- both pre-existing pty tests in this suite
+# attach the pty to `stdin` only, which cannot reach the sixth shape). Both
+# live here rather than in `tests/test_password_leaks.py` because they are
+# harness machinery, not matrix content -- the same split `discover_verbs()`
+# and `run_cli()` already draw.
+# --------------------------------------------------------------------------- #
+
+#: Click hard-wraps `--help` text, including inside a hyphenated flag name
+#: (`--password-\n  file`). De-wrapping before a substring grep is what keeps
+#: the D2 probe from silently shrinking the population on a wrapped line --
+#: `tests/test_password_leaks.py`'s own AC18 grep already carries this same
+#: normalization (its `:883`); reused here, not re-derived, so the population
+#: and the proof that built it cannot drift apart.
+_HELP_LINE_WRAP: Final[re.Pattern[str]] = re.compile(r"-[ \t]*\n[ \t]*")
+
+
+def derive_password_file_pairs() -> tuple[tuple[str, str], ...]:
+    """D2 -- the `(flag, verb)` population, built rather than typed.
+
+    A pair is IN the population **iff the live rendered `<verb> --help`
+    names `flag`** -- `PDF-13` AC18's own idiom (B-052's lesson: grep
+    rendered ``--help``, never source) applied to BUILD a population rather
+    than to police one. No skip list, no hard-coded verb or flag name: a verb
+    that stops accepting a flag, or a new password-file flag, moves this
+    return value the next time the suite runs.
+
+    At `2d19bcb` this yields 28 pairs over 26 verbs; that number appears
+    nowhere as a literal in this function or in its callers.
+
+    The 26 `--help` subprocess spawns are dispatched across a small thread
+    pool (AC8's `<= 30s` budget: this is I/O-bound subprocess wait, not CPU
+    work, so the GIL is released for the duration of each spawn and threads
+    give a real wall-clock win with zero correctness risk -- each verb's
+    probe is independent and touches nothing but its own `--help` output).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+
+    def _probe(verb_name: str) -> list[tuple[str, str]]:
+        rendered = run_cli(verb_name, "--help").stdout
+        normalized = _HELP_LINE_WRAP.sub("-", rendered)
+        return [(flag, verb_name) for flag in PASSWORD_FILE_FLAGS if flag in normalized]
+
+    verb_names = [verb.name for verb in discover_verbs()]
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(verb_names)))) as pool:
+        per_verb = list(pool.map(_probe, verb_names))
+    return tuple(pair for pairs in per_verb for pair in pairs)
+
+
+def output_shape_states() -> tuple[OutputFormat | None, ...]:
+    """The shape dimension: every `output_formats()` member PLUS the
+    absent-``-o`` state (``None``), which resolves through `auto_format()`'s
+    own `isatty()` branch rather than being a fourth enum member.
+
+    Reuses `output_formats()` rather than a second enumeration (X-157): a
+    member added to `OutputFormat` joins this tuple, and every derived
+    dimension a consumer builds from it, with zero action here.
+    """
+    return (*output_formats(), None)
+
+
+@dataclass(frozen=True, slots=True)
+class PtyResult:
+    """One `run_cli_with_pty` observation. Mirrors
+    `subprocess.CompletedProcess[str]`'s three fields a consumer actually
+    reads, decoded ``errors="replace"`` since a pty is a byte stream, not
+    guaranteed valid UTF-8 at every partial read boundary."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _drain_pty(controller_fd: int, sink: bytearray) -> None:
+    """Read *controller_fd* until the kernel reports the far end gone.
+
+    A pty's read-side raises ``OSError`` (``EIO``) once the slave has no more
+    writers, rather than returning ``b""`` the way a pipe's read side would --
+    the one behavioural difference from a plain `subprocess.PIPE` that makes
+    this its own function instead of a `communicate()` call.
+    """
+    while True:
+        try:
+            chunk = os.read(controller_fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        sink.extend(chunk)
+
+
+def run_cli_with_pty(
+    *args: str,
+    pty_stream: str,
+    stdin_data: bytes | None = None,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: float = 30.0,
+) -> PtyResult:
+    """Run the CLI with exactly ONE of ``stdout`` / ``stderr`` / ``stdin``
+    attached to a REAL pty (`pty_stream`), the other two ordinary pipes.
+
+    THE NEW CAPABILITY (Correction 3, `PDF-22` Design D1) -- every pty test
+    that already existed in this suite (`tests/unit/test_confirm.py:251`,
+    `tests/integration/test_compose_roundtrip.py:166`) attaches the pty to
+    `stdin` only. `auto_format()` branches on `sys.stdout.isatty()` and
+    `color_enabled()` on `sys.stderr.isatty()` -- neither stream had ever
+    been made a terminal by any test idiom in this repository before this
+    function, which is why the sixth shape (a table on stderr, under a
+    terminal, with no ``-o`` flag) was unreachable by anything shipped.
+
+    ``start_new_session=True`` (verified against this host, `PDF-22`
+    Implementation Log): without it the child inherits the calling process's
+    session and `getpass`'s `/dev/tty` open may resolve to a DIFFERENT
+    terminal than the pty this function built; with it the child is a fresh
+    session leader and falls back to reading its own `stdin` (still our pty)
+    the same way `getpass.getpass` always has when `/dev/tty` is unavailable.
+    """
+    if pty_stream not in ("stdout", "stderr", "stdin"):
+        raise ValueError(f"pty_stream must be one of stdout/stderr/stdin, got {pty_stream!r}")
+
+    import pty  # POSIX-only; local per this repo's own pty-test convention.
+
+    controller, follower = pty.openpty()
+    stdin_kw: object = subprocess.DEVNULL
+    stdout_kw: object = subprocess.PIPE
+    stderr_kw: object = subprocess.PIPE
+    if pty_stream == "stdin":
+        stdin_kw = follower
+    elif pty_stream == "stdout":
+        stdout_kw = follower
+    else:
+        stderr_kw = follower
+
+    process = subprocess.Popen(  # noqa: S603 - argv built by this module, never shell
+        [*console_script(), *args],
+        stdin=stdin_kw,
+        stdout=stdout_kw,
+        stderr=stderr_kw,
+        cwd=str(cwd) if cwd is not None else REPO_ROOT,
+        env=env,
+        text=True,
+        start_new_session=True,
+    )
+    os.close(follower)
+
+    captured = bytearray()
+    drain_thread: threading.Thread | None = None
+    if pty_stream in ("stdout", "stderr"):
+        drain_thread = threading.Thread(target=_drain_pty, args=(controller, captured), daemon=True)
+        drain_thread.start()
+    elif stdin_data is not None:
+        # The child needs a moment to exec and reach its own read() (e.g.
+        # `getpass`'s termios setup) before data written to the controller is
+        # visible to it as a *line* the way a real terminal would deliver one.
+        # Writing immediately risks the write landing before the child's
+        # read call is posted; this mirrors the interactive-terminal proof
+        # already shipped (`tests/unit/test_confirm.py`'s own `_answer_on_a_pty`
+        # helper writes right after `Popen`, but that harness's target reads
+        # in a tight loop from process start -- `getpass` does not start
+        # reading until deep inside password resolution, so this function
+        # gives it real wall-clock time rather than assuming the same timing
+        # holds).
+        import time
+
+        time.sleep(0.5)
+        os.write(controller, stdin_data)
+
+    try:
+        piped_stdout, piped_stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        piped_stdout, piped_stderr = process.communicate()
+        raise
+    finally:
+        if drain_thread is not None:
+            drain_thread.join(timeout=5.0)
+        os.close(controller)
+
+    pty_text = captured.decode("utf-8", errors="replace")
+    if pty_stream == "stdout":
+        return PtyResult(process.returncode, pty_text, piped_stderr or "")
+    if pty_stream == "stderr":
+        return PtyResult(process.returncode, piped_stdout or "", pty_text)
+    return PtyResult(process.returncode, piped_stdout or "", piped_stderr or "")
