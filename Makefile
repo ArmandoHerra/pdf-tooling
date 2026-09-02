@@ -1,18 +1,32 @@
 # pdf-toolkit — developer entry points.
 #
-# The local gate IS the CI gate: `make ci` runs exactly the checks CI runs, in
-# the same order, with the same commands. No target here degrades to a weaker
-# substitute, swallows a missing tool, or exits 0 when its check did not run —
-# a gate that cannot fail is not a gate.
+# `make ci` is a SUBSET of CI, run with the same commands -- it does not
+# predict CI. What runs locally, what does not, and why is declared in
+# .github/gate-parity.toml, enforced by tests/test_gate_parity.py, and printed
+# by `make ci`'s own epilogue on every run (PDF-28). No target here degrades
+# to a weaker substitute, swallows a missing tool, or exits 0 when its check
+# did not run — a gate that cannot fail is not a gate.
 
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
 ARGS ?=
+PYTEST_ARGS ?=
+
+# PDF-28 / B-029: when set, `make ci PYTHON=3.11` reproduces the ONE named CI
+# leg that went red under an isolated per-interpreter environment, without
+# disturbing the ambient `.venv/`. Unset (the default) costs nothing and
+# changes no command below.
+PYTHON ?=
+ifdef PYTHON
+UV_RUN := UV_PROJECT_ENVIRONMENT=.venv-py$(PYTHON) uv run --python $(PYTHON)
+else
+UV_RUN := uv run
+endif
 
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
-        samples-gate ci clean
+        samples-gate engines-gate licenses-check artifacts-check ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -31,7 +45,7 @@ doctor: ## Report which engines resolved (arrives with the engine-ports work; ex
 	uv run pdftoolkit doctor
 
 test: ## Run the test suite
-	uv run pytest
+	$(UV_RUN) pytest $(PYTEST_ARGS)
 
 test-e2e: ## Run only the subprocess-level CLI tests
 	uv run pytest -m e2e
@@ -75,25 +89,25 @@ cover: ## Run the suite under coverage against the project's floor
 	echo "$$$$" > "$$lock/pid"; \
 	trap 'rm -rf "$$lock"' EXIT INT TERM; \
 	COVERAGE_FILE=$(CURDIR)/.coverage \
-	  uv run pytest --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85
+	  $(UV_RUN) pytest --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85 $(PYTEST_ARGS)
 
 fmt: ## Format the tree
 	uv run ruff format .
 
 fmt-check: ## Check formatting without writing
-	uv run ruff format --check .
+	$(UV_RUN) ruff format --check .
 
 lint: ## Lint the tree
-	uv run ruff check .
+	$(UV_RUN) ruff check .
 
 typecheck: ## Type-check src/ in strict mode
-	uv run mypy src/
+	$(UV_RUN) mypy src/
 
 vulncheck: ## Audit dependencies for known CVEs
-	uv run pip-audit
+	$(UV_RUN) pip-audit
 
 sast: ## Static security analysis of src/
-	uv run bandit -r src/ -c pyproject.toml
+	$(UV_RUN) bandit -r src/ -c pyproject.toml
 
 secret-scan: ## Scan history and worktree for secrets (needs the gitleaks binary)
 	@command -v gitleaks >/dev/null 2>&1 || { \
@@ -110,8 +124,8 @@ secret-scan: ## Scan history and worktree for secrets (needs the gitleaks binary
 	gitleaks detect --no-banner
 
 licenses: ## Regenerate THIRD_PARTY_LICENSES from the pinned closure, then gate it
-	uv run python scripts/licenses.py generate
-	uv run python scripts/licenses.py check
+	$(UV_RUN) python scripts/licenses.py generate
+	$(UV_RUN) python scripts/licenses.py check
 
 samples-scratch: ## Copy $$PDF_TOOLKIT_SAMPLES_DIR into .scratch/samples/ + write the originals manifest (PLAN.md §10.1)
 	@if [ -z "$$PDF_TOOLKIT_SAMPLES_DIR" ]; then \
@@ -218,7 +232,43 @@ samples-gate: ## Run the whole @samples chain in the one correct order (PLAN.md 
 	@echo "samples-gate 5/5: only NOW is the originals comparison meaningful"
 	$(MAKE) samples-check
 
-ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate
+# PDF-28: the three targets below make a CI-only check RUNNABLE locally. NONE
+# joins `make ci` -- see .github/gate-parity.toml `in_make_ci`. Declaring a
+# local counterpart is strictly better than having none, without spending the
+# wall-clock `PDF-29` is fighting.
+
+engines-gate: ## Run both engine configurations (present + hidden) with skip-visibility assertions
+	@mkdir -p .scratch
+	@missing=""; \
+	command -v tesseract >/dev/null 2>&1 || missing="$$missing tesseract"; \
+	command -v soffice >/dev/null 2>&1 || missing="$$missing soffice"; \
+	if [ -n "$$missing" ]; then \
+		echo "" >&2; \
+		echo "make engines-gate: REFUSING arm 1 (engines present) --$$missing not on PATH." >&2; \
+		echo "  This arm exercises the engine-backed code paths; it does not skip them," >&2; \
+		echo "  and it will NOT exit 0 pretending it ran them." >&2; \
+		echo "  Install the missing engine(s), or use 'make test' directly if you only" >&2; \
+		echo "  need the without-engines arm below." >&2; \
+		echo "" >&2; \
+		exit 1; \
+	fi
+	@echo "engines-gate 1/2: engines present -- cover + zero-skip assertion"
+	$(MAKE) cover PYTEST_ARGS="--junitxml=.scratch/junit-engines-present.xml"
+	$(UV_RUN) python scripts/assert_skips.py .scratch/junit-engines-present.xml --expect-zero
+	@echo "engines-gate 2/2: engines hidden -- test + skip-visibility assertion"
+	PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice $(MAKE) test PYTEST_ARGS="--junitxml=.scratch/junit-without-engines.xml"
+	$(UV_RUN) python scripts/assert_skips.py .scratch/junit-without-engines.xml
+
+licenses-check: ## Reproduce the license-gate CI job's freshness diffs locally (needs-clean-tree)
+	$(MAKE) licenses
+	git diff --exit-code -- THIRD_PARTY_LICENSES website/src/data/licenses.json
+
+artifacts-check: ## Reproduce the build job's license-file assertion locally (needs-built-artifact)
+	uv build
+	uv run --no-project python scripts/assert_artifacts.py
+
+ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate; ends by printing what CI additionally gates
+	@uv run python scripts/gate_parity.py epilogue
 
 clean: ## Remove build, cache and coverage artefacts
 	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml .scratch .make-cover.lock

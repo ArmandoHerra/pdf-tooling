@@ -123,7 +123,7 @@ make test      # run the test suite
 make ci        # the full local gate: format, lint, types, tests, licenses, SAST, CVEs
 ```
 
-`make help` lists every target. The local gate is the CI gate: `make ci` runs exactly the checks CI runs, in the same order, with the same commands. No target degrades to a weaker substitute or exits 0 when its check did not run.
+`make help` lists every target. `make ci` is a **subset** of CI, run with the same commands — it does not predict CI. What runs locally, what does not, and why is declared in `.github/gate-parity.toml` and printed by `make ci`'s own epilogue on every run. No target degrades to a weaker substitute or exits 0 when its check did not run.
 
 Contributions are accepted under the Developer Certificate of Origin (`git commit -s`). See `CONTRIBUTING.md` for the commit conventions and `TESTING.md` for how to run each suite.
 

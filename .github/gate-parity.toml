@@ -1,0 +1,192 @@
+# The single source of truth for the relationship between `make ci` and
+# .github/workflows/ci.yml -- PDF-28.
+#
+# THIS FILE IS A DECLARATION, NOT A DERIVATION. The CI side (job set, check-leg
+# count, gating-step count) is RE-DERIVED from ci.yml on every test run by TWO
+# independent parsers -- scripts/gate_parity.py (structural, PyYAML) and
+# tests/test_gate_parity.py (a from-scratch regex/text scan that does not
+# import gate_parity.py's derivation, so a shared-parser bug cannot make both
+# sides agree wrongly). `local`, `reason`, `note` and `in_make_ci` are the
+# human claims neither derivation can make on its own.
+#
+# TWO RULES, both enforced by tests/test_gate_parity.py:
+#   1. A CI gating step with no [[check]] entry for its job fails the suite.
+#      You cannot add a CI check without saying whether a contributor can run
+#      it locally.
+#   2. A [[check]] entry whose `job` no longer exists in ci.yml ALSO fails the
+#      suite. You cannot make the two lists agree by DELETING a CI check --
+#      see PDF-28's spec, Design Sec 2.
+#
+# WHAT COUNTS AS A "GATING STEP" (both parsers apply this identically, in
+# separate code): a `run:` step, EXCLUDING (a) recognized environment-setup
+# commands (`uv sync --locked`, and any step named "Install engines" or
+# "Install pinned gitleaks" -- provisioning, not a check), (b) any step
+# carrying `continue-on-error: true` (informational; annotates, never blocks),
+# and (c) any step whose command is self-neutralizing (ends in `|| true` --
+# an artifact-generation report step that cannot fail regardless). `uses:`
+# steps (checkout, setup-uv, upload-artifact) have no `run:` key and are
+# excluded automatically. Applying this at 2d19bcb/PDF-28-HEAD yields 19
+# gating steps across the 10 jobs -- reproduced by
+# `uv run python scripts/gate_parity.py check`.
+#
+# `in_make_ci` is a separate boolean from `local`, deliberately: a check with
+# a local target that `make ci` does not run is a different, weaker gap than a
+# check with no local target at all.
+
+schema_version = 1
+
+# --- lint --------------------------------------------------------------- #
+
+[[check]]
+job = "lint"
+step = "make fmt-check"
+local = "fmt-check"
+in_make_ci = true
+
+[[check]]
+job = "lint"
+step = "make lint"
+local = "lint"
+in_make_ci = true
+
+# --- typecheck ------------------------------------------------------------ #
+
+[[check]]
+job = "typecheck"
+step = "make typecheck"
+local = "typecheck"
+in_make_ci = true
+
+# --- test ------------------------------------------------------------------ #
+
+[[check]]
+job = "test"
+step = "make test"
+local = "cover"
+in_make_ci = true
+partial = "1 of 8 legs"
+reason = "needs-ci-host"
+note = "the local gate runs ONE interpreter on ONE OS; CI runs 4 x 2. See `make ci PYTHON=<x.y>`."
+
+# --- engines-present -------------------------------------------------------- #
+
+[[check]]
+job = "engines-present"
+step = "tesseract --version && soffice --version"
+local = "engines-gate"
+in_make_ci = false
+reason = "needs-engine-configuration"
+
+[[check]]
+job = "engines-present"
+step = "make cover PYTEST_ARGS=--junitxml=junit-engines-present.xml"
+local = "cover"
+in_make_ci = true
+note = "identical command since PDF-28; ci.yml invoked pytest directly until then (changelog.md:123)"
+
+[[check]]
+job = "engines-present"
+step = "uv run python scripts/assert_skips.py junit-engines-present.xml --expect-zero"
+local = "engines-gate"
+in_make_ci = false
+reason = "needs-engine-configuration"
+
+# --- without-engines --------------------------------------------------------- #
+
+[[check]]
+job = "without-engines"
+step = "verify tesseract and soffice are ABSENT"
+local = "engines-gate"
+in_make_ci = false
+reason = "needs-engine-configuration"
+
+[[check]]
+job = "without-engines"
+step = "make test PYTEST_ARGS=--junitxml=junit-without-engines.xml"
+local = "engines-gate"
+in_make_ci = false
+reason = "needs-engine-configuration"
+note = "identical command since PDF-28; ci.yml invoked pytest directly until then (changelog.md:123). Not `in_make_ci` because `test` alone does not hide the engines -- that is what `engines-gate` arm 2 adds via PDF_TOOLKIT_TEST_HIDE_ENGINES."
+
+[[check]]
+job = "without-engines"
+step = "uv run python scripts/assert_skips.py junit-without-engines.xml"
+local = "engines-gate"
+in_make_ci = false
+reason = "needs-engine-configuration"
+
+# --- sast / vulncheck ------------------------------------------------------- #
+
+[[check]]
+job = "sast"
+step = "make sast"
+local = "sast"
+in_make_ci = true
+
+[[check]]
+job = "vulncheck"
+step = "make vulncheck"
+local = "vulncheck"
+in_make_ci = true
+
+# --- secret-scan -------------------------------------------------------------- #
+
+[[check]]
+job = "secret-scan"
+step = "make secret-scan"
+local = "secret-scan"
+in_make_ci = false
+reason = "needs-pinned-external-binary"
+note = "gitleaks is pinned to GITLEAKS_VERSION in CI; a local binary is a different scanner (PDF-28 V-5)."
+
+# --- license-gate -------------------------------------------------------------- #
+
+[[check]]
+job = "license-gate"
+step = "make licenses (regenerate and gate the inventory)"
+local = "licenses"
+in_make_ci = true
+
+[[check]]
+job = "license-gate"
+step = "git diff --exit-code -- THIRD_PARTY_LICENSES"
+local = "licenses-check"
+in_make_ci = false
+reason = "needs-clean-tree"
+
+[[check]]
+job = "license-gate"
+step = "make licenses (redundant second run, regenerates website licence data)"
+local = "licenses"
+in_make_ci = true
+note = "genuinely redundant with the first run in this same job -- declared, NOT removed. Deleting a CI step in the commit that ships this two-list agreement test is exactly what it exists to forbid (Design Sec 2, Sec 10; Scope > Out). Recorded for PDF-29, whose theme is CI cost."
+
+[[check]]
+job = "license-gate"
+step = "git diff --exit-code -- website/src/data/licenses.json"
+local = "licenses-check"
+in_make_ci = false
+reason = "needs-clean-tree"
+
+# --- build ---------------------------------------------------------------- #
+
+[[check]]
+job = "build"
+step = "uv build"
+local = "artifacts-check"
+in_make_ci = false
+reason = "needs-built-artifact"
+
+[[check]]
+job = "build"
+step = "uv run --no-project python scripts/assert_artifacts.py"
+local = "artifacts-check"
+in_make_ci = false
+reason = "needs-built-artifact"
+
+# --- rejected proposals ----------------------------------------------------- #
+
+[[rejected]]
+proposal = "make samples-check as a CI job"
+id = "B-R01"
+reason = "PLAN.md 10.1 rule 5 forbids CI from ever setting PDF_TOOLKIT_SAMPLES_DIR; the job would be a permanent no-op that looks like coverage. TESTING.md:118-120."

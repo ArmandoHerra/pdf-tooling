@@ -128,12 +128,14 @@ jobs:
       # several tests spawn the CLI with `cwd` inside a temp directory, and an
       # unpinned relative data file would let a subprocess-measured `.coverage.*`
       # land somewhere a purity snapshot could see it.
+      # PDF-28: was a direct `uv run pytest ...` invocation; now the SAME
+      # command `make cover` runs, so the coverage floor is defined once
+      # (Makefile:78) instead of twice (here and there) -- see
+      # .github/gate-parity.toml's engines-present/cover entry.
       - name: Run suite with engines installed
         env:
           COVERAGE_FILE: ${{ github.workspace }}/.coverage
-        run: >
-          uv run pytest --junitxml=junit-engines-present.xml
-          --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85
+        run: make cover PYTEST_ARGS="--junitxml=junit-engines-present.xml"
       # With engines installed, an engine-gated SKIP means a test that should
       # have exercised a real engine silently did not — a false green.
       - name: Assert no engine-gated skips
@@ -159,8 +161,11 @@ jobs:
             exit 1
           fi
       - run: uv sync --locked
+      # PDF-28: was a direct `uv run pytest ...` invocation; now the SAME
+      # command `make test` runs -- see .github/gate-parity.toml's
+      # without-engines entries.
       - name: Run suite without engines
-        run: uv run pytest --junitxml=junit-without-engines.xml
+        run: make test PYTEST_ARGS="--junitxml=junit-without-engines.xml"
       # Prints "engine-gated skips: N". Vacuous by construction until PDF-06
       # introduces the markers, and it SAYS SO rather than implying coverage.
       - name: Assert engine-gated SKIP visibility

@@ -436,17 +436,28 @@ def test_the_workflow_python_parser_can_find_and_miss() -> None:
 def test_the_floor_has_not_been_weakened_by_any_route() -> None:
     """`PDF-06:236`: *"If 85% is unreachable, the answer is more tests -- never
     a lower `fail_under` and never an `omit`. Lowering the floor is a BLOCKER
-    reported to the PM, not an edit."* The floor lives on the COMMAND LINE in
-    exactly two places (there is no `fail_under` key in `pyproject.toml`), and
-    both must agree — a local gate that enforces a different number from CI is
-    `PDF-28`'s subject, and this is the tripwire for it arriving by accident.
+    reported to the PM, not an edit."* The floor used to live on the COMMAND
+    LINE in exactly two places (there is no `fail_under` key in
+    `pyproject.toml`); `PDF-28` (its own AC16) collapsed that to ONE
+    definition by converting `ci.yml`'s direct `pytest --cov-fail-under=85`
+    invocation into a `make cover` call, so the floor and the pytest
+    invocation are one definition instead of two -- exactly the reconciliation
+    this test's own docstring anticipated ("a local gate that enforces a
+    different number from CI is PDF-28's subject, and this is the tripwire
+    for it arriving by accident"). Updated HERE, by PDF-28, rather than left
+    red: `ci.yml` must now carry ZERO occurrences (a re-duplication is the
+    drift this assertion exists to catch), and `Makefile` must carry exactly
+    one, at 85.
     """
-    for path in (MAKEFILE, CI_WORKFLOW):
-        text = path.read_text(encoding="utf-8")
-        floors = re.findall(r"--cov-fail-under=(\d+)", text)
-        assert floors == ["85"], (
-            f"{path.name} declares coverage floor(s) {floors}, expected exactly one at 85"
-        )
+    makefile_floors = re.findall(r"--cov-fail-under=(\d+)", MAKEFILE.read_text(encoding="utf-8"))
+    assert makefile_floors == ["85"], (
+        f"Makefile declares coverage floor(s) {makefile_floors}, expected exactly one at 85"
+    )
+    ci_floors = re.findall(r"--cov-fail-under=(\d+)", CI_WORKFLOW.read_text(encoding="utf-8"))
+    assert ci_floors == [], (
+        f"ci.yml declares coverage floor(s) {ci_floors} directly -- since PDF-28, the floor "
+        "must be defined only in Makefile, reached via `make cover`/`make test`"
+    )
     config = PYPROJECT.read_text(encoding="utf-8")
     assert not re.search(r"^\s*omit\s*=", config, re.MULTILINE), (
         "an `omit` key appeared under [tool.coverage.*] -- PDF-06's AC14 forbids omitting "

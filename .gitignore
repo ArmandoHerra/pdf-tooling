@@ -45,5 +45,10 @@ htmlcov/
 .venv-licenses/
 .venv-licenses-dev/
 
+# Per-interpreter environments built by `make ci PYTHON=<x.y>` (PDF-28 B-029,
+# AC15). `.venv/` above is the exact-name entry for the ambient venv; this is
+# deliberately a separate glob rather than widening it to `.venv*/`.
+.venv-py*/
+
 # Scratch space for manual probing against real documents. Never committed.
 .scratch/

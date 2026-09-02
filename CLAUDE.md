@@ -48,9 +48,9 @@ Each package's `__init__.py` states its own contract in its docstring. Read it b
 uv sync        # runtime stack plus development tooling
 make help      # every available target
 make test      # the test suite
-make ci        # the full local gate — the same checks CI runs, in the same order
+make ci        # the full local gate -- a SUBSET of CI, run with the same commands
 ```
 
-`make ci` is the contract. If it is green locally it is green in CI, and no target in it degrades to a weaker substitute or exits 0 when its check did not run.
+`make ci` does not predict CI — see `.github/gate-parity.toml` and the epilogue `make ci` prints on every run for exactly what CI additionally gates. No target in it degrades to a weaker substitute or exits 0 when its check did not run.
 
 `uv run pdftoolkit --help` is the authoritative list of what exists. If a verb is not printed there, it has not been built yet — do not write documentation, tests or website copy that claims otherwise.

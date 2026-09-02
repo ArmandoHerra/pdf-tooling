@@ -68,6 +68,12 @@ dev = [
   "bandit>=1.7.9",
   "pip-audit>=2.7",
   "pip-licenses>=5.0",
+  # PDF-28: already resolved transitively via bandit (uv.lock, pinned 6.0.3);
+  # declared explicitly rather than relied upon so scripts/gate_parity.py's
+  # ci.yml parse does not depend on bandit's dependency tree. Dev-only -- see
+  # Design Sec 9 / AC21: cannot move THIRD_PARTY_LICENSES or licenses.json,
+  # both generated from the --no-dev closure.
+  "pyyaml>=6.0",
 ]
 
 [tool.hatch.build.targets.wheel]

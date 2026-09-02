@@ -33,12 +33,13 @@ uv sync
 make ci
 ```
 
-`make ci` runs format checking, linting, strict type checking, the test suite, licence generation, static security analysis and a dependency CVE audit — the same checks CI runs, in the same order, with the same commands. If it is green locally it is green in CI.
+`make ci` is a **subset** of CI, run with the same commands. It does not predict CI — `.github/gate-parity.toml` declares exactly what runs locally and what does not, why, and where a local counterpart exists; `make ci`'s own epilogue prints that gap on every run, and `make help` lists every target it does not run.
 
-Two things about the gate are deliberate and should not be "fixed":
+Three things about the gate are deliberate and should not be "fixed":
 
 - **No target degrades.** No recipe ends in `|| true`, is prefixed with `-`, or swallows a missing tool. A gate that cannot fail is not a gate; a check that quietly did not run is worse than one that failed loudly.
-- **`make secret-scan` needs the `gitleaks` binary** and fails loudly when it is absent, rather than passing. It is not part of `make ci` locally because it is a repository-history scan, not a source check.
+- **`make secret-scan` needs the `gitleaks` binary** and fails loudly when it is absent, rather than passing. It is not part of `make ci` locally: the local binary, when present, is a different scanner version than the one CI pins (`GITLEAKS_VERSION` in `ci.yml`), so running it inside `make ci` would trade a known gap for an unnoticed one — same command, different check.
+- **Some CI checks are not part of `make ci` at all, on purpose.** A few (`make engines-gate`, `make licenses-check`, `make artifacts-check`) are runnable on demand but cost real wall-clock; others need CI's own host, matrix, or a pinned binary and have no local form. `.github/gate-parity.toml` is the record of which is which.
 
 Individual targets, when you want a faster loop:
 

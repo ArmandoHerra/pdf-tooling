@@ -90,6 +90,11 @@ MAKEFILE_TARGETS = {
     # PDF-11 (decision.md §8 X-115): the @samples ordering, encoded ONCE as a
     # target instead of re-typed into every spec's Validation block.
     "samples-gate",
+    # PDF-28: local counterparts for three CI-only checks. None joins `ci`'s
+    # own prerequisite list -- see .github/gate-parity.toml `in_make_ci`.
+    "engines-gate",
+    "licenses-check",
+    "artifacts-check",
     "ci",
     "clean",
 }

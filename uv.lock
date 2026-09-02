@@ -1342,6 +1342,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 
@@ -1370,6 +1371,7 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "pytest-xdist", specifier = ">=3.6" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.6" },
 ]
 

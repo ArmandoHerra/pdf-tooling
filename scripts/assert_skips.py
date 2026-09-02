@@ -26,6 +26,23 @@ the regex already matches every marker-driven skip without needing to import
 pytest's own marker metadata from a JUnit report, which does not carry it.
 Replacing a working, simpler mechanism with a more complex one that answers
 the same question was not worth the diff.
+
+B-081 -- THE `type="pytest.xfail"` EXCLUSION (PDF-28)
+------------------------------------------------------
+`ENGINE_REASON` matches on PROSE, not on why pytest recorded the skip. pytest
+serializes an `xfail` outcome as `<skipped type="pytest.xfail" message="...">`
+in JUnit XML -- the SAME element shape a real skip uses. If a deliberate
+`@pytest.mark.xfail(reason="... engine ...")` ever lands, its reason text can
+happen to name an engine, a port class, or the literal word "engine" (e.g.
+"StructureEngine port unavailable"), and this script would count it as an
+engine-gated SKIP -- under `--expect-zero` (the `engines-present` job) that
+reddens the run with a message that blames the wrong thing: it looks like an
+engine silently failed to exercise, when the real cause is an unrelated xfail.
+The fix excludes any `<skipped type="pytest.xfail">` element from the count
+BEFORE the `ENGINE_REASON` regex ever sees it -- see
+`tests/test_assert_skips.py` for the red/complement pair that proves this
+does not also silence a REAL engine-gated skip (`type="pytest.skip"`, the
+shape `tests/conftest.py::pytest_collection_modifyitems` actually emits).
 """
 
 from __future__ import annotations
@@ -74,6 +91,10 @@ def main(argv: list[str] | None = None) -> int:
     for case in cases:
         skipped = case.find("skipped")
         if skipped is None:
+            continue
+        if skipped.get("type") == "pytest.xfail":
+            # B-081: an xfail is not a skip -- its reason text may still name
+            # an engine, but that is not what this count is asking about.
             continue
         reason = f"{skipped.get('message', '')} {skipped.text or ''}"
         if ENGINE_REASON.search(reason):
