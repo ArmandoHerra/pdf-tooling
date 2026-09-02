@@ -35,7 +35,7 @@ mode-count check.
 
 **X-67 / B-054.** The dry-run prediction is inherited: ``ops`` calls the
 shared ``safety.atomic.plan_output_set``/``AtomicWriter`` planning path in
-both modes through ``_plan_filesystem``, so a dry run over an occupied or
+both modes through ``plan_filesystem``, so a dry run over an occupied or
 unwritable destination predicts what the real run does. No per-verb
 prediction logic and no per-verb exit-code logic exists in this file.
 

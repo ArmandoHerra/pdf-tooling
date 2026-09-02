@@ -178,18 +178,19 @@ def convert_run(
         # OR-7 / D12.1 (B-096) -- an ABSENT engine is knowable at plan time, so
         # predict it HERE rather than reporting `would_exit: 0` and letting the
         # real run discover exit 3. `ops/ocr.py` demands its engine above its
-        # own dry-run return for exactly this reason (`require_ocr()` at its
-        # :328, above `if policy.dry_run:` at :331); this is that ordering,
+        # own dry-run return for exactly this reason (`require_ocr()` runs
+        # before its `if policy.dry_run:` branch); this is that ordering,
         # expressed the one way `convert` can afford it (see below).
         #
         # `not plan.refused` keeps the FILESYSTEM tier's precedence, matching
-        # what the real run does: `_plan_filesystem` RAISES for a real run
-        # (`safety/atomic.py:319-320`, and its own widened check at `:182-183`,
-        # both re-raise unless `policy.dry_run`), so a real run never reaches
-        # its engine demand carrying a pending filesystem refusal. Getting this
-        # order wrong regresses an unwritable destination from `dry 1 / real 1`
-        # back to the `dry 1 / real 3` split `_plan_filesystem`'s own docstring
-        # measured.
+        # what the real run does: `plan_filesystem` RAISES for a real run
+        # (`safety/atomic.py::plan_output_set`'s own raise, and
+        # `plan_filesystem`'s own widened check on top of it both re-raise
+        # unless `policy.dry_run`), so a real run never reaches its engine
+        # demand carrying a pending filesystem refusal. Getting this order
+        # wrong regresses an unwritable destination from `dry 1 / real 1`
+        # back to the `dry 1 / real 3` split this module's own filesystem-
+        # tier comment above `convert_run` records having measured.
         #
         # Why the PRESENCE check and not `require_office()` itself: the latter
         # is spawn-free only when the binary is ABSENT. With `soffice` PRESENT,

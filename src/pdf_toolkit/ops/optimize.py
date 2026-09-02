@@ -270,7 +270,7 @@ def compress_run(
 
     Under ``--dry-run`` no engine runs at all (mirroring `rasterize`/
     `compose`/`create`): the filesystem tier alone is predicted, through
-    :func:`_plan_filesystem`.
+    :func:`~pdf_toolkit.safety.atomic.plan_filesystem`.
     """
     _validate_sources(sources)
     if name_template is not None and out_dir is None:

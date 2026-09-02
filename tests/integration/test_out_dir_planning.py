@@ -42,6 +42,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from dryreal import dry_and_real, prediction, real_envelope  # noqa: E402
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot  # noqa: E402
+from pdf_toolkit.ports.office import office_binary_present  # noqa: E402
 from registry import OUTPUT_FLAG_INVOCATIONS, discover_verbs, run_cli  # noqa: E402
 
 # --------------------------------------------------------------------------- #
@@ -51,6 +52,27 @@ from registry import OUTPUT_FLAG_INVOCATIONS, discover_verbs, run_cli  # noqa: E
 VERBS: Final[tuple[str, ...]] = tuple(
     sorted(verb.name for verb in discover_verbs() if "--out-dir" in verb.consumes)
 )
+
+#: `office_binary_present()` is a spawn-free `shutil.which` check (its own
+#: docstring: it exists precisely so a `--dry-run` preview can ask "is the
+#: engine there" without the side effect `require_office()` has when the
+#: engine IS present). Detecting it once here at collection time is D8's own
+#: "derived, not hand-typed" philosophy applied to a second population axis
+#: -- not just WHICH verbs take `--out-dir`, but which of THIS matrix's cells
+#: an engine-dependent verb can even measure on the current leg.
+_OFFICE_PRESENT: Final[bool] = office_binary_present()
+
+#: AC12's C cell (parent writable, out-dir absent) for `convert`: the
+#: filesystem tier answers cleanly -- `0` -- in BOTH modes regardless of the
+#: engine, but `ops/office.py:203`'s own `not plan.refused and not
+#: office_binary_present()` guard means the very NEXT tier, engine presence,
+#: refuses with exit `3` in both modes too (OR-7/D12.1) whenever `soffice`
+#: is absent. Every other `--out-dir` verb has no engine-shaped tier between
+#: the filesystem check and success, so its own C cell is unconditionally
+#: `0`. This is `_NO_CLOBBER_EXPECTED`'s own sibling pattern below: an
+#: expected VALUE, derived once at module scope -- never a skip, and never
+#: hand-typed per cell.
+_C_CELL_EXPECTED: Final[dict[str, int]] = {"convert": 0 if _OFFICE_PRESENT else 3}
 
 #: AC13 -- the one verb the exit-5 no-clobber gate cannot mask, because its
 #: own N/M/F cells are built to produce nothing. Every other verb's N/M/F
@@ -116,6 +138,17 @@ def _skip_if_root_ignores_mode_bits(directory: Path) -> None:
 # AC7 / AC9 / AC12 / AC13 -- the five-precondition matrix, one verb at a
 # time. Every cell is a measured dry/real pair; U, C and N/M/F are built
 # fresh so no cell's precondition leaks into another's.
+#
+# `convert` is the one verb here whose engine can be legitimately ABSENT
+# (D12.1/B-096/OR-7). This does NOT gate the parametrize case (a whole-verb
+# `pytest.mark.requires("soffice")` skip would throw the U cell away on
+# every leg but `engines-present` -- U is engine-INDEPENDENT: the filesystem
+# tier refuses before `ops/office.py:203`'s engine-presence check is ever
+# reached, in both modes, so it is the cell that proves PDF-18's D3 thesis
+# and it is asserted UNCONDITIONALLY below, on every leg). Only the C cell's
+# EXPECTED VALUE (`_C_CELL_EXPECTED`, module scope, AC13's own
+# "expected-value, not skip" pattern) and the N/M/F seeding step are
+# engine-dependent -- see the inline notes at each.
 # --------------------------------------------------------------------------- #
 
 
@@ -150,23 +183,85 @@ def test_ac12_the_five_precondition_matrix(verb: str, corpus: Any, tmp_path: Pat
     assert "Traceback (most recent call last)" not in u_real.stderr, u_real.stderr
     assert not u_out_dir.exists(), "neither run may create the directory it refuses"
 
-    # -- C: parent writable, out-dir absent -> dry == real == 0 (AC9) ----- #
-    # Dry and real run SEPARATELY here (not through `dry_and_real`, which
-    # returns both only after running both) so Trap 1's absent-then-present
-    # existence check can land BETWEEN the two runs, not after both.
+    # -- C: parent writable, out-dir absent -> dry == real == 0 (AC9),
+    #    EXCEPT `convert` when `soffice` is ABSENT (`_C_CELL_EXPECTED`,
+    #    module scope): the filesystem tier answers cleanly in both modes,
+    #    but `ops/office.py:203`'s `not plan.refused and not
+    #    office_binary_present()` guard means the engine-presence tier
+    #    refuses right after it, with exit 3, ALSO in both modes (OR-7).
+    #    Dry and real run SEPARATELY here (not through `dry_and_real`, which
+    #    returns both only after running both) so Trap 1's absent-then-present
+    #    existence check can land BETWEEN the two runs, not after both.
     c_root = tmp_path / "cell-c"
     c_root.mkdir()
     c_argv, c_out_dir = _out_dir_argv(verb, corpus, c_root)
-    c_dry = run_cli(verb, "--dry-run", *c_argv, "-o", "json", cwd=c_root, env=env)
+    expected_c = _C_CELL_EXPECTED.get(verb, 0)
 
-    c_detail = prediction(c_dry.stdout)
-    assert c_detail["would_exit"] == 0, f"{verb} C cell: dry predicted {c_detail}"
+    c_dry = run_cli(verb, "--dry-run", *c_argv, "-o", "json", cwd=c_root, env=env)
+    assert c_dry.returncode == expected_c, (
+        f"{verb} C cell: dry {c_dry.returncode}, expected {expected_c}"
+    )
     assert not c_out_dir.exists(), "Trap 1: the dry run must leave a non-existent out-dir absent"
 
     c_real = run_cli(verb, *c_argv, "-o", "json", cwd=c_root, env=env)
-    assert c_real.returncode == 0, f"{verb} C cell real run: {c_real.stdout}{c_real.stderr}"
-    assert c_dry.returncode == c_real.returncode == 0
-    assert c_out_dir.is_dir(), "Trap 1's other half: the real run must have created it"
+    assert c_real.returncode == expected_c, (
+        f"{verb} C cell real run: {c_real.stdout}{c_real.stderr}, expected {expected_c}"
+    )
+
+    if expected_c == 0:
+        c_detail = prediction(c_dry.stdout)
+        assert c_detail["would_exit"] == 0, f"{verb} C cell: dry predicted {c_detail}"
+        assert c_out_dir.is_dir(), "Trap 1's other half: the real run must have created it"
+    else:
+        # `convert`, `soffice` absent: an ENGINE-tier refusal, not a
+        # filesystem-tier one. `dryreal.prediction()` is deliberately NOT
+        # used here -- it asserts an `items` list exists, and NEITHER run
+        # ever constructs one: `require_office()` raises before the dry
+        # branch builds `items` and before the real branch's write loop
+        # starts, so both envelopes are the top-level `{"error": {...}}`
+        # shape `render_error_json` emits for an uncaught `PdfToolkitError`.
+        # Asserted directly instead, on the SHAPE (X-184(b)/X-185), never
+        # the exit integer alone. `c_out_dir`'s own existence after the real
+        # run is NOT asserted here: `plan_filesystem`'s real-mode branch
+        # already ran `_ensure_out_dir`'s `mkdir` (unrefused) before
+        # `require_office()` raised, so the directory is typically created
+        # anyway as an incidental side effect -- not a property this cell
+        # exists to pin, and not the same "planned, not silently absent"
+        # shape Trap 1 is about (that guard is about a *clean* run, not one
+        # already ending in a different tier's refusal).
+        dry_error = json.loads(c_dry.stdout)["error"]
+        real_error = json.loads(c_real.stdout)["error"]
+        assert dry_error["kind"] == real_error["kind"] == "engine_missing", (
+            f"{verb} C cell (soffice absent): dry {dry_error} real {real_error}"
+        )
+        assert "Traceback (most recent call last)" not in c_dry.stderr, c_dry.stderr
+        assert "Traceback (most recent call last)" not in c_real.stderr, c_real.stderr
+
+    if verb == "convert" and not _OFFICE_PRESENT:
+        # N/M/F all depend on a SEEDING run (below) that succeeds and writes
+        # a real colliding output -- for every other verb, that seed is a
+        # plain real invocation of the verb itself. For `convert` without
+        # `soffice`, the seed cannot succeed: `require_office()` raises
+        # exit 3 before the per-target write loop ever runs, so there is no
+        # colliding target to build N/M/F's own precondition from at all.
+        # This is NOT the `tables` shape (AC13): `tables`' seed run DOES
+        # succeed (exit 0), it simply detects nothing to write, so its N/M/F
+        # cells get an expected VALUE (0) rather than being unreachable.
+        # Here the seed run itself cannot complete, so a fixed expected
+        # value would not exercise the no-clobber gate or `--force` at all --
+        # every re-probe would read `engine_missing` regardless of state,
+        # which is exactly the "one answer everywhere" shape AC12's own note
+        # warns a silent preview would produce. U and C are asserted above,
+        # UNCONDITIONALLY, on this same leg; the `engines-present` CI job
+        # (which installs `libreoffice-writer`) is where this verb's full
+        # five-cell matrix, N/M/F included, is proven.
+        pytest.skip(
+            "convert's N/M/F cells need a REAL conversion to seed a colliding "
+            "output; soffice is absent on this leg, so seeding itself exits 3 "
+            "(engine_missing) before writing anything -- there is no "
+            "colliding target to build N/M/F's precondition from. U and C "
+            "are asserted above, unconditionally, on this same leg."
+        )
 
     # -- N / M / F: seed once under a writable parent, then re-probe ------ #
     nmf_root = tmp_path / "cell-nmf"
