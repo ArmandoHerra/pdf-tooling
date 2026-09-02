@@ -13,10 +13,14 @@ SHELL := /bin/bash
 ARGS ?=
 PYTEST_ARGS ?=
 
-# PDF-28 / B-029: when set, `make ci PYTHON=3.11` reproduces the ONE named CI
-# leg that went red under an isolated per-interpreter environment, without
-# disturbing the ambient `.venv/`. Unset (the default) costs nothing and
-# changes no command below.
+# PDF-28 / B-029: when set, PYTHON pins the targets below to an isolated
+# per-interpreter environment (`.venv-py<x.y>/`), without disturbing the
+# ambient `.venv/`. `make test PYTHON=3.11` runs, on that interpreter, the
+# same command CI's 3.11 matrix legs run -- `make test`, uninstrumented. CI
+# does not run `cover` at 3.11, so `make ci PYTHON=3.11` would add coverage
+# instrumentation those legs do not have (B-148, owned by PDF-29); it is not
+# the closer reproduction. Unset (the default) costs nothing and changes no
+# command below.
 PYTHON ?=
 ifdef PYTHON
 UV_RUN := UV_PROJECT_ENVIRONMENT=.venv-py$(PYTHON) uv run --python $(PYTHON)

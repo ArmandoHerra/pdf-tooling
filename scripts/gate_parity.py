@@ -312,7 +312,7 @@ def epilogue(argv: list[str] | None = None) -> int:
     print()
     print("A green `make ci` means those checks passed. It does not predict CI.")
     manifest_rel = MANIFEST_PATH.relative_to(REPO_ROOT)
-    print(f"Manifest: {manifest_rel}   Reproduce one CI leg: make ci PYTHON=3.11")
+    print(f"Manifest: {manifest_rel}   Reproduce one CI leg: make test PYTHON=3.11")
     return 0
 
 
