@@ -376,7 +376,8 @@ AUDIT: Final[tuple[ACAudit, ...]] = (
             "tests/test_coverage_policy.py::test_the_floor_has_not_been_weakened_by_any_route",
             "tests/test_coverage_policy.py::test_the_pragma_total_has_not_been_raised",
             "tests/test_coverage_policy.py::test_every_pragma_carries_a_reason",
-            "tests/test_coverage_policy.py::test_the_branch_coverage_deviation_has_not_expired",
+            "tests/test_coverage_policy.py::test_the_floor_interpreter_still_needs_the_branch_deviation",
+            "tests/test_coverage_policy.py::test_the_branch_support_boundary_is_where_it_was_measured",
         ),
         red=(
             "FILED AS A BLOCKER BY PDF-06's OWN ENGINEER AT LANDING (PDF-06:507, measured "
@@ -390,7 +391,11 @@ AUDIT: Final[tuple[ACAudit, ...]] = (
             "tests/test_info.py, 55 tests, quiet host): branch=false/core=sysmon 24.93 s at "
             "46%, branch=true 486.56 s at 39% -- a 19.5x factor, with coverage 7.16.0 "
             "emitting `Can't use core=sysmon: sys.monitoring can't measure branches in this "
-            "version`. branch = false STAYS and the key was not touched. RED, observed: "
+            "version`. branch = false STAYS and the key was not touched -- AND the expiry alarm "
+            "PDF-17 added FIRED FOR REAL on its first pushed run: CPython 3.14 already "
+            "supports branch measurement under sys.monitoring (measured on 8 CI "
+            "interpreters, run 33588614762), so the deviation has expired on 3.14 while "
+            "still holding on the 3.13 the floor is enforced on. RED, observed: "
             "adding an unreasoned `# pragma: no cover` is reported by "
             "`unreasoned_pragmas`, and the 46-pragma ceiling fires when exceeded -- closing "
             "the third gaming lever AC14's anti-gaming rule left open."

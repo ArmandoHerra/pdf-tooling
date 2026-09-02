@@ -9,9 +9,15 @@ the three things a comment cannot do into tests:
 1. **An expiry alarm (AC19).** `pyproject.toml:142-145` calls re-enabling
    `branch = true` *"a legitimate follow-up once coverage.py/CPython ship the
    version combination that supports branch measurement under `sys.monitoring`"*.
-   That is a TODO nobody will read on the day it comes true.
-   `test_the_branch_coverage_deviation_has_not_expired` fails, naming PDF-17,
-   the moment the installed combination supports it.
+   That is a TODO nobody will read on the day it comes true. **It came true
+   while PDF-17 was landing**: the alarm's first pushed CI run found that
+   CPython **3.14** already supports it, on both OSes, while 3.11-3.13 do not.
+   So the alarm is now two controls, and both are sharper than the one it
+   replaced: `test_the_branch_support_boundary_is_where_it_was_measured` pins
+   the measured boundary in BOTH directions on every matrix interpreter, and
+   `test_the_floor_interpreter_still_needs_the_branch_deviation` fails, naming
+   PDF-17, the day the job that actually enforces the floor moves onto an
+   interpreter where the deviation's reason no longer holds.
 
 2. **The third gaming lever, closed (AC20).** `PDF-06:236`'s anti-gaming rule
    forbids `omit` and forbids lowering `fail_under`. It says nothing about
@@ -263,6 +269,35 @@ _SYSMON_REFUSAL: Final[re.Pattern[str]] = re.compile(
     r"can't use core\s*=?\s*[\"']?sysmon", re.IGNORECASE
 )
 
+#: The CPython version from which coverage.py CAN measure branches under
+#: `sys.monitoring`. **MEASURED, ACROSS EIGHT INTERPRETERS, NOT ASSUMED.**
+#:
+#: PDF-17 originally wrote this control as "fail the moment support exists
+#: anywhere", which is what `pyproject.toml:142-145` asks for in terms. It
+#: FIRED ON ITS FIRST PUSHED CI RUN (33588614762): both `test (3.14, ...)`
+#: legs reported NO refusal at all -- coverage output empty -- while every
+#: 3.11/3.12/3.13 leg on both OSes reported the refusal, as did this
+#: engineer's local 3.12.13. The alarm was right and the deviation HAS
+#: expired, on 3.14 only.
+#:
+#: What it has NOT expired on is the interpreter the floor is actually
+#: enforced on -- see FLOOR_INTERPRETER -- so §8.1's ruling still holds where
+#: it binds. Recording the BOUNDARY rather than a one-sided alarm makes the
+#: control fire in BOTH directions: if 3.13-and-below gains support, or if
+#: 3.14 loses it, or if the boundary moves at all.
+BRANCH_UNDER_SYSMON_FROM: Final[tuple[int, int]] = (3, 14)
+
+#: The interpreter the 85% floor is enforced on: `ci.yml`'s `engines-present`
+#: job (described there as "the 85% floor is enforced HERE, and only here").
+#: Tied to the workflow by `test_the_floor_interpreter_matches_the_workflow`
+#: so it cannot drift from the file it describes.
+FLOOR_INTERPRETER: Final[tuple[int, int]] = (3, 13)
+
+_ENGINES_PRESENT_PYTHON: Final[re.Pattern[str]] = re.compile(
+    r"^  engines-present:.*?^\s*python-version:\s*\"(\d+)\.(\d+)\"",
+    re.MULTILINE | re.DOTALL,
+)
+
 
 def sysmon_refused_branch_measurement(output: str) -> bool:
     """Whether coverage.py said it could not measure branches under sysmon."""
@@ -275,10 +310,10 @@ def probe_branch_under_sysmon(tmp_path: Path) -> tuple[bool, str]:
     Runs coverage.py for real with `COVERAGE_CORE=sysmon` and `--branch`,
     against a throwaway script in *tmp_path*, and reads whether it refused.
 
-    FAIL-LOUD BY DESIGN. If coverage.py stops emitting that refusal — because
-    support arrived, OR because the message was reworded — this reports
-    "supported" and the alarm below fires, naming PDF-17. A human then looks.
-    The alternative failure direction (silently reporting "still unsupported"
+    FAIL-LOUD BY DESIGN. If coverage.py stops emitting that refusal -- because
+    support arrived, OR because the message was reworded -- this reports
+    "supported" and the boundary pin below fires. A human then looks. The
+    alternative failure direction (silently reporting "still unsupported"
     forever) is the rotting TODO this replaces.
     """
     script = tmp_path / "probe.py"
@@ -300,38 +335,97 @@ def probe_branch_under_sysmon(tmp_path: Path) -> tuple[bool, str]:
     return (not sysmon_refused_branch_measurement(output)), output
 
 
-def test_the_branch_coverage_deviation_has_not_expired(tmp_path: Path) -> None:
-    """AC19. `pyproject.toml:113-147` records the deviation and its cause:
-    `branch = true` and `core = "sysmon"` are MUTUALLY EXCLUSIVE in the
-    supported version combination, so restoring branch coverage re-enters
-    `406420c494` (the ~25x band factor) by construction.
+def engines_present_python(workflow_source: str) -> tuple[int, int] | None:
+    """The CPython version `ci.yml`'s `engines-present` job pins."""
+    match = _ENGINES_PRESENT_PYTHON.search(workflow_source)
+    return (int(match.group(1)), int(match.group(2))) if match else None
 
-    This is the alarm for the day that stops being true. It is deliberately a
-    FAILING test rather than a comment: PDF-17 measured the deviation and ruled
-    it on the record, and the ruling has an expiry condition that nothing else
-    watches.
+
+def test_the_floor_interpreter_matches_the_workflow() -> None:
+    """The tie. FLOOR_INTERPRETER is a declaration about another file, and the
+    ruling below rests on it -- so a bump of `engines-present`'s Python must
+    fail HERE, by name, rather than leaving that ruling standing on a stale
+    number."""
+    pinned = engines_present_python(CI_WORKFLOW.read_text(encoding="utf-8"))
+    assert pinned == FLOOR_INTERPRETER, (
+        f"ci.yml's engines-present job pins Python {pinned}, but FLOOR_INTERPRETER says "
+        f"{FLOOR_INTERPRETER}. That job is where --cov-fail-under=85 is enforced, and "
+        "PDF-17 §8.1's branch-coverage ruling is scoped to it."
+    )
+
+
+def test_the_floor_interpreter_still_needs_the_branch_deviation() -> None:
+    """AC19's alarm, scoped to where the deviation actually BINDS.
+
+    §8.1 ruled `branch = false` because `branch = true` forces the ctrace
+    backend, measured at 19.5x on a 55-test band. That is a fact about the
+    interpreter the floor runs on. When `engines-present` moves to a CPython
+    that CAN measure branches under `sys.monitoring`, the reason evaporates
+    and the ruling must be re-taken -- and that is the day this fails.
+    """
+    assert FLOOR_INTERPRETER < BRANCH_UNDER_SYSMON_FROM, (
+        f"the coverage floor is now enforced on CPython {FLOOR_INTERPRETER}, which CAN "
+        f"measure branches under sys.monitoring (support arrives at "
+        f"{BRANCH_UNDER_SYSMON_FROM}). PDF-17 §8.1 ruled `branch = false` on the record "
+        "BECAUSE branch forced the ctrace backend on the floor's interpreter -- 24.93 s "
+        "vs 486.56 s on a 55-test band, 19.5x. That reason has expired where it binds: "
+        "re-measure BOTH arms on this interpreter and revisit `[tool.coverage.run] "
+        "branch` and `core` together, per PDF-17 AC17/AC18. Do NOT simply delete this "
+        "test, and do NOT flip the key without the measurement."
+    )
+
+
+def test_the_branch_support_boundary_is_where_it_was_measured(tmp_path: Path) -> None:
+    """The boundary pin, fired in BOTH directions on every interpreter the
+    matrix runs.
+
+    PDF-17's first push proved this control is not decorative: written as a
+    one-sided "fail if support exists anywhere", it went RED on both CPython
+    3.14 legs of run 33588614762 while every 3.11/3.12/3.13 leg passed. That
+    was the alarm working, and the boundary it found is now recorded here
+    rather than papered over -- so a change in EITHER direction, on ANY
+    interpreter in the matrix, fails by name.
     """
     supported, output = probe_branch_under_sysmon(tmp_path)
-    assert not supported, (
-        "coverage.py no longer refuses branch measurement under `sys.monitoring` on this "
-        f"interpreter (coverage output: {output.strip()!r}).\n"
-        "PDF-17 §8.1 ruled `branch = false` on the record BECAUSE `branch = true` forced "
-        "the ctrace backend (~25x on the info/doctor/cli_contract band). That reason has "
-        "now expired: re-measure both arms and revisit `[tool.coverage.run] branch` and "
-        "`core` together, per PDF-17 AC17/AC18. Do NOT simply delete this test."
+    expected = sys.version_info[:2] >= BRANCH_UNDER_SYSMON_FROM
+    assert supported == expected, (
+        f"on CPython {sys.version_info.major}.{sys.version_info.minor}, coverage.py "
+        f"{'ACCEPTS' if supported else 'REFUSES'} branch measurement under sys.monitoring, "
+        f"but BRANCH_UNDER_SYSMON_FROM={BRANCH_UNDER_SYSMON_FROM} says it should "
+        f"{'accept' if expected else 'refuse'}. Coverage output: {output.strip()!r}.\n"
+        "If support has ARRIVED EARLIER than recorded, PDF-17 §8.1's ruling may have "
+        "expired on the floor's own interpreter -- re-measure both arms and revisit "
+        "`[tool.coverage.run] branch` and `core` together (AC17/AC18). If it has been "
+        "WITHDRAWN, the recorded boundary is wrong. Either way: measure, do not edit this "
+        "constant to match."
     )
 
 
 def test_the_expiry_probe_can_report_both_answers() -> None:
-    """Without this, `test_the_branch_coverage_deviation_has_not_expired` could
-    be green because the refusal detector matches everything — the 24th control
-    that cannot fail, installed by the spec written to end them."""
+    """Without this, the boundary pin could be green because the refusal
+    detector matches everything -- the 24th control that cannot fail,
+    installed by the spec written to end them."""
     assert sysmon_refused_branch_measurement(
         "Can't use core=sysmon: sys.monitoring can't measure branches in this version"
     )
     assert sysmon_refused_branch_measurement("can't use core sysmon: nope")
     assert not sysmon_refused_branch_measurement("")
     assert not sysmon_refused_branch_measurement("Wrote coverage data to .coverage")
+
+
+def test_the_workflow_python_parser_can_find_and_miss() -> None:
+    """The tie's own red proof."""
+    workflow = (
+        "jobs:\n"
+        "  lint:\n"
+        "    steps:\n"
+        '      - with:\n          python-version: "3.11"\n'
+        "  engines-present:\n"
+        "    steps:\n"
+        '      - with:\n          python-version: "3.13"\n'
+    )
+    assert engines_present_python(workflow) == (3, 13)
+    assert engines_present_python("jobs:\n  lint:\n    steps: []\n") is None
 
 
 # --------------------------------------------------------------------------- #
