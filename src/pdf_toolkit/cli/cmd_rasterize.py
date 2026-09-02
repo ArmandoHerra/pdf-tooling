@@ -47,7 +47,9 @@ class RasterFormat(StrEnum):
 
 _HELP = f"""Render PDF pages to images, one file per page.
 
-pypdfium2 alone -- no other renderer, not even as a fallback. If a page
+Rendering resolves the RasterEngine port; run 'pdftoolkit doctor' to see
+which engine satisfied it. pypdfium2 alone -- no other renderer, not even
+as a fallback. If a page
 cannot be rendered, that page is a failed item and the run exits 1 -- never
 a silent fallback to another engine.
 
@@ -62,7 +64,10 @@ implies the page's own aspect ratio for height. --format
 {{png,jpeg,tiff,webp}} (default png) is authoritative over any output
 extension. --quality INT (1-100, default 85) applies only to jpeg/webp;
 passing it with png or tiff exits 2. --grayscale renders single-channel
-output.
+output for png, tiff and jpeg. --format webp is the one exception: WebP's
+bitstream has no single-channel pixel mode, so --grayscale --format webp
+writes grey-valued RGB (rendered without colour information, three equal
+channels) rather than one channel.
 
 --out-dir is the destination directory (created if absent, unless
 --dry-run); defaults to '.' when omitted. --name templates each output
@@ -74,6 +79,14 @@ template: '{{stem}}-{{page:04}}.{{ext}}'.
 --threads 1 forces deterministic sequential rendering and is the switch to
 reproduce a parallel failure -- --threads 1 and --threads 8 render
 byte-identical files in the same order (PLAN.md §12 R-08).
+
+Teardown is stated per platform. On any POSIX platform, SIGTERM, SIGINT or
+SIGHUP sent to this command alone tears the render pool down through one
+routine: no further page is written and no worker outlives it. SIGKILL to
+this command cannot be handled by it at all; the workers are still reaped
+on Linux, where each asks the kernel for PR_SET_PDEATHSIG at start-up, but
+that is a Linux-only facility -- on macOS a SIGKILLed parent can leave its
+workers running.
 """
 
 

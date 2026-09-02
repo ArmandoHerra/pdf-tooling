@@ -111,6 +111,12 @@ _PROGRESS_TIMEOUT_S = 60.0
 #: for process spawn/reap overhead on top.
 _PARENT_EXIT_TIMEOUT_S = 25.0
 _SETTLE_S = 1.0
+#: PDF-21/AC11: how long the enumerated-survivor check polls. Under SIGKILL
+#: to the parent, the kernel delivers PR_SET_PDEATHSIG's SIGKILL to each
+#: worker asynchronously and the subreaper reaps them asynchronously too, so
+#: a single sample is a race. This is a bound on a teardown that is expected
+#: to complete in milliseconds, not a probability judgment.
+_SURVIVOR_TIMEOUT_S = 10.0
 
 
 def _make_source(directory: Path, *, pages: int = _PAGE_COUNT) -> Path:
@@ -259,6 +265,75 @@ def _assert_clean_signal_death(
     )
 
 
+#: PDF-21/AC10-AC11. `_group_alive` answers "does ANYTHING exist under this
+#: pgid", which is the portable check the SIGTERM/SIGINT arms use. The two arms
+#: added by PDF-21 additionally ENUMERATE the survivors by PID, for two reasons
+#: the wave-3 `PDF-05` AC10 inversion (`5d5c4d49bd`) makes concrete: a control
+#: that reports a boolean cannot say WHAT survived, and `killpg(pgid, 0)`
+#: counts an unreaped ZOMBIE as alive -- which under SIGKILL-to-parent is the
+#: normal, harmless transient while the kernel's PR_SET_PDEATHSIG kills land and
+#: the subreaper reaps them. A zombie holds no memory and writes no output, so
+#: it is not a survivor; a live worker is.
+def _live_group_members(pgid: int) -> tuple[tuple[int, str], ...]:
+    """Every NON-ZOMBIE live pid whose process group is *pgid*, from /proc.
+
+    Enumeration, not a return value: this reads the kernel's own view of which
+    processes exist. Returns ``()`` where ``/proc`` is unavailable (macOS), in
+    which case the caller falls back to :func:`_group_alive` alone -- which is
+    why the SIGKILL arm this backs is `skipif`-gated to Linux in the first
+    place.
+    """
+    procfs = Path("/proc")
+    if not procfs.is_dir():  # pragma: no cover - macOS
+        return ()
+    members: list[tuple[int, str]] = []
+    for entry in procfs.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+        except OSError:  # pragma: no cover - the pid exited mid-scan
+            continue
+        try:
+            # `comm` is parenthesised and may itself contain spaces/parens, so
+            # the fields after it are found from the LAST ')'.
+            fields = stat[stat.rindex(")") + 2 :].split()
+            state, pgrp = fields[0], int(fields[2])
+        except (ValueError, IndexError):  # pragma: no cover - malformed/raced
+            continue
+        if pgrp != pgid or state == "Z":
+            continue
+        try:
+            cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+        except OSError:  # pragma: no cover - the pid exited mid-scan
+            cmdline = ""
+        members.append((int(entry.name), cmdline.strip()))
+    return tuple(members)
+
+
+def _wait_for_no_survivors(pgid: int, *, timeout: float) -> tuple[tuple[int, str], ...]:
+    """Poll until the group holds no live non-zombie member, and return whatever
+    is left when the deadline expires. Bounded polling, not a bare sleep: under
+    SIGKILL-to-parent the kernel's PR_SET_PDEATHSIG deliveries and the
+    subreaper's reaps are asynchronous, and asserting on the first sample would
+    make this arm a race rather than a control."""
+    deadline = time.monotonic() + timeout
+    survivors = _live_group_members(pgid)
+    while survivors and time.monotonic() < deadline:
+        time.sleep(0.05)
+        survivors = _live_group_members(pgid)
+    return survivors
+
+
+def _assert_enumerated_zero_survivors(proc: subprocess.Popen[bytes], sig: signal.Signals) -> None:
+    survivors = _wait_for_no_survivors(proc.pid, timeout=_SURVIVOR_TIMEOUT_S)
+    assert survivors == (), (
+        f"after {sig.name} to the parent PID alone, these processes are still alive in "
+        f"the launched job's own process group (pgid {proc.pid}): {survivors} -- each one "
+        f"is an orphaned render worker holding pdfium/Pillow buffers"
+    )
+
+
 def test_sigterm_to_parent_only_stops_new_output_and_leaves_no_survivors(
     tmp_path: Path,
 ) -> None:
@@ -286,3 +361,74 @@ def test_sigint_to_parent_only_stops_new_output_and_leaves_no_survivors(
         tmp_path, signal.SIGINT
     )
     _assert_clean_signal_death(proc, signal.SIGINT, count_at_death, count_after_settle, strays)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-21 D6 -- the two arms the committed suite never had.
+#
+# E-3, measured: this file contained exactly TWO test functions (SIGTERM and
+# SIGINT). `changelog.md` claims "SIGTERM, SIGINT and SIGHUP all route through
+# the one teardown routine" and the QA reports record all four signals at zero
+# survivors -- but those were probes recorded in a report, not committed
+# controls, and the ONE arm `PR_SET_PDEATHSIG` exists to serve, SIGKILL, had
+# never had a test on any platform. "Probed once, never re-runnable" is not
+# coverage.
+# --------------------------------------------------------------------------- #
+
+
+def test_sighup_to_parent_only_stops_new_output_and_leaves_no_survivors(
+    tmp_path: Path,
+) -> None:
+    """SIGHUP gets the SAME measurement discipline as the SIGTERM and SIGINT
+    arms: the PARENT PID ALONE (X-119 -- signalling the group would kill the
+    workers directly and manufacture a pass), the positive control (parent
+    alive, pool members present, ``count_at_death < _PAGE_COUNT``), zero new
+    output after death, and zero survivors -- here ENUMERATED by pid as well as
+    probed with ``killpg(pgid, 0)``.
+    """
+    proc, count_at_death, count_after_settle, strays = _send_signal_and_measure(
+        tmp_path, signal.SIGHUP
+    )
+    _assert_clean_signal_death(proc, signal.SIGHUP, count_at_death, count_after_settle, strays)
+    _assert_enumerated_zero_survivors(proc, signal.SIGHUP)
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "the SIGKILL-to-parent orphan guard is PR_SET_PDEATHSIG, and prctl is a "
+        "Linux syscall (ops/procpool.py:235). There is no macOS equivalent, so on "
+        "macos-14 this arm is a VISIBLE SKIP rather than a silent absence -- the "
+        "verification gap X-153 rules is filed, not closed (see PDF-21 D7)."
+    ),
+)
+def test_sigkill_to_parent_only_leaves_no_survivors_on_linux(tmp_path: Path) -> None:
+    """The one arm ``PR_SET_PDEATHSIG`` exists for, and the one that never had a
+    test. SIGKILL cannot be handled by the parent at all: no handler, no
+    ``finally``, nothing runs. The only thing the CHILD side can still do is ask
+    the kernel to SIGKILL it when its parent dies, which ``ops/procpool.py``
+    does at worker start-up, on Linux only.
+
+    **Residue is EXPECTED here and is deliberately not asserted against.** A
+    SIGKILLed worker cannot run its own ``AtomicWriter.__exit__`` to discard its
+    in-flight temp file; ``PLAN §12 R-07`` accepts that class. What is asserted
+    is what the guarantee actually claims: **zero surviving processes and zero
+    new output after the parent is gone.**
+    """
+    proc, count_at_death, count_after_settle, _strays = _send_signal_and_measure(
+        tmp_path, signal.SIGKILL
+    )
+    assert proc.returncode == -signal.SIGKILL, proc.returncode
+    # The positive control, part of the assertion and not a preamble: the job
+    # was genuinely mid-flight, so "no growth after death" is not vacuously
+    # true of a run that had already finished.
+    assert count_at_death < _PAGE_COUNT, (
+        f"{count_at_death}/{_PAGE_COUNT} files existed at parent death -- the job "
+        f"already finished before SIGKILL arrived; tune _DPI/_PAGE_COUNT"
+    )
+    _assert_enumerated_zero_survivors(proc, signal.SIGKILL)
+    # Only NOW is "no new output" decisive: it is asserted after the survivors
+    # are gone, so it cannot pass merely because the settle window was short.
+    assert len(list((tmp_path / "out").iterdir())) == count_after_settle == count_at_death, (
+        "new output appeared after the parent was SIGKILLed -- a worker outlived it"
+    )

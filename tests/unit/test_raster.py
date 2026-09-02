@@ -90,6 +90,29 @@ def _make_multipage(directory: Path, pages: int, *, name: str = "multi.pdf") -> 
     return path
 
 
+def _make_coloured(directory: Path, *, name: str = "coloured.pdf") -> Path:
+    """PDF-21/AC4(a): a US-Letter page of six SATURATED colour bands.
+
+    Verb-private, and deliberately not text: ``_make_letter`` draws black on
+    white, so every channel is already equal before any grayscale conversion --
+    the property that made the shipped AC9 webp arm pass with the feature
+    switched off. Bands, not text, so a colour pixel dominates the measurement
+    instead of a hairline glyph edge.
+    """
+    from reportlab.lib.pagesizes import letter
+
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    made = _new_canvas(path, letter)
+    bands = ((1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 1, 1), (1, 0, 1))
+    for index, (red, green, blue) in enumerate(bands):
+        made.setFillColorRGB(red, green, blue)  # type: ignore[attr-defined]
+        made.rect(0, index * 132, 612, 132, stroke=0, fill=1)  # type: ignore[attr-defined]
+    made.showPage()  # type: ignore[attr-defined]
+    made.save()  # type: ignore[attr-defined]
+    return path
+
+
 def _stamp_rotate(path: Path, angle: int) -> Path:
     """Set ``/Rotate`` on page 1 **without touching the MediaBox** (B-094).
 
@@ -329,16 +352,130 @@ def test_ac4_worker_arguments_and_return_value_round_trip_through_pickle(
 # --------------------------------------------------------------------------- #
 
 
-def _child_process_pid(_marker: int) -> int:
-    """Module-level (picklable by reference) -- proves a real ProcessPoolExecutor
-    dispatch runs in a different OS process, under ANY start method."""
+def test_ac5_the_planning_handle_is_closed_before_the_executor_is_created(
+    tmp_path: Path,
+) -> None:
+    """PDF-21/AC4(b). This REPLACES ``test_ac5_a_process_pool_dispatch_runs_in_
+    a_different_pid``, which was **vacuous**: its body referenced no
+    ``pdf_toolkit`` symbol at all -- it submitted a local function to a
+    ``ProcessPoolExecutor`` and asserted the PID differed, i.e. it tested that
+    CPython forks. It would have passed with the entire rasterize feature
+    deleted. (Reported as a finding, not silently dropped.)
+
+    AC5's ACTUAL claim is *"the planning handle is closed before the executor is
+    created"* (``ops/raster.py``: ``_plan_pages``'s ``with
+    engine.open_document(...)`` closes at ``:132-134``; the pool is created at
+    ``:412``), and AC5 itself offers the mechanization used here -- **an
+    instrumented adapter counter**. The counter is sampled at the exact moment
+    ``guarded_process_pool`` is called, so a handle held open across the pool
+    reds it.
+
+    The sibling ``test_ac5_rasterize_document_never_calls_render_directly`` is
+    a structural proof about a DIFFERENT property (nothing renders on the
+    parent's own stack) and is kept, not replaced.
+    """
+    import contextlib
+
+    source = _make_multipage(tmp_path / "src", pages=4)
+    live: list[int] = [0]
+    open_handles_at_pool_creation: list[int] = []
+
+    real_require_structure = raster_module.require_structure
+    real_pool = raster_module.guarded_process_pool
+
+    class _CountingEngine:
+        """Wraps the real StructureEngine; counts CURRENTLY-OPEN documents."""
+
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+        @contextlib.contextmanager
+        def open_document(self, path: object):  # type: ignore[no-untyped-def]
+            live[0] += 1
+            try:
+                with self._inner.open_document(path) as document:  # type: ignore[attr-defined]
+                    yield document
+            finally:
+                live[0] -= 1
+
+    def _counting_require_structure(*args: object, **kwargs: object) -> object:
+        return _CountingEngine(real_require_structure(*args, **kwargs))
+
+    def _observing_pool(*args: object, **kwargs: object) -> object:
+        open_handles_at_pool_creation.append(live[0])
+        return real_pool(*args, **kwargs)
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(raster_module, "require_structure", _counting_require_structure)
+        monkeypatch.setattr(raster_module, "guarded_process_pool", _observing_pool)
+        result = _rasterize(
+            source, out_dir=tmp_path / "out", dpi=72.0, policy=make_policy(threads=2)
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert result.exit_code == 0
+    # Non-vacuity: the pool WAS created, so the sample below is a real sample.
+    assert open_handles_at_pool_creation, (
+        "guarded_process_pool was never called -- this assertion would be vacuous"
+    )
+    assert open_handles_at_pool_creation == [0], (
+        f"{open_handles_at_pool_creation[0]} planning handle(s) were still open when the "
+        f"executor was created; AC5 requires the parent to hold none"
+    )
+    assert live[0] == 0, "a planning handle outlived the run"
+
+
+def test_ac5_a_process_pool_dispatch_runs_in_a_different_process(tmp_path: Path) -> None:
+    """The PID property AC5 also states, re-derived through the PRODUCT rather
+    than through a local function: the pages are rendered somewhere other than
+    this interpreter. ``_render_one`` records ``os.getpid()`` nowhere, so the
+    observation is made from the worker side of the real dispatch -- the module
+    level worker ``_render_chunk``, submitted by ``rasterize_document`` itself.
+    """
+    source = _make_multipage(tmp_path / "src", pages=2)
+    seen: list[int] = []
+    real_pool = raster_module.guarded_process_pool
+
+    class _PidRecordingExecutor:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> object:
+            future = self._inner.submit(_worker_pid_probe)  # type: ignore[attr-defined]
+            seen.append(future.result())
+            return self._inner.submit(fn, *args, **kwargs)  # type: ignore[attr-defined]
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _probing_pool(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        with real_pool(*args, **kwargs) as executor:
+            yield _PidRecordingExecutor(executor)
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(raster_module, "guarded_process_pool", _probing_pool)
+        result = _rasterize(source, out_dir=tmp_path / "out", dpi=72.0)
+    finally:
+        monkeypatch.undo()
+
+    assert result.exit_code == 0
+    assert seen, "the pool the product itself creates dispatched nothing"
+    assert all(pid != os.getpid() for pid in seen), seen
+
+
+def _worker_pid_probe() -> int:
+    """Module-level (picklable by reference): reports the OS process a worker of
+    the PRODUCT's own pool actually runs in."""
     return os.getpid()
-
-
-def test_ac5_a_process_pool_dispatch_runs_in_a_different_pid() -> None:
-    with ProcessPoolExecutor(max_workers=1) as executor:
-        child_pid = executor.submit(_child_process_pid, 0).result()
-    assert child_pid != os.getpid()
 
 
 def test_ac5_rasterize_document_never_calls_render_directly() -> None:
@@ -660,26 +797,69 @@ def test_ac9_grayscale_produces_mode_l(tmp_path: Path, fmt: str) -> None:
         assert img.mode == "L"
 
 
+#: The webp arm's tolerance: WebP's lossy YUV round-trip drifts a few units of
+#: chroma even for an R==G==B source, so "perceptually grayscale" is asserted
+#: rather than bit-exact channel equality.
+_WEBP_GRAY_TOLERANCE = 8
+
+
+def _max_channel_delta(path: Path) -> int:
+    """The largest per-pixel spread between any two RGB channels in *path*."""
+    with Image.open(path) as img:
+        assert img.mode == "RGB", img.mode
+        r, g, b = (channel.tobytes() for channel in img.split())
+        return max(
+            max(abs(rv - gv), abs(gv - bv), abs(rv - bv))
+            for rv, gv, bv in zip(r, g, b, strict=True)
+        )
+
+
 def test_ac9_grayscale_webp_is_perceptually_grayscale_but_reads_back_rgb(
     tmp_path: Path,
 ) -> None:
-    source = _make_letter(tmp_path / "src")
+    """PDF-21/AC4(a) -- REBUILT ON A COLOURED FIXTURE.
+
+    **The shipped version of this test was an inverted control**, in the same
+    file as AC8's and found the same way: it rendered ``_make_letter`` (BLACK
+    TEXT ON WHITE), so R == G == B held *before any grayscale conversion at
+    all*. Measured at ``b20a651``: ``grayscale=True -> mode=RGB max_delta=1``
+    and ``grayscale=False -> mode=RGB max_delta=1`` -- **both of the shipped
+    assertions passed identically with the feature switched off**, and would
+    have gone on passing if ``--grayscale`` were removed for webp entirely.
+
+    The fixture below paints six saturated colour bands, so the two states are
+    separable: ``grayscale=True -> max_delta=0``, ``grayscale=False ->
+    max_delta=255``. The negative arm underneath is what makes this a control
+    rather than an observation.
+    """
+    source = _make_coloured(tmp_path / "src")
     out_dir = tmp_path / "out-webp-gray"
     result = _rasterize(source, out_dir=out_dir, dpi=96.0, fmt="webp", grayscale=True)
     assert result.exit_code == 0
     files = list(out_dir.iterdir())
     with Image.open(files[0]) as img:
-        assert img.mode == "RGB"  # the documented exception -- see the block comment above
-        # Not exact equality: WebP's lossy YUV round-trip introduces a few
-        # units of chroma-subsampling drift even for an R==G==B source, so
-        # this asserts "perceptually grayscale" (every channel pair within a
-        # small tolerance) rather than bit-exact equality.
-        r, g, b = (channel.tobytes() for channel in img.split())
-        max_delta = max(
-            max(abs(rv - gv), abs(gv - bv), abs(rv - bv))
-            for rv, gv, bv in zip(r, g, b, strict=True)
-        )
-        assert max_delta <= 8, max_delta
+        # The documented exception: WebP has no single-channel bitstream mode.
+        assert img.mode == "RGB"
+    assert _max_channel_delta(files[0]) <= _WEBP_GRAY_TOLERANCE
+
+
+def test_ac9_the_webp_grayscale_arm_can_fail_without_the_flag(tmp_path: Path) -> None:
+    """The negative half, and the whole reason the fixture above changed: the
+    SAME source, the SAME assertion, with ``grayscale=False`` must FAIL. Without
+    this, "perceptually grayscale" is a property of the fixture, not of the
+    feature -- which is exactly what the shipped arm was measuring."""
+    source = _make_coloured(tmp_path / "src")
+    out_dir = tmp_path / "out-webp-colour"
+    result = _rasterize(source, out_dir=out_dir, dpi=96.0, fmt="webp", grayscale=False)
+    assert result.exit_code == 0
+    files = list(out_dir.iterdir())
+    with Image.open(files[0]) as img:
+        assert img.mode == "RGB"
+    assert _max_channel_delta(files[0]) > _WEBP_GRAY_TOLERANCE, (
+        "a colour source rendered WITHOUT --grayscale came back with equal "
+        "channels -- the positive arm above cannot distinguish the flag's two "
+        "states and is therefore not a control"
+    )
 
 
 def test_ac9_without_grayscale_the_mode_is_rgb(tmp_path: Path) -> None:
@@ -792,6 +972,75 @@ def test_ac16_no_forbidden_name_or_process_spawn(relative: str) -> None:
     assert re.search(_FORBIDDEN_PATTERN, text) is None, relative
 
 
+def test_ac16_a_render_failure_is_a_failed_item_and_exit_1_never_a_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PDF-09 AC16's second clause -- *"a render failure is a failed
+    ``ItemResult`` and exit 1, never a fallback"* -- had **no test in the
+    repository**: nothing ever produced ``ok=False`` out of ``_render_one``.
+
+    Driven against ``_render_chunk`` directly for the reason
+    ``test_ac26_atomic_writer_refusing_produces_zero_files`` already documents
+    at length: production always dispatches through a ``ProcessPoolExecutor``,
+    and under ``spawn`` a parent-side monkeypatch never reaches a child.
+    ``_render_chunk`` is the module-level, picklable-argument unit AC4/AC7
+    already pin as what a worker executes.
+    """
+    from pdf_toolkit.errors import FailureError
+    from pdf_toolkit.models import OperationResult
+
+    source = _make_multipage(tmp_path / "src", pages=3)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    real_require_raster = raster_module.require_raster
+
+    class _FailsOnPageTwo:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+        def render_page(self, path: str, page_number: int, **kwargs: object) -> object:
+            if page_number == 2:
+                raise FailureError("planted render failure on page 2")
+            return self._inner.render_page(path, page_number, **kwargs)  # type: ignore[attr-defined]
+
+    def _flaky(*, capability: str | None = None) -> object:
+        return _FailsOnPageTwo(real_require_raster(capability=capability))
+
+    monkeypatch.setattr(raster_module, "require_raster", _flaky)
+
+    items = [
+        (slot, str(source), page, str(out_dir / f"src-{page:04}.png"), 96.0, None)
+        for slot, page in enumerate(range(1, 4))
+    ]
+    produced = [
+        item
+        for _slot, item in raster_module._render_chunk(
+            items, fmt="png", quality=None, grayscale=False, policy=make_policy()
+        )
+    ]
+
+    assert [item.ok for item in produced] == [True, False, True]
+    failed = produced[1]
+    assert failed.exit_code == 1
+    assert failed.message is not None and "planted render failure" in failed.message
+    # No fallback: the failed page produced no file, the others did.
+    assert sorted(path.name for path in out_dir.iterdir()) == ["src-0001.png", "src-0003.png"]
+    # The run-level code AC16 names, from the per-item codes the run collects.
+    run = OperationResult(
+        schema_version=raster_module._SCHEMA_VERSION,
+        verb=raster_module.VERB,
+        dry_run=False,
+        items=tuple(produced),
+        warnings=(),
+        duration_ms=0,
+    )
+    assert run.exit_code == 1
+
+
 # --------------------------------------------------------------------------- #
 # AC17 -- the render is re-usable by another verb (PDF-15's ocr): a direct
 # port import, no Typer, no CLI, no --out-dir, no file written.
@@ -841,15 +1090,48 @@ def test_ac25_fields_is_not_extended() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_ac26_pillow_is_handed_a_stream_never_a_path() -> None:
-    text = (SRC_ROOT / "ops" / "raster.py").read_text()
-    import re
+#: The only first arguments a `.save(` call in `ops/raster.py` may take. An
+#: allowlist, not a denylist: PDF-09 AC26's own regex was a denylist and had a
+#: PROVEN hole (below), which is what a denylist over source text always
+#: eventually has.
+_ALLOWED_SAVE_TARGETS = frozenset({"stream"})
 
-    save_calls = re.findall(r"\.save\(([^)]*)", text)
+
+def test_ac26_pillow_is_handed_a_stream_never_a_path() -> None:
+    """PDF-21/AC5 -- the shipped regex had a proven hole, closed here by parsing.
+
+    The shipped assertion was ``re.match(r"\\s*(str|Path|[a-z_]*path)\\s*[,)]",
+    call)`` over ``re.findall(r"\\.save\\(([^)]*)")``. Because ``[^)]*`` stops at
+    the FIRST ``)``, ``image.save(str(target), ...)`` captures ``"str(target"``
+    -- and ``str`` is then followed by ``(``, not by ``[,)]``, so the guard does
+    not fire. ``image.save(Path(target), ...)`` fails the same way. **Both are
+    the two most natural chokepoint bypasses and both passed the shipped
+    control** (each demonstrated red against this version -- see PDF-21's audit
+    record).
+
+    Parsing removes the class of hole rather than one instance of it: every
+    ``.save(`` call's first positional argument must be, verbatim, one of
+    :data:`_ALLOWED_SAVE_TARGETS`.
+    """
+    import ast
+
+    tree = ast.parse((SRC_ROOT / "ops" / "raster.py").read_text())
+    save_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "save"
+    ]
     assert save_calls, "no .save( call found -- the test is measuring nothing"
     for call in save_calls:
-        assert "writer.path" not in call
-        assert not re.match(r"\s*(str|Path|[a-z_]*path)\s*[,)]", call)
+        assert call.args, f"a .save() call with no positional target at line {call.lineno}"
+        target = ast.unparse(call.args[0])
+        assert target in _ALLOWED_SAVE_TARGETS, (
+            f"ops/raster.py:{call.lineno}: image bytes are handed {target!r}, not an "
+            f"AtomicWriter stream -- the chokepoint is bypassed "
+            f"(allowed: {sorted(_ALLOWED_SAVE_TARGETS)})"
+        )
 
 
 def test_ac26_no_mkdir_in_ops_raster() -> None:

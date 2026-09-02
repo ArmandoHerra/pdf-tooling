@@ -6,9 +6,11 @@ over captured ``--help`` output, never left to a human to notice.
 
 from __future__ import annotations
 
+import importlib
 import re
 import sys
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -16,7 +18,12 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from registry import PDF_08_VERBS, run_cli, undeclared_expectations  # noqa: E402
+from registry import (  # noqa: E402
+    PDF_08_VERBS,
+    discover_verbs,
+    run_cli,
+    undeclared_expectations,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -52,9 +59,28 @@ def test_split_help_documents_all_four_modes_and_the_comma_rule() -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("verb", ["compose", "create"])
-def test_ac1_both_new_verbs_name_the_port_they_depend_on(verb: str) -> None:
-    assert "ComposeEngine" in _help(verb)
+#: PDF-21/AC8 -- verb -> the dotted module whose ``PORT`` constant that verb's
+#: ``--help`` must name. **The port name is READ FROM THE CODE, never typed
+#: here**: a hand-written port-name literal would be exactly the
+#: hand-maintained claim `0615feae63` was filed about, and a port rename would
+#: leave it stale and still passing. `rasterize` joins the pattern PDF-10
+#: established for `compose`/`create` rather than starting a second one
+#: (X-157: consume the existing dimension, do not build a parallel one).
+_VERB_PORT_MODULES: Final[dict[str, str]] = {
+    "compose": "pdf_toolkit.ports.compose",
+    "create": "pdf_toolkit.ports.compose",
+    "rasterize": "pdf_toolkit.ports.raster",
+}
+
+
+@pytest.mark.parametrize("verb", sorted(_VERB_PORT_MODULES))
+def test_ac1_these_verbs_name_the_port_they_depend_on(verb: str) -> None:
+    port = importlib.import_module(_VERB_PORT_MODULES[verb]).PORT
+    assert port, f"{_VERB_PORT_MODULES[verb]}.PORT is empty -- this check would be vacuous"
+    assert port in _help(verb), (
+        f"{verb} --help does not name {port!r}, the port it resolves. A user who "
+        f"cannot see which engine a verb depends on cannot act on `doctor` output."
+    )
 
 
 def test_ac1_compose_help_documents_its_four_flags_and_the_lossless_contract() -> None:
@@ -86,18 +112,6 @@ def test_ac1_create_help_documents_its_five_flags_and_the_stdin_contract() -> No
 def test_the_two_margin_defaults_are_documented_as_deliberately_different() -> None:
     assert "0" in _help("compose")
     assert "54pt" in _help("create")
-
-
-@pytest.mark.parametrize("verb", ["compose", "create"])
-def test_ac30_no_help_text_names_a_forbidden_tool(verb: str) -> None:
-    """The prohibition and the advertisement look identical to a grep, and this
-    spec's headline feature is reproducing a forbidden tool's differentiator.
-    So the capability is described and the tool is never named -- not in help
-    text, not in a docstring, not in an error message."""
-    from test_cli_spine import FORBIDDEN_NAMES
-
-    lowered = _help(verb).lower()
-    assert [name for name in FORBIDDEN_NAMES if name in lowered] == []
 
 
 # --------------------------------------------------------------------------- #
@@ -191,14 +205,6 @@ def test_delete_help_documents_the_zero_page_refusal() -> None:
     assert "zero-page" in text
 
 
-@pytest.mark.parametrize("verb", _PAGES_VERBS)
-def test_no_pages_verb_help_names_a_forbidden_tool(verb: str) -> None:
-    from test_cli_spine import FORBIDDEN_NAMES
-
-    lowered = _help(verb).lower()
-    assert [name for name in FORBIDDEN_NAMES if name in lowered] == []
-
-
 # --------------------------------------------------------------------------- #
 # PDF-14 -- `meta set --help`'s AC7 mechanized honesty clause: the sentence
 # naming what `--clear-all` does NOT clear is a grep over captured `--help`
@@ -222,9 +228,85 @@ def test_watermark_and_stamp_help_state_the_overlay_default() -> None:
         assert "'overlay' (default)" in text or "overlay (default)" in text.replace("'", "")
 
 
-@pytest.mark.parametrize("verb", ["watermark", "stamp"])
-def test_no_overlay_verb_help_names_a_forbidden_tool(verb: str) -> None:
+# --------------------------------------------------------------------------- #
+# PDF-21 -- `rasterize --help` is this spec's documentation surface, and the
+# three hand-typed forbidden-tool copies collapse into ONE derived check.
+#
+# AC14/D8: this file carried THREE copies of the same assertion over three
+# hand-typed verb lists (`compose`/`create`, the four PDF-08 page verbs,
+# `watermark`/`stamp`) -- eight verbs of the twenty-six the CLI actually
+# exposes, and `rasterize` was in none of them, even though `rasterize`'s own
+# first `--help` draft is the ONE that ever tripped the repository-wide
+# forbidden-name scan. A fourth hand-typed copy would reproduce the exact
+# anti-pattern, so the roster is DERIVED from `discover_verbs()` and a new verb
+# is covered with zero author action.
+# --------------------------------------------------------------------------- #
+
+#: Every leaf verb on the LIVE command tree -- no hand-typed list, no skip list.
+_ALL_VERBS: Final[tuple[str, ...]] = tuple(sorted(spec.name for spec in discover_verbs()))
+
+
+def test_the_derived_verb_roster_is_neither_empty_nor_a_subset() -> None:
+    """Non-vacuity for the parametrized check below: an empty or partial roster
+    would collect zero (or eight of twenty-six) cases and pass by doing nothing,
+    which is the failure mode the three hand-typed copies actually had."""
+    live = discover_verbs()
+    assert _ALL_VERBS, "discover_verbs() returned nothing -- the check below is vacuous"
+    assert len(_ALL_VERBS) == len(live)
+    assert "rasterize" in _ALL_VERBS
+    for hand_typed in ("compose", "create", "watermark", "stamp", *PDF_08_VERBS):
+        assert hand_typed in _ALL_VERBS, hand_typed
+
+
+@pytest.mark.parametrize("verb", _ALL_VERBS)
+def test_no_verb_help_names_a_forbidden_tool(verb: str) -> None:
+    """The prohibition and the advertisement look identical to a grep, and this
+    product's headline features reproduce forbidden tools' differentiators. So
+    the capability is described and the tool is never named -- not in help text,
+    not in a docstring, not in an error message."""
     from test_cli_spine import FORBIDDEN_NAMES
 
     lowered = _help(verb).lower()
     assert [name for name in FORBIDDEN_NAMES if name in lowered] == []
+
+
+def _rasterize_help() -> str:
+    return _collapsed("rasterize")
+
+
+def test_ac9_rasterize_help_qualifies_the_single_channel_claim_for_webp() -> None:
+    """`66f43b3123`: the help claimed, unqualified, that `--grayscale` renders
+    single-channel output. For `--format webp` that is false -- WebP's bitstream
+    has no single-channel pixel mode at all, so the file reads back as Pillow
+    mode `RGB`. The OUTPUT is deliberately unchanged (forcing an approximation
+    would be a silent behaviour change to a shipped verb); the CLAIM is
+    qualified, and `webp` is named in the same statement so a reader cannot miss
+    which format the exception is about."""
+    text = _rasterize_help()
+    assert "single-channel" in text
+    qualification = text[text.index("single-channel") :]
+    head = qualification[:400]
+    assert "webp" in head, (
+        f"the single-channel claim is not qualified for webp within the same statement: {head!r}"
+    )
+    assert "png" in head and "tiff" in head and "jpeg" in head, (
+        f"the qualification does not say which formats DO get one channel: {head!r}"
+    )
+
+
+def test_ac12_rasterize_help_states_the_teardown_guarantee_per_platform() -> None:
+    """X-153: the `PR_SET_PDEATHSIG` worker guard that closed `cb948ad85b` is
+    Linux-only (`prctl` is a Linux syscall), while `macos-14` is a supported CI
+    platform -- and a user reading `rasterize --help` saw no platform scope at
+    all. Both halves are asserted: the catchable signals are POSIX-wide, and the
+    uncatchable SIGKILL-to-parent case is Linux-only, with its reason."""
+    text = _rasterize_help()
+    for token in ("SIGTERM", "SIGINT", "SIGHUP"):
+        assert token in text, token
+    assert "POSIX" in text, "the catchable-signal guarantee names no platform scope"
+    assert "SIGKILL" in text
+    assert "Linux" in text and "macOS" in text, (
+        "the SIGKILL-to-parent case is stated without naming the platform it "
+        "does and does not hold on"
+    )
+    assert "PR_SET_PDEATHSIG" in text, "the reason for the Linux-only scope is not stated"
