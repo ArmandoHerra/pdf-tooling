@@ -31,21 +31,43 @@ noticing: `DESTRUCTIVE` empty means C13 collects zero cases and cannot bite
 on anything. B-079 wires the gate on all five and seeds `compress` --
 the one of the five whose arity makes a bulk `--in-place` run reachable
 today -- as C13's first non-empty case (`tests/registry.py`'s
-`Invocation.destructive_build`); `test_c13_population_is_non_empty` below is
-the anti-lapse guard so this cannot silently regress to zero again.
+`Invocation.destructive_build`); the `POPULATIONS` roster at the foot of this
+module is the anti-lapse guard so this cannot silently regress to zero again.
+
+**PDF-17 -- every derived population is pinned, not two of them.** `DESTRUCTIVE`
+and `IN_PLACE_OUTPUT_CONFLICT_VERBS` carried the module's only two
+`assert len(...) > 0` statements; the other thirteen tuple-valued module-level
+constants -- including `PAGE_ADDRESSING` and `MUTATING`, which `B-032` believed
+were the pinned ones -- had no pin at all. They are now rostered in
+`POPULATIONS` and pinned by ONE parameterized control, with a second control
+(`test_every_population_is_rostered`) that fails when a population exists in
+this module but not in the roster, so the roster cannot lag the module the way
+seven hand-typed verb tuples lagged the live registry (`e138934a60`).
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 import pytest
 
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot
 from pdf_toolkit.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS
-from registry import INVOCATIONS, OUTPUT_FLAG_INVOCATIONS, discover_groups, discover_verbs, run_cli
+from registry import (
+    INVOCATIONS,
+    OUTPUT_FLAG_INVOCATIONS,
+    REPO_ROOT,
+    discover_groups,
+    discover_verbs,
+    run_cli,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -354,19 +376,6 @@ def test_c12_json_on_a_pipe_by_default(verb, corpus, tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_c13_population_is_non_empty() -> None:
-    """B-079's own anti-lapse guard: a green C13 whose population is empty
-    is exactly the failure this row exists to prevent (`DESTRUCTIVE` sat
-    empty from PDF-06 through PDF-14, which is why the gate went unwired on
-    five verbs without the suite ever noticing). Fails BY NAME, mirroring
-    `test_every_verb_is_registered`'s own shape, rather than letting C13
-    quietly collect zero cases again."""
-    assert len(DESTRUCTIVE) > 0, (
-        "DESTRUCTIVE is empty -- C13 would collect zero parametrized cases and pass "
-        "vacuously; this is B-079's own defect shape (a control that cannot bite)"
-    )
-
-
 @pytest.mark.parametrize("verb", DESTRUCTIVE, ids=_ids(DESTRUCTIVE))
 def test_c13_bulk_destructive_requires_y_on_a_non_tty(verb, corpus, tmp_path: Path) -> None:
     """B-079's own red/green pair: a refused run mutates NOTHING, a
@@ -380,7 +389,7 @@ def test_c13_bulk_destructive_requires_y_on_a_non_tty(verb, corpus, tmp_path: Pa
     every other registered ``build`` in this file already has.
     """
     invocation = INVOCATIONS[verb.name]
-    args = (invocation.destructive_build or invocation.build)(corpus, tmp_path)
+    args = destructive_argv(invocation, verb.name, corpus, tmp_path)
     operands = [Path(tok) for tok in args if not tok.startswith("-")]
     operands = [op for op in operands if op.is_file()]
     assert operands, f"{verb.name}: destructive invocation names no discoverable operand file"
@@ -424,7 +433,7 @@ def test_c13_dry_run_predicts_the_bulk_destructive_refusal(verb, corpus, tmp_pat
     than fail.
     """
     invocation = INVOCATIONS[verb.name]
-    args = (invocation.destructive_build or invocation.build)(corpus, tmp_path)
+    args = destructive_argv(invocation, verb.name, corpus, tmp_path)
     operands = [Path(tok) for tok in args if not tok.startswith("-")]
     operands = [op for op in operands if op.is_file()]
     assert operands, f"{verb.name}: destructive invocation names no discoverable operand file"
@@ -461,9 +470,68 @@ def test_c13_dry_run_predicts_the_bulk_destructive_refusal(verb, corpus, tmp_pat
 # `discover_verbs()` x `OUTPUT_FLAGS`, exactly like every other check in this
 # module. A future verb is covered the day it registers, not the day someone
 # remembers to extend a list.
+#
+# PDF-17 -- V2 (satisfiable assertion): THE HONOURED SIDE NOW PROVES THAT THE
+# *VERB* WROTE SOMETHING.
+#
+# `afe6137b`/`afe2e6137b`'s mechanism, and it is not the exit code: the row's
+# own builder materialises its input INTO `tmp_path` (`_copy_corpus_fixture`,
+# `_fixture_jpeg`, `_fixture_text`, `_password_file`), and the pre-PDF-17
+# assertion snapshotted `tmp_path` BEFORE calling the builder. `after - before`
+# was therefore satisfied by the BUILDER's file, for any cell whose builder
+# writes -- which is precisely the shape the old comment claimed to catch
+# ("this is B-035's own shape (exit 0, nothing written)"). The verb ran and its
+# exit code was checked; the WRITE assertion was what proved nothing.
+#
+# Moving the snapshot after the builder is the minimal edit and it is NOT
+# enough: a whole-directory diff still passes if the verb writes ANY file
+# anywhere under `tmp_path` -- a temp artefact, a partial write -- and still
+# cannot tell "the verb honoured `--out-dir`" from "the verb wrote somewhere
+# else". The snapshot moves as defence in depth; the real assertion is
+# specific, and it is made against a destination THE PRODUCT NAMED:
+#
+#   1. `_discover_target` reads `items[0].output` from the verb's own
+#      `--dry-run -o json` plan (the machinery C15 already has).
+#   2. The target is asserted ABSENT before the real run -- if the builder
+#      already created it, the cell proves nothing and says so BY FAILING.
+#   3. The real run exits 0.
+#   4. The target EXISTS. The verb wrote THAT path.
+#
+# That makes the honoured side a dry/real pair: the plan PREDICTS the
+# destination and the real run is checked against the prediction, so a verb
+# whose plan names one path and whose write lands on another now fails a check
+# that previously could not see it. The path is computed by the verb's own
+# `_plan()`; the existence check is made by the test. Neither vouches for
+# itself.
+#
+# THE `--in-place` ARM IS DIFFERENT AND IS NOT FORCED INTO THE SAME SHAPE. For
+# an in-place row the planned target IS the input, so "absent before" is false
+# by construction. The witness is the `.bak` SIDECAR: `safety/atomic.py:546`
+# creates `destination.with_name(destination.name + ".bak")` and ONLY the
+# in-place path does so, which makes its appearance an unforgeable signal that
+# the verb reached the write chokepoint. The input's BYTES are deliberately not
+# asserted to change -- a legitimately idempotent operation (compressing an
+# already-compressed file) would fail for a correct reason.
+#
+# ONE HONOURED CELL CANNOT USE THE SIDECAR AND IT IS ALLOWLISTED RATHER THAN
+# WAVED THROUGH: `("encrypt", "--in-place")` passes `--no-backup`, because a
+# bare `encrypt --in-place` exits 5 by design (PDF-13's plaintext-`.bak` gate)
+# and the row deliberately leaves no plaintext copy behind. With backups off
+# there is no sidecar to witness, so that cell falls back to "the operand's
+# bytes changed" -- sound there because encryption is not byte-idempotent, and
+# UNSOUND in general, which is why the fallback is an allowlist with its own
+# staleness pin (`test_the_no_backup_in_place_allowlist_is_not_stale`) rather
+# than a branch any future row can take silently.
 # --------------------------------------------------------------------------- #
 
 OUTPUT_FLAG_CASES = tuple((verb, flag) for verb in VERBS for flag in OUTPUT_FLAGS)
+
+#: The DECLARED (honoured) half of the matrix — 53 of C14's 104 cells at this
+#: commit. Defined here beside `OUTPUT_FLAG_CASES` rather than beside the red
+#: proof that consumes it, so `POPULATIONS` below can roster it.
+HONOURED_CELLS: Final[tuple[tuple, ...]] = tuple(
+    (verb, flag) for verb, flag in OUTPUT_FLAG_CASES if flag in verb.consumes
+)
 
 
 def _output_flag_ids(cases: tuple) -> list[str]:
@@ -491,12 +559,97 @@ def _offending_flag_args(flag: str, tmp_path: Path) -> list[str]:
     raise AssertionError(f"unknown OUTPUT_FLAGS entry {flag!r}")  # pragma: no cover
 
 
+#: The honoured `--in-place` cells whose row suppresses the `.bak` sidecar, and
+#: which therefore cannot use it as the write witness. Kept as an ALLOWLIST
+#: rather than a `"--no-backup" in args` branch so a second row taking the
+#: weaker fallback is a decision someone has to write down.
+#: `test_the_no_backup_in_place_allowlist_is_not_stale` fails when an entry
+#: stops being a real declared cell or stops passing `--no-backup`.
+NO_BACKUP_IN_PLACE_CELLS: Final[frozenset[tuple[str, str]]] = frozenset({("encrypt", "--in-place")})
+
+
+def _bak_sidecar(operand: Path) -> Path:
+    """`safety/atomic.py:546`'s in-place backup path. Only the in-place write
+    path creates this, which is what makes it unforgeable as a witness."""
+    return operand.with_name(operand.name + ".bak")
+
+
+def _honoured_witness(
+    verb, flag: str, args: list[str], tmp_path: Path
+) -> tuple[Path, bytes | None]:
+    """The path whose appearance proves *verb* itself wrote, plus the operand's
+    pre-run bytes when the witness is a byte change rather than a new file.
+
+    Never a per-verb table: the destination comes from the product's own
+    ``--dry-run -o json`` plan for the non-in-place arm, and from
+    ``safety/atomic.py``'s one backup-naming rule for the in-place arm.
+    """
+    if flag != "--in-place":
+        return _discover_target(verb, args, tmp_path), None
+    operand = Path(args[0])
+    if (verb.name, flag) in NO_BACKUP_IN_PLACE_CELLS:
+        return operand, operand.read_bytes()
+    return _bak_sidecar(operand), None
+
+
+def assert_the_verb_itself_wrote(
+    verb_name: str,
+    flag: str,
+    witness: Path,
+    witness_existed_before: bool,
+    operand_bytes_before: bytes | None,
+    returncode: int,
+    stderr: str,
+    new_paths: frozenset[Path],
+) -> None:
+    """C14's honoured-side assertion, as a PURE function of an already-obtained
+    result.
+
+    Factored out so `test_a_planted_exit_0_without_writing_fails_every_honoured_cell`
+    can drive it with a synthetic exit-0 result over EVERY honoured cell without
+    spawning 53 more subprocesses -- the red proof is what makes this assertion
+    an instrument, and a red proof that doubles the gate's wall-clock is a
+    different spec's problem (`decision.md` §5 R-1).
+    """
+    if operand_bytes_before is None:
+        assert not witness_existed_before, (
+            f"{verb_name} {flag}: the write witness {witness} ALREADY existed before the "
+            "run -- the row's own builder created the destination, so this cell could not "
+            "tell a verb that wrote from one that did not. Fix the row, do not relax this."
+        )
+    else:
+        # The byte-change arm's precondition is the MIRROR IMAGE: an in-place
+        # operand must be there before the run, or "its bytes changed" is a
+        # statement about a file the verb created rather than one it rewrote.
+        assert witness_existed_before, (
+            f"{verb_name} {flag}: the in-place operand {witness} did not exist before the "
+            "run, so a byte change afterwards would not prove an in-place rewrite"
+        )
+    assert returncode == 0, f"{verb_name} declares {flag!r} but the invocation refused: {stderr}"
+    if operand_bytes_before is None:
+        assert witness.exists(), (
+            f"{verb_name} declares {flag!r} and exited 0, but did not write {witness} -- "
+            f"the destination its OWN --dry-run plan named. This is B-035's shape (exit 0, "
+            "nothing written), and until PDF-17 this cell was satisfied by whatever the "
+            "row's builder happened to drop in tmp_path."
+        )
+        assert witness in new_paths, (
+            f"{verb_name} {flag}: {witness} exists but is not NEW since the builder ran -- "
+            "defence in depth for the precondition above"
+        )
+    else:
+        assert witness.read_bytes() != operand_bytes_before, (
+            f"{verb_name} declares {flag!r} and exited 0, but left {witness} byte-identical. "
+            "This cell suppresses the .bak sidecar (NO_BACKUP_IN_PLACE_CELLS), so a byte "
+            "change is the only witness available that the verb reached the write chokepoint."
+        )
+
+
 @pytest.mark.parametrize(
     ("verb", "flag"), OUTPUT_FLAG_CASES, ids=_output_flag_ids(OUTPUT_FLAG_CASES)
 )
 def test_c14_output_flag_matrix(verb, flag: str, corpus, tmp_path: Path) -> None:
     declared = flag in verb.consumes
-    before = set(tmp_path.rglob("*"))
 
     if declared:
         key = (verb.name, flag)
@@ -512,16 +665,23 @@ def test_c14_output_flag_matrix(verb, flag: str, corpus, tmp_path: Path) -> None
         # stays engine-independent for every verb, `convert` included.
         _skip_unless_engine_available(INVOCATIONS.get(verb.name))
         args = OUTPUT_FLAG_INVOCATIONS[key](corpus, tmp_path)
+        witness, operand_bytes_before = _honoured_witness(verb, flag, args, tmp_path)
+        # Snapshotted AFTER the builder call (AC5): everything the ROW created
+        # is already on disk here, so nothing below can be satisfied by it.
+        before = set(tmp_path.rglob("*"))
         result = run_cli(verb.name, *args, cwd=tmp_path)
-        assert result.returncode == 0, (
-            f"{verb.name} declares {flag!r} but the invocation refused: {result.stderr}"
-        )
-        after = set(tmp_path.rglob("*"))
-        assert after - before, (
-            f"{verb.name} declares {flag!r} but no new file appeared under the target "
-            "-- this is B-035's own shape (exit 0, nothing written)"
+        assert_the_verb_itself_wrote(
+            verb.name,
+            flag,
+            witness,
+            witness_existed_before=witness in before,
+            operand_bytes_before=operand_bytes_before,
+            returncode=result.returncode,
+            stderr=result.stderr,
+            new_paths=frozenset(set(tmp_path.rglob("*")) - before),
         )
     else:
+        before = set(tmp_path.rglob("*"))
         args = [*_base_args_for(verb.name, corpus), *_offending_flag_args(flag, tmp_path)]
         result = run_cli(verb.name, *args, cwd=tmp_path)
         assert result.returncode == 2, (
@@ -709,18 +869,6 @@ IN_PLACE_OUTPUT_CONFLICT_VERBS = tuple(
 )
 
 
-def test_c16_population_is_non_empty() -> None:
-    """Anti-lapse guard, mirroring `test_c13_population_is_non_empty`
-    above: a green C16 whose population is empty proves nothing -- this
-    row's own history is three separately-measured, all-too-narrow scopes
-    (five, then three, then four verbs) before the structural population
-    was re-derived at eleven."""
-    assert len(IN_PLACE_OUTPUT_CONFLICT_VERBS) > 0, (
-        "IN_PLACE_OUTPUT_CONFLICT_VERBS is empty -- C16 would collect zero parametrized "
-        "cases and pass vacuously"
-    )
-
-
 def test_c16_instrument_control_output_alone_still_writes(corpus, tmp_path: Path) -> None:
     """Positive control: `-O` alone (no `--in-place`) still honours the
     target -- proves the probe below is not blind, same idiom C14's own
@@ -848,3 +996,588 @@ def test_the_anti_lapse_guard_fires_when_a_verb_is_unregistered(
     names = {verb.name for verb in registry.discover_verbs()}
     missing = names - set(registry.INVOCATIONS)
     assert missing == {removed_name}
+
+
+# --------------------------------------------------------------------------- #
+# PDF-17 -- V1 (empty population): every derived population, pinned, with a red
+#
+# `B-032` filed this as "`GROUPS` and `DESTRUCTIVE` have no dedicated emptiness
+# pin, unlike `PAGE_ADDRESSING` and `MUTATING`". Re-measured at `2d19bcb` the
+# row is wrong in BOTH directions and the true state is materially worse:
+# `DESTRUCTIVE` *was* pinned (B-079) and `PAGE_ADDRESSING`/`MUTATING` were
+# **not**. The module carried exactly two `assert len(...) > 0` statements
+# against FIFTEEN tuple-valued module-level constants -- thirteen unpinned.
+#
+# Two ad-hoc pins are replaced by ONE parameterized control over a declared
+# roster, because a hand-written pin per population is the same shape as a
+# hand-typed verb tuple beside a live registry: it covers what someone
+# remembered. `test_every_population_is_rostered` is what makes the roster
+# unable to lag the module, and `test_a_population_pin_fires` /
+# `test_the_roster_check_fires_on_an_unrostered_population` are what make both
+# of them instruments rather than claims.
+#
+# WHY THIS IS NOT `PDF-06` AC6 IN A NEW COSTUME. AC6 pins that `pytest -m e2e
+# --collect-only -q` collects a non-zero number of items, and it was GREEN at
+# the very commit where C4/C9/C10/C11/C13 each collected zero: an aggregate
+# non-emptiness pin cannot see a per-population zero. Every pin below is
+# PER-POPULATION, and the roster control is what stops a new population from
+# escaping the per-population treatment.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class Population:
+    """One derived population, the checks it feeds, and its floor."""
+
+    name: str
+    members: tuple
+    checks: str
+    minimum: int
+    why: str
+    """Why *minimum* is what it is. Argued per row, never defaulted."""
+
+
+#: Every tuple-valued module-level constant in this module -- the ones defined
+#: here AND the two imported from the product -- with the check(s) it feeds and
+#: the cardinality below which that check stops discriminating. Adding a
+#: population without adding a row here fails `test_every_population_is_rostered`.
+#:
+#: EVERY `minimum` IS 1, AND THAT IS AN ARGUMENT RATHER THAN A DEFAULT. A pin
+#: that fails for a CORRECT reason -- a verb legitimately retired, a flag
+#: legitimately withdrawn -- gets weakened by the next author rather than
+#: investigated, which converts an instrument back into a claim. `DESTRUCTIVE`
+#: is the sharpest case: `compress` and `ocr` both carry a `destructive_build`
+#: today, but pinning it at 2 would fail the day one of them is retired for a
+#: good reason. One is the floor at which the check still RUNS; above that, the
+#: population's own derivation is what keeps it honest.
+POPULATIONS: Final[tuple[Population, ...]] = (
+    Population(
+        "VERBS",
+        VERBS,
+        "C1,C2,C3,C7,C8,C14",
+        1,
+        "the root population; zero makes six checks collect zero cases at once",
+    ),
+    Population(
+        "GROUPS",
+        GROUPS,
+        "C4",
+        1,
+        "one grouping parent exists (`meta`, PDF-14). NECESSARY BUT NOT SUFFICIENT: a "
+        "single-element population passes an emptiness pin while being one refactor away "
+        "from vacuity, so C4's real guarantee is `discover_groups()`'s derivation, not this",
+    ),
+    Population(
+        "MUTATING",
+        MUTATING,
+        "C9,C10",
+        1,
+        "unpinned before PDF-17 despite B-032 claiming otherwise; zero makes both "
+        "dry-run purity checks collect zero cases",
+    ),
+    Population(
+        "PAGE_ADDRESSING",
+        PAGE_ADDRESSING,
+        "C6",
+        1,
+        "unpinned before PDF-17 despite B-032 claiming otherwise",
+    ),
+    Population("TAKES_INPUT_PATHS", TAKES_INPUT_PATHS, "C5", 1, "zero makes C5 collect zero cases"),
+    Population(
+        "REGISTERED",
+        REGISTERED,
+        "C12",
+        1,
+        "`test_every_verb_is_registered` forces REGISTERED == VERBS, so a zero here means "
+        "the CLI tree itself came back empty",
+    ),
+    Population(
+        "DESTRUCTIVE",
+        DESTRUCTIVE,
+        "C13",
+        1,
+        "the population that sat EMPTY from PDF-06 through PDF-14, which is why the bulk "
+        "confirmation gate went unwired on five verbs with the suite green throughout. "
+        "NOT 2: `compress` and `ocr` both qualify today, but a pin that fails when a verb "
+        "is legitimately retired gets lowered rather than investigated",
+    ),
+    Population(
+        "_DESTINATION_FLAGS",
+        _DESTINATION_FLAGS,
+        "feeds PRODUCING -> C15",
+        1,
+        "a literal rather than a derivation, and pinned anyway: an empty one silently "
+        "empties PRODUCING and takes both C15 arms down with it",
+    ),
+    Population(
+        "PRODUCING",
+        PRODUCING,
+        "C15",
+        1,
+        "zero makes both C15 arms (occupied target, unwritable destination) collect zero",
+    ),
+    Population(
+        "OUTPUT_CONSUMING_MUTATING", OUTPUT_CONSUMING_MUTATING, "C11", 1, "zero makes C11 vacuous"
+    ),
+    Population(
+        "OUTPUT_FLAG_CASES",
+        OUTPUT_FLAG_CASES,
+        "C14",
+        1,
+        "the full VERBS x OUTPUT_FLAGS cross-product; zero takes down the entire OR-3 "
+        "matrix arm, honoured and refused sides together",
+    ),
+    Population(
+        "_C16_DESTINATION_FLAGS",
+        _C16_DESTINATION_FLAGS,
+        "feeds IN_PLACE_OUTPUT_CONFLICT_VERBS -> C16",
+        1,
+        "empty makes IN_PLACE_OUTPUT_CONFLICT_VERBS empty by construction",
+    ),
+    Population(
+        "IN_PLACE_OUTPUT_CONFLICT_VERBS",
+        IN_PLACE_OUTPUT_CONFLICT_VERBS,
+        "C16",
+        1,
+        "B-076's own population, whose history is three separately-measured, all-too-narrow "
+        "scopes (five, then three, then four verbs) before it was re-derived at eleven",
+    ),
+    Population(
+        "GLOBAL_OPTIONS",
+        GLOBAL_OPTIONS,
+        "C2, test_root_help_exits_0_and_lists_every_global_flag",
+        1,
+        "IMPORTED from `pdf_toolkit.cli.common`, and pinned here because C2's assertions "
+        "live inside a `for option in GLOBAL_OPTIONS` loop: an empty tuple makes C2 report "
+        "26 green cases having asserted nothing at all",
+    ),
+    Population(
+        "OUTPUT_FLAGS",
+        OUTPUT_FLAGS,
+        "feeds OUTPUT_FLAG_CASES -> C14; _C16_DESTINATION_FLAGS -> C16",
+        1,
+        "IMPORTED from `pdf_toolkit.cli.common`; empty empties C14's whole matrix",
+    ),
+    Population(
+        "HONOURED_CELLS",
+        HONOURED_CELLS,
+        "test_a_planted_exit_0_without_writing_fails_every_honoured_cell",
+        1,
+        "PDF-17's own population, and it is in this roster because "
+        "`test_every_population_is_rostered` FIRED ON IT during implementation -- the "
+        "roster control catching its own author is the evidence that it is not decorative. "
+        "Empty means AC7's red proof collects zero cases and reports green, which is the "
+        "precise shape (`PDF-06` AC6) this spec exists to end",
+    ),
+)
+
+_ROSTERED: Final[frozenset[str]] = frozenset(row.name for row in POPULATIONS)
+
+
+@pytest.mark.parametrize("population", POPULATIONS, ids=[row.name for row in POPULATIONS])
+def test_every_population_is_non_empty(population: Population) -> None:
+    """The V1 pin, per population rather than in aggregate."""
+    assert len(population.members) >= population.minimum, (
+        f"{population.name} has {len(population.members)} member(s), below its floor of "
+        f"{population.minimum} -- the check(s) it feeds ({population.checks}) would then "
+        f"collect zero parametrized cases and report GREEN having asserted nothing. "
+        f"Why this floor: {population.why}"
+    )
+
+
+def module_level_tuple_names(source: str, namespace: Mapping[str, object]) -> frozenset[str]:
+    """Every module-level name in *source* whose live value in *namespace* is a tuple.
+
+    Assignments AND imports, because two of this module's populations
+    (`GLOBAL_OPTIONS`, `OUTPUT_FLAGS`) are the product's own constants imported
+    from `pdf_toolkit.cli.common` -- and an empty `GLOBAL_OPTIONS` makes C2
+    vacuous just as surely as an empty `VERBS` makes C1 vacuous.
+
+    Static over the module's own source (`ast`, the convention
+    `tests/registry.py` and `tests/test_import_boundaries.py` already share)
+    rather than a bare `vars()` scan, so a tuple bound inside a function or a
+    class body is not mistaken for a module-level population.
+    """
+    tree = ast.parse(source)
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+    return frozenset(name for name in names if isinstance(namespace.get(name), tuple))
+
+
+def unrostered_populations(
+    source: str, namespace: Mapping[str, object], rostered: frozenset[str]
+) -> list[str]:
+    """The module-level tuple constants that have no `POPULATIONS` row."""
+    return sorted(module_level_tuple_names(source, namespace) - rostered - {"POPULATIONS"})
+
+
+def test_every_population_is_rostered() -> None:
+    """Without this, `POPULATIONS` is a hand-maintained list beside a live
+    module -- the exact `e138934a60` shape this spec exists to end,
+    reintroduced by its own fix. A population added by a later spec is pinned
+    the day it exists rather than the day someone remembers."""
+    source = Path(__file__).read_text(encoding="utf-8")
+    missing = unrostered_populations(source, dict(globals()), _ROSTERED)
+    assert missing == [], (
+        f"module-level tuple population(s) {missing} have no row in POPULATIONS -- add one "
+        "naming the check(s) each feeds and a `minimum` with a stated argument, or the new "
+        "population is exempt from the only emptiness pin this module has"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Proof that the population guards fire. Without these, the two tests above are
+# a claim (`tests/test_import_boundaries.py:481`'s own idiom).
+# --------------------------------------------------------------------------- #
+
+
+def test_a_population_pin_fires(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC1's red, automated: empty ONE population and confirm the pin fails
+    naming that population AND the checks it feeds. A manual monkeypatch of the
+    real module was also run once by hand; see PDF-17's Implementation Log for
+    the verbatim message."""
+    for row in POPULATIONS:
+        emptied = Population(row.name, (), row.checks, row.minimum, row.why)
+        with pytest.raises(AssertionError) as caught:
+            test_every_population_is_non_empty(emptied)
+        message = str(caught.value)
+        assert row.name in message, f"the pin's message does not name {row.name}"
+        assert row.checks in message, f"the pin's message does not name {row.name}'s checks"
+
+
+def test_the_roster_check_fires_on_an_unrostered_population() -> None:
+    """AC2's red, automated: a synthetic module whose source declares a derived
+    tuple absent from the roster is reported BY NAME. Synthetic rather than a
+    real edit for the same reason `tests/test_acceptance_audit.py`'s proofs are
+    synthetic -- a red proof that vandalises the registry it proves is not a
+    proof."""
+    source = "VERBS = discover_verbs()\nSMUGGLED = tuple(v for v in VERBS if v.is_mutating)\n"
+    namespace = {"VERBS": VERBS, "SMUGGLED": MUTATING}
+    assert unrostered_populations(source, namespace, frozenset({"VERBS"})) == ["SMUGGLED"]
+    # ...and the same check is quiet once the row exists.
+    assert unrostered_populations(source, namespace, frozenset({"VERBS", "SMUGGLED"})) == []
+
+
+def test_the_roster_scan_sees_this_module_at_all() -> None:
+    """The non-vacuity guard for the guard: a `module_level_tuple_names` that
+    returned an empty set would make `test_every_population_is_rostered` pass
+    for the worst possible reason. Pinned against the roster's own length, so
+    the two cannot drift apart silently."""
+    found = module_level_tuple_names(Path(__file__).read_text(encoding="utf-8"), dict(globals()))
+    assert len(found) >= len(POPULATIONS), (
+        f"the AST scan found {len(found)} module-level tuple(s) but POPULATIONS declares "
+        f"{len(POPULATIONS)} -- the scan itself has stopped seeing this module"
+    )
+    assert "VERBS" in found and "GLOBAL_OPTIONS" in found, sorted(found)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-17 -- V2: proof that C14's honoured side fires.
+#
+# The planted defect is the B-035 shape the old comment claimed to catch and
+# did not: a run that EXITS 0 AND WRITES NOTHING. Driven against the pure
+# assertion over EVERY honoured cell rather than against a mutated `src/`,
+# because (a) PDF-17's `src/` budget is zero lines and (b) 53 extra CLI spawns
+# is a `make ci` regression, which `decision.md` §5 R-1 makes a BLOCKER rather
+# than a cost to absorb. The END-TO-END version of this probe -- the real
+# `_discover_target`, the real builders, the verb genuinely never run -- was
+# run once out of tree and its counts are recorded in PDF-17's Implementation
+# Log, including how many cells the PRE-CHANGE assertion let the same planted
+# defect pass.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_honoured_population_matches_the_declared_registry() -> None:
+    """Totality between the two registries, and the non-vacuity guard for the
+    red proof below: an empty `HONOURED_CELLS` would make that proof collect
+    zero cases and report green, which is `PDF-06` AC6's own defect."""
+    assert len(HONOURED_CELLS) > 0, "HONOURED_CELLS is empty -- C14's honoured side is vacuous"
+    assert {(verb.name, flag) for verb, flag in HONOURED_CELLS} == set(OUTPUT_FLAG_INVOCATIONS), (
+        "the OR-3 declarations and OUTPUT_FLAG_INVOCATIONS disagree about which cells are "
+        "honoured -- C14's own pytest.fail catches one direction, this catches both"
+    )
+
+
+@pytest.mark.parametrize(("verb", "flag"), HONOURED_CELLS, ids=_output_flag_ids(HONOURED_CELLS))
+def test_a_planted_exit_0_without_writing_fails_every_honoured_cell(
+    verb, flag: str, tmp_path: Path
+) -> None:
+    """AC7's red: exit 0, nothing written, for EVERY honoured cell -- naming
+    the verb, the flag and the expected path."""
+    if (verb.name, flag) in NO_BACKUP_IN_PLACE_CELLS:
+        witness = tmp_path / "planted-no-backup-operand.pdf"
+        witness.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        operand_bytes_before: bytes | None = witness.read_bytes()
+    else:
+        witness = tmp_path / f"planted-{verb.name.replace(' ', '-')}{flag}.out"
+        operand_bytes_before = None
+
+    with pytest.raises(AssertionError) as caught:
+        assert_the_verb_itself_wrote(
+            verb.name,
+            flag,
+            witness,
+            witness_existed_before=operand_bytes_before is not None,
+            operand_bytes_before=operand_bytes_before,
+            returncode=0,
+            stderr="",
+            new_paths=frozenset(),
+        )
+    message = str(caught.value)
+    assert verb.name in message, message
+    assert flag in message, message
+    assert str(witness) in message, message
+
+
+def test_the_honoured_precondition_pin_fires_when_the_builder_made_the_target(
+    tmp_path: Path,
+) -> None:
+    """The other half of AC5: a row whose own builder creates the destination
+    proves nothing, and must say so BY FAILING rather than by passing."""
+    witness = tmp_path / "the-builder-already-made-this.pdf"
+    with pytest.raises(AssertionError) as caught:
+        assert_the_verb_itself_wrote(
+            "merge",
+            "--output",
+            witness,
+            witness_existed_before=True,
+            operand_bytes_before=None,
+            returncode=0,
+            stderr="",
+            new_paths=frozenset({witness}),
+        )
+    assert "ALREADY existed before the run" in str(caught.value)
+
+
+def test_the_honoured_assertion_passes_a_verb_that_really_wrote(tmp_path: Path) -> None:
+    """The positive control. Without it, an `assert_the_verb_itself_wrote` that
+    raised unconditionally would satisfy every red proof above and fail every
+    real cell -- a guard that cannot pass is as useless as one that cannot
+    fail."""
+    witness = tmp_path / "really-written.pdf"
+    witness.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    assert_the_verb_itself_wrote(
+        "merge",
+        "--output",
+        witness,
+        witness_existed_before=False,
+        operand_bytes_before=None,
+        returncode=0,
+        stderr="",
+        new_paths=frozenset({witness}),
+    )
+
+
+def test_the_no_backup_in_place_allowlist_is_not_stale(corpus, tmp_path: Path) -> None:
+    """Every allowlisted cell must still be a real declared honoured cell whose
+    row really does pass `--no-backup`. Without this the allowlist outlives its
+    reason and silently downgrades a cell from the unforgeable `.bak` witness
+    to the weaker byte-change one."""
+    declared = {(verb.name, flag) for verb, flag in HONOURED_CELLS}
+    for cell in sorted(NO_BACKUP_IN_PLACE_CELLS):
+        assert cell in declared, f"{cell} is allowlisted but is no longer a declared C14 cell"
+        args = OUTPUT_FLAG_INVOCATIONS[cell](corpus, tmp_path)
+        assert "--no-backup" in args, (
+            f"{cell} is allowlisted as suppressing the .bak sidecar but its row no longer "
+            "passes --no-backup -- remove the allowlist entry so the cell goes back to the "
+            "unforgeable sidecar witness"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-17 -- C13: B-047's reinstatement path, closed.
+#
+# The MECHANISM landed with B-079 (`Invocation.destructive_build`); the GUARD
+# never did. `registry.py` documented `None` as "C13 falls back to `build`",
+# and both C13 rows took that fallback -- so the next author to write
+# `destructive=True` without a `destructive_build` would have silently
+# re-shared C12's single-input `-O` tail, C13 would have stopped
+# discriminating, and NO TEST WOULD HAVE FAILED. That is B-047 reinstating
+# itself through a documented door.
+#
+# PDF-17 deletes the fallback rather than pragma-ing it (Design §4 control 2
+# prefers deletion): a documented path that cannot execute is the next
+# reader's trap, and `destructive_argv` below turns a missing row into a
+# failure that names the verb and the field to add.
+# --------------------------------------------------------------------------- #
+
+
+def destructive_argv(invocation, verb_name: str, corpus, tmp_path: Path) -> list[str]:
+    """C13's bulk, `--in-place` argv for *verb_name*. No fallback to `build`."""
+    build = invocation.destructive_build
+    assert build is not None, (
+        f"{verb_name} is destructive=True but supplies no `destructive_build` -- C13 would "
+        "fall back to `build`, which is the SINGLE-INPUT `-O` shape C12 uses, so the "
+        "bulk-destructive confirmation gate would go untested while C13 reported green. "
+        "Add a `destructive_build` to tests/registry.py::INVOCATIONS (B-047)."
+    )
+    return build(corpus, tmp_path)
+
+
+@pytest.mark.parametrize("verb", DESTRUCTIVE, ids=_ids(DESTRUCTIVE))
+def test_a_destructive_row_supplies_its_own_bulk_argv(verb) -> None:
+    """AC8. The guard B-047 asked for -- not the field, which already existed."""
+    assert INVOCATIONS[verb.name].destructive_build is not None, (
+        f"tests/registry.py::INVOCATIONS[{verb.name!r}] is destructive=True with "
+        "destructive_build=None. `registry.py`'s own reasoning: `build` is SHARED by "
+        "C1/C9/C10/C11/C12/C15 and is a single-input, `-O`-terminated shape which "
+        "'cannot exercise C13's bulk-destructive ground at all'."
+    )
+
+
+def test_the_destructive_argv_guard_fires_on_a_missing_row(corpus, tmp_path: Path) -> None:
+    """AC8's red, automated against a synthetic Invocation -- the manual
+    version (setting `compress`'s row to None in the real file, observing the
+    named failure, restoring with `git show HEAD:`) is in PDF-17's
+    Implementation Log with the verbatim message."""
+    from registry import Invocation
+
+    orphan = Invocation(build=lambda corpus, tmp_path: [], destructive=True)
+    with pytest.raises(AssertionError) as caught:
+        destructive_argv(orphan, "hypothetical", corpus, tmp_path)
+    message = str(caught.value)
+    assert "hypothetical" in message
+    assert "destructive_build" in message
+
+
+# --------------------------------------------------------------------------- #
+# PDF-17 -- AC9: a routing COMMENT is tied to the test it credits.
+#
+# `tests/registry.py` routes `extract`/`delete`/`rotate`/`reorder` away from
+# C13's population and justifies it by crediting a test elsewhere. That
+# argument is sound -- a single input writing to `-O` is neither bulk nor
+# destructive -- but until now it was a COMMENT, and nothing tied the claim to
+# its evidence. A credited test that is renamed or deleted leaves the routing
+# decision standing on nothing, which is the same "a claim must be tied to its
+# evidence" shape as `AUDIT-CONVENTION(PDF-17)` itself.
+# --------------------------------------------------------------------------- #
+
+_CREDITED_NODE_ID = re.compile(r"`(tests/[\w/]+\.py)::(\w+)`")
+
+#: The specific claim AC9 is about, located by its own words so the tie moves
+#: with the sentence rather than with a line number.
+_ROUTING_CLAIM = re.compile(
+    r"posture these three DO honour is asserted directly by `(tests/[\w/]+\.py)::(\w+)`"
+)
+
+
+def comment_text(source: str) -> str:
+    """*source*'s comment lines, de-hashed and joined — so a claim wrapped
+    across several `#` lines is one sentence again."""
+    stripped = [
+        line.lstrip().lstrip("#").lstrip(":").strip()
+        for line in source.splitlines()
+        if line.lstrip().startswith("#")
+    ]
+    return " ".join(part for part in stripped if part)
+
+
+def credited_node_ids(source: str) -> list[tuple[str, str]]:
+    """Every `tests/...py::test_name` node id named inside a COMMENT in *source*."""
+    return _CREDITED_NODE_ID.findall(comment_text(source))
+
+
+def routing_claim_credit(source: str) -> tuple[str, str] | None:
+    """The node id `registry.py`'s PDF-08 routing comment credits, or None."""
+    match = _ROUTING_CLAIM.search(comment_text(source))
+    return (match.group(1), match.group(2)) if match else None
+
+
+def _test_functions(module: Path) -> dict[str, str]:
+    tree = ast.parse(module.read_text(encoding="utf-8"))
+    return {
+        node.name: ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+
+
+def test_every_node_id_the_registry_credits_still_resolves() -> None:
+    """The general rule: `tests/registry.py` may cite a test as evidence for a
+    decision, and every such citation must resolve. A comment that credits a
+    deleted test is a decision standing on nothing."""
+    import registry
+
+    source = Path(registry.__file__).read_text(encoding="utf-8")
+    credited = credited_node_ids(source)
+    assert credited, (
+        "tests/registry.py's comments credit no node id at all -- PDF-17 added two, so "
+        "either they were removed or this parser has stopped reading comments"
+    )
+    unresolved = [
+        f"{relative}::{name}"
+        for relative, name in credited
+        if not (REPO_ROOT / relative).is_file() or name not in _test_functions(REPO_ROOT / relative)
+    ]
+    assert unresolved == [], (
+        f"tests/registry.py credits node id(s) that no longer resolve: {unresolved}"
+    )
+
+
+def test_the_pdf_08_destructive_routing_claim_names_a_test_that_exists() -> None:
+    """AC9's tie, on the specific claim.
+
+    `registry.py` routes `extract`/`delete`/`rotate`/`reorder` away from C13's
+    population and justifies it by crediting a test elsewhere. Until PDF-17 the
+    credit named a whole MODULE and nothing checked it, so the routing decision
+    could outlive the test that justified it.
+    """
+    import registry
+
+    source = Path(registry.__file__).read_text(encoding="utf-8")
+    credit = routing_claim_credit(source)
+    assert credit is not None, (
+        "tests/registry.py's PDF-08 routing comment no longer credits a node id -- the "
+        "argument for keeping extract/delete/rotate/reorder out of C13's population is "
+        "back to being an untied claim"
+    )
+    relative, test_name = credit
+    module = REPO_ROOT / relative
+    assert module.is_file(), f"credited module {relative} does not exist"
+    functions = _test_functions(module)
+    assert test_name in functions, (
+        f"tests/registry.py credits {relative}::{test_name} with asserting PDF-08's "
+        "bulk `--in-place` non-TTY posture, and that test no longer exists. Either "
+        "the credit is stale or the coverage it stands for is gone -- the routing "
+        "decision it justifies (destructive=False for four verbs) cannot outlive it."
+    )
+    # `ast.unparse` normalizes string quoting, so the tokens are compared
+    # against a quote-normalized body rather than the source's own quote style.
+    body = functions[test_name].replace('"', "'")
+    for token in ("'--in-place'", "== 5", "'-y'"):
+        assert token in body, (
+            f"{relative}::{test_name} exists but no longer contains {token} -- it is "
+            "credited with proving the bulk non-TTY refusal/confirmation pair, and a "
+            "renamed-but-hollowed test satisfies the credit without the coverage"
+        )
+
+
+def test_the_credited_node_id_parser_can_find_and_miss() -> None:
+    """The tie's own red proof: the parser really does read a node id out of a
+    comment (including one wrapped across several `#` lines, which is how the
+    real credit is written), and really does return nothing when the credit is
+    dropped."""
+    assert credited_node_ids("# see `tests/integration/test_x.py::test_y` for the proof") == [
+        ("tests/integration/test_x.py", "test_y")
+    ]
+    assert credited_node_ids("# see tests/integration/test_x.py for the proof") == []
+    # A node id in CODE (a string literal, say) is not a credit.
+    assert credited_node_ids('NODE = "`tests/test_x.py::test_y`"') == []
+    # The specific claim survives being wrapped across lines, and disappears
+    # when the sentence does -- which is the failure mode AC9 is about.
+    wrapped = (
+        "    # posture these three DO honour is asserted directly by\n"
+        "    # `tests/integration/test_pages_cli.py::test_ac21_x`\n"
+        "    # instead of by giving C13 a row it would pass vacuously.\n"
+    )
+    assert routing_claim_credit(wrapped) == (
+        "tests/integration/test_pages_cli.py",
+        "test_ac21_x",
+    )
+    assert routing_claim_credit("# some other comment entirely\n") is None

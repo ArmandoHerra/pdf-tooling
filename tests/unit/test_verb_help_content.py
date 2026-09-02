@@ -16,7 +16,7 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from registry import run_cli  # noqa: E402
+from registry import PDF_08_VERBS, run_cli, undeclared_expectations  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -112,19 +112,46 @@ def test_ac30_no_help_text_names_a_forbidden_tool(verb: str) -> None:
 # rather than the sentence.
 # --------------------------------------------------------------------------- #
 
-_PAGES_VERBS = ("extract", "delete", "rotate", "reorder")
+#: PDF-17/AC10 -- DERIVED. See `registry.PDF_08_VERBS`.
+_PAGES_VERBS = PDF_08_VERBS
+
+#: §D3's selection semantics per governed verb. A MAPPING keyed by the derived
+#: dimension, not a pair of hand-typed tuples: `("extract", "reorder")` and
+#: `("delete", "rotate")` were PARTIAL subsets of the verb list, which is worse
+#: than a full stale tuple -- a rename leaves a partial subset both stale and
+#: passing, with nothing to notice it. The totality test below is the tie.
+_SELECTION_SEMANTICS: dict[str, object] = {
+    "extract": "ordered",
+    "delete": "set",
+    "rotate": "set",
+    "reorder": "ordered",
+}
+_ORDERED_VERBS = tuple(verb for verb in _PAGES_VERBS if _SELECTION_SEMANTICS.get(verb) == "ordered")
+_SET_VERBS = tuple(verb for verb in _PAGES_VERBS if _SELECTION_SEMANTICS.get(verb) == "set")
+
+
+def test_every_governed_verb_declares_its_selection_semantics() -> None:
+    missing, stale = undeclared_expectations(_SELECTION_SEMANTICS, _PAGES_VERBS)
+    assert (missing, stale) == ([], []), (
+        f"_SELECTION_SEMANTICS is out of step with the derived verb dimension -- "
+        f"missing={missing} stale={stale}"
+    )
+    assert _ORDERED_VERBS and _SET_VERBS, (
+        "one of the two semantic partitions is empty -- the parametrized rows below would "
+        "collect zero cases and pass vacuously"
+    )
 
 
 def _collapsed(verb: str) -> str:
     return " ".join(_help(verb).split())
 
 
-@pytest.mark.parametrize("verb", ["extract", "reorder"])
+@pytest.mark.parametrize("verb", _ORDERED_VERBS)
 def test_ac10_the_ordered_verbs_say_so(verb: str) -> None:
     assert "order and duplicates are preserved" in _collapsed(verb)
 
 
-@pytest.mark.parametrize("verb", ["delete", "rotate"])
+@pytest.mark.parametrize("verb", _SET_VERBS)
 def test_ac10_the_set_verbs_say_so(verb: str) -> None:
     assert "sorted, deduplicated set" in _collapsed(verb)
 
@@ -138,9 +165,9 @@ def test_ac10_the_ordered_and_set_phrasings_never_overlap() -> None:
     and vice versa. Without this, one copy-pasted help block could satisfy
     every positive grep above while telling the user the opposite of what the
     verb does."""
-    for verb in ("extract", "reorder"):
+    for verb in _ORDERED_VERBS:
         assert "sorted, deduplicated set" not in _collapsed(verb), verb
-    for verb in ("delete", "rotate"):
+    for verb in _SET_VERBS:
         assert "order and duplicates are preserved" not in _collapsed(verb), verb
 
 

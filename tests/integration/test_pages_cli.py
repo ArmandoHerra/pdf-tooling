@@ -30,16 +30,34 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot  # noqa: E402
 from pdfium_text import page_texts  # noqa: E402
-from registry import run_cli  # noqa: E402
+from registry import (  # noqa: E402
+    PDF_08_VERBS,
+    discover_verbs,
+    expectation,
+    run_cli,
+    undeclared_expectations,
+)
 
 pytestmark = pytest.mark.e2e
 
 FIXTURE = "ten_page_text"
-VERBS = ("extract", "delete", "rotate", "reorder")
-#: The three verbs that declare `--in-place`. `extract` is deliberately absent:
-#: it derives a different page set from its input, so "mutate the input" has no
-#: meaning there, and its refusal is produced by the OR-3 declaration alone.
-IN_PLACE_VERBS = ("delete", "rotate", "reorder")
+
+#: PDF-17/AC10 -- DERIVED, not typed. `registry.PDF_08_VERBS` is the one
+#: declaration AC30 permits, and it carries a live membership tie; this module
+#: used to carry three hand-typed tuples beside the live registry
+#: (`e138934a60`), which a verb rename would have left stale AND passing.
+VERBS = PDF_08_VERBS
+
+_CONSUMES = {verb.name: verb.consumes for verb in discover_verbs()}
+
+#: The verbs that declare `--in-place`, read off the LIVE OR-3 declaration
+#: rather than typed. `extract` is absent for a reason and the derivation
+#: reproduces it: `extract` derives a different page set from its input, so
+#: "mutate the input" has no meaning there, and its refusal is produced by the
+#: OR-3 declaration alone -- which is exactly what `--in-place not in consumes`
+#: says. Deriving it means a verb that GAINS `--in-place` joins these arms the
+#: day it declares it.
+IN_PLACE_VERBS = tuple(verb for verb in VERBS if "--in-place" in _CONSUMES.get(verb, ()))
 
 
 # --------------------------------------------------------------------------- #
@@ -93,22 +111,41 @@ def _rotations(path: Path) -> list[int | None]:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize(
-    ("verb", "phrase"),
-    [
-        ("extract", "order and duplicates are preserved"),
-        ("reorder", "order and duplicates are preserved"),
-        ("reorder", "pages you do not name are appended"),
-        ("delete", "sorted, deduplicated set"),
-        ("rotate", "sorted, deduplicated set"),
-    ],
-)
-def test_ac10_each_verb_states_its_own_semantics_in_help(verb: str, phrase: str) -> None:
+#: PDF-17/AC10 -- the TWELFTH hand-typed verb collection in this tree, and
+#: neither `e138934a60` ("three") nor PDF-17's own AC10 (which enumerates
+#: seven) names it. It was found by the MECHANIZED AC30 scan
+#: (`tests/test_derived_dimensions.py`), which is the whole argument for
+#: mechanizing the rule instead of fixing a list of known sites: a list of
+#: known sites is only ever as complete as the last person who counted.
+#:
+#: Per-verb DATA keyed by the derived dimension, with `registry.expectation`
+#: failing BY NAME when a new page verb arrives without a phrase declared.
+HELP_SEMANTICS_PHRASES: dict[str, object] = {
+    "extract": ("order and duplicates are preserved",),
+    "reorder": ("order and duplicates are preserved", "pages you do not name are appended"),
+    "delete": ("sorted, deduplicated set",),
+    "rotate": ("sorted, deduplicated set",),
+}
+
+
+def test_every_governed_verb_declares_its_help_phrases() -> None:
+    missing, stale = undeclared_expectations(HELP_SEMANTICS_PHRASES, VERBS)
+    assert (missing, stale) == ([], []), (
+        f"HELP_SEMANTICS_PHRASES is out of step with the derived verb dimension -- "
+        f"missing={missing} stale={stale}"
+    )
+
+
+@pytest.mark.parametrize("verb", VERBS)
+def test_ac10_each_verb_states_its_own_semantics_in_help(verb: str) -> None:
+    phrases = expectation(HELP_SEMANTICS_PHRASES, verb, label="HELP_SEMANTICS_PHRASES")
     result = run_cli(verb, "--help")
     assert result.returncode == 0
     # `--help` hard-wraps; compare on collapsed whitespace so the assertion is
     # about the sentence, not about the terminal width it was rendered at.
-    assert phrase in " ".join(result.stdout.split())
+    collapsed = " ".join(result.stdout.split())
+    for phrase in phrases:
+        assert phrase in collapsed, f"{verb} --help does not state {phrase!r}"
 
 
 # --------------------------------------------------------------------------- #
@@ -398,13 +435,34 @@ def test_ac33_extracts_refusal_needs_no_branch_in_its_own_cmd_module(
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize(
-    ("verb", "expected_pages"),
-    [("extract", 2), ("delete", 9), ("rotate", 10), ("reorder", 10)],
-)
+#: Per-verb DATA, keyed by the DERIVED dimension (AC10). The verb list is no
+#: longer typed here; only the page count each verb's own selection yields from
+#: the ten-page fixture is, and `registry.expectation` fails BY NAME when a new
+#: page verb arrives without one instead of letting it be skipped silently.
+EXPECTED_PAGE_COUNT: dict[str, object] = {
+    "extract": 2,
+    "delete": 9,
+    "rotate": 10,
+    "reorder": 10,
+}
+
+
+def test_every_governed_verb_has_a_page_count_expectation() -> None:
+    """The other direction: an expectation naming a verb that no longer exists
+    is as stale as a missing one, and neither is visible from the parametrized
+    rows alone."""
+    missing, stale = undeclared_expectations(EXPECTED_PAGE_COUNT, VERBS)
+    assert (missing, stale) == ([], []), (
+        f"EXPECTED_PAGE_COUNT is out of step with the derived verb dimension -- "
+        f"missing={missing} stale={stale}"
+    )
+
+
+@pytest.mark.parametrize("verb", VERBS)
 def test_ac22_every_output_is_a_readable_document_with_the_expected_page_count(
-    verb: str, expected_pages: int, corpus, tmp_path: Path
+    verb: str, corpus, tmp_path: Path
 ) -> None:
+    expected_pages = expectation(EXPECTED_PAGE_COUNT, verb, label="EXPECTED_PAGE_COUNT")
     target = tmp_path / f"{verb}.pdf"
     tail = ["--pages", "1,3"] if verb == "extract" else _selection_args(verb)
     produced = run_cli(verb, str(corpus.path(FIXTURE)), *tail, "-O", str(target), cwd=tmp_path)

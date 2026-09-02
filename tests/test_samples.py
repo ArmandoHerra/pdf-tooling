@@ -1019,6 +1019,13 @@ def test_pdf14_arm_a_meta_set_title_preserves_every_other_info_field(
     # (D2.2), and this sample happens to exercise the "absent" case, which
     # the generated corpus's own `metadata_typed` fixture (always title-
     # bearing) cannot. Every OTHER key's PRESENCE is unaffected either way.
+    #
+    # PDF-17/AC14 (`0355564e04`): the sentence above USED TO BE THE WHOLE
+    # ARGUMENT. The set-union below distinguishes "added a key" from
+    # "overwrote a key" only while the sample carries no `/Title`; the moment
+    # one does, `{*before_keys, "Title"} == set(before_keys)` and the assertion
+    # silently stops discriminating. Prose is now an assertion.
+    assert_title_absent(before_keys, _META_SAMPLE_NAME)
     expected_keys = sorted({*before_keys, "Title"})
     assert sorted(after.info) == expected_keys, "meta set changed which keys are present"
     for key in before_keys:
@@ -1284,3 +1291,60 @@ def test_ac20_convert_docx_matches_the_google_docs_pdf_of_the_same_document(
     # HC-2 rule 4: the message carries ONLY the filename and the ratio --
     # never the extracted text, on any path, pass or fail.
     assert ratio >= _CONVERT_SAMPLE_MIN_RATIO, f"{_CONVERT_SAMPLE_DOCX}: token overlap {ratio:.2f}"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-17 -- AC14: the precondition pin, and the general rule it introduces.
+#
+# WHERE A CONTROL IS SOUND ONLY BECAUSE OF A PROPERTY OF ITS INPUT, THAT
+# PROPERTY IS ASSERTED, NOT ASSUMED. `0355564e04` is the first instance:
+# `test_pdf14_arm_a_meta_set_title_preserves_every_other_info_field` is
+# discriminating only while its sample carries no `/Title`, and its own comment
+# conceded the point in prose.
+#
+# The red for this pin is deliberately taken INSIDE THE GENERATED CORPUS --
+# `metadata_rich` does carry a `/Title` -- and never against the operator's
+# originals. That keeps HC-2 satisfied with no skip: the proof below runs on
+# every host, corpus or no corpus, which matters because the pinned arm itself
+# is an `@samples` test and would otherwise carry two vacuity axes at once
+# (a skipped control AND an assumed precondition).
+# --------------------------------------------------------------------------- #
+
+
+def assert_title_absent(before_keys, sample_name: str) -> None:
+    """Fail when *sample_name* already carries a `/Title`.
+
+    HC-2 binds the message: the sample is named by FILENAME ONLY -- no content,
+    no metadata values, no path.
+    """
+    if "Title" in before_keys:
+        raise AssertionError(
+            f"{sample_name} carries a /Title before the run, which makes this arm's "
+            "set-union assertion NON-DISCRIMINATING: `{*before_keys, 'Title'}` collapses "
+            "to `before_keys`, so an added key and an overwritten key become "
+            "indistinguishable. Point Arm A at a sample with no /Title, or split the "
+            "arm in two -- do not relax the assertion."
+        )
+
+
+def test_the_arm_a_title_precondition_pin_fires(corpus) -> None:
+    """AC14's red, taken against the GENERATED corpus so it needs no samples
+    directory and touches no original: `metadata_rich` sets a title, so the
+    precondition must fire on it."""
+    from pdf_toolkit.ops.metadata import meta_get_run
+
+    titled = meta_get_run(corpus.path("metadata_rich"), xmp=False)
+    before_keys = sorted(titled.info)
+    assert "Title" in before_keys, (
+        "the metadata_rich fixture no longer carries a /Title -- this red proof has lost "
+        "its subject and would pass by having nothing to detect"
+    )
+    with pytest.raises(AssertionError) as caught:
+        assert_title_absent(before_keys, "metadata_rich.pdf")
+    assert "NON-DISCRIMINATING" in str(caught.value)
+
+
+def test_the_arm_a_title_precondition_pin_is_quiet_when_the_precondition_holds() -> None:
+    """The positive half: a pin that raised unconditionally would fail Arm A
+    for the wrong reason on every host with a corpus."""
+    assert_title_absent(["Author", "Producer"], "some-sample.pdf")

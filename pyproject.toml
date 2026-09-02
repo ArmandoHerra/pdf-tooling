@@ -152,9 +152,16 @@ core = "sysmon"
 # `patch = ["subprocess"]` rides the coverage.py-installed `a1_coverage.pth`
 # hook (already present regardless of this setting) by exporting
 # COVERAGE_PROCESS_CONFIG into os.environ, which every subprocess call site in
-# this suite inherits by default (none scrub the environment except
-# tests/unit/test_subprocess_util.py, which is testing subprocess_util's own
-# env handling, not the CLI, and stays scrubbed on purpose).
+# this suite inherits by default. B-033/PDF-17: exactly ONE test scrubs those
+# two variables from a child environment, and it is
+# tests/test_cli_spine.py::test_help_stays_within_the_startup_budget -- the
+# PLAN §12 R-13 startup-budget assertion, which must measure the product's own
+# startup path rather than coverage.py's tracer overhead, and argues the point
+# in place. This sentence previously named a different module, which scrubs
+# nothing; a comment pointing at the wrong file is worse than no comment,
+# because it sends the next reader somewhere nothing is wrong.
+# `tests/test_coverage_policy.py` now pins the count at one AND pins this
+# comment, so neither can drift again.
 # `parallel = true` is not decoration: without it a spawned child's data_suffix
 # defaults to None and every child overwrites the same data file instead of
 # getting its own `.coverage.<host>.<pid>.<rand>` -- pytest-cov's own combine()

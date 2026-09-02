@@ -51,12 +51,29 @@ def test_every_fixture_matches_its_own_spec(built: Corpus, name: str) -> None:
     for index, page in enumerate(reader.pages):
         text = page.extract_text()
         assert spec.page_texts[index] in text, f"{name}: page {index} text mismatch"
-        if spec.rotations:
-            assert int(page.get("/Rotate", 0)) == spec.rotations[index], (
-                f"{name}: page {index} rotation"
+
+        # PDF-17/B-084 -- ABSENT and ZERO are different states, and until now
+        # this test could not tell them apart: BOTH branches read
+        # `page.get("/Rotate", 0)`, which answers `0` for a page with no
+        # `/Rotate` key AND for a page with an explicit `/Rotate 0`. A verb
+        # that must distinguish the two had no fixture that could tell it it
+        # was wrong. The key's PRESENCE is now asserted in both directions, per
+        # `FixtureSpec.rotate_key_absent_on`, so every fixture states which it
+        # is rather than being silently flattened.
+        key_present = "/Rotate" in page
+        if index in spec.rotate_key_absent_on:
+            assert not key_present, (
+                f"{name}: page {index} carries an explicit /Rotate, but its spec says the "
+                "key is ABSENT -- the one state B-084 says the corpus could not express"
             )
         else:
-            assert int(page.get("/Rotate", 0)) == 0, f"{name}: unexpected rotation"
+            assert key_present, (
+                f"{name}: page {index} carries NO /Rotate key, but its spec does not list "
+                f"page {index} in rotate_key_absent_on. Declare it: an undeclared absence "
+                "is exactly the ambiguity B-084 filed."
+            )
+            expected = spec.rotations[index] if spec.rotations else 0
+            assert int(page.get("/Rotate", 0)) == expected, f"{name}: page {index} rotation"
 
     if spec.metadata:
         with pikepdf.open(str(path), password=ENCRYPTED_PASSWORD if spec.encrypted else "") as pdf:
@@ -89,6 +106,29 @@ def test_the_encrypted_fixture_rejects_the_wrong_password(built: Corpus) -> None
 
 
 UNENCRYPTED_FIXTURES = tuple(name for name in FIXTURE_NAMES if name != "encrypted_aes256")
+
+
+def test_the_absent_rotate_state_is_expressible_at_all(built: Corpus) -> None:
+    """B-084's own subject, pinned as a FACT about the corpus rather than a
+    property some fixture happens to have.
+
+    Without this, `rotate_absent` could lose its whole purpose to a refactor
+    and only `test_every_fixture_matches_its_own_spec` would notice -- and only
+    if the spec were updated in the same edit, which is precisely how a fixture
+    stops expressing the state it was built for."""
+    declared = [name for name in FIXTURE_NAMES if built.spec(name).rotate_key_absent_on]
+    assert "rotate_absent" in declared, (
+        "the rotate_absent fixture no longer declares an absent /Rotate -- the corpus is "
+        "back to the B-084 state where no fixture can express a page with no /Rotate key"
+    )
+    reader = pypdf.PdfReader(str(built.path("rotate_absent")))
+    assert "/Rotate" not in reader.pages[0], "rotate_absent carries a /Rotate key"
+    # And the contrast: `rotated` page 1 carries an EXPLICIT /Rotate 0, which
+    # is the other half of the distinction and the reason `setPageRotation(0)`
+    # is not the same as leaving the key off.
+    rotated = pypdf.PdfReader(str(built.path("rotated")))
+    assert "/Rotate" in rotated.pages[0]
+    assert int(rotated.pages[0]["/Rotate"]) == 0
 
 
 def test_six_unencrypted_fixtures_are_byte_identical_across_two_builds(

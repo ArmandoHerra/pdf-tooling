@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+import pikepdf
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, StreamObject, TextStringObject
@@ -76,7 +77,16 @@ class FixtureSpec:
         page_count: Expected page count.
         page_size: Expected MediaBox width/height in points.
         page_texts: Exactly what reportlab wrote, one entry per page, in order.
-        rotations: Expected ``/Rotate`` per page. Empty when no page is rotated.
+        rotations: Expected ``/Rotate`` VALUE per page, for pages that carry
+            the key. ``()`` means no page carries a NON-ZERO rotation -- which
+            is NOT the same as "no page carries a ``/Rotate`` key", and B-084
+            is what that ambiguity cost: ``rotate_absent`` below is the only
+            fixture whose whole purpose is the second state, and until PDF-17
+            nothing in the corpus could tell the two apart.
+        rotate_key_absent_on: Zero-based page indices carrying NO ``/Rotate``
+            KEY at all. Every OTHER page is asserted to carry one explicitly
+            (`tests/test_corpus.py`), so this field is exhaustive in both
+            directions rather than a hint.
         embedded_jpeg: Whether this fixture embeds a raster image.
         metadata: The document-information-dictionary fields this fixture sets.
         encrypted: ``"AES-256"`` when the fixture is password-protected, else
@@ -89,6 +99,7 @@ class FixtureSpec:
     page_size: tuple[float, float]
     page_texts: tuple[str, ...]
     rotations: tuple[int, ...] = ()
+    rotate_key_absent_on: tuple[int, ...] = ()
     embedded_jpeg: bool = False
     metadata: Mapping[str, str] = field(default_factory=dict)
     encrypted: str | None = None
@@ -448,7 +459,16 @@ def _build_no_contents_page(root: Path) -> tuple[Path, FixtureSpec]:
     writer.add_blank_page(width=_LETTER[0], height=_LETTER[1])
     with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
         writer.write(handle)
-    spec = FixtureSpec(name="no_contents_page", page_count=1, page_size=_LETTER, page_texts=("",))
+    # `PdfWriter.add_blank_page` sets no `/Rotate` either -- measured, and
+    # declared here rather than left to `page.get("/Rotate", 0)` to flatten
+    # into a `0` indistinguishable from an explicit one (B-084).
+    spec = FixtureSpec(
+        name="no_contents_page",
+        page_count=1,
+        page_size=_LETTER,
+        page_texts=("",),
+        rotate_key_absent_on=(0,),
+    )
     return path, spec
 
 
@@ -466,7 +486,11 @@ def _build_empty_contents_page(root: Path) -> tuple[Path, FixtureSpec]:
     with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
         writer.write(handle)
     spec = FixtureSpec(
-        name="empty_contents_page", page_count=1, page_size=_LETTER, page_texts=("",)
+        name="empty_contents_page",
+        page_count=1,
+        page_size=_LETTER,
+        page_texts=("",),
+        rotate_key_absent_on=(0,),
     )
     return path, spec
 
@@ -495,6 +519,58 @@ def _build_stamp_source(root: Path) -> tuple[Path, FixtureSpec]:
     return path, spec
 
 
+def _build_rotate_absent(root: Path) -> tuple[Path, FixtureSpec]:
+    """B-084 — a page carrying NO ``/Rotate`` key at all.
+
+    THE FILED PREMISE WAS WRONG AND THE MEASUREMENT IS RECORDED HERE. B-084
+    reads *"reportlab writes an explicit `/Rotate 0`, so no fixture can express
+    absent"*. Measured across all fifteen fixtures at `2d19bcb`, thirteen do
+    carry an explicit ``/Rotate`` on every page — but ``no_contents_page`` and
+    ``empty_contents_page`` do NOT, because they are built by
+    ``pypdf.PdfWriter.add_blank_page`` rather than emitted by reportlab, and
+    that writer sets no ``/Rotate``. The absent state was
+    therefore already REACHABLE; what did not exist was any way to SAY SO. Both
+    of `tests/test_corpus.py`'s rotation branches read
+    ``page.get("/Rotate", 0)``, which collapses absent and zero into the same
+    ``0``, so a verb that must distinguish them had no fixture that could tell
+    it it was wrong.
+
+    This fixture exists anyway, and deliberately: the other two carry the state
+    INCIDENTALLY, as a side effect of being built for a different purpose, so a
+    future edit to either could restore the key and quietly remove the only
+    coverage of the absent case. One fixture whose entire purpose is that state
+    cannot lose it by accident.
+
+    Built by deleting the key reportlab emits, via pikepdf — already a runtime
+    dependency, so **Q5 holds and no dependency is added**. ``deterministic_id``
+    keeps it byte-identical across two independent builds (measured), so it
+    joins AC2's determinism assertion rather than needing an exemption.
+    """
+    text = "rotate_absent fixture -- no /Rotate key on any page."
+    staged = root / "_rotate_absent_staged.pdf"
+    made = _new_canvas(staged, _LETTER)
+    made.drawString(72, 700, text)
+    made.showPage()
+    made.save()
+
+    path = root / "rotate_absent.pdf"
+    with pikepdf.open(str(staged)) as pdf:
+        for page in pdf.pages:
+            if "/Rotate" in page.obj:
+                del page.obj["/Rotate"]
+        pdf.save(str(path), deterministic_id=True)
+    staged.unlink()
+
+    spec = FixtureSpec(
+        name="rotate_absent",
+        page_count=1,
+        page_size=_LETTER,
+        page_texts=(text,),
+        rotate_key_absent_on=(0,),
+    )
+    return path, spec
+
+
 #: Build order. `FIXTURE_NAMES` mirrors it for iteration by name.
 _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_multipage_text,
@@ -512,6 +588,7 @@ _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_no_contents_page,
     _build_empty_contents_page,
     _build_stamp_source,
+    _build_rotate_absent,
 )
 
 FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
@@ -532,6 +609,7 @@ FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
         "no_contents_page",
         "empty_contents_page",
         "stamp_source",
+        "rotate_absent",
     )
 )
 

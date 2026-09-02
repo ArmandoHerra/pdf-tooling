@@ -30,6 +30,32 @@ transitively and bounded, for a reference to `AtomicWriter` — the one write
 chokepoint (`PLAN.md` §5.2, `PDF-04`). A verb that never reaches the
 chokepoint cannot mutate anything the safety spine protects, which is what
 `is_mutating` is actually meant to signal.
+
+THE DIMENSION SURFACE — X-157, and `PDF-22` CONSUMES IT RATHER THAN REBUILDING IT
+---------------------------------------------------------------------------------
+Every matrix dimension in this suite comes from here, derived from the live
+registry or a live enum, never typed beside it:
+
+* ``discover_verbs()`` — the verb dimension, walked off the live Typer tree.
+* ``OUTPUT_FLAGS`` — the destination-flag dimension, RE-EXPORTED from
+  ``pdf_toolkit.cli.common`` so a consumer has one import to make. It is the
+  product's own tuple, not a copy: there is nothing here that can drift from it.
+* ``output_formats()`` — every member of the live ``OutputFormat`` StrEnum.
+  Derived from the enum; a renderer added there joins every consuming matrix
+  with zero author action, and `tests/test_derived_dimensions.py` asserts the
+  renderer's own dispatch was wired to match.
+* ``tty_modes()`` — the ``isatty()`` branch as an explicit two-member axis
+  rather than an implicit one.
+* ``PDF_08_VERBS`` — the ONE place PDF-08's four page verbs are named, with a
+  live membership tie (`test_the_governed_verb_set_is_live`). AC30 forbids a
+  typed verb list in PDF-08's tests; this is the declaration that let eleven of
+  them be deleted, and it is mechanically enforced tree-wide.
+* ``expectation()`` — the safe shape for per-verb DATA: a mapping keyed by a
+  derived verb, with a lookup that fails BY NAME when a new verb has no
+  expectation declared, instead of skipping it silently.
+
+`PDF-17` exports and pins these. It does not cross them, cap them, or write a
+single secret-leak case: the cardinality budget is `PDF-22`'s own deliverable.
 """
 
 from __future__ import annotations
@@ -47,18 +73,25 @@ from typing import Final
 import typer
 
 from pdf_toolkit.cli import common as _common
+from pdf_toolkit.cli.common import OUTPUT_FLAGS
 from pdf_toolkit.cli.main import PROG_NAME, app
+from pdf_toolkit.output import OutputFormat
 
 __all__ = [
     "INVOCATIONS",
+    "OUTPUT_FLAGS",
     "OUTPUT_FLAG_INVOCATIONS",
+    "PDF_08_VERBS",
     "REPO_ROOT",
     "Invocation",
     "VerbSpec",
     "console_script",
     "discover_groups",
     "discover_verbs",
+    "expectation",
+    "output_formats",
     "run_cli",
+    "tty_modes",
 ]
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
@@ -117,9 +150,17 @@ class Invocation:
     ``--in-place``/``--output`` conflict, C12's plain run would newly hit
     the very confirmation gate C13 exists to test), a verb whose
     ``destructive=True`` supplies its OWN bulk, ``--in-place`` argv here.
-    ``None`` (the default, and every entry but ``compress`` today) means
-    C13 falls back to ``build`` -- the shape every other registration
-    already has."""
+
+    ``None`` is the default and is correct for every ``destructive=False`` row.
+    It is NOT a fallback: PDF-17 deleted the ``destructive_build or build``
+    fallback both C13 rows used to take, and
+    ``test_a_destructive_row_supplies_its_own_bulk_argv`` now fails the suite
+    when a ``destructive=True`` row omits one. That fallback was B-047's
+    reinstatement path -- the next author to write ``destructive=True`` without
+    a ``destructive_build`` would have silently re-shared C12's single-input
+    ``-O`` tail, C13 would have stopped discriminating, and no test would have
+    failed. Two rows set it today (``compress``, B-079; ``ocr``, PDF-15), not
+    one."""
     requires_engine: str | None = None
     """A port name from ``pdf_toolkit.ports.PORTS`` (e.g. ``"OfficeConverter"``)
     that this verb's registered invocation genuinely needs to REACH exit 0,
@@ -279,10 +320,16 @@ def discover_groups(root: object | None = None) -> tuple[tuple[str, ...], ...]:
     Separate from :func:`discover_verbs` on purpose: C4 ("every grouping
     parent" exits 2 on a bogus subcommand) is a plain structural check, not
     one of the ``(reg)`` checks, so it has no business participating in the
-    :data:`INVOCATIONS` anti-lapse contract (AC10) that leaf verbs do. No
-    grouping parent exists below root at PDF-06 landing time (``meta``
-    arrives with ``PDF-14``); this returns ``()`` today and picks the future
-    group up automatically the moment it exists.
+    :data:`INVOCATIONS` anti-lapse contract (AC10) that leaf verbs do.
+
+    No grouping parent existed below root at PDF-06 landing time, which is why
+    C4 collected zero cases there. ``meta`` arrived with ``PDF-14``, so this
+    returns ``(("meta",),)`` -- ONE path-tuple, not the bare ``("meta",)`` an
+    earlier version of this docstring claimed -- and picks a future group up
+    automatically the moment it exists. A single-element population still
+    passes an emptiness pin while being one refactor from vacuity, which is
+    stated in `test_cli_contract.py`'s own ``POPULATIONS`` roster rather than
+    left to be rediscovered.
     """
     top = root if root is not None else typer.main.get_command(app)
     found: list[tuple[str, ...]] = []
@@ -855,8 +902,16 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     # the registered invocation is a single input writing to `-O`, which is
     # neither bulk nor destructive, so C13 would have nothing to refuse. The
     # bulk `--in-place` non-TTY posture these three DO honour is asserted
-    # directly by `tests/integration/test_pages_cli.py` instead of by giving
-    # C13 a row it would pass vacuously.
+    # directly by
+    # `tests/integration/test_pages_cli.py::test_ac21_a_bulk_in_place_run_fails_closed_on_a_non_tty`
+    # instead of by giving C13 a row it would pass vacuously.
+    #
+    # PDF-17/AC9 -- THAT SENTENCE IS NOW TIED TO THE TEST IT NAMES. It used to
+    # credit a whole module and nothing checked the credit, so the routing
+    # decision could outlive the test that justified it.
+    # `test_the_pdf_08_destructive_routing_claim_names_a_test_that_exists`
+    # parses the node id out of this very comment and fails when it stops
+    # resolving.
     "extract": Invocation(build=_extract_invocation, destructive=False),
     "delete": Invocation(build=_delete_invocation, destructive=False),
     "rotate": Invocation(build=_rotate_invocation, destructive=False),
@@ -1315,3 +1370,73 @@ def _encrypted_password() -> str:
     from corpus import ENCRYPTED_PASSWORD
 
     return ENCRYPTED_PASSWORD
+
+
+# --------------------------------------------------------------------------- #
+# PDF-17 -- the derived dimension surface (X-157). See this module's docstring.
+# --------------------------------------------------------------------------- #
+
+#: PDF-08's four page-addressed structure verbs — the ONE place they are named.
+#:
+#: AC30 forbids a typed verb list *"anywhere in PDF-08's tests"*, and eleven of
+#: them existed. They are gone; this declaration replaced them, and it is not
+#: the same thing they were, for one reason: it carries a LIVE TIE
+#: (`tests/test_derived_dimensions.py::test_the_governed_verb_set_is_live`)
+#: that fails by name the moment one of these stops being a discovered verb.
+#: The eleven tuples had no tie, which is why a rename would have left them
+#: stale AND passing.
+#:
+#: It is a declaration rather than a derivation because no structural predicate
+#: over the live registry isolates these four: `is_page_addressing` returns
+#: ELEVEN verbs (`compress`, `ocr`, `rasterize`, `stamp`, `tables`, `text`,
+#: `watermark` all declare `--pages` too). Measured, not assumed.
+PDF_08_VERBS: Final[tuple[str, ...]] = ("extract", "delete", "rotate", "reorder")
+
+
+def output_formats() -> tuple[OutputFormat, ...]:
+    """Every member of the live ``OutputFormat`` StrEnum, in declaration order.
+
+    DERIVED, never listed: a renderer added to
+    ``src/pdf_toolkit/output/__init__.py`` joins every consuming matrix with
+    zero action from its author. `PDF-22` consumes this rather than building a
+    second one (X-157).
+    """
+    return tuple(OutputFormat)
+
+
+def tty_modes() -> tuple[bool, ...]:
+    """The ``isatty()`` branch as an explicit two-member dimension.
+
+    A first-class axis rather than an implicit one, so a matrix that must cross
+    it says so. `tests/test_derived_dimensions.py` ties it to the product:
+    ``auto_format()`` must still answer differently on the two modes, or the
+    axis has collapsed and this tuple describes nothing.
+    """
+    return (True, False)
+
+
+def expectation(mapping: dict[str, object], key: str, *, label: str) -> object:
+    """*mapping*[*key*], failing BY NAME when no expectation is declared.
+
+    The blessed shape for per-verb DATA under AC30 (`PDF-17` §5). A dimension
+    is DERIVED (`discover_verbs()`, :data:`PDF_08_VERBS`); the per-verb values a
+    test compares against are a mapping keyed by that dimension, and this
+    lookup is what stops a new verb from being silently skipped: it fails with
+    "no expectation declared" instead. `undeclared_expectations` closes the
+    other direction.
+    """
+    if key not in mapping:
+        raise AssertionError(
+            f"{label}: no expectation declared for {key!r}. A verb joined the derived "
+            f"dimension without a value here -- declare one (or state why it is exempt). "
+            f"Declared: {sorted(mapping)}"
+        )
+    return mapping[key]
+
+
+def undeclared_expectations(
+    mapping: dict[str, object], dimension: tuple[str, ...]
+) -> tuple[list[str], list[str]]:
+    """``(missing, stale)`` — dimension members with no expectation, and
+    expectations naming something no longer in the dimension."""
+    return sorted(set(dimension) - set(mapping)), sorted(set(mapping) - set(dimension))

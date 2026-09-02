@@ -43,6 +43,7 @@ from pdf_toolkit.ops.pages import (  # noqa: E402
 )
 from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
 from pdfium_text import page_texts  # noqa: E402
+from registry import PDF_08_VERBS  # noqa: E402
 
 FIXTURE = "ten_page_text"
 
@@ -389,7 +390,7 @@ def test_ac24_parse_is_called_exactly_once_per_input(
     assert len(calls) == 3
 
 
-@pytest.mark.parametrize("verb", ["extract", "delete", "rotate", "reorder"])
+@pytest.mark.parametrize("verb", PDF_08_VERBS)
 def test_ac24_no_verb_carries_a_second_grammar_implementation(
     verb: str, corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -688,7 +689,7 @@ def test_ac15_modular_normalization_against_a_pre_rotated_page(
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("verb", ["extract", "delete", "rotate", "reorder"])
+@pytest.mark.parametrize("verb", PDF_08_VERBS)
 def test_ac39_the_reported_page_count_transition_matches_the_documents(
     verb: str, corpus, tmp_path: Path
 ) -> None:
@@ -751,7 +752,7 @@ def test_ac39_rotate_reports_how_many_pages_it_actually_stamped(corpus, tmp_path
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("verb", ["extract", "delete", "rotate", "reorder"])
+@pytest.mark.parametrize("verb", PDF_08_VERBS)
 def test_ac38_every_verb_acquires_its_engine_through_the_one_registry_seam(
     verb: str, corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
