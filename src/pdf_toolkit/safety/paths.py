@@ -43,6 +43,7 @@ __all__ = [
     "ensure_no_clobber",
     "ensure_within",
     "identity_key",
+    "nearest_existing_ancestor",
     "resolved_device",
     "same_destination",
     "target_exists",
@@ -219,3 +220,40 @@ def resolved_device(path: Path | str) -> int | None:
         except OSError:
             continue
     return None
+
+
+def nearest_existing_ancestor(path: Path | str) -> Path:
+    """Read-only walk to the deepest existing ancestor of *path*, inclusive.
+
+    Mirrors :func:`declared_device`'s own walk over ``(current, *current.parents)``
+    -- that function asks the deepest stat-able ancestor for a device id;
+    this one asks the same walk a different question ("does this exist?").
+    It is what lets a caller predict whether a not-yet-existing path's
+    eventual ``mkdir(parents=True, exist_ok=True)`` would land inside a real
+    directory, land on a non-directory (``ENOTDIR``/``EEXIST``), or be
+    refused for want of permission (``EACCES``) -- **without performing the
+    operation** (PDF-18 Design D4).
+
+    ``Path.exists()`` follows a final symlink and swallows *most* stat-time
+    ``OSError``s (an inaccessible intermediate component included) -- but
+    not every one. ``ENAMETOOLONG`` is a documented exception (CPython's own
+    ``_ignore_error`` allowlist does not cover it), and a too-long component
+    is exactly the condition this function exists to let a caller predict
+    without performing the operation. So every candidate's existence check
+    is wrapped here too: this is the read a *prediction* is allowed, and it
+    must never raise for a caller asking a filesystem question about a
+    destination that legitimately does not exist yet, however it fails to
+    exist.
+
+    The walk always terminates: a filesystem's root always exists, so the
+    last candidate in ``current.parents`` is always returned if nothing
+    closer does.
+    """
+    current = Path(path).expanduser().absolute()
+    for candidate in (current, *current.parents):
+        try:
+            if candidate.exists():
+                return candidate
+        except OSError:
+            continue
+    return current.parents[-1]

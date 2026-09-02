@@ -53,16 +53,19 @@ predictable.
   the payload** (``"password_verified": false``) rather than left silent —
   that is the whole difference between honouring X-67 and re-committing X-89.
 
-**The filesystem tier runs in both modes (B-054, extending X-67).**
-:func:`_plan_filesystem` below is structurally identical to
-``ops/optimize.py``'s own (itself ``ops/textract.py``'s donor) — same call
-order, same ``out_dir is None`` guard. `encrypt`/`decrypt` carry **only** the
+**The filesystem tier runs in both modes (B-054, extending X-67), through the
+ONE shared planner (PDF-18).** `encrypt`/`decrypt` carry **only** the
 single-target shape (``-O``/``--in-place``; ``out_dir`` is always ``None``
-for them, exactly as `repair`/`linearize` do), so ``plan_output_set``'s own
-asymmetry routes them through ``AtomicWriter._plan`` and there is no second
-code path. This is the FOURTH structurally identical copy of that
-composition; consolidating it into ``safety/`` is filed as **B-064** and
-scheduled, deliberately not done here.
+for them, exactly as `repair`/`linearize` do), so
+:func:`~pdf_toolkit.safety.atomic.plan_filesystem`'s own ``out_dir is None``
+branch is what checks this module's destination writability — in both
+modes now, which is what closes `d231fbcec4` (the ladder disagreeing on tier
+order between a dry run and a real run) as a byproduct of the eight-copy
+unification rather than as a second, separate fix. This module no longer
+owns a planner of its own; :meth:`_plan` below still owns the *ladder* —
+the ordering of the filesystem tier against ``document_refusal`` and
+password resolvability, which is `encrypt`/`decrypt`'s own concern and
+stays here.
 
 **Nothing here writes.** Every byte reaches disk through
 ``safety.AtomicWriter``.
@@ -91,7 +94,7 @@ from pdf_toolkit.ports.structure import (
     EncryptionFacts,
     require_encryption,
 )
-from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.secret import Secret
 
@@ -262,36 +265,6 @@ def _resolve_single_target(source: Path, *, output: Path | None, in_place: bool,
     raise UsageError(f"{verb} requires -O/--output or --in-place")
 
 
-def _plan_filesystem(
-    targets: Sequence[Path], *, out_dir: Path | None, policy: SafetyPolicy, kind: str
-) -> PdfToolkitError | None:
-    """The filesystem tier, through the SHARED primitives only.
-
-    Structurally identical to ``ops/optimize.py::_plan_filesystem`` — read its
-    docstring before touching this one; the ``out_dir is None`` guard is the
-    load-bearing line. `encrypt`/`decrypt` declare only ``--output`` and
-    ``--in-place`` (OR-3), so ``out_dir`` is always ``None`` here and the
-    guard is what routes every call through ``AtomicWriter``'s own ``_plan``
-    — the same code path the real run takes. **B-062 does not bite these two
-    verbs**: they carry the single-destination shape only, which is exactly
-    what ``plan_output_set``'s asymmetry intends.
-
-    A per-verb prediction patch here would rebuild B-054's defect one verb
-    later. If the shared primitives ever cannot express this case, that is a
-    BLOCKER, not a local fix.
-    """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
-    if plan.refusal is not None:
-        return plan.refusal
-    if policy.dry_run and out_dir is None:
-        for target in targets:
-            with AtomicWriter(target, policy=policy, kind=kind) as atomic:
-                refusal = atomic.planned_refusal
-            if refusal is not None:
-                return refusal
-    return None
-
-
 def _plan(
     *,
     target: Path,
@@ -317,9 +290,9 @@ def _plan(
     """
     if pre_refusal is not None:
         return _Prediction(refusal=pre_refusal)
-    filesystem = _plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
-    if filesystem is not None:
-        return _Prediction(refusal=filesystem)
+    filesystem = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    if filesystem.refusal is not None:
+        return _Prediction(refusal=filesystem.refusal)
     if document_refusal is not None:
         return _Prediction(refusal=document_refusal)
     for source in passwords:

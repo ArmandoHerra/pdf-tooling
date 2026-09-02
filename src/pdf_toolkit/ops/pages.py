@@ -68,18 +68,19 @@ rendering while failing the "changes only page 1" guarantee, so it is not a
 defensive branch that could be removed by mistake: it is a property of which
 pages get a call at all.
 
-**The filesystem tier runs in both modes (X-67, B-054).**
-:func:`_plan_filesystem` below is ``ops/optimize.py:263-337``'s own donor
-function, structurally identical — same call order, same ``out_dir is None``
-guard on the writer tier. The *selection* tier is planned the same way (see
+**The filesystem tier runs in both modes (X-67, B-054), through the ONE
+shared planner (PDF-18).**
+:func:`~pdf_toolkit.safety.atomic.plan_filesystem` is called at the tier-2
+step below. The *selection* tier is planned the same way (see
 :func:`_run`'s tier 1), so ``delete --pages all --dry-run`` predicts §D5's
 zero-page refusal rather than discovering it only on the real run.
 
 **Nothing here writes.** Every byte reaches disk through
 ``safety.AtomicWriter``; ``--out-dir`` is created only via
-``safety.atomic.plan_output_set``; every rendered destination comes from
-``safety.naming.render_name`` (X-70 — a hand-built path is the only way to
-bypass containment, so the rule is about which function builds the path).
+``safety.atomic.plan_output_set`` (which ``plan_filesystem`` wraps); every
+rendered destination comes from ``safety.naming.render_name`` (X-70 — a
+hand-built path is the only way to bypass containment, so the rule is about
+which function builds the path).
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageRange
 from pdf_toolkit.ops.pagerange import parse
 from pdf_toolkit.ports.structure import OpenStructureDocument, require_structure
-from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
 from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
@@ -321,75 +322,16 @@ def _resolve_targets(
 # --------------------------------------------------------------------------- #
 
 
-@dataclass(frozen=True, slots=True)
-class _FilesystemPlan:
-    """What a real run of this invocation would do at the filesystem tier.
-
-    Mirrors :class:`~pdf_toolkit.safety.atomic.PlannedOutputs`' own X-67
-    vocabulary exactly, because that is what makes a prediction and an outcome
-    comparable like with like rather than two hand-rolled shapes that agree by
-    luck.
-    """
-
-    would_exit: int
-    would_refuse: dict[str, object] | None
-    message: str | None
-
-    @property
-    def refused(self) -> bool:
-        return self.would_refuse is not None
-
-    def detail(self) -> dict[str, object]:
-        payload: dict[str, object] = {"would_exit": self.would_exit}
-        if self.would_refuse is not None:
-            payload["would_refuse"] = self.would_refuse
-        return payload
-
-
-def _plan_filesystem(
-    targets: Sequence[Path], *, out_dir: Path | None, policy: SafetyPolicy, kind: str
-) -> _FilesystemPlan:
-    """The filesystem tier for this run, through the SHARED primitives only.
-
-    ``ops/optimize.py``'s own donor function, unchanged in structure. The two
-    destination shapes have two different shared owners and neither is
-    re-implemented here: :func:`~pdf_toolkit.safety.atomic.plan_output_set`
-    owns the ``--out-dir`` tier, and :class:`AtomicWriter`'s own ``_plan``
-    owns the per-destination tier a single ``-O``/``--in-place`` target has
-    instead of a shared directory.
-
-    The writer tier is consulted **only when ``out_dir`` is ``None``**: under
-    ``--dry-run`` a not-yet-existing ``--out-dir`` legitimately stays
-    non-existent, and entering a writer against a target inside it would turn
-    every ordinary ``--dry-run --out-dir new/`` into a false exit-1 refusal.
-    That is ``plan_output_set``'s own documented Trap 1, reached from the
-    other side.
-
-    **Not widened into, deliberately — B-058.** A ``--out-dir`` that does not
-    exist and whose *parent* is unwritable still predicts ``would_exit 0``
-    against a real unhandled ``PermissionError``; ``plan_output_set``'s own
-    docstring records that as a measured, deliberate gap, because predicting
-    it would mean inventing a refusal class the real run does not raise.
-    These verbs inherit that tier and do not repair it.
-    """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
-    if plan.refusal is not None:
-        return _FilesystemPlan(
-            would_exit=plan.would_exit,
-            would_refuse=plan.would_refuse,
-            message=plan.refusal.message,
-        )
-    if policy.dry_run and out_dir is None:
-        for target in targets:
-            with AtomicWriter(target, policy=policy, kind=kind) as atomic:
-                refusal = atomic.planned_refusal
-            if refusal is not None:
-                return _FilesystemPlan(
-                    would_exit=refusal.exit_code,
-                    would_refuse=refusal.to_dict(),
-                    message=refusal.message,
-                )
-    return _FilesystemPlan(would_exit=plan.would_exit, would_refuse=None, message=None)
+#: The filesystem tier for this run, through the ONE shared planner (PDF-18
+#: Design D1). :func:`~pdf_toolkit.safety.atomic.plan_filesystem` owns both
+#: destination shapes in one call, in both modes: the `--out-dir` tier and
+#: the per-destination tier a single `-O`/`--in-place` target has instead of
+#: a shared directory. `d55b302668` -- a `--out-dir` that does not exist and
+#: whose *parent* is unwritable used to predict `would_exit 0` against a real
+#: unhandled `PermissionError` -- is now predicted correctly, for these four
+#: verbs along with every other producing verb, because the fix lives inside
+#: the shared planner itself (`safety/atomic.py::_ensure_out_dir`) rather
+#: than in a per-module copy.
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,7 +535,7 @@ def _run(
         )
 
     # Tier 2 -- the filesystem.
-    plan = _plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
 
     if policy.dry_run:
         fs_detail = plan.detail()

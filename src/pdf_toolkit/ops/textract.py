@@ -31,17 +31,19 @@ invalidates another spec's proof.
 
 **Nothing here writes.** Every byte reaches disk through
 ``safety.AtomicWriter``, and a destination directory is created only via
-``safety.atomic.plan_output_set``. CSV and text are serialized **into memory**
-(``io.StringIO`` + ``csv.writer``, then ``encode("utf-8")``) and the bytes are
-handed to the writer — which is both what PDF-04's import-boundary walk
-requires and how ``--dry-run`` purity, no-clobber and the ``-y`` posture come
-for free instead of being re-implemented twice.
+``safety.atomic.plan_output_set`` (which ``plan_filesystem`` wraps). CSV and
+text are serialized **into memory** (``io.StringIO`` + ``csv.writer``, then
+``encode("utf-8")``) and the bytes are handed to the writer — which is both
+what PDF-04's import-boundary walk requires and how ``--dry-run`` purity,
+no-clobber and the ``-y`` posture come for free instead of being
+re-implemented twice.
 
-**The filesystem tier runs in both modes (B-054, extending X-67).**
-``plan_output_set`` is called unconditionally, so a ``--dry-run`` over an
-occupied target or an unwritable destination predicts the same refusal a real
-run produces, through the *shared* planning path rather than a per-verb copy of
-it. This module adds no per-verb exit-code logic on top of that path.
+**The filesystem tier runs in both modes (B-054, extending X-67), through the
+ONE shared planner (PDF-18).** ``plan_filesystem`` is called unconditionally,
+so a ``--dry-run`` over an occupied target or an unwritable destination
+predicts the same refusal a real run produces, through the *shared* planning
+path rather than a per-verb copy of it. This module adds no per-verb
+exit-code logic on top of that path.
 
 **Inputs are processed sequentially, in input order.** ``--threads`` is
 accepted (it is a global flag) and has no effect on either verb; both
@@ -75,7 +77,7 @@ from pdf_toolkit.ports.text import (
     require_layout_text,
     require_tables,
 )
-from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name, used_fields
 from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
@@ -297,88 +299,14 @@ def _require_out_dir_for_template(name_template: str | None, out_dir: Path | Non
         raise UsageError(_NAME_WITHOUT_OUT_DIR)
 
 
-@dataclass(frozen=True, slots=True)
-class _FilesystemPlan:
-    """What a real run of this invocation would do at the filesystem tier.
-
-    Mirrors :class:`~pdf_toolkit.safety.atomic.PlannedOutputs`' own X-67
-    vocabulary exactly, because that is what makes a prediction and an outcome
-    comparable like with like rather than two hand-rolled shapes that agree by
-    luck.
-    """
-
-    would_exit: int
-    would_refuse: dict[str, object] | None
-    message: str | None
-
-    @property
-    def refused(self) -> bool:
-        return self.would_refuse is not None
-
-    def detail(self) -> dict[str, object]:
-        """The per-item ``detail`` payload a ``--dry-run`` item carries."""
-        payload: dict[str, object] = {"would_exit": self.would_exit}
-        if self.would_refuse is not None:
-            payload["would_refuse"] = self.would_refuse
-        return payload
-
-
-def _plan_filesystem(
-    targets: Sequence[Path], *, out_dir: Path | None, policy: SafetyPolicy, kind: str
-) -> _FilesystemPlan:
-    """The filesystem tier for this run, through the SHARED primitives only.
-
-    These two verbs are the first in the product to carry **both** destination
-    shapes, and the two shapes have two different shared owners. Neither is
-    re-implemented here:
-
-    * :func:`~pdf_toolkit.safety.atomic.plan_output_set` owns the ``--out-dir``
-      tier — creating the directory, checking it is writable, and checking every
-      target for no-clobber. It is called unconditionally, in both modes, so a
-      dry run over an occupied target or an unwritable directory predicts what
-      the real run does (B-054, extending X-67).
-    * :class:`~pdf_toolkit.safety.atomic.AtomicWriter`'s own ``_plan`` owns the
-      per-destination tier that a single ``-O`` target has *instead of* a shared
-      directory. ``plan_output_set`` deliberately does not check writability
-      when ``out_dir`` is ``None`` (its own docstring says it routes only the
-      per-target no-clobber check in that shape), because for a single target
-      that check belongs to the writer — which is exactly why ``merge``,
-      ``compose`` and ``create`` predict through the writer and not through the
-      planner.
-
-    A real run walks both tiers because it *calls* both. A dry run must
-    therefore consult both, or it predicts half of what the real run checks —
-    which is B-054's own defect class one destination shape further out, and it
-    is a real, measured gap: found here by contract row ``C15``'s unwritable arm
-    reporting dry 0 against real 1, not by reading the code.
-
-    **The one thing to read before touching this function.** The writer tier is
-    consulted **only when ``out_dir`` is ``None``**. Under ``--dry-run`` a
-    not-yet-existing ``--out-dir`` legitimately stays non-existent (its creation
-    is the real run's first mutation), and ``ensure_destination_writable``
-    refuses a directory that does not exist — so entering a writer against a
-    target inside it would turn every ordinary
-    ``text --dry-run --out-dir new/`` into a false exit-1 refusal. That is
-    ``plan_output_set``'s own documented Trap 1, reached from the other side.
-    """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
-    if plan.refusal is not None:
-        return _FilesystemPlan(
-            would_exit=plan.would_exit,
-            would_refuse=plan.would_refuse,
-            message=plan.refusal.message,
-        )
-    if policy.dry_run and out_dir is None:
-        for target in targets:
-            with AtomicWriter(target, policy=policy, kind=kind) as atomic:
-                refusal = atomic.planned_refusal
-            if refusal is not None:
-                return _FilesystemPlan(
-                    would_exit=refusal.exit_code,
-                    would_refuse=refusal.to_dict(),
-                    message=refusal.message,
-                )
-    return _FilesystemPlan(would_exit=plan.would_exit, would_refuse=None, message=None)
+#: The filesystem tier for this run, through the ONE shared planner (PDF-18
+#: Design D1). These two verbs are the first in the product to carry **both**
+#: destination shapes, and :func:`~pdf_toolkit.safety.atomic.plan_filesystem`
+#: owns both in one call, in both modes: the `--out-dir` tier and the
+#: per-destination tier a single `-O` target has instead of a shared
+#: directory (which is why `merge`, `compose` and `create` predict through
+#: the writer and not through this planner at all -- they never pass
+#: `out_dir`).
 
 
 # --------------------------------------------------------------------------- #
@@ -563,16 +491,24 @@ def extract_text_run(
     # identically in both modes -- the same rule `split` follows.
     check_output_collisions(targets)
 
-    plan = _plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="text")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="text")
 
     if not planned:
+        # PDF-18: `out_dir` is always `None` here (`_plan_text_targets`'s own
+        # third branch), so `plan.refused` is always `False` in practice --
+        # `ok`/`exit_code` still derive from the plan rather than a hardcoded
+        # clean result, for the same reason `extract_tables_run`'s sibling
+        # branch below does (uniform with every other producing verb's own
+        # `ok=not plan.refused, exit_code=plan.would_exit` shape).
         items = tuple(
             ItemResult(
                 input=str(source),
                 output=None,
-                ok=True,
-                exit_code=0,
-                message=f"{len(selections[source])} page(s)",
+                ok=not plan.refused,
+                exit_code=plan.would_exit,
+                message=(
+                    f"{len(selections[source])} page(s)" if not plan.refused else plan.message
+                ),
                 bytes_before=source.stat().st_size,
                 bytes_after=None,
                 duration_ms=0,
@@ -769,18 +705,31 @@ def extract_tables_run(
     # The two paths stay distinct, and a test proves they stay distinct.
     check_output_collisions(targets)
 
-    plan = _plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="table")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="table")
 
     if not targets:
+        # PDF-18/AC13: `tables` is the one verb whose own targets can be
+        # empty EVEN WHEN `out_dir` was given (zero tables detected) -- so
+        # this is the branch that must actually reach the U tier for it.
+        # `ok`/`exit_code` derive from the plan rather than a hardcoded clean
+        # result, uniform with every other producing verb's own
+        # `ok=not plan.refused, exit_code=plan.would_exit` shape; a real run
+        # only ever reaches this branch with a clean plan (a refusal raises
+        # before it, same as every other verb), so the ordinary case is
+        # unchanged.
         items = tuple(
             ItemResult(
                 input=str(source),
                 output=None,
-                ok=True,
-                exit_code=0,
+                ok=not plan.refused,
+                exit_code=plan.would_exit,
                 message=(
-                    f"{sum(1 for entry in found if entry[0] == source)} table(s) on "
-                    f"{len(selections[source])} page(s)"
+                    (
+                        f"{sum(1 for entry in found if entry[0] == source)} table(s) on "
+                        f"{len(selections[source])} page(s)"
+                    )
+                    if not plan.refused
+                    else plan.message
                 ),
                 bytes_before=source.stat().st_size,
                 bytes_after=None,

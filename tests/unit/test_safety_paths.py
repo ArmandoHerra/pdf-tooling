@@ -32,7 +32,7 @@ from pdf_toolkit.safety import (
     identity_key,
     same_destination,
 )
-from pdf_toolkit.safety.paths import declared_device, resolved_device
+from pdf_toolkit.safety.paths import declared_device, nearest_existing_ancestor, resolved_device
 
 # --------------------------------------------------------------------------- #
 # Identity across aliases
@@ -224,3 +224,89 @@ def test_declared_device_does_not_follow_the_final_symlink(tmp_path: Path) -> No
     link = tmp_path / "alias"
     link.symlink_to(real)
     assert declared_device(link / "doc.pdf") == os.lstat(link).st_dev
+
+
+# --------------------------------------------------------------------------- #
+# `nearest_existing_ancestor` (PDF-18 Design D4) -- the read-only walk the
+# `--out-dir` unwritable-parent prediction is built on.
+# --------------------------------------------------------------------------- #
+
+
+def test_nearest_existing_ancestor_returns_the_path_itself_when_it_exists(
+    tmp_path: Path,
+) -> None:
+    existing = tmp_path / "already-here"
+    existing.mkdir()
+    assert nearest_existing_ancestor(existing) == existing.resolve()
+
+
+def test_nearest_existing_ancestor_climbs_to_the_deepest_existing_directory(
+    tmp_path: Path,
+) -> None:
+    """`--out-dir a/b/c` where none of `a/b/c` exists yet -- the walk must
+    stop at `tmp_path` itself, the deepest thing that is actually there."""
+    absent = tmp_path / "a" / "b" / "c"
+    assert nearest_existing_ancestor(absent) == tmp_path.resolve()
+
+
+def test_nearest_existing_ancestor_stops_at_a_file_blocking_the_walk(
+    tmp_path: Path,
+) -> None:
+    """The `EEXIST`-as-file family (`fa5736f2ae`): a regular file sitting
+    where a directory component was expected is itself the "nearest existing
+    ancestor" -- the caller's job is to notice it is not a directory."""
+    blocker = tmp_path / "blocker.file"
+    blocker.write_bytes(b"x")
+    absent = blocker / "sub" / "out"
+    ancestor = nearest_existing_ancestor(absent)
+    assert ancestor == blocker.resolve()
+    assert not ancestor.is_dir()
+
+
+def test_nearest_existing_ancestor_over_the_out_dir_itself_that_is_a_file(
+    tmp_path: Path,
+) -> None:
+    """`--out-dir blocker.file`, no `sub` component at all -- the out-dir
+    path itself is the nearest existing ancestor of itself."""
+    blocker = tmp_path / "blocker.file"
+    blocker.write_bytes(b"x")
+    assert nearest_existing_ancestor(blocker) == blocker.resolve()
+
+
+def test_nearest_existing_ancestor_is_computable_for_a_relative_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mirrors `canonical`'s own contract: a destination that does not exist
+    yet, spelled relatively, must still resolve to an absolute answer."""
+    monkeypatch.chdir(tmp_path)
+    ancestor = nearest_existing_ancestor(Path("new") / "deeper")
+    assert ancestor == tmp_path.resolve()
+    assert ancestor.is_absolute()
+
+
+def test_nearest_existing_ancestor_never_touches_the_filesystem(tmp_path: Path) -> None:
+    """Read-only by construction: nothing named in the walk may come to
+    exist merely by having been asked about (the AC9/AC10 purity property
+    this function's own caller relies on)."""
+    before = sorted(tmp_path.iterdir())
+    nearest_existing_ancestor(tmp_path / "never" / "created" / "here")
+    after = sorted(tmp_path.iterdir())
+    assert before == after == []
+
+
+def test_nearest_existing_ancestor_falls_back_to_the_root_when_nothing_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The root always exists on every real filesystem, so the walk's
+    post-loop fallback is unreachable in practice -- proven rather than
+    pragma'd around (PDF-06:236's own anti-gaming rule: unreachable-in-
+    practice is a test to write, not a line to exclude): `Path.exists()` is
+    monkeypatched to say "no" about EVERYTHING, including the root, and the
+    walk must still terminate with an answer instead of raising or looping
+    forever."""
+    import pathlib
+
+    monkeypatch.setattr(pathlib.Path, "exists", lambda self: False)
+    absent = tmp_path / "a" / "b"
+    result = nearest_existing_ancestor(absent)
+    assert result == Path(absent).expanduser().absolute().parents[-1]

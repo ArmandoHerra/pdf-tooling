@@ -57,16 +57,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from pdf_toolkit.errors import EngineMissingError, NoInputError, PdfToolkitError, UsageError
+from pdf_toolkit.errors import EngineMissingError, NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageInfo, PageRange
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.ocr import OcrEngine, require_ocr
 from pdf_toolkit.ports.raster import require_raster
 from pdf_toolkit.ports.structure import StructureEngine, require_structure
-from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import canonical, check_output_collisions, ensure_destination_writable
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -158,56 +158,12 @@ def _resolve_ocr_targets(
     ]
 
 
-@dataclass(frozen=True, slots=True)
-class _FilesystemPlan:
-    would_exit: int
-    would_refuse: dict[str, object] | None
-    message: str | None
-
-    @property
-    def refused(self) -> bool:
-        return self.would_refuse is not None
-
-    def detail(self) -> dict[str, object]:
-        payload: dict[str, object] = {"would_exit": self.would_exit}
-        if self.would_refuse is not None:
-            payload["would_refuse"] = self.would_refuse
-        return payload
-
-
-def _plan_filesystem(
-    targets: Sequence[Path], *, out_dir: Path | None, policy: SafetyPolicy
-) -> _FilesystemPlan:
-    """The filesystem tier, through the SHARED primitives only.
-
-    **Widened beyond ``compress``'s own donor shape for the single-target
-    (``-O``, ``out_dir is None``) case**, for the same reason
-    ``ops/office.py::_plan_filesystem`` is (see that function's own
-    docstring): ``ocr``'s engine can be legitimately ABSENT, so the
-    writability check must run in BOTH modes, before ``require_ocr()`` is
-    ever reached -- not only under ``--dry-run``, which is where ``compress``
-    (a hard, always-present dependency) leaves it.
-    """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
-    if plan.refusal is not None:
-        return _FilesystemPlan(
-            would_exit=plan.would_exit,
-            would_refuse=plan.would_refuse,
-            message=plan.refusal.message,
-        )
-    if out_dir is None:
-        for target in targets:
-            try:
-                ensure_destination_writable(canonical(target).parent, as_written=target.parent)
-            except PdfToolkitError as refusal:
-                if not policy.dry_run:
-                    raise
-                return _FilesystemPlan(
-                    would_exit=refusal.exit_code,
-                    would_refuse=refusal.to_dict(),
-                    message=refusal.message,
-                )
-    return _FilesystemPlan(would_exit=plan.would_exit, would_refuse=None, message=None)
+#: The filesystem tier, through the ONE shared planner (PDF-18 Design D1).
+#: `ocr`'s engine can be legitimately ABSENT, which is why the pre-unification
+#: copy here widened past `compress`'s own donor shape to check writability in
+#: BOTH modes for the single-target (`-O`, `out_dir is None`) case -- before
+#: `require_ocr()` is ever reached. `plan_filesystem` now does that widening
+#: for every caller, unconditionally.
 
 
 def _resolve_pages(pages_spec: str | None, page_count: int) -> PageRange:
@@ -309,7 +265,7 @@ def ocr_run(
     # spawns tesseract to find that out (the same ordering rationale
     # `ensure_destination_writable`'s own docstring states: "before an
     # engine runs").
-    plan = _plan_filesystem(targets, out_dir=out_dir, policy=policy)
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
 
     structure_engine = require_structure()
     pages_by_source: dict[Path, tuple[PageInfo, ...]] = {

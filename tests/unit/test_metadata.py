@@ -317,15 +317,26 @@ def test_ac21_dry_run_predicts_an_occupied_target_via_plan_output_set(
         )
 
 
-def test_ac21_meta_set_calls_plan_output_set_not_a_local_refusal(tmp_path: Path) -> None:
-    """`grep -n "plan_output_set" src/pdf_toolkit/ops/metadata.py` is
-    non-empty; nothing re-derives a refusal locally (Design D9)."""
+def test_ac21_meta_set_calls_plan_filesystem_not_a_local_refusal(tmp_path: Path) -> None:
+    """`grep -n "plan_filesystem" src/pdf_toolkit/ops/metadata.py` is
+    non-empty; nothing re-derives a refusal locally (Design D9).
+
+    **PDF-18 Design D9 — re-pointed by design, not a regression.** Before
+    PDF-18 unified the eight `ops/_plan_filesystem` copies, this module
+    called `plan_output_set` directly and this test pinned that literal.
+    After unification it calls `safety.atomic.plan_filesystem` (which wraps
+    `plan_output_set` internally), so the literal this test protects moves
+    with it — the invariant it protects ("route through the shared
+    primitive; never hand-roll a local refusal") is unchanged and is now ALSO
+    protected structurally by `tests/test_import_boundaries.py`'s Section 5,
+    which no module under `ops/` can route around by construction.
+    """
     import inspect
 
     from pdf_toolkit.ops import metadata
 
     source = inspect.getsource(metadata)
-    assert "plan_output_set" in source
+    assert "plan_filesystem" in source
 
 
 def test_meta_get_writes_nothing_and_is_unaffected_by_dry_run(corpus, tmp_path: Path) -> None:

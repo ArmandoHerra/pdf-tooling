@@ -154,6 +154,7 @@ from typing import IO, Final
 from pdf_toolkit.cli.exit_codes import OK
 from pdf_toolkit.errors import (
     BackupExistsError,
+    DestinationUnwritableError,
     FailureError,
     PdfToolkitError,
     TargetExistsError,
@@ -164,6 +165,7 @@ from pdf_toolkit.safety.paths import (
     declared_device,
     ensure_destination_writable,
     ensure_no_clobber,
+    nearest_existing_ancestor,
     resolved_device,
 )
 from pdf_toolkit.safety.policy import SafetyPolicy
@@ -174,6 +176,7 @@ __all__ = [
     "DEGRADED_PREFIX",
     "PlannedOutputs",
     "ScratchDir",
+    "plan_filesystem",
     "plan_output_set",
 ]
 
@@ -217,6 +220,91 @@ def _digest(path: Path) -> tuple[int, str]:
     return size, hasher.hexdigest()
 
 
+def _predict_name_too_long(out_dir: Path, ancestor: Path) -> None:
+    """``ENAMETOOLONG``, predicted rather than performed (PDF-18 Design D4,
+    implementation note 2, resolution (a)).
+
+    A non-existent ``out_dir`` whose ancestor is writable is not yet fully
+    decidable: ``mkdir(parents=True)`` still has to create every component
+    between *ancestor* and *out_dir*, and one of those components can be too
+    long for the filesystem to accept, which is a refusal the ancestor's own
+    writability check cannot see. Every not-yet-existing component is
+    checked against the *ancestor*'s own ``PC_NAME_MAX`` -- the components
+    ``mkdir`` would create all land on the same filesystem as the ancestor
+    that hosts them, so its limit is theirs too. Stdlib, one
+    :func:`os.pathconf` call, decidable without performing the operation --
+    squarely inside §D3's invariant.
+
+    If ``PC_NAME_MAX`` is unavailable for this attribute on this platform,
+    the check is silently skipped: the real ``mkdir`` still refuses
+    (§D4's errno table), this tier of the *prediction* is simply not
+    decidable here, exactly as X-67 already permits for password
+    correctness.
+    """
+    try:
+        limit = os.pathconf(str(ancestor), "PC_NAME_MAX")
+    except (OSError, ValueError, AttributeError):
+        return
+    remainder = out_dir.relative_to(ancestor) if out_dir != ancestor else Path()
+    for part in remainder.parts:
+        if len(os.fsencode(part)) > limit:
+            raise DestinationUnwritableError(
+                f"destination directory cannot be created: {out_dir} "
+                f"(path component {part!r} exceeds the filesystem's {limit}-byte "
+                f"name limit)",
+                path=str(out_dir),
+            )
+
+
+def _predict_out_dir_creation(out_dir: Path) -> None:
+    """Would ``out_dir.mkdir(parents=True, exist_ok=True)`` succeed? (X-184/D4)
+
+    Mirrors ``Path.mkdir(exist_ok=True)``'s own two-branch behaviour exactly,
+    read-only:
+
+    * ``out_dir`` already exists (as anything at all) -- the real ``mkdir``
+      is a no-op regardless of its own permission bits (only *search*
+      permission on the parent is needed to discover ``EEXIST``, never
+      *write*). Predicting anything here would duplicate -- and could
+      disagree with -- :func:`~pdf_toolkit.safety.paths.
+      ensure_destination_writable`, which `plan_output_set` already calls
+      right after this one whenever ``out_dir`` exists (Trap 1's own
+      exemption is keyed on existence for exactly this reason). So this
+      function returns and lets that check own the "exists but unwritable"
+      and "exists but is a file" cases -- AC6's wire-compatibility pin
+      covers both and neither may change shape.
+    * ``out_dir`` does not exist -- walk to the deepest existing ancestor.
+      If that ancestor is not a directory (``ENOTDIR``/``EEXIST``-as-file,
+      the trigger `fa5736f2ae` names) or is not writable+executable
+      (``EACCES``), the real ``mkdir`` would refuse; predict it. Otherwise,
+      check the remaining not-yet-created path components for
+      ``ENAMETOOLONG``.
+
+    **Existence is decided through :func:`nearest_existing_ancestor` alone,
+    never a direct ``out_dir.exists()`` call.** ``Path.exists()`` does not
+    swallow ``ENAMETOOLONG`` (see that function's own docstring), and this
+    function is exactly the place a too-long ``out_dir`` would reach first —
+    a direct call here would raise instead of predicting.
+    """
+    absolute = Path(out_dir).expanduser().absolute()
+    ancestor = nearest_existing_ancestor(out_dir)
+    if ancestor == absolute:
+        return
+    if not ancestor.is_dir():
+        raise DestinationUnwritableError(
+            f"destination directory cannot be created: {out_dir} "
+            f"({ancestor} exists and is not a directory)",
+            path=str(out_dir),
+        )
+    if not os.access(ancestor, os.W_OK | os.X_OK):
+        raise DestinationUnwritableError(
+            f"destination directory cannot be created: {out_dir} "
+            f"(the nearest existing directory, {ancestor}, is not writable)",
+            path=str(out_dir),
+        )
+    _predict_name_too_long(out_dir, ancestor)
+
+
 def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
     """Create ``--out-dir`` if it does not exist, unless ``--dry-run`` (`PLAN.md` §4.2).
 
@@ -229,9 +317,20 @@ def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
     ``Path.mkdir`` is a row-11 mutation the write chokepoint's own AST walk
     forbids everywhere outside this file; this is that mutation's one
     confined call site, mirroring every other step this module already owns.
-    A dry run never calls the real ``mkdir`` — the function returns having
-    done nothing at all, which is what keeps a non-existent ``--out-dir``
-    non-existent under ``--dry-run`` (AC18).
+
+    **PDF-18 (`d55b302668` / `fa5736f2ae`): this call is now guarded on the
+    real run and PREDICTED on the dry run, instead of the dry run being an
+    unconditional no-op.** A dry run never calls the real ``mkdir`` -- the
+    function's dry-run branch is :func:`_predict_out_dir_creation`, entirely
+    read-only, which is what keeps a non-existent ``--out-dir`` non-existent
+    under ``--dry-run`` (AC9, AC18). Any ``OSError`` the real ``mkdir`` raises
+    -- ``EACCES``, ``ENOTDIR``, ``EEXIST``-as-file, ``ENAMETOOLONG``, ``EROFS``,
+    the whole errno family, never only ``PermissionError`` -- becomes
+    :class:`~pdf_toolkit.errors.DestinationUnwritableError`, echoing the path
+    **as the user wrote it**. `cli/main.py`'s single ``except PdfToolkitError``
+    handler already routes that class through the product's structured
+    envelope (exit 1) -- raising it is the entire fix; nothing else in the
+    envelope path changes.
 
     **Private as of B-054.** :func:`plan_output_set` is this function's only
     caller: a verb author who reaches past the planner cannot obtain a
@@ -239,8 +338,16 @@ def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
     planner a real run that cannot write rather than a silent diagnostic gap.
     """
     if policy.dry_run:
+        _predict_out_dir_creation(out_dir)
         return
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        detail = f" ({error.strerror})" if error.strerror else ""
+        raise DestinationUnwritableError(
+            f"destination directory could not be created: {out_dir}{detail}",
+            path=str(out_dir),
+        ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +360,16 @@ class PlannedOutputs:
     when the plan is clean), :attr:`would_exit` is the status it would have
     exited with, and :attr:`would_refuse` is the same structured payload the
     real run's own error prints under ``-o json``.
+
+    **PDF-18 Design D2 — the eight ``ops/`` copies of ``_FilesystemPlan``
+    collapse into this one type.** Every construction in those seven
+    dataclasses (plus `ops/crypto.py`'s own divergent ``PdfToolkitError |
+    None`` return) derived its stored ``would_exit``/``would_refuse`` from a
+    refusal, so absorbing them here is behaviour-preserving by inspection —
+    and AC6 pins the emitted per-item payload byte-for-byte rather than
+    trusting that inspection alone. :attr:`message` and :attr:`refused` and
+    :meth:`detail` are the three members every copy defined identically;
+    they are copied here unchanged.
     """
 
     refusal: PdfToolkitError | None
@@ -264,6 +381,21 @@ class PlannedOutputs:
     @property
     def would_refuse(self) -> dict[str, object] | None:
         return None if self.refusal is None else self.refusal.to_dict()
+
+    @property
+    def message(self) -> str | None:
+        return None if self.refusal is None else self.refusal.message
+
+    @property
+    def refused(self) -> bool:
+        return self.refusal is not None
+
+    def detail(self) -> dict[str, object]:
+        """The per-item ``detail`` payload a ``--dry-run`` item carries."""
+        payload: dict[str, object] = {"would_exit": self.would_exit}
+        if self.would_refuse is not None:
+            payload["would_refuse"] = self.would_refuse
+        return payload
 
 
 def plan_output_set(
@@ -281,7 +413,7 @@ def plan_output_set(
 
     The real run's own order, unchanged:
 
-    1. :func:`_ensure_out_dir` — already a no-op under ``--dry-run``.
+    1. :func:`_ensure_out_dir` — now able to refuse in both modes (PDF-18).
     2. :func:`~pdf_toolkit.safety.paths.ensure_destination_writable`.
     3. per *target*, in order:
        :func:`~pdf_toolkit.safety.paths.ensure_no_clobber`.
@@ -293,20 +425,23 @@ def plan_output_set(
 
     **Trap 1, and this is the one thing to read before touching this
     function.** A ``--out-dir`` that does not exist yet must not be predicted
-    as a refusal. Under ``--dry-run``, :func:`_ensure_out_dir` is a no-op, so a
-    non-existent directory stays non-existent — but the *real* run would have
-    created it and moved on. Checking writability on a directory that
-    legitimately does not exist yet would turn every ordinary
-    ``split --dry-run --out-dir parts/`` into a false exit-1 refusal, so under
-    ``--dry-run``, when *out_dir* does not exist, the writability tier is
-    skipped entirely and only the (trivially passing) per-target no-clobber
-    checks run — exactly what the real run's own create-then-succeed path
-    would have reached. The one case this leaves unpredicted — a non-existent
-    ``out_dir`` whose *parent* is itself unwritable, so the real run's own
-    ``mkdir`` raises an unhandled ``PermissionError`` rather than a coded
-    refusal — is a real, measured gap: filed as a new finding rather than
-    silently patched over, because patching it would mean inventing a refusal
-    class the real run does not raise.
+    as a refusal by *this* function's own writability check. Checking
+    writability on a directory that legitimately does not exist yet would
+    turn every ordinary ``split --dry-run --out-dir parts/`` into a false
+    exit-1 refusal, so under ``--dry-run``, when *out_dir* does not exist,
+    :func:`ensure_destination_writable` is skipped entirely and only the
+    (trivially passing) per-target no-clobber checks run — exactly what the
+    real run's own create-then-succeed path would have reached.
+
+    **PDF-18 (`d55b302668` / `fa5736f2ae`): the case Trap 1 exempts is no
+    longer the case nobody predicts.** A non-existent ``out_dir`` whose
+    *parent* is itself unwritable used to reach the real run's unhandled
+    ``mkdir`` — the writability tier here skipped it (correctly, per Trap 1)
+    and :func:`_ensure_out_dir` skipped it too (it was an unconditional
+    no-op under ``--dry-run``). :func:`_ensure_out_dir` now predicts that
+    exact question itself — see its own docstring — so the tier this
+    function's Trap 1 exemption steps around is covered by the step
+    *before* it rather than by nothing at all.
     """
     try:
         if out_dir is not None:
@@ -320,6 +455,68 @@ def plan_output_set(
             raise
         return PlannedOutputs(refusal=refusal)
     return PlannedOutputs(refusal=None)
+
+
+def plan_filesystem(
+    targets: Sequence[Path],
+    *,
+    out_dir: Path | None,
+    policy: SafetyPolicy,
+    kind: str,
+) -> PlannedOutputs:
+    """The ONE filesystem-tier planner (PDF-18 Design D1), reached by every
+    producing verb including `ops/crypto.py`'s divergent former copy.
+
+    Collapses eight ``ops/_plan_filesystem`` definitions in four signature
+    shapes into one signature that expresses both destination forms:
+
+    ============================================  ===================================
+    old call (module)                              new call
+    ============================================  ===================================
+    ``(targets, out_dir=od, policy=p, kind=k)``     unchanged but for the name
+    (optimize, pages, textract)
+    ``(targets, out_dir=od, policy=p)``             ``kind=`` supplied explicitly
+    (ocr, office)
+    ``(target, policy=p)``                          ``plan_filesystem([target],
+    (metadata, overlay)                             out_dir=None, policy=p, kind="pdf")``
+    ``(...) -> PdfToolkitError | None`` (crypto)     same call; consumes ``.refusal``
+    ============================================  ===================================
+
+    ``kind`` is **not** optional. A default is how the ocr/office shape
+    drifted from the other six in the first place: a parameter one author
+    may omit is a parameter two authors will disagree about.
+
+    **The firing moment: both modes, at plan time (Design D3). This is
+    forced, not a style choice.** Six of the eight collapsed copies
+    consulted the single-destination writer tier (below) only under
+    ``if policy.dry_run and out_dir is None:`` — a real run's guard was
+    always false, so the check was *skipped*, and control fell through to
+    whichever tier answered next. That is not a firing-moment choice; it is
+    a mode-dependent ladder, and OR-7 forbids a plan that evaluates a
+    different *set* of tiers per mode. `ops/ocr.py`/`ops/office.py` already
+    widened past this (their own docstrings measure why: skipping it broke
+    OR-7's ``dry == real`` guarantee the moment their engine could be
+    legitimately absent). This function generalises that widening to every
+    caller, which is what closes `d231fbcec4` (the ``crypto`` ladder
+    disagreeing on tier order) as a byproduct of unification rather than as
+    a second, separate fix — Design D3 concludes the two are not separable.
+
+    A tier may be omitted from the plan only if it is undecidable without
+    performing the operation (password correctness; not directory
+    writability, which is one ``os.access`` call).
+    """
+    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
+    if plan.refusal is not None:
+        return plan
+    if out_dir is None:
+        for target in targets:
+            try:
+                ensure_destination_writable(canonical(target).parent, as_written=target.parent)
+            except PdfToolkitError as refusal:
+                if not policy.dry_run:
+                    raise
+                return PlannedOutputs(refusal=refusal)
+    return plan
 
 
 class AtomicWriter:

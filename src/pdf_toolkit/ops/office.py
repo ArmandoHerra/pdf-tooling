@@ -39,13 +39,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from pdf_toolkit.errors import NoInputError, PdfToolkitError, UsageError
+from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
 from pdf_toolkit.ports.office import office_binary_present, require_office
-from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import canonical, check_output_collisions, ensure_destination_writable
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -128,65 +128,17 @@ def resolve_convert_targets(
     ]
 
 
-@dataclass(frozen=True, slots=True)
-class _FilesystemPlan:
-    would_exit: int
-    would_refuse: dict[str, object] | None
-    message: str | None
-
-    @property
-    def refused(self) -> bool:
-        return self.would_refuse is not None
-
-    def detail(self) -> dict[str, object]:
-        payload: dict[str, object] = {"would_exit": self.would_exit}
-        if self.would_refuse is not None:
-            payload["would_refuse"] = self.would_refuse
-        return payload
-
-
-def _plan_filesystem(
-    targets: Sequence[Path], *, out_dir: Path | None, policy: SafetyPolicy
-) -> _FilesystemPlan:
-    """The filesystem tier, through the SHARED primitives only (B-054/X-67).
-
-    **Deliberately widened beyond ``compress``'s own donor shape for the
-    single-target (``-O``, ``out_dir is None``) case.** ``ensure_destination_
-    writable``'s own docstring states the rule directly: "checked at plan
-    time, before an engine runs... producing bytes and only then discovering
-    there is nowhere to put them wastes the expensive half of the operation."
-    For ``compress`` (a hard, always-present wheel dependency) skipping this
-    in the real-run branch is merely wasteful; for ``convert`` -- whose
-    engine can be legitimately ABSENT -- skipping it would additionally
-    break OR-7's own ``dry == real`` guarantee for an unwritable destination
-    (verified: without it, dry predicted **1** while a real run with
-    ``soffice`` absent returned **3**, engine-missing, never having reached
-    the writability check at all). So this runs the writability check for
-    EVERY target in BOTH modes when ``out_dir is None`` -- raising
-    immediately for a real run, exactly mirroring what ``AtomicWriter``'s
-    own ``_plan()`` would have raised, but before ``require_office()`` is
-    ever reached.
-    """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
-    if plan.refusal is not None:
-        return _FilesystemPlan(
-            would_exit=plan.would_exit,
-            would_refuse=plan.would_refuse,
-            message=plan.refusal.message,
-        )
-    if out_dir is None:
-        for target in targets:
-            try:
-                ensure_destination_writable(canonical(target).parent, as_written=target.parent)
-            except PdfToolkitError as refusal:
-                if not policy.dry_run:
-                    raise
-                return _FilesystemPlan(
-                    would_exit=refusal.exit_code,
-                    would_refuse=refusal.to_dict(),
-                    message=refusal.message,
-                )
-    return _FilesystemPlan(would_exit=plan.would_exit, would_refuse=None, message=None)
+#: The filesystem tier, through the ONE shared planner (PDF-18 Design D1).
+#: `ensure_destination_writable`'s own docstring states the rule directly:
+#: "checked at plan time, before an engine runs... producing bytes and only
+#: then discovering there is nowhere to put them wastes the expensive half
+#: of the operation." `convert`'s engine can be legitimately ABSENT, which is
+#: why the pre-unification copy here widened past `compress`'s own donor
+#: shape to check writability in BOTH modes for the single-target (`-O`,
+#: `out_dir is None`) case -- verified back then: without it, dry predicted
+#: **1** while a real run with `soffice` absent returned **3**,
+#: engine-missing, never having reached the writability check at all.
+#: `plan_filesystem` now does that widening for every caller, unconditionally.
 
 
 def convert_run(
@@ -220,7 +172,7 @@ def convert_run(
     targets = [item.target for item in planned]
     check_output_collisions(targets)
 
-    plan = _plan_filesystem(targets, out_dir=out_dir, policy=policy)
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
 
     if policy.dry_run:
         # OR-7 / D12.1 (B-096) -- an ABSENT engine is knowable at plan time, so

@@ -28,6 +28,7 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
+from dryreal import dry_and_real, prediction, real_envelope  # noqa: E402
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot  # noqa: E402
 from pagetree import page_tree_digest  # noqa: E402
 from pdf_toolkit.ports.structure import (  # noqa: E402
@@ -837,6 +838,15 @@ def test_ac20d_correctness_is_not_predicted_because_a_preview_is_not_an_oracle(
     The limit is STATED in the payload (``password_verified: false``) rather
     than left silent -- which is the whole difference between honouring X-67
     and re-committing X-89.
+
+    **PDF-18 Design D7 -- unchanged and pinned, not "fixed".** The separating
+    rule between this carve-out and `d231fbcec4` (AC16 above) is
+    DECIDABILITY, not agreement: correctness requires attempting the
+    decrypt, so it is undecidable at plan time and X-67 permits omitting it;
+    directory writability is one ``os.access`` call, so it was decidable all
+    along and PDF-18 closes the gap. A future reader who sees this test
+    still asserting ``dry 0 / real 6`` after PDF-18 landed should read §D7
+    before "fixing" it -- that would re-commit X-89.
     """
     workspace = tmp_path / "work"
     workspace.mkdir()
@@ -862,6 +872,255 @@ def test_ac20d_correctness_is_not_predicted_because_a_preview_is_not_an_oracle(
     # deliberate limit rather than a missing check.
     real = run_cli("decrypt", *args, env=env, cwd=workspace)
     assert real.returncode == 6
+
+
+# --------------------------------------------------------------------------- #
+# PDF-18 AC16/AC17 -- `d231fbcec4`: the crypto refusal ladder now evaluates
+# tiers in the SAME order under `--dry-run` as on a real run.
+#
+# Before PDF-18 unified the eight `ops/_plan_filesystem` copies, `encrypt`'s
+# and `decrypt`'s own filesystem-tier check ran the writer-tier writability
+# check only under `if policy.dry_run and out_dir is None:` -- a real run's
+# guard was always false, so the check was SKIPPED, and the password-
+# resolvability tier answered first instead: dry `1` (`DestinationUnwritableError`)
+# vs real `6` (`AuthError`) for `encrypt`, dry `1` vs real `4`
+# (`NoInputError`) for `decrypt`. `safety.atomic.plan_filesystem` now checks
+# writability in BOTH modes unconditionally, so the real run raises AT the
+# filesystem tier -- before the password loop is ever reached -- exactly
+# like the dry run already predicted.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.e2e
+def test_pdf18_ac16_encrypt_ladder_agrees_on_an_unwritable_destination_with_no_password(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """`fa5736f2ae`/`d231fbcec4` red at HEAD `2d19bcb`: dry `1` / real `6`."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory mode bits; this arm cannot fire as root")
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+    locked = workspace / "locked"
+    locked.mkdir()
+
+    # NO --owner-password-file, no env var, non-TTY: the password tier is
+    # unresolvable -- exactly the SECOND tier that used to answer once the
+    # filesystem check was skipped on a real run.
+    args = [str(plain), "-O", str(locked / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    locked.chmod(0o500)
+    try:
+        dry, real = dry_and_real("encrypt", args, cwd=workspace, env=env)
+    finally:
+        locked.chmod(0o700)
+
+    dry_detail = prediction(dry.stdout)
+    assert dry_detail["would_exit"] == 1
+    assert dry_detail["would_refuse"]["kind"] == "failure"
+    assert real.returncode == 1, real.stdout + real.stderr
+    assert dry.returncode == real.returncode == 1
+    envelope = real_envelope(real.stdout)
+    assert envelope is not None, "an empty -o json stdout is fa5736f2ae's own shape"
+    assert envelope["error"]["kind"] == "failure"
+    assert "Traceback (most recent call last)" not in real.stderr
+
+
+@pytest.mark.e2e
+def test_pdf18_ac16_decrypt_ladder_agrees_on_an_unwritable_destination_over_an_unencrypted_document(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """`d231fbcec4` red at HEAD `2d19bcb`: dry `1` / real `4`."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory mode bits; this arm cannot fire as root")
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+    locked = workspace / "locked"
+    locked.mkdir()
+
+    args = [str(plain), "-O", str(locked / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    locked.chmod(0o500)
+    try:
+        dry, real = dry_and_real("decrypt", args, cwd=workspace, env=env)
+    finally:
+        locked.chmod(0o700)
+
+    dry_detail = prediction(dry.stdout)
+    assert dry_detail["would_exit"] == 1
+    assert real.returncode == 1, real.stdout + real.stderr
+    assert dry.returncode == real.returncode == 1
+
+
+@pytest.mark.e2e
+def test_pdf18_ac17_unwritable_with_a_resolvable_password_still_refuses_at_exit_1(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """Green control (a). A fix that reddens this one has broken the ladder
+    rather than reordered it -- `plan_filesystem` must still answer FIRST,
+    ahead of a perfectly good password."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory mode bits; this arm cannot fire as root")
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    pw = _password_file(workspace)
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+    locked = workspace / "locked"
+    locked.mkdir()
+
+    args = [str(plain), "--owner-password-file", str(pw), "-O", str(locked / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    locked.chmod(0o500)
+    try:
+        real = run_cli("encrypt", *args, env=env, cwd=workspace)
+    finally:
+        locked.chmod(0o700)
+    assert real.returncode == 1, real.stdout + real.stderr
+
+
+@pytest.mark.e2e
+def test_pdf18_ac17_writable_with_no_password_still_predicts_and_raises_auth(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """Green control (b), re-verified after the fix: `encrypt 6 == 6`,
+    `decrypt 6 == 6` when the destination is writable -- unchanged behaviour,
+    already proven by `test_ac20c_resolvability_is_predicted_without_reading_anything`;
+    re-asserted here beside its siblings so the three-control story is
+    visible in one place."""
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+
+    args = [str(plain), "-O", str(workspace / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    dry, real = dry_and_real("encrypt", args, cwd=workspace, env=env)
+    assert prediction(dry.stdout)["would_exit"] == 6
+    assert real.returncode == 6
+    assert dry.returncode == real.returncode == 6
+
+
+@pytest.mark.e2e
+def test_pdf18_ac17_writable_and_unencrypted_still_predicts_and_raises_not_encrypted(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """Green control (c), re-verified after the fix: `decrypt 4 == 4` over an
+    unencrypted document with a writable destination -- the document tier
+    fires before the password tier is ever reached, unaffected by the
+    filesystem-tier widening."""
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+    pw = _password_file(workspace)
+
+    args = [str(plain), "--password-file", str(pw), "-O", str(workspace / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    dry, real = dry_and_real("decrypt", args, cwd=workspace, env=env)
+    assert prediction(dry.stdout)["would_exit"] == 4
+    assert real.returncode == 4
+    assert dry.returncode == real.returncode == 4
+
+
+# --------------------------------------------------------------------------- #
+# PDF-18 AC19 -- `ops/crypto.py:315`'s "every tier is evaluated identically
+# in both modes" is asserted MECHANICALLY: one stimulus per `_plan` tier,
+# each arming only that tier, each measured `dry == real`.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.e2e
+def test_pdf18_ac19_tier1_pre_refusal_agrees_in_both_modes(corpus: Any, tmp_path: Path) -> None:
+    """Tier 1: the invocation-shape refusal (`encrypt --in-place` without a
+    backup choice, AC14's own gate) -- exit 5, computed by the CLI layer
+    before `_plan` is ever called, so it is evaluated identically in both
+    modes by construction."""
+    subject = tmp_path / "inplace.pdf"
+    shutil.copy(corpus.path("single_page"), subject)
+    pw = _password_file(tmp_path)
+    args = [str(subject), "--owner-password-file", str(pw), "--in-place"]
+    dry = run_cli("encrypt", "--dry-run", *args, "-o", "json", env=_clean_env())
+    real = run_cli("encrypt", *args, "-o", "json", env=_clean_env())
+    assert prediction(dry.stdout)["would_exit"] == 5
+    assert real.returncode == 5
+    assert dry.returncode == real.returncode == 5
+
+
+@pytest.mark.e2e
+def test_pdf18_ac19_tier2_filesystem_agrees_in_both_modes(corpus: Any, tmp_path: Path) -> None:
+    """Tier 2: the filesystem tier, isolated -- writable destination is the
+    ONE thing this test perturbs, so this is `test_ac20b`'s own arm cited as
+    AC19's tier-2 stimulus (an unwritable destination with a resolvable
+    password reaches the filesystem tier and nothing beyond it)."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory mode bits; this arm cannot fire as root")
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    pw = _password_file(workspace)
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+    locked = workspace / "locked"
+    locked.mkdir()
+
+    args = [str(plain), "--owner-password-file", str(pw), "-O", str(locked / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    locked.chmod(0o500)
+    try:
+        dry, real = dry_and_real("encrypt", args, cwd=workspace, env=env)
+    finally:
+        locked.chmod(0o700)
+    assert prediction(dry.stdout)["would_exit"] == 1
+    assert real.returncode == 1
+    assert dry.returncode == real.returncode == 1
+
+
+@pytest.mark.e2e
+def test_pdf18_ac19_tier3_document_refusal_agrees_in_both_modes(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """Tier 3: `document_refusal` -- `decrypt` over an unencrypted document,
+    writable destination, isolated from both the filesystem tier (writable)
+    and the password tier (the document tier answers first regardless of
+    whether a password was ever supplied)."""
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+
+    args = [str(plain), "-O", str(workspace / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    dry, real = dry_and_real("decrypt", args, cwd=workspace, env=env)
+    assert prediction(dry.stdout)["would_exit"] == 4
+    assert real.returncode == 4
+    assert dry.returncode == real.returncode == 4
+
+
+@pytest.mark.e2e
+def test_pdf18_ac19_tier4_password_resolvability_agrees_in_both_modes(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """Tier 4: password resolvability, isolated -- writable destination,
+    document tier clean (already encrypted, for `decrypt`), no password
+    supplied. This is `test_ac20c`'s own arm, cited as AC19's tier-4
+    stimulus rather than re-derived."""
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    pw = _password_file(workspace)
+    plain = workspace / "in.pdf"
+    shutil.copy(corpus.path("single_page"), plain)
+    encrypted = workspace / "enc.pdf"
+    _encrypt(plain, encrypted, pw, allow=frozenset({"print"}))
+
+    args = [str(encrypted), "-O", str(workspace / "out.pdf")]
+    env, _roots = redirected_environment(tmp_path)
+    dry, real = dry_and_real("decrypt", args, cwd=workspace, env=env)
+    assert prediction(dry.stdout)["would_exit"] == 6
+    assert real.returncode == 6
+    assert dry.returncode == real.returncode == 6
 
 
 # --------------------------------------------------------------------------- #

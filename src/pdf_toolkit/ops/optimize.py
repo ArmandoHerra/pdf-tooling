@@ -36,21 +36,21 @@ Three verbs, four rules `PLAN.md` §12 R-02 already decided:
    inside the adapter (D-12.6 check 1) before this module ever reaches
    ``AtomicWriter``.
 
-**The filesystem tier runs in both modes (B-054, extending X-67).**
-``_plan_filesystem`` below is structurally identical to
-``ops/textract.py:326-381`` (the donor this spec cites) — same call order,
-same ``out_dir is None`` guard on the writer tier — and is the ONE helper all
-three verbs share. `compress` carries both destination shapes (``-O``,
+**The filesystem tier runs in both modes (B-054, extending X-67), through
+the ONE shared planner (PDF-18).**
+:func:`~pdf_toolkit.safety.atomic.plan_filesystem` is the ONE call all three
+verbs share. `compress` carries both destination shapes (``-O``,
 ``--out-dir``, ``--name``, ``--in-place``); `repair`/`linearize` carry only
-the single-target shape (``out_dir`` is always ``None`` for them), which
-``_plan_filesystem``'s own guard already handles without a second code path.
+the single-target shape (``out_dir`` is always ``None`` for them), which the
+shared planner's own guard already handles without a second code path.
 
 **Nothing here writes.** Every byte reaches disk through
 ``safety.AtomicWriter``; `compress --out-dir` creates its directory only via
-``safety.atomic.plan_output_set``. Structural work (the image pass, the
-pikepdf pass, the recovery/linearize pass) is skipped entirely under
-``--dry-run`` — the same posture `rasterize`/`compose`/`create` already take
-— so a dry run never opens `pikepdf` or `pypdf` at all.
+``safety.atomic.plan_output_set`` (which ``plan_filesystem`` wraps).
+Structural work (the image pass, the pikepdf pass, the recovery/linearize
+pass) is skipped entirely under ``--dry-run`` — the same posture
+`rasterize`/`compose`/`create` already take — so a dry run never opens
+`pikepdf` or `pypdf` at all.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ from pdf_toolkit.ports.structure import (
     require_image_pass,
     require_structure,
 )
-from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
 from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
@@ -122,94 +122,14 @@ def _validate_sources(sources: Sequence[Path]) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Shared filesystem-tier planning — `ops/textract.py:326-381`'s own donor
-# function, structurally identical (B-054/X-67, `decision.md` §8). The ONE
-# helper all three PDF-12 verbs use; `compress` reaches the `out_dir is not
-# None` branch, `repair`/`linearize` never do (their `out_dir` is always
-# `None`), and both are covered by the SAME guard rather than two copies of
-# it.
+# Shared filesystem-tier planning — PDF-18 Design D1's ONE planner. `compress`
+# is the first of these three verbs to carry **both** destination shapes:
+# :func:`~pdf_toolkit.safety.atomic.plan_filesystem` owns the `--out-dir` tier
+# and the per-destination (`-O`/`--in-place`) tier a single target has
+# instead, in the same call, in both modes. For `repair`/`linearize`,
+# `out_dir` is always `None`, so the same call routes them through the writer
+# tier on every call — the same code path `compress -O`/`--in-place` takes.
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True, slots=True)
-class _FilesystemPlan:
-    """What a real run of this invocation would do at the filesystem tier.
-
-    Mirrors :class:`~pdf_toolkit.safety.atomic.PlannedOutputs`' own X-67
-    vocabulary exactly, because that is what makes a prediction and an
-    outcome comparable like with like rather than two hand-rolled shapes
-    that agree by luck.
-    """
-
-    would_exit: int
-    would_refuse: dict[str, object] | None
-    message: str | None
-
-    @property
-    def refused(self) -> bool:
-        return self.would_refuse is not None
-
-    def detail(self) -> dict[str, object]:
-        payload: dict[str, object] = {"would_exit": self.would_exit}
-        if self.would_refuse is not None:
-            payload["would_refuse"] = self.would_refuse
-        return payload
-
-
-def _plan_filesystem(
-    targets: Sequence[Path], *, out_dir: Path | None, policy: SafetyPolicy, kind: str
-) -> _FilesystemPlan:
-    """The filesystem tier for this run, through the SHARED primitives only.
-
-    `compress` is the first of these three verbs to carry **both**
-    destination shapes, and the two shapes have two different shared owners.
-    Neither is re-implemented here:
-
-    * :func:`~pdf_toolkit.safety.atomic.plan_output_set` owns the
-      ``--out-dir`` tier — creating the directory, checking it is writable,
-      and checking every target for no-clobber. It is called unconditionally,
-      in both modes, so a dry run over an occupied target or an unwritable
-      directory predicts what the real run does (B-054, extending X-67).
-    * :class:`~pdf_toolkit.safety.atomic.AtomicWriter`'s own ``_plan`` owns
-      the per-destination tier that a single ``-O``/``--in-place`` target has
-      *instead of* a shared directory. ``plan_output_set`` deliberately does
-      not check writability when ``out_dir`` is ``None`` (its own docstring
-      says it routes only the per-target no-clobber check in that shape),
-      because for a single target that check belongs to the writer.
-
-    A real run walks both tiers because it *calls* both. A dry run must
-    therefore consult both, or it predicts half of what the real run checks.
-
-    **The one thing to read before touching this function.** The writer tier
-    is consulted **only when ``out_dir`` is ``None``**. Under ``--dry-run`` a
-    not-yet-existing ``--out-dir`` legitimately stays non-existent (its
-    creation is the real run's first mutation), and
-    ``ensure_destination_writable`` refuses a directory that does not exist
-    — so entering a writer against a target inside it would turn every
-    ordinary ``compress --dry-run --out-dir new/`` into a false exit-1
-    refusal. That is ``plan_output_set``'s own documented Trap 1, reached
-    from the other side. For `repair`/`linearize`, ``out_dir`` is always
-    ``None``, so this guard is what routes them through the writer tier on
-    every call — the same code path `compress -O`/`--in-place` takes.
-    """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
-    if plan.refusal is not None:
-        return _FilesystemPlan(
-            would_exit=plan.would_exit,
-            would_refuse=plan.would_refuse,
-            message=plan.refusal.message,
-        )
-    if policy.dry_run and out_dir is None:
-        for target in targets:
-            with AtomicWriter(target, policy=policy, kind=kind) as atomic:
-                refusal = atomic.planned_refusal
-            if refusal is not None:
-                return _FilesystemPlan(
-                    would_exit=refusal.exit_code,
-                    would_refuse=refusal.to_dict(),
-                    message=refusal.message,
-                )
-    return _FilesystemPlan(would_exit=plan.would_exit, would_refuse=None, message=None)
 
 
 # --------------------------------------------------------------------------- #
@@ -364,7 +284,7 @@ def compress_run(
     # identically in both modes, mirroring `split`'s own AC10 convention.
     check_output_collisions(targets)
 
-    plan = _plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
 
     if policy.dry_run:
         detail = plan.detail()
@@ -486,7 +406,7 @@ def repair_run(
     _validate_sources([source])
     target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_REPAIR)
 
-    plan = _plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
 
     if policy.dry_run:
         detail = plan.detail()
@@ -572,7 +492,7 @@ def linearize_run(
     _validate_sources([source])
     target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_LINEARIZE)
 
-    plan = _plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
 
     if policy.dry_run:
         detail = plan.detail()

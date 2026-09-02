@@ -31,6 +31,7 @@ than a parallel one that happens to agree.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import os
 import sys
@@ -41,7 +42,7 @@ import pytest
 from pdf_toolkit import errors
 from pdf_toolkit.cli.exit_codes import FAILURE, OK, REFUSED, USAGE
 from pdf_toolkit.safety import TEMP_PREFIX, AtomicWriter, SafetyPolicy
-from pdf_toolkit.safety.atomic import plan_output_set
+from pdf_toolkit.safety.atomic import PlannedOutputs, plan_filesystem, plan_output_set
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -690,3 +691,338 @@ def test_plan_output_set_a_real_run_over_a_clean_plan_raises_nothing(tmp_path: P
     assert plan.refusal is None
     assert plan.would_exit == OK
     assert plan.would_refuse is None
+
+
+# --------------------------------------------------------------------------- #
+# PDF-18 AC5 -- `PlannedOutputs` gains `message`, `refused`, `detail()`: the
+# three members every one of the eight collapsed `_FilesystemPlan` copies
+# defined identically.
+# --------------------------------------------------------------------------- #
+
+
+def test_planned_outputs_a_clean_plan_reports_no_message_and_is_not_refused() -> None:
+    clean = PlannedOutputs(refusal=None)
+    assert clean.message is None
+    assert clean.refused is False
+    assert clean.detail() == {"would_exit": OK}
+
+
+def test_planned_outputs_a_refused_plan_carries_the_refusal_message_and_detail(
+    tmp_path: Path,
+) -> None:
+    refusal = errors.DestinationUnwritableError("nope", path=str(tmp_path))
+    refused = PlannedOutputs(refusal=refusal)
+    assert refused.message == "nope"
+    assert refused.refused is True
+    assert refused.detail() == {"would_exit": FAILURE, "would_refuse": refusal.to_dict()}
+
+
+# --------------------------------------------------------------------------- #
+# PDF-18 (`d55b302668`/`fa5736f2ae`) -- `_ensure_out_dir`'s own errno family,
+# reached ONLY through the public `plan_output_set`/`plan_filesystem` API,
+# never by calling the private helper directly.
+#
+# §D4's table, and which arm covers it here:
+#   EACCES              -- parent 0o500, out-dir absent (the U tier)
+#   ENOTDIR              -- a path component is a file
+#   EEXIST-as-file        -- the out-dir path is itself a file
+#   ENAMETOOLONG          -- a path component exceeds the filesystem's limit
+#   EROFS                 -- skipped; not producible without root (§D4/X-153)
+# --------------------------------------------------------------------------- #
+
+
+def test_plan_output_set_predicts_a_nonexistent_out_dir_under_an_unwritable_parent(
+    tmp_path: Path,
+) -> None:
+    """`d55b302668`'s own U-tier repro, at the unit level. Before PDF-18: the
+    dry run predicted OK (`would_exit 0`) while a real run crashed with an
+    unhandled `PermissionError` -- `_ensure_out_dir`'s dry branch was a total
+    no-op. Both `plan.refusal` and the real run's own raise now agree."""
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    out_dir = parent / "newdir"
+    targets = [out_dir / "a.pdf"]
+    parent.chmod(0o500)
+    try:
+        if os.access(parent, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+        assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+        assert plan.would_exit == FAILURE
+        assert not out_dir.exists(), "the dry run must not create the directory it refuses"
+
+        with pytest.raises(errors.DestinationUnwritableError):
+            plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+        assert not out_dir.exists(), "a refused real run must not leave a partial directory"
+    finally:
+        parent.chmod(0o700)
+
+
+def test_plan_output_set_real_run_wraps_enotdir_instead_of_crashing(tmp_path: Path) -> None:
+    """`out-dir`'s PARENT component is a file (`ENOTDIR`): the unguarded
+    `mkdir` used to raise `NotADirectoryError` uncaught; it is now a coded
+    `DestinationUnwritableError` in both modes."""
+    blocker = tmp_path / "blocker.file"
+    blocker.write_bytes(b"x")
+    out_dir = blocker / "sub"
+    targets = [out_dir / "a.pdf"]
+
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+
+    with pytest.raises(errors.DestinationUnwritableError):
+        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+    assert blocker.read_bytes() == b"x", "the blocking file must survive untouched"
+
+
+def test_plan_output_set_real_run_wraps_eexist_as_file_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    """`fa5736f2ae` at the unit level: `--out-dir` names an existing regular
+    file. `Path.mkdir(exist_ok=True)` only suppresses `FileExistsError` when
+    the existing path IS a directory (``except OSError: if not exist_ok or
+    not self.is_dir(): raise``); against a file it still raises -- now a
+    coded refusal instead of an uncaught traceback, and `-o json` gets a
+    structured envelope instead of empty stdout."""
+    blocker = tmp_path / "blocker.file"
+    blocker.write_bytes(b"i am a regular file")
+    targets = [blocker / "a.pdf"]
+
+    plan = plan_output_set(targets, out_dir=blocker, policy=make_policy(dry_run=True))
+    assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+    assert plan.would_exit == FAILURE
+
+    with pytest.raises(errors.DestinationUnwritableError):
+        plan_output_set(targets, out_dir=blocker, policy=make_policy(dry_run=False))
+    assert blocker.read_bytes() == b"i am a regular file"
+
+
+def test_plan_output_set_predicts_a_path_component_that_is_too_long(tmp_path: Path) -> None:
+    """`ENAMETOOLONG`, predicted rather than performed (PDF-18 Design D4
+    implementation note 2, resolution (a))."""
+    try:
+        limit = os.pathconf(str(tmp_path), "PC_NAME_MAX")
+    except (OSError, ValueError, AttributeError):  # pragma: no cover - platform-dependent
+        pytest.skip("PC_NAME_MAX is not available on this platform")
+    too_long = "x" * (limit + 1)
+    out_dir = tmp_path / too_long
+    targets = [out_dir / "a.pdf"]
+
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+    # `out_dir.exists()` itself raises OSError for a too-long component (the
+    # same trap `nearest_existing_ancestor` and `_predict_out_dir_creation`
+    # are built to avoid) -- listing the parent is the safe way to prove
+    # nothing was created.
+    assert list(tmp_path.iterdir()) == []
+
+    with pytest.raises(errors.DestinationUnwritableError):
+        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+
+
+def test_plan_output_set_skips_the_too_long_check_when_pathconf_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PDF-18 Design D4 implementation note 2, resolution (a)'s own fallback:
+    ``os.pathconf`` does not exist on every platform (Windows has none at
+    all). Proven rather than pragma'd around (PDF-06:236): ``os.pathconf``
+    is monkeypatched to raise, and the prediction must skip that ONE tier
+    silently -- an otherwise-clean plan over a writable, non-existent
+    ``out_dir`` still predicts nothing, because directory writability
+    (checked first) is unaffected."""
+    import os as os_module
+
+    def _unavailable(*_args: object, **_kwargs: object) -> int:
+        raise OSError("pathconf not supported on this platform")
+
+    monkeypatch.setattr(os_module, "pathconf", _unavailable)
+    out_dir = tmp_path / "new-dir"
+    targets = [out_dir / "a.pdf"]
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    assert plan.refusal is None
+    assert not out_dir.exists()
+
+
+# --------------------------------------------------------------------------- #
+# PDF-18 AC2 -- all 12 `plan_filesystem` call sites under `ops/` pass the
+# IDENTICAL keyword set, over a `Sequence[Path]` first argument.
+# --------------------------------------------------------------------------- #
+
+_OPS_DIR = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit" / "ops"
+
+
+def _plan_filesystem_call_sites() -> list[tuple[str, ast.Call]]:
+    """Every ``plan_filesystem(...)`` call under ``src/pdf_toolkit/ops/``."""
+    found: list[tuple[str, ast.Call]] = []
+    for path in sorted(_OPS_DIR.glob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "plan_filesystem"
+            ):
+                found.append((path.name, node))
+    return found
+
+
+def test_ac2_every_ops_call_site_passes_the_identical_keyword_set() -> None:
+    """AC1's own census (`grep -rn "def _plan_filesystem" src/`) recorded 12
+    call sites across the eight collapsed modules; this walks the AST
+    instead of trusting the count, and pins the SHAPE those 12 calls share.
+
+    Red: plant a call missing ``kind=``; the walk fails.
+    """
+    calls = _plan_filesystem_call_sites()
+    assert len(calls) >= 12, f"found only {len(calls)} plan_filesystem call site(s) under ops/"
+
+    modules = {module for module, _ in calls}
+    assert len(modules) == 8, (
+        f"expected all eight collapsed modules to call plan_filesystem, saw {sorted(modules)}"
+    )
+
+    for module, call in calls:
+        assert len(call.args) == 1, (
+            f"{module}:{call.lineno}: expected exactly one positional argument "
+            f"(a Sequence[Path]), got {len(call.args)}"
+        )
+        keywords = {kw.arg for kw in call.keywords}
+        assert keywords == {"out_dir", "policy", "kind"}, (
+            f"{module}:{call.lineno}: keyword set was {sorted(keywords)}, expected "
+            "{'kind', 'out_dir', 'policy'}"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-18 AC14 -- the composed precedence of §D6, pinned at the
+# `plan_filesystem` level. Swapping any adjacent pair below reddens its test.
+# --------------------------------------------------------------------------- #
+
+
+def test_plan_filesystem_precedence_ancestor_unwritable_beats_occupied_out_dir_target(
+    tmp_path: Path,
+) -> None:
+    """§D6 step 1/2 beat step 3, out_dir is not None: `plan_filesystem` calls
+    `plan_output_set` first and returns its refusal unchanged, so the
+    ordering `test_plan_output_set_stops_at_the_first_refusal` already pins
+    (unwritable `out_dir` beats an occupied target inside it) holds at this
+    level too."""
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    occupied = parent / "a.pdf"
+    occupied.write_bytes(b"x")
+    parent.chmod(0o500)
+    try:
+        if os.access(parent, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        plan = plan_filesystem(
+            [occupied], out_dir=parent, policy=make_policy(dry_run=True), kind="pdf"
+        )
+        assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+    finally:
+        parent.chmod(0o700)
+
+
+def test_plan_filesystem_out_dir_exists_defers_to_ensure_destination_writable(
+    tmp_path: Path,
+) -> None:
+    """§D6 step 1's own no-op branch, out_dir is not None: when ``out_dir``
+    already exists (as anything at all -- a file included), `_ensure_out_dir`'s
+    prediction defers to step 2 (`ensure_destination_writable`) rather than
+    also predicting, because step 2 ALREADY handles "exists but is a file"
+    and "exists but unwritable" correctly and AC6 pins that message
+    byte-for-byte across the refactor
+    (`tests/integration/test_text_tables_cli.py::
+    test_ac24_a_dry_run_predicts_an_unwritable_destination_refusal` is the
+    live proof: it compares the dry prediction against the real run's own
+    error payload for an out_dir that already exists, chmod 0o500, and both
+    must come from the SAME tier or the comparison fails)."""
+    blocker = tmp_path / "blocker.file"
+    blocker.write_bytes(b"x")
+    targets = [blocker / "a.pdf"]
+    plan = plan_filesystem(targets, out_dir=blocker, policy=make_policy(dry_run=True), kind="pdf")
+    assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+    assert plan.message == f"destination directory does not exist: {blocker}"
+
+
+def test_plan_filesystem_real_run_still_wraps_the_mkdir_attempt_on_an_existing_file(
+    tmp_path: Path,
+) -> None:
+    """The real-run OUTCOME side of the arm above: `_ensure_out_dir`'s real
+    branch always attempts the ``mkdir`` regardless of whether ``out_dir``
+    already exists, so `fa5736f2ae`'s own trigger IS caught on a real run
+    even though the dry-run prediction reaches it through step 2 instead of
+    step 1 -- both are `DestinationUnwritableError`, exit 1, which is what
+    OR-7 (read per X-185 as exit code AND envelope KIND, not literal message
+    text) requires."""
+    blocker = tmp_path / "blocker.file"
+    blocker.write_bytes(b"x")
+    targets = [blocker / "a.pdf"]
+    with pytest.raises(errors.DestinationUnwritableError) as caught:
+        plan_filesystem(targets, out_dir=blocker, policy=make_policy(dry_run=False), kind="pdf")
+    assert caught.value.exit_code == FAILURE
+    assert caught.value.kind == "failure"
+
+
+def test_plan_filesystem_ancestor_walk_catches_a_non_directory_component_at_0o755(
+    tmp_path: Path,
+) -> None:
+    """PDF-18 design note 1's own literal concern: a blocking component with
+    execute permission (0o755) would pass an ``os.access(W_OK | X_OK)``-only
+    check, so the ancestor walk must ask "is this a directory?" FIRST. Here
+    ``out_dir`` itself does NOT exist (only its blocking ancestor does), so
+    this exercises `_ensure_out_dir`'s ancestor-walk branch directly, unlike
+    the "out_dir exists" arm above."""
+    blocker = tmp_path / "blocker.file"
+    blocker.write_bytes(b"x")
+    blocker.chmod(0o755)
+    out_dir = blocker / "sub"
+    targets = [out_dir / "a.pdf"]
+
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=make_policy(dry_run=True), kind="pdf")
+    assert isinstance(plan.refusal, errors.DestinationUnwritableError)
+
+    with pytest.raises(errors.DestinationUnwritableError):
+        plan_filesystem(targets, out_dir=out_dir, policy=make_policy(dry_run=False), kind="pdf")
+
+
+def test_plan_filesystem_precedence_no_clobber_beats_the_writer_tier(tmp_path: Path) -> None:
+    """§D6 step 3 beats step 4, out_dir is None: per-target no-clobber
+    (`plan_output_set`'s own loop) fires before the writer tier
+    (`plan_filesystem`'s own widening). Both conditions armed at once --
+    an occupied target AND an unwritable parent -- so a swapped order would
+    read `TargetExistsError` as `DestinationUnwritableError`."""
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    target = parent / "a.pdf"
+    target.write_bytes(b"already here")
+    parent.chmod(0o500)
+    try:
+        if os.access(parent, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        plan = plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf")
+        assert isinstance(plan.refusal, errors.TargetExistsError)
+    finally:
+        parent.chmod(0o700)
+
+
+def test_plan_filesystem_widens_the_writer_tier_into_both_modes(tmp_path: Path) -> None:
+    """PDF-18 Design D3 -- the firing moment. `out_dir is None`, target's
+    parent unwritable: the real run must raise the SAME class the dry run
+    predicts, which is the property `d231fbcec4` violated for `encrypt`/
+    `decrypt` before every `_plan_filesystem` copy was unified into one
+    firing moment."""
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    target = parent / "a.pdf"
+    parent.chmod(0o500)
+    try:
+        if os.access(parent, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        dry = plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf")
+        assert isinstance(dry.refusal, errors.DestinationUnwritableError)
+
+        with pytest.raises(errors.DestinationUnwritableError):
+            plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=False), kind="pdf")
+    finally:
+        parent.chmod(0o700)

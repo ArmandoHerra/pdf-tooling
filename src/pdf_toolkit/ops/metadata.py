@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -42,7 +41,7 @@ from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, MetadataReport, OperationResult
 from pdf_toolkit.ports.structure import MetadataFacts, require_structure
-from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -173,46 +172,10 @@ def meta_get_run(source: Path, *, xmp: bool) -> MetadataReport:
 
 
 # --------------------------------------------------------------------------- #
-# `meta set` -- the filesystem tier (X-67/B-054), mirroring
-# `ops/optimize.py`'s `_FilesystemPlan`/`_plan_filesystem` donor shape
-# exactly (Design D9): `meta set` is a single-target `("--output",
+# `meta set` -- the filesystem tier (X-67/B-054), through the ONE shared
+# planner (PDF-18 Design D1/D9): `meta set` is a single-target `("--output",
 # "--in-place")` verb, so `out_dir` is always `None`.
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True, slots=True)
-class _FilesystemPlan:
-    would_exit: int
-    would_refuse: dict[str, object] | None
-    message: str | None
-
-    @property
-    def refused(self) -> bool:
-        return self.would_refuse is not None
-
-    def detail(self) -> dict[str, object]:
-        payload: dict[str, object] = {"would_exit": self.would_exit}
-        if self.would_refuse is not None:
-            payload["would_refuse"] = self.would_refuse
-        return payload
-
-
-def _plan_filesystem(target: Path, *, policy: SafetyPolicy) -> _FilesystemPlan:
-    plan = plan_output_set([target], out_dir=None, policy=policy)
-    if plan.refusal is not None:
-        return _FilesystemPlan(
-            would_exit=plan.would_exit, would_refuse=plan.would_refuse, message=plan.refusal.message
-        )
-    if policy.dry_run:
-        with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
-            refusal = atomic.planned_refusal
-        if refusal is not None:
-            return _FilesystemPlan(
-                would_exit=refusal.exit_code,
-                would_refuse=refusal.to_dict(),
-                message=refusal.message,
-            )
-    return _FilesystemPlan(would_exit=plan.would_exit, would_refuse=None, message=None)
 
 
 def meta_set_run(
@@ -239,7 +202,7 @@ def meta_set_run(
     if target is None:
         raise UsageError(f"{VERB_META_SET} requires -O/--output or --in-place")
 
-    plan = _plan_filesystem(target, policy=policy)
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
 
     if policy.dry_run:
         detail = plan.detail()

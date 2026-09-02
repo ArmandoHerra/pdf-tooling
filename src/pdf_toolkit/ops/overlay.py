@@ -39,7 +39,6 @@ from __future__ import annotations
 import io
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -49,7 +48,7 @@ from pdf_toolkit.models import ItemResult, OperationResult, PageRange
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.compose import require_compose
 from pdf_toolkit.ports.structure import require_composite, require_structure
-from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
+from pdf_toolkit.safety.atomic import AtomicWriter, PlannedOutputs, plan_filesystem
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -121,46 +120,10 @@ def _blank_warning(blank_pages: tuple[int, ...]) -> tuple[str, ...]:
 
 
 # --------------------------------------------------------------------------- #
-# The filesystem tier (X-67/B-054), mirroring `ops/optimize.py`'s
-# `_FilesystemPlan`/`_plan_filesystem` donor shape (Design D9): `watermark`
-# and `stamp` are single-target `("--output", "--in-place")` verbs, so
-# `out_dir` is always `None`.
+# The filesystem tier (X-67/B-054), through the ONE shared planner (PDF-18
+# Design D1): `watermark` and `stamp` are single-target `("--output",
+# "--in-place")` verbs, so `out_dir` is always `None`.
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True, slots=True)
-class _FilesystemPlan:
-    would_exit: int
-    would_refuse: dict[str, object] | None
-    message: str | None
-
-    @property
-    def refused(self) -> bool:
-        return self.would_refuse is not None
-
-    def detail(self) -> dict[str, object]:
-        payload: dict[str, object] = {"would_exit": self.would_exit}
-        if self.would_refuse is not None:
-            payload["would_refuse"] = self.would_refuse
-        return payload
-
-
-def _plan_filesystem(target: Path, *, policy: SafetyPolicy) -> _FilesystemPlan:
-    plan = plan_output_set([target], out_dir=None, policy=policy)
-    if plan.refusal is not None:
-        return _FilesystemPlan(
-            would_exit=plan.would_exit, would_refuse=plan.would_refuse, message=plan.refusal.message
-        )
-    if policy.dry_run:
-        with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
-            refusal = atomic.planned_refusal
-        if refusal is not None:
-            return _FilesystemPlan(
-                would_exit=refusal.exit_code,
-                would_refuse=refusal.to_dict(),
-                message=refusal.message,
-            )
-    return _FilesystemPlan(would_exit=plan.would_exit, would_refuse=None, message=None)
 
 
 def _resolve_target(source: Path, *, output: Path | None, in_place: bool, verb: str) -> Path:
@@ -172,7 +135,7 @@ def _resolve_target(source: Path, *, output: Path | None, in_place: bool, verb: 
 
 
 def _dry_run_result(
-    verb: str, *, source: Path, target: Path, plan: _FilesystemPlan
+    verb: str, *, source: Path, target: Path, plan: PlannedOutputs
 ) -> OperationResult:
     detail = plan.detail()
     item = ItemResult(
@@ -226,7 +189,7 @@ def watermark_run(
     """
     reject_missing_sources([source])
     target = _resolve_target(source, output=output, in_place=in_place, verb=VERB_WATERMARK)
-    plan = _plan_filesystem(target, policy=policy)
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
     if policy.dry_run:
         return _dry_run_result(VERB_WATERMARK, source=source, target=target, plan=plan)
 
@@ -372,7 +335,7 @@ def stamp_run(
     selected pages of *source* (Design D4.5)."""
     reject_missing_sources([source])
     target = _resolve_target(source, output=output, in_place=in_place, verb=VERB_STAMP)
-    plan = _plan_filesystem(target, policy=policy)
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
     if policy.dry_run:
         return _dry_run_result(VERB_STAMP, source=source, target=target, plan=plan)
 

@@ -1514,3 +1514,184 @@ def test_benign_section_4_mentions_are_never_flagged() -> None:
     discipline."""
     found = scan_dry_run_bypass(BENIGN_SECTION_4, "pdf_toolkit.cli.cmd_benign")
     assert found == [], f"false positives: {[str(item) for item in found]}"
+
+
+# --------------------------------------------------------------------------- #
+# Section 5 -- no local filesystem-tier refusal construction under `ops/`
+# (PDF-18 Design D9)
+#
+# APPENDED, never rewritten, per this file's own header rule; it reuses
+# `iter_python_files`, `module_name` and `Boundary` rather than starting a
+# fifth walk.
+#
+# THE DEFECT THIS EXISTS FOR. Eight `ops/` modules each defined their own
+# `_plan_filesystem`/`_FilesystemPlan` before PDF-18 unified them into
+# `safety.atomic.plan_filesystem`. `tests/unit/test_metadata.py`'s own
+# `test_ac21_meta_set_calls_plan_output_set_not_a_local_refusal` protected
+# exactly ONE of those eight files with a string-literal pin -- a real
+# invariant ("route through the shared primitive; never hand-roll a local
+# refusal") wearing a fragile, single-module form. PDF-18 Design D9
+# generalises it: the invariant is now that NO module under `ops/` may even
+# NAME `DestinationUnwritableError` or `TargetExistsError` -- the two
+# filesystem-tier refusal classes `safety.atomic.plan_filesystem` already
+# constructs -- because a verb author who imports one to build a local
+# refusal has, by definition, stopped consuming the shared planner's own
+# `.refusal`. This is the *protected by construction* form the common brief
+# calls for: a string pin on one file protects one file; the AST guard below
+# protects the eight that just had their planner taken away, and it is what
+# stops copy nine.
+#
+# AST, not grep, for the reason every other section here is: "raise
+# DestinationUnwritableError" could equally be prose in a docstring (as
+# several of the eight modules' own module docstrings demonstrate, quoting
+# the class name while explaining why they do NOT construct one), and a text
+# scan cannot tell the difference.
+# --------------------------------------------------------------------------- #
+
+KIND_OPS_LOCAL_REFUSAL: Final = "ops-local-filesystem-refusal-name"
+
+#: The two filesystem-tier refusal classes `safety.atomic.plan_filesystem`
+#: already constructs (PDF-18 Design D4/D9). No module under `ops/` may name
+#: either one -- importing, isinstance-checking or raising it locally is all
+#: the same violation: reaching past the shared planner to build (or inspect
+#: the identity of) its own refusal.
+FORBIDDEN_OPS_REFUSAL_NAMES: Final = frozenset({"DestinationUnwritableError", "TargetExistsError"})
+
+
+def scan_local_refusal_names(source: str, module: str) -> list[Boundary]:
+    """Every mention of a forbidden refusal class name in *source*'s AST --
+    an import, a qualified attribute access, or a bare name -- never a
+    prose mention (those live in ``ast.Constant`` string nodes this walk
+    never visits)."""
+    tree = ast.parse(source, filename=module)
+    found: list[Boundary] = []
+    for node in ast.walk(tree):
+        name: str | None = None
+        if isinstance(node, ast.Name) and node.id in FORBIDDEN_OPS_REFUSAL_NAMES:
+            name = node.id
+        elif isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_OPS_REFUSAL_NAMES:
+            name = node.attr
+        elif isinstance(node, ast.alias) and node.name in FORBIDDEN_OPS_REFUSAL_NAMES:
+            name = node.name
+        if name is not None:
+            found.append(
+                Boundary(
+                    module,
+                    getattr(node, "lineno", 0),
+                    name,
+                    KIND_OPS_LOCAL_REFUSAL,
+                    "the filesystem-tier refusal classes belong to "
+                    "safety.atomic.plan_filesystem alone (PDF-18 Design D9); a verb "
+                    "module must consume the plan's own `.refusal`, never name "
+                    f"{name!r} itself",
+                )
+            )
+    return found
+
+
+def scan_ops_local_refusal_names(root: Path) -> list[Boundary]:
+    """Every Section 5 finding under ``root/pdf_toolkit/ops``.
+
+    *root* is the ``src/`` directory to scan -- either :data:`SRC` itself or a
+    scratch copy of it, mirroring every other section's ``scan_*(root)``
+    shape.
+    """
+    ops_root = root / "pdf_toolkit" / "ops"
+    found: list[Boundary] = []
+    for path in iter_python_files(ops_root):
+        module = module_name(path, root)
+        found.extend(scan_local_refusal_names(path.read_text(), module))
+    return found
+
+
+def test_no_ops_module_names_a_filesystem_tier_refusal_class() -> None:
+    found = scan_ops_local_refusal_names(SRC)
+    listed = "\n".join(f"  - {item}" for item in found)
+    assert found == [], (
+        "DestinationUnwritableError/TargetExistsError belong to "
+        "safety.atomic.plan_filesystem alone; a verb module must consume the "
+        f"plan's own `.refusal`, never construct or import the class itself:\n{listed}"
+    )
+
+
+def test_the_ops_package_actually_contains_python_files() -> None:
+    """Non-vacuity. A green Section 5 over zero files proves nothing -- the
+    same trap every other section's own non-vacuity test exists to catch."""
+    files = iter_python_files(SRC / "pdf_toolkit" / "ops")
+    assert len(files) >= 8, f"Section 5 found only {len(files)} file(s) under ops/"
+
+
+PLANTED_SECTION_5: Final = (
+    (
+        "plant-a-raised-destination-unwritable",
+        "pdf_toolkit/ops/sneaky_refusal.py",
+        "from pdf_toolkit.errors import DestinationUnwritableError\n\n\n"
+        "def go(target):\n"
+        "    raise DestinationUnwritableError('nope', path=str(target))\n",
+    ),
+    (
+        "plant-a-bare-target-exists-import",
+        "pdf_toolkit/ops/sneaky_import.py",
+        "from pdf_toolkit.errors import TargetExistsError\n\n\n"
+        "def check(refusal):\n"
+        "    return isinstance(refusal, TargetExistsError)\n",
+    ),
+    (
+        "plant-a-qualified-reference",
+        "pdf_toolkit/ops/sneaky_qualified.py",
+        "from pdf_toolkit import errors\n\n\n"
+        "def label(refusal):\n"
+        "    return type(refusal) is errors.DestinationUnwritableError\n",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "relative", "source"),
+    PLANTED_SECTION_5,
+    ids=[row[0] for row in PLANTED_SECTION_5],
+)
+def test_a_planted_section_5_violation_fails_the_walk(
+    label: str,
+    relative: str,
+    source: str,
+    tmp_path: Path,
+) -> None:
+    """Copy src/, plant one refusal-class mention under ops/, confirm Section 5
+    turns red."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / relative
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(source)
+
+    found = scan_ops_local_refusal_names(scratch)
+    assert found, f"Section 5 did not notice the planted violation: {label}"
+
+
+BENIGN_SECTION_5 = '''
+"""A module that talks ABOUT the refusal classes without naming them as code.
+
+DestinationUnwritableError and TargetExistsError are mentioned here only in
+prose, exactly the way this docstring does it right now -- that is not what
+Section 5 forbids.
+"""
+
+from pdf_toolkit.safety.atomic import plan_filesystem
+
+
+def go(targets, out_dir, policy):
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+    if plan.refusal is not None:
+        raise plan.refusal
+    return plan
+'''
+
+
+def test_benign_section_5_mentions_are_never_flagged() -> None:
+    """A docstring quoting both forbidden class names, and ordinary consumption
+    of `plan.refusal`, are not violations -- the mechanized proof that Section 5
+    is an AST walk and not a text grep, matching Sections 1-4's negative-control
+    discipline."""
+    found = scan_local_refusal_names(BENIGN_SECTION_5, "pdf_toolkit.ops.benign")
+    assert found == [], f"false positives: {[str(item) for item in found]}"
