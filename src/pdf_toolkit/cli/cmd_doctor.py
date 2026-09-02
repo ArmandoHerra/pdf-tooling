@@ -52,18 +52,35 @@ __all__ = ["build_payload", "doctor_command"]
 VERB = "doctor"
 
 
-def build_payload(*, strict: bool, root: Path | None = None) -> dict[str, Any]:
+def build_payload(*, strict: bool, dry_run: bool, root: Path | None = None) -> dict[str, Any]:
     """The canonical ``doctor`` payload.
 
     ``reset_cache()`` first: the registry memoizes per process, and this verb's
     whole job is to report the state of the machine *now*. A long-lived process
     — or a test that has just changed ``PATH`` — must not be answered from a
     memo taken before the change.
+
+    ``dry_run`` is a REQUIRED keyword rather than a defaulted one (B-038). The
+    key was missing from this envelope alone, and it was missing because nothing
+    forced a hand-built payload to carry it: every other verb gets it either
+    from ``OperationResult.to_dict()`` or by writing it into its own dict. A
+    default here would let the next caller silently reproduce the omission.
+
+    **What the key reports is what the USER ASKED FOR, not what the verb did.**
+    ``doctor`` behaves identically with and without ``--dry-run``, so "always
+    ``false``" is arguable -- and ``version``, which is non-mutating in exactly
+    the same way, already settled it the other way (``cmd_version.py`` passes
+    ``dry_run=config.dry_run``). That is the only reading under which the field
+    means the same thing on every verb in the envelope.
     """
     reset_cache()
     reports = resolve_all()
     payload: dict[str, Any] = {
         "verb": VERB,
+        # Immediately after `verb`: the envelope reads
+        # {schema_version, verb, dry_run, strict, ports}. ADDITIVE at
+        # schema_version 1 -- a key added, never renamed or renumbered.
+        "dry_run": dry_run,
         "strict": strict,
         "ports": [report.to_dict() for report in reports],
     }
@@ -98,7 +115,7 @@ def doctor_command(
 ) -> None:
     """Report which engines resolved, and how."""
     config = get_config(ctx)
-    payload = build_payload(strict=strict)
+    payload = build_payload(strict=strict, dry_run=config.dry_run)
     text = _render(payload, config.output_format)
     if text:
         typer.echo(text)

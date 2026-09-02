@@ -74,6 +74,26 @@ pytestmark = pytest.mark.e2e
 VERBS = discover_verbs()
 GROUPS = discover_groups()
 MUTATING = tuple(verb for verb in VERBS if verb.is_mutating)
+#: AC21 (PDF-20) — the population C9 and C10 measure. **Every verb, not just the
+#: mutating ones.** `CLAUDE.md` rule 2 and `README.md`'s own claim state
+#: `--dry-run` purity WITHOUT a condition ("it writes nothing, anywhere"), so
+#: the instrument that measures it has no business being narrower than the
+#: claim. It was narrower, and `doctor` -- which is structurally outside
+#: `MUTATING`, because `is_mutating` derives from reaching the `AtomicWriter`
+#: chokepoint and `doctor` never does -- wrote `$HOME/.config` on every run for
+#: a whole cycle with both rows green (`ba07fdfb56` / B-100, B-075). The
+#: impurity was not missed; it was UNREACHABLE by the instrument.
+#:
+#: Widened HERE rather than by touching `is_mutating`: the classifier is right
+#: about what it classifies (which verbs reach the write chokepoint) and C11 /
+#: C13 depend on that meaning. Purity simply is not a mutating-verb property.
+DRY_RUN_PURITY = VERBS
+
+#: The three keys `schema_version: 1` promises on every verb's `-o json` object.
+#: `dry_run` is here because it was absent from exactly one envelope and nothing
+#: was watching (E3: the invariant was upheld by two independent mechanisms,
+#: neither of them enforced, and `doctor` rode neither).
+ENVELOPE_KEYS: Final[tuple[str, ...]] = ("schema_version", "verb", "dry_run")
 PAGE_ADDRESSING = tuple(verb for verb in VERBS if verb.is_page_addressing)
 TAKES_INPUT_PATHS = tuple(verb for verb in VERBS if verb.takes_input_paths)
 REGISTERED = tuple(verb for verb in VERBS if verb.name in INVOCATIONS)
@@ -212,7 +232,7 @@ def test_c8_no_ansi_on_a_pipe(verb) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("verb", MUTATING, ids=_ids(MUTATING))
+@pytest.mark.parametrize("verb", DRY_RUN_PURITY, ids=_ids(DRY_RUN_PURITY))
 def test_c9_unconditional_dry_run_purity(verb, tmp_path: Path) -> None:
     env, roots = redirected_environment(tmp_path)
     before = snapshot(*roots)
@@ -274,15 +294,28 @@ def _expected_dry_run_exit(invocation) -> int:
     return 0 if resolve(engine).available else ENGINE_MISSING
 
 
-@pytest.mark.parametrize("verb", MUTATING, ids=_ids(MUTATING))
+@pytest.mark.parametrize("verb", DRY_RUN_PURITY, ids=_ids(DRY_RUN_PURITY))
 def test_c10_registered_invocation_dry_run_purity(verb, corpus, tmp_path: Path) -> None:
     invocation = INVOCATIONS[verb.name]
-    # Resolved BEFORE the snapshot opens. `resolve()` may spawn a version probe
-    # on an engine-PRESENT host (`soffice --version` creates `$HOME/.config`),
-    # and it runs in THIS process against the real environment rather than the
-    # redirected one under test -- ordering it first keeps that spawn provably
-    # outside the purity window this row measures, instead of relying on the
-    # roots happening not to overlap.
+    # Resolved BEFORE the snapshot opens -- RETAINED by PDF-20 (AC21), with the
+    # reason re-measured rather than inherited.
+    #
+    # The claim this hoist used to carry was that it kept a `$HOME`-writing
+    # probe out of the purity window. `PDF-20` D3.3 went further and called the
+    # ordering "a control that cannot fail, on the exact defect it would
+    # otherwise catch". **Measured: that causal story is wrong, in the product's
+    # favour and against the hoist's own defence.** `resolve()` runs IN THIS
+    # PROCESS against the REAL environment; the snapshot roots are the
+    # REDIRECTED `$HOME`/`$TMPDIR` handed to the child. Moving the call after
+    # `before = snapshot(...)` would therefore make the spawn no more visible to
+    # this row -- it would simply write into the OPERATOR'S OWN home inside a
+    # window that cannot see it. What actually blinded C9/C10 to `ba07fdfb56`
+    # was the POPULATION (`doctor` is not `is_mutating`), which is what
+    # `DRY_RUN_PURITY` above fixes. Removing the hoist would have bought nothing
+    # and cost a real-home write on every run of this suite.
+    #
+    # It costs nothing to keep, either: since PDF-20 routed the probe spawns
+    # through `subprocess_util.probe_env()`, the probe writes nowhere at all.
     expected = _expected_dry_run_exit(invocation)
     args = invocation.build(corpus, tmp_path)
     env, roots = redirected_environment(tmp_path)
@@ -1070,10 +1103,23 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "MUTATING",
         MUTATING,
+        "C11,C13,C15 (via PRODUCING)",
+        1,
+        "unpinned before PDF-17 despite B-032 claiming otherwise. NO LONGER FEEDS C9/C10: "
+        "PDF-20 moved the two purity rows onto DRY_RUN_PURITY, because `doctor` -- which "
+        "cannot be `is_mutating` and wrote `$HOME/.config` on every run -- was structurally "
+        "outside the population that measured purity",
+    ),
+    Population(
+        "DRY_RUN_PURITY",
+        DRY_RUN_PURITY,
         "C9,C10",
         1,
-        "unpinned before PDF-17 despite B-032 claiming otherwise; zero makes both "
-        "dry-run purity checks collect zero cases",
+        "zero makes both dry-run purity checks collect zero cases. NOT pinned at "
+        "len(VERBS): a floor that fails when a verb is legitimately retired gets lowered "
+        "rather than investigated (`DESTRUCTIVE`'s own argument). What keeps this honest is "
+        "the identity assertion below, which fails if the population ever becomes a SUBSET "
+        "of the verbs -- that narrowing is exactly how B-075 stayed invisible",
     ),
     Population(
         "PAGE_ADDRESSING",
@@ -1157,6 +1203,17 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "feeds OUTPUT_FLAG_CASES -> C14; _C16_DESTINATION_FLAGS -> C16",
         1,
         "IMPORTED from `pdf_toolkit.cli.common`; empty empties C14's whole matrix",
+    ),
+    Population(
+        "ENVELOPE_KEYS",
+        ENVELOPE_KEYS,
+        "test_every_verb_envelope_carries_dry_run",
+        1,
+        "PDF-20's own population, and it is in this roster for the same reason HONOURED_CELLS "
+        "is: `test_every_population_is_rostered` FIRED ON IT during implementation, on the "
+        "first full `make ci`. An empty tuple makes the envelope guard iterate no keys and "
+        "report 26 green verbs having asserted nothing -- which is exactly how `doctor` came "
+        "to be the one verb on neither of E3's two unenforced mechanisms",
     ),
     Population(
         "HONOURED_CELLS",
@@ -1581,3 +1638,117 @@ def test_the_credited_node_id_parser_can_find_and_miss() -> None:
         "test_ac21_x",
     )
     assert routing_claim_credit("# some other comment entirely\n") is None
+
+
+# --------------------------------------------------------------------------- #
+# PDF-20 — AC21 and AC23. Appended; nothing above is rewritten except C9's and
+# C10's own parametrize lines and the `MUTATING` roster row's `checks` field,
+# each of which is recorded where it happens.
+#
+# TWO INVARIANTS, ONE CAUSE. `doctor` was the only verb whose `-o json` envelope
+# lacked `dry_run` (`d4ae996c52` / B-038) AND the only verb writing into `$HOME`
+# on every run (`ba07fdfb56` / B-100). Neither was noticed, and in both cases the
+# reason was the same: the thing that would have noticed enumerated a population
+# that did not contain `doctor`. The two guards below both derive their
+# population from `discover_verbs()`, so a verb added tomorrow joins each of them
+# with zero author action.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_purity_population_is_every_verb_not_a_subset_of_them() -> None:
+    """AC21. `DRY_RUN_PURITY` may not silently narrow back to a subset.
+
+    A `POPULATIONS` minimum of 1 keeps the rows from collecting zero cases; it
+    does NOT stop the population from shrinking to one verb, which is the shape
+    that actually happened -- C9/C10 ran 22 green cases for a whole cycle while
+    the verb with the impurity sat outside them. Purity is claimed
+    unconditionally (`CLAUDE.md` rule 2), so the population is asserted EQUAL to
+    the verb roster rather than merely non-empty.
+    """
+    missing = sorted({verb.name for verb in VERBS} - {verb.name for verb in DRY_RUN_PURITY})
+    assert missing == [], (
+        f"verb(s) {missing} are outside the population C9/C10 measure. `--dry-run` purity is "
+        "claimed for every verb without a condition; a narrower instrument makes the claim "
+        "unmeasured for exactly the verbs it excludes (B-075's whole history)"
+    )
+    assert "doctor" in {verb.name for verb in DRY_RUN_PURITY}, (
+        "`doctor` is the verb the two rows were blind to; if it leaves this population the "
+        "instrument has gone blind again"
+    )
+
+
+def envelope_problems(verb_name: str, payload: object) -> list[str]:
+    """Every way *payload* fails the `-o json` envelope contract.
+
+    A pure function of the parsed payload, so the red proof below can drive it
+    with a synthetic object rather than by mutating `src/`.
+    """
+    if not isinstance(payload, dict):
+        return [f"{verb_name}: -o json did not produce a JSON object"]
+    problems = [
+        f"{verb_name}: -o json object has no {key!r} key"
+        for key in ENVELOPE_KEYS
+        if key not in payload
+    ]
+    if payload.get("schema_version") != 1:
+        problems.append(f"{verb_name}: schema_version is {payload.get('schema_version')!r}, not 1")
+    if "verb" in payload and payload["verb"] != verb_name:
+        problems.append(f"{verb_name}: envelope names verb {payload['verb']!r}")
+    if payload.get("dry_run") is not True:
+        problems.append(
+            f"{verb_name}: ran with --dry-run but the envelope reports "
+            f"dry_run={payload.get('dry_run')!r} -- the key reports what the USER ASKED FOR"
+        )
+    return problems
+
+
+def test_every_verb_envelope_carries_dry_run(corpus, tmp_path: Path) -> None:
+    """AC23's derived guard. Population from `discover_verbs()`, never typed.
+
+    Driven with `--dry-run` so the guard writes nothing and so the reported
+    value can be asserted against a KNOWN request rather than against whatever
+    the verb happened to do. Verbs whose dry run legitimately does not reach an
+    envelope -- an engine-absent `convert` predicts exit 3 and renders the error
+    shape (`PLAN.md` §5.6), which carries no `verb` -- are recorded by name and
+    excluded, and the guard then refuses to be vacuous about it.
+    """
+    checked: list[str] = []
+    non_envelope: list[str] = []
+    problems: list[str] = []
+    for verb in VERBS:
+        args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+        result = run_cli(verb.name, "--dry-run", "-o", "json", *args, cwd=tmp_path)
+        if result.returncode != 0:
+            non_envelope.append(f"{verb.name}(exit {result.returncode})")
+            continue
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            problems.append(f"{verb.name}: -o json emitted no parseable JSON")
+            continue
+        checked.append(verb.name)
+        problems.extend(envelope_problems(verb.name, payload))
+    assert problems == [], "\n".join(problems + [f"(excluded: {non_envelope})"])
+    # Non-vacuity, and it is the half that matters: a guard that quietly
+    # excluded its whole population would report green having asserted nothing.
+    assert len(checked) >= len(VERBS) - len(non_envelope), "accounting lost a verb"
+    for required in ("doctor", "info", "version"):
+        assert required in checked, (
+            f"{required} was not asserted (excluded: {non_envelope}) -- narrowing the "
+            "population until it passes is the defect this guard exists to end"
+        )
+
+
+def test_the_envelope_guard_fires_on_a_missing_key() -> None:
+    """AC23's red, driven against a SYNTHETIC payload rather than a mutated
+    `src/` (`tests/test_acceptance_audit.py`'s idiom). The LIVE red -- deleting
+    `dry_run` from `cmd_info.py`'s payload and watching the guard above name
+    `info` -- was run by hand and is recorded in `tests/acceptance/
+    audit_pdf_05.py`'s AC23 row."""
+    good = {"schema_version": 1, "verb": "info", "dry_run": True}
+    assert envelope_problems("info", good) == []
+    assert envelope_problems("info", {k: v for k, v in good.items() if k != "dry_run"}) != []
+    assert envelope_problems("info", {**good, "dry_run": None}) != []
+    assert envelope_problems("info", {**good, "schema_version": 2}) != []
+    assert envelope_problems("info", {**good, "verb": "doctor"}) != []
+    assert envelope_problems("info", ["not", "an", "object"]) != []

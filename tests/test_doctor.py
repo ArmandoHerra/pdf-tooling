@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -197,6 +197,32 @@ def test_hiding_tesseract_flips_exactly_one_row(soffice_only_path: str) -> None:
     assert unavailable[0]["hint"].strip() != ""
 
 
+def test_hiding_both_binaries_flips_exactly_two_rows(tmp_path: Path) -> None:
+    """AC6's DISCRIMINATING arm (PDF-20). Appended, not a rewrite.
+
+    `test_hiding_tesseract_flips_exactly_one_row` above only ever observes the
+    value `1`, and a test that only ever sees one number cannot distinguish
+    *"exactly one"* from *"at least one"* -- and "at least one" is the
+    silent-wrong-answer reading of the product's own countable acceptance
+    signal. This arm drives the same instrument to a DIFFERENT number, which is
+    what makes the count assertion a count assertion.
+
+    An empty `PATH` is correct here and wrong in the fixture above, for the same
+    reason: it hides both system binaries. The CLI is still reachable because
+    `run_cli` spawns through an absolute `sys.executable`.
+    """
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    env = {**os.environ, "PATH": str(empty)}
+    report = doctor_json(env=env)
+
+    assert len(report["ports"]) == 6, "the row count must not depend on what is installed"
+    unavailable = [row["port"] for row in report["ports"] if not row["available"]]
+    assert sorted(unavailable) == ["OcrEngine", "OfficeConverter"], unavailable
+    assert run_cli("doctor", "--strict", env=env).returncode == 3
+    assert run_cli("doctor", env=env).returncode == 0
+
+
 def test_hints_are_still_exactly_right_with_an_engine_hidden(soffice_only_path: str) -> None:
     env = {**os.environ, "PATH": soffice_only_path}
     for row in doctor_json(env=env)["ports"]:
@@ -306,3 +332,179 @@ def test_doctor_appears_in_help() -> None:
     result = run_cli("--help")
     assert result.returncode == 0
     assert "doctor" in result.stdout
+
+
+# --------------------------------------------------------------------------- #
+# PDF-20 — B-100 / B-075: `doctor` is filesystem-pure on an engines-PRESENT
+# host (AC19), and the sandbox that makes it so did not blind the probe (AC20a).
+# Appended; nothing above is rewritten.
+#
+# THE CONDITION IS THE MEASUREMENT. `soffice --version` is what created
+# `$HOME/.config`, so a host WITHOUT soffice reproduces B-100's own CONTROL
+# ("`doctor` with soffice hidden is pure") rather than the defect. A pass there
+# is the absence of the condition, not the presence of the fix, so the rows
+# below SKIP WITH A REASON on such a host and are never marked passed.
+# --------------------------------------------------------------------------- #
+
+import sys as _sys  # noqa: E402
+
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in _sys.path:  # pragma: no cover - import plumbing
+    _sys.path.insert(0, str(_TESTS_DIR))
+
+from fs_snapshot import diff, redirected_environment, snapshot  # noqa: E402
+
+#: The four invocations D3.4 requires for the B-075 exhaustivity claim. "We
+#: fixed the one we knew about" is not an answer to a finding whose complaint
+#: was that it had never been characterized.
+PURITY_INVOCATIONS: Final = (
+    ("doctor",),
+    ("doctor", "--strict"),
+    ("doctor", "--dry-run"),
+    ("doctor", "-o", "json"),
+)
+
+#: The two ports whose probe SPAWNS. Without one of them resolvable there is no
+#: probe-path spawn to be impure, so there is nothing here to prove.
+SPAWNING_PORTS: Final = ("OcrEngine", "OfficeConverter")
+
+
+def _purity_environment(base: Path) -> tuple[dict[str, str], tuple[Path, ...]]:
+    """A redirected `$HOME`/`$TMPDIR` plus a scratch working tree as roots.
+
+    `redirected_environment` is `tests/fs_snapshot.py`'s own helper -- the same
+    one `test_c9`/`test_c10` use -- so this row and the contract rows cannot
+    disagree about what "redirected" means. The working tree is added as a third
+    root because a probe could equally have written beside the cwd, and the XDG
+    variables are CLEARED so an operator's own `XDG_CONFIG_HOME` cannot route a
+    write to a real directory outside the roots and out of sight.
+    """
+    env, roots = redirected_environment(base)
+    for name in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+        env.pop(name, None)
+    tree = base / "tree"
+    tree.mkdir(exist_ok=True)
+    return env, (*roots, tree)
+
+
+def _skip_unless_a_probe_spawns(report: dict[str, Any]) -> None:
+    rows = {row["port"]: row["available"] for row in report["ports"]}
+    if not any(rows.get(port) for port in SPAWNING_PORTS):
+        pytest.skip(
+            "engine-gated: neither system-binary port resolves, so no probe spawns and this "
+            "host reproduces B-100's CONTROL rather than the defect -- a pass here would be "
+            "the absence of the condition, not the presence of the fix"
+        )
+
+
+@pytest.mark.parametrize("argv", PURITY_INVOCATIONS, ids=[" ".join(a) for a in PURITY_INVOCATIONS])
+def test_doctor_writes_nothing_on_an_engines_present_host(
+    argv: tuple[str, ...], report: dict[str, Any], tmp_path: Path
+) -> None:
+    """AC19 / AC25. `ba07fdfb56` — every one of the four, not just `--dry-run`.
+
+    The impurity was never dry-run-specific: `doctor` does nothing differently
+    under `--dry-run` (it is ungoverned by OR-3 and is accepted and ignored), so
+    the write happened on every invocation. Asserting all four is what makes the
+    B-075 answer an exhaustivity claim rather than a spot check.
+    """
+    _skip_unless_a_probe_spawns(report)
+    env, roots = _purity_environment(tmp_path)
+    before = snapshot(*roots)
+    result = run_cli(*argv, env=env)
+    assert result.returncode == 0, f"{argv}: exit {result.returncode}: {result.stderr}"
+    differences = diff(before, snapshot(*roots))
+    assert differences == [], (
+        f"`pdftoolkit {' '.join(argv)}` made {len(differences)} filesystem difference(s) "
+        f"across {len(roots)} root(s): {[str(item) for item in differences]}"
+    )
+    assert not (Path(env["HOME"]) / ".config").exists(), (
+        "$HOME/.config was created -- B-100 has regressed. The probe-path sandbox at "
+        "adapters/subprocess_util.probe_env() is what stops the soffice version query "
+        "writing into the operator's home."
+    )
+
+
+def test_the_sandbox_did_not_blind_the_probe(report: dict[str, Any], tmp_path: Path) -> None:
+    """AC20(a). The D2.3 trap: a purity fix must not become a wrong answer.
+
+    Run under a redirected `$HOME`, `doctor` must report exactly what it reports
+    without one. Asserted as an EQUALITY against the unsandboxed report rather
+    than as "all six available", so this row still discriminates on a host where
+    an engine is genuinely missing.
+    """
+    _skip_unless_a_probe_spawns(report)
+    env, _ = _purity_environment(tmp_path)
+    sandboxed = doctor_json(env=env)
+    plain = {
+        row["port"]: (row["available"], row["version"], row["detail"]) for row in report["ports"]
+    }
+    under_home = {
+        row["port"]: (row["available"], row["version"], row["detail"]) for row in sandboxed["ports"]
+    }
+    assert under_home == plain, (
+        "the report changed when the probe environment changed -- a probe sandbox that "
+        "strips PATH reports engines missing on a host that has them, with exit code 0"
+    )
+    for port in SPAWNING_PORTS:
+        row = next(r for r in sandboxed["ports"] if r["port"] == port)
+        if row["available"]:
+            assert row["version"], f"{port} is available but its version no longer parses"
+
+
+def test_the_probe_environment_inherits_everything_but_the_home_variables() -> None:
+    """AC20(a)'s direct red control, and it is host-independent.
+
+    The end-to-end arm above cannot fire for the trap D2.3 names on THIS host:
+    `available` is decided by `shutil.which` against the PARENT's `PATH`, which
+    the sandbox never touches, and `subprocess` falls back to `os.defpath`
+    (`:/bin:/usr/bin`) when a child environment carries no `PATH` at all -- and
+    both binaries live in `/usr/bin` here. So a helper that built a MINIMAL
+    environment would leave every row unchanged on this machine and the
+    prescribed red would not appear. This row asserts the property directly
+    instead, where dropping the `os.environ` copy fails immediately, by name.
+    """
+    from pdf_toolkit.adapters.subprocess_util import (
+        PROBE_HOME_VARIABLES,
+        PROBE_SANDBOX_ROOT,
+        probe_env,
+    )
+
+    base = {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "TESSDATA_PREFIX": "/usr/share/tesseract-ocr/5/tessdata/",
+        "LANG": "C.UTF-8",
+        "HOME": "/home/someone",
+        "XDG_CONFIG_HOME": "/home/someone/.config",
+    }
+    prepared = probe_env(base)
+    for name in ("PATH", "TESSDATA_PREFIX", "LANG"):
+        assert prepared[name] == base[name], (
+            f"{name} did not survive the probe sandbox. `run()`'s `env` REPLACES the child "
+            "environment wholesale, so a minimal env silently stops the binaries resolving "
+            "and `doctor` reports engines missing on a host that has them"
+        )
+    for name in PROBE_HOME_VARIABLES:
+        assert prepared[name] == PROBE_SANDBOX_ROOT, name
+    assert set(prepared) == set(base) | set(PROBE_HOME_VARIABLES)
+
+
+def test_the_probe_sandbox_root_cannot_be_created() -> None:
+    """Zero net effect BY CONSTRUCTION, which is stronger than by cleanup.
+
+    A scratch directory that is made and removed still moves its parent's mtime,
+    and `tests/fs_snapshot.py` records directory mtime -- so a sweep-based
+    sandbox trades `$HOME/.config` appearing for `$TMPDIR`'s mtime moving, and
+    AC19 above would still be red. A path beneath the null device is not a
+    directory anything can create, so there is nothing to clean up and nothing
+    that can fail while cleaning up.
+    """
+    from pdf_toolkit.adapters.subprocess_util import PROBE_SANDBOX_ROOT
+
+    if not os.path.isabs(os.devnull):  # pragma: no cover - POSIX hosts only
+        pytest.skip(f"platform-gated: os.devnull is {os.devnull!r}, not an absolute path")
+    assert PROBE_SANDBOX_ROOT.startswith(os.devnull + os.sep)
+    assert not Path(PROBE_SANDBOX_ROOT).exists()
+    with pytest.raises(OSError):
+        Path(PROBE_SANDBOX_ROOT).mkdir(parents=True)
+    assert not Path(PROBE_SANDBOX_ROOT).exists()

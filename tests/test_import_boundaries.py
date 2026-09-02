@@ -1340,6 +1340,302 @@ def test_importing_the_port_layer_loads_no_engine() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# PDF-20 -- Section 2 continued: the probe-path environment sandbox is
+# PROTECTED BY CONSTRUCTION (AC22). Append only; nothing above is rewritten.
+#
+# `soffice --version` creates the user's config directory, so `doctor` -- and
+# anything else that resolves the office port -- wrote into `$HOME` on every
+# run (`ba07fdfb56` / B-100), including under `--dry-run`, against a rule
+# `CLAUDE.md` states without conditions. PDF-20 routes the three PROBE-path
+# spawns through `subprocess_util.probe_env()`.
+#
+# WHY THIS IS A GUARD AND NOT A DEFAULT. Putting the sandbox inside `run()`
+# would have been the more "central" fix and it is the WRONG one: `run()` is
+# shared with the two OPERATIONAL spawns, which depend on the caller's real
+# environment (`convert_to_pdf` passes its own isolated profile already; an OCR
+# run may legitimately need operator-installed language data reachable from the
+# real home). Forcing a redirected home under either is a silent behaviour
+# change to a separately-verified verb. The construction guarantee therefore
+# lives here, where a FOURTH probe added later inherits it and the operational
+# path is untouched.
+#
+# THE EXCLUSION IS ASSERTED, NOT ASSUMED. `OPERATIONAL_SPAWNS` below is checked
+# in BOTH directions: every entry must still resolve to a real call site (an
+# exclusion that no longer names anything is how an allowlist rots), and an
+# excluded site must NOT pass the probe sandbox. So an operational call cannot
+# drift into the probe set, and a probe cannot drift out of it, without a red.
+# --------------------------------------------------------------------------- #
+
+#: Section 2's fourth finding kind, DISJOINT from the other three by equality.
+KIND_PROBE_SANDBOX: Final = "probe-sandbox"
+
+#: The methods whose spawns are probe-path. `probe()` is the port contract's own
+#: name (`ports/__init__`'s Protocol surface) and `languages()` is the one probe
+#: helper a probe delegates to.
+PROBE_METHODS: Final = frozenset({"probe", "languages"})
+
+#: The sandbox helper, in both spellings a call site may use.
+SANDBOX_HELPER: Final = "probe_env"
+SANDBOX_HELPER_QUALIFIED: Final = "pdf_toolkit.adapters.subprocess_util.probe_env"
+
+#: The OPERATIONAL spawns, excluded BY DESIGN (PDF-20 Scope > Out; they belong
+#: to the office/OCR spec). `(module, enclosing function)`.
+OPERATIONAL_SPAWNS: Final[frozenset[tuple[str, str]]] = frozenset(
+    {
+        ("pdf_toolkit.adapters.soffice_office", "convert_to_pdf"),
+        ("pdf_toolkit.adapters.tesseract_ocr", "text_layer"),
+    }
+)
+
+
+class SpawnSite(NamedTuple):
+    """One `subprocess_util.run(...)` call site, with the function around it."""
+
+    module: str
+    function: str
+    line: int
+    sandboxed: bool
+
+    @property
+    def where(self) -> tuple[str, str]:
+        return (self.module, self.function)
+
+    def __str__(self) -> str:
+        state = "sandboxed" if self.sandboxed else "un-sandboxed"
+        return f"{self.module}:{self.line}: {self.function}() spawns {state}"
+
+
+class _SpawnSiteVisitor(ast.NodeVisitor):
+    """Every helper spawn, tagged with its enclosing function and env argument.
+
+    Scope tracking mirrors Section 1's `_WriteCallVisitor` rather than inventing
+    a second convention.
+    """
+
+    def __init__(self, module: str, bindings: dict[str, str]) -> None:
+        self.module = module
+        self.bindings = bindings
+        self.scope: list[str] = ["<module>"]
+        self.found: list[SpawnSite] = []
+
+    def _scoped(self, node: ast.AST, name: str) -> None:
+        self.scope.append(name)
+        self.generic_visit(node)
+        self.scope.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        if _is_helper_call(dotted(node.func), self.bindings):
+            self.found.append(
+                SpawnSite(self.module, self.scope[-1], node.lineno, self._is_sandboxed(node))
+            )
+        self.generic_visit(node)
+
+    def _is_sandboxed(self, node: ast.Call) -> bool:
+        """Whether this call passes `env=` built by the sandbox helper.
+
+        A CALL is required, not merely a name: `env=some_dict` would satisfy a
+        name check while handing the child an arbitrary environment.
+        """
+        for keyword in node.keywords:
+            if keyword.arg != "env" or not isinstance(keyword.value, ast.Call):
+                continue
+            target = dotted(keyword.value.func)
+            if target.rsplit(".", 1)[-1] == SANDBOX_HELPER:
+                return True
+            if self.bindings.get(target) == SANDBOX_HELPER_QUALIFIED:
+                return True
+        return False
+
+
+def scan_spawn_sites(source: str, module: str) -> list[SpawnSite]:
+    """Every `subprocess_util.run(...)` site in one module, tagged."""
+    tree = ast.parse(source, filename=module)
+    visitor = _SpawnSiteVisitor(module, from_import_bindings(tree))
+    visitor.visit(tree)
+    return visitor.found
+
+
+def probe_sandbox_violations(
+    sites: list[SpawnSite],
+    *,
+    operational: frozenset[tuple[str, str]] = OPERATIONAL_SPAWNS,
+) -> list[Boundary]:
+    """Probe-path spawns without the sandbox, and excluded spawns with it."""
+    problems: list[Boundary] = []
+    for site in sites:
+        is_probe = site.function in PROBE_METHODS
+        if is_probe and not site.sandboxed:
+            problems.append(
+                Boundary(
+                    site.module,
+                    site.line,
+                    site.function,
+                    KIND_PROBE_SANDBOX,
+                    "probe-path spawn without env=subprocess_util.probe_env()",
+                )
+            )
+        elif not is_probe and site.where not in operational:
+            problems.append(
+                Boundary(
+                    site.module,
+                    site.line,
+                    site.function,
+                    KIND_PROBE_SANDBOX,
+                    "spawn that is neither a declared probe nor a declared operational site",
+                )
+            )
+        elif not is_probe and site.sandboxed:
+            problems.append(
+                Boundary(
+                    site.module,
+                    site.line,
+                    site.function,
+                    KIND_PROBE_SANDBOX,
+                    "operational spawn has joined the probe sandbox by accident",
+                )
+            )
+    return problems
+
+
+def scan_spawn_sites_tree(root: Path) -> list[SpawnSite]:
+    found: list[SpawnSite] = []
+    for path in iter_python_files(root):
+        found.extend(scan_spawn_sites(path.read_text(), module_name(path, root)))
+    return found
+
+
+@pytest.fixture(scope="module")
+def spawn_sites() -> list[SpawnSite]:
+    return scan_spawn_sites_tree(SRC)
+
+
+def test_every_probe_path_spawn_passes_the_sandbox(spawn_sites: list[SpawnSite]) -> None:
+    """AC22. B-100 cannot come back through a fourth probe."""
+    problems = probe_sandbox_violations(spawn_sites)
+    assert problems == [], "\n".join(str(item) for item in problems)
+
+
+def test_the_operational_exclusion_still_names_real_call_sites(
+    spawn_sites: list[SpawnSite],
+) -> None:
+    """The exclusion list may not outlive the call sites it excuses.
+
+    Without this the two entries could be deleted from `src/` and the guard
+    would go on reporting green over a set it no longer describes -- allowlist
+    rot, which is how a guard dies quietly (Section 1's own words).
+    """
+    live = {site.where for site in spawn_sites}
+    stale = sorted(OPERATIONAL_SPAWNS - live)
+    assert stale == [], f"OPERATIONAL_SPAWNS entries that no longer resolve: {stale}"
+
+
+def test_the_spawn_walk_sees_the_real_tree(spawn_sites: list[SpawnSite]) -> None:
+    """Non-vacuity. A guard over zero call sites is green for the worst reason.
+
+    Pinned against the enumerated population rather than a bare `> 0`: three
+    probe-path spawns and two operational ones is the whole spawn surface of
+    this product, and a walk that stopped seeing one of them would otherwise be
+    indistinguishable from a tree that no longer had it.
+    """
+    probes = [site for site in spawn_sites if site.function in PROBE_METHODS]
+    operational = [site for site in spawn_sites if site.where in OPERATIONAL_SPAWNS]
+    assert len(probes) >= 3, f"the walk found only {len(probes)} probe spawn(s): {probes}"
+    assert len(operational) >= 2, (
+        f"the walk found only {len(operational)} operational: {operational}"
+    )
+    assert all(site.sandboxed for site in probes)
+    assert not any(site.sandboxed for site in operational)
+
+
+# -- Proof that the AC22 guard fires, in BOTH directions -------------------- #
+
+_FOURTH_PROBE_UNSANDBOXED = """
+from pdf_toolkit.adapters import subprocess_util
+BINARY = "widget"
+class Adapter:
+    def probe(self):
+        return subprocess_util.run([BINARY, "--version"], timeout=1.0, check=False)
+"""
+
+_FOURTH_PROBE_SANDBOXED = """
+from pdf_toolkit.adapters import subprocess_util
+BINARY = "widget"
+class Adapter:
+    def probe(self):
+        return subprocess_util.run(
+            [BINARY, "--version"], timeout=1.0, check=False, env=subprocess_util.probe_env()
+        )
+"""
+
+_PROBE_WITH_A_PLAIN_DICT = """
+import os
+from pdf_toolkit.adapters import subprocess_util
+BINARY = "widget"
+class Adapter:
+    def probe(self):
+        return subprocess_util.run([BINARY, "-v"], timeout=1.0, check=False, env=dict(os.environ))
+"""
+
+_OPERATIONAL_JOINING_THE_SANDBOX = """
+from pdf_toolkit.adapters import subprocess_util
+BINARY = "soffice"
+class Adapter:
+    def convert_to_pdf(self, source):
+        return subprocess_util.run(
+            [BINARY, "--convert-to"], timeout=1.0, check=False, env=subprocess_util.probe_env()
+        )
+"""
+
+_UNDECLARED_SPAWN = """
+from pdf_toolkit.adapters import subprocess_util
+BINARY = "widget"
+class Adapter:
+    def do_something_new(self):
+        return subprocess_util.run([BINARY, "--go"], timeout=1.0, check=False)
+"""
+
+
+def test_the_probe_sandbox_guard_fires_on_a_fourth_unsandboxed_probe() -> None:
+    module = "pdf_toolkit.adapters.widget"
+    found = probe_sandbox_violations(scan_spawn_sites(_FOURTH_PROBE_UNSANDBOXED, module))
+    assert found, "a fourth probe spawn without the sandbox was not caught"
+    assert found[0].kind == KIND_PROBE_SANDBOX
+    assert probe_sandbox_violations(scan_spawn_sites(_FOURTH_PROBE_SANDBOXED, module)) == []
+
+
+def test_the_probe_sandbox_guard_refuses_an_arbitrary_env() -> None:
+    """`env=` alone is not the guarantee -- the sandbox helper is.
+
+    A name check would accept `env=dict(os.environ)`, which is precisely the
+    environment whose `$HOME` the probe must not be able to write through.
+    """
+    found = probe_sandbox_violations(
+        scan_spawn_sites(_PROBE_WITH_A_PLAIN_DICT, "pdf_toolkit.adapters.widget")
+    )
+    assert found, "a probe passing an arbitrary env was accepted as sandboxed"
+
+
+def test_the_exclusion_is_asserted_in_the_other_direction_too() -> None:
+    """An operational site may not quietly join the probe sandbox, and a new
+    spawn may not appear in neither set."""
+    joined = probe_sandbox_violations(
+        scan_spawn_sites(_OPERATIONAL_JOINING_THE_SANDBOX, "pdf_toolkit.adapters.soffice_office"),
+        operational=frozenset({("pdf_toolkit.adapters.soffice_office", "convert_to_pdf")}),
+    )
+    assert joined and "joined the probe sandbox" in joined[0].detail
+    undeclared = probe_sandbox_violations(
+        scan_spawn_sites(_UNDECLARED_SPAWN, "pdf_toolkit.adapters.widget")
+    )
+    assert undeclared and "neither a declared probe" in undeclared[0].detail
+
+
+# --------------------------------------------------------------------------- #
 # Section 3 -- the typer/click import boundary (PDF-06)
 #
 # APPENDED, never rewriting Sections 1/2. `PLAN.md` §10 / D-03: no typer or

@@ -96,7 +96,21 @@ class SofficeOfficeAdapter:
 
         # argv[0] is the module-level constant, not the located path -- see the
         # note on the same line in `tesseract_ocr`.
-        run = subprocess_util.run([BINARY, "--version"], timeout=PROBE_TIMEOUT_S, check=False)
+        #
+        # `env=subprocess_util.probe_env()` is B-100's fix and it is REQUIRED
+        # here, not decorative: this exact spawn is what creates `$HOME/.config`
+        # (see `binary_present`'s docstring, which recorded the defect against
+        # the shipped source before it was fixed). The sandbox inherits the
+        # caller's environment and overrides only the five home-rooted
+        # variables, so `PATH` still resolves the binary; `tests/
+        # test_import_boundaries.py` Section 2 fails if a probe-path spawn is
+        # ever added without it.
+        run = subprocess_util.run(
+            [BINARY, "--version"],
+            timeout=PROBE_TIMEOUT_S,
+            check=False,
+            env=subprocess_util.probe_env(),
+        )
         first = run.first_line() or run.first_line("stderr")
         version = _parse_version(first)
         if version is None:

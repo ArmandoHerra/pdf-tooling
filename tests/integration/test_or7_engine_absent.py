@@ -160,3 +160,44 @@ def test_or7_absent_engine_dry_run_mirrors_the_real_exit_code(
 
     # --dry-run stays pure, and the refused real run writes nothing either.
     assert not target.exists(), f"{verb}: {target.name} was created by a refused run"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-20 — AC20(b)'s OTHER half: the engine-PRESENT pair.
+#
+# WHY THIS ROW EXISTS BESIDE THE ABSENT ONE. The absent arm above proves
+# `3 == 3`. On its own that is not enough to say a preview still WORKS: a matrix
+# that agrees everywhere is equally consistent with a preview that has gone
+# silent, and D7.1 names that reading in terms. The discriminating evidence is a
+# pair where the engine gate STEPS ASIDE and a lower tier answers -- here, the
+# same verb predicting and exiting **0** with soffice resolvable. Two pairs, two
+# different answers, both agreeing: that is precedence, not agreement.
+#
+# WHY PDF-20 ADDS IT. PDF-20 changes the ENVIRONMENT the office probe spawns
+# under (`adapters/subprocess_util.probe_env()`), and OR-7 forbids that from
+# moving a predicted exit code. Asserting `0 == 0` here is how "no predicted
+# exit code changed" is measured rather than assumed.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.requires("soffice")
+def test_or7_present_engine_dry_run_still_predicts_success(tmp_path: Path) -> None:
+    """`dry == real == 0` with the engine present, measured AS A PAIR."""
+    args = _convert_source(tmp_path)
+    dry_target = tmp_path / "or7-present-dry.pdf"
+    real_target = tmp_path / "or7-present-real.pdf"
+
+    dry = run_cli("convert", *args, "-O", str(dry_target), "--dry-run")
+    real = run_cli("convert", *args, "-O", str(real_target))
+
+    assert dry.returncode == real.returncode, (
+        f"OR-7 violated with the engine PRESENT -- dry={dry.returncode} real={real.returncode}. "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+    assert dry.returncode == 0, (
+        f"a resolvable engine must predict success, got {dry.returncode}: {dry.stdout}{dry.stderr}"
+    )
+    # The pair is only discriminating if the two arms genuinely DIFFER in what
+    # they do: the preview writes nothing and the real run produces the file.
+    assert not dry_target.exists(), "the preview created its destination"
+    assert real_target.is_file() and real_target.stat().st_size > 0, "the real run produced nothing"

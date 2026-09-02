@@ -267,7 +267,16 @@ class TesseractOcrAdapter:
         # it cannot resolve and check against the forbidden set. A guarantee that
         # a reader can verify by grepping one constant beats one that requires
         # tracing a local variable.
-        run = subprocess_util.run([BINARY, "--version"], timeout=PROBE_TIMEOUT_S, check=False)
+        # `env=subprocess_util.probe_env()` -- the probe-path sandbox (PDF-20,
+        # D2). The environment is INHERITED and only the five home-rooted
+        # variables are overridden, so `TESSDATA_PREFIX` and `PATH` both survive
+        # and this probe reports exactly what it reported before.
+        run = subprocess_util.run(
+            [BINARY, "--version"],
+            timeout=PROBE_TIMEOUT_S,
+            check=False,
+            env=subprocess_util.probe_env(),
+        )
         first = run.first_line() or run.first_line("stderr")
         version = _parse_version(first)
 
@@ -293,7 +302,15 @@ class TesseractOcrAdapter:
         """
         if shutil.which(BINARY) is None:
             return ()
-        run = subprocess_util.run([BINARY, "--list-langs"], timeout=PROBE_TIMEOUT_S, check=False)
+        # The probe-path sandbox again -- see `probe()`. `TESSDATA_PREFIX` is
+        # inherited unchanged, which is what keeps the reported language set
+        # identical to the one an OCR run would use.
+        run = subprocess_util.run(
+            [BINARY, "--list-langs"],
+            timeout=PROBE_TIMEOUT_S,
+            check=False,
+            env=subprocess_util.probe_env(),
+        )
         return _parse_languages(run.stdout or run.stderr)
 
     def binding_probe(self) -> AdapterProbe:

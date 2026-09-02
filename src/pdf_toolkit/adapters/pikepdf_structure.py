@@ -42,6 +42,7 @@ from pdf_toolkit.adapters import AdapterProbe, package_probe
 from pdf_toolkit.errors import AuthError, FailureError
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports.structure import (
+    PASSWORD_HINT,
     PERMISSION_TOKENS,
     CompressOutcome,
     EncryptionFacts,
@@ -64,11 +65,6 @@ __all__ = ["ADAPTER", "CAPABILITY_SUMMARY", "PikepdfStructureAdapter"]
 #: stripped before a warning reaches `OperationResult.warnings` — otherwise
 #: every repair report would carry a non-deterministic memory address.
 _WARNING_PREFIX_RE: Final = re.compile(r"^\S+ <[^>]+>(?:\s*\([^)]*\))?:\s*(.*)$")
-
-_PASSWORD_HINT: Final[str] = (
-    "supply one with --password-file PATH (or --password-file - to read one line from stdin), "
-    "or run 'pdftoolkit decrypt' first"
-)
 
 _NAME: Final[str] = "pikepdf"
 _DISTRIBUTION: Final[str] = "pikepdf"
@@ -173,7 +169,7 @@ class PikepdfStructureAdapter:
                 )
         except pikepdf.PasswordError as error:
             raise AuthError(
-                f"a password is required to compress this document; {_PASSWORD_HINT}"
+                f"a password is required to compress this document; {PASSWORD_HINT}"
             ) from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not open PDF for compression: {error}") from error
@@ -202,7 +198,7 @@ class PikepdfStructureAdapter:
             pdf = pikepdf.Pdf.open(io.BytesIO(data), attempt_recovery=True)
         except pikepdf.PasswordError as error:
             raise AuthError(
-                f"a password is required to repair this document; {_PASSWORD_HINT}"
+                f"a password is required to repair this document; {PASSWORD_HINT}"
             ) from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not recover this document: {error}") from error
@@ -248,7 +244,7 @@ class PikepdfStructureAdapter:
                 pdf.save(out_buffer, linearize=True)
         except pikepdf.PasswordError as error:
             raise AuthError(
-                f"a password is required to linearize this document; {_PASSWORD_HINT}"
+                f"a password is required to linearize this document; {PASSWORD_HINT}"
             ) from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not open PDF for linearization: {error}") from error
@@ -388,7 +384,7 @@ class PikepdfStructureAdapter:
                 )
         except pikepdf.PasswordError as error:
             raise AuthError(
-                f"a password is required to open this document; {_PASSWORD_HINT}"
+                f"a password is required to open this document; {PASSWORD_HINT}"
             ) from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not encrypt this document: {error}") from error

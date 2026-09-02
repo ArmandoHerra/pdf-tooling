@@ -33,6 +33,7 @@ from pdf_toolkit.models import DocumentInfo, PageInfo
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports import BROKEN_INSTALL_HINT
 from pdf_toolkit.ports.structure import (
+    PASSWORD_HINT,
     CompositeOutcome,
     CompressOutcome,
     ImagePassOutcome,
@@ -72,18 +73,16 @@ _OPTIMIZE_HINT: Final[str] = (
     "Run 'pdftoolkit doctor' to see which engines resolved."
 )
 
-#: [B-078] `PypdfOpenDocument.__enter__`'s own `AuthError` hint. Same shape and
-#: same actionable text as `pikepdf_structure.py`'s own `_PASSWORD_HINT`
-#: (`f"a password is required to {verb} this document; {{hint}}"`), duplicated
-#: here rather than imported so this adapter never reaches into its sibling's
-#: module for a private symbol. Pinned by `test_ac13_encrypted_input_is_exit_6
-#: _naming_decrypt`'s `match="decrypt"` precedent -- naming the *verb* that
-#: resolves it (`pdftoolkit decrypt`), not just a flag this adapter's own
-#: `open_document` does not accept.
-_PASSWORD_HINT: Final[str] = (
-    "supply one with --password-file PATH (or --password-file - to read one line from stdin), "
-    "or run 'pdftoolkit decrypt' first"
-)
+#: [B-078 / B-086] The hint now lives at the port
+#: (``ports.structure.PASSWORD_HINT``), not here. **Moved by PDF-20**, which
+#: also dropped its `--password-file` clause: no verb that can reach this
+#: message declares that flag, so the instruction named a flag its own reader
+#: would be refused for using. The comment this replaces argued the copy was
+#: deliberate -- *"duplicated here rather than imported so this adapter never
+#: reaches into its sibling's module for a private symbol"* -- and it was right
+#: about the fix it refused. Importing from the PORT is not reaching into a
+#: sibling adapter; both adapters already import from it, and `PDF-13` moved
+#: `ENCRYPTION_ALGORITHMS` out of this very file for the same reason.
 
 #: Filters that mean "converting this to JPEG would lose information" --
 #: skipped, counted, and the count is reported (D-12.2's skip rule).
@@ -408,8 +407,7 @@ class PypdfStructureAdapter:
                 unlocked = False
             if not unlocked:
                 raise AuthError(
-                    "a user password is required to read this document; supply one with "
-                    "--password-file PATH (or --password-file - to read one line from stdin)",
+                    f"a user password is required to read this document; {PASSWORD_HINT}",
                     path=str(path),
                 )
 
@@ -589,8 +587,7 @@ class PypdfStructureAdapter:
             if not unlocked:
                 raise AuthError(
                     "a user password is required to read this document's metadata; "
-                    "supply one with --password-file PATH (or --password-file - to "
-                    "read one line from stdin)",
+                    f"{PASSWORD_HINT}",
                     path=str(path),
                 )
 
@@ -633,8 +630,7 @@ class PypdfStructureAdapter:
             if not unlocked:
                 raise AuthError(
                     "a user password is required to write this document's metadata; "
-                    "supply one with --password-file PATH (or --password-file - to "
-                    "read one line from stdin)"
+                    f"{PASSWORD_HINT}"
                 )
 
         # `clone_from=reader` -- not `writer.append(reader)` -- is what makes
@@ -772,7 +768,7 @@ class PypdfOpenDocument:
         except FileNotDecryptedError as error:
             handle.close()
             raise AuthError(
-                f"a password is required to open this document; {_PASSWORD_HINT}",
+                f"a password is required to open this document; {PASSWORD_HINT}",
                 path=str(self._path),
             ) from error
         except PdfReadError as error:

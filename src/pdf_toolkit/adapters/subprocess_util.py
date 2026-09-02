@@ -67,7 +67,14 @@ from typing import Final
 from pdf_toolkit.errors import FailureError
 from pdf_toolkit.output.logging import get_logger
 
-__all__ = ["TERM_GRACE_S", "ProcRun", "run"]
+__all__ = [
+    "PROBE_HOME_VARIABLES",
+    "PROBE_SANDBOX_ROOT",
+    "TERM_GRACE_S",
+    "ProcRun",
+    "probe_env",
+    "run",
+]
 
 #: How long a signalled group is given to exit on its own before it is killed
 #: outright. Long enough for a well-behaved child to flush and close, short
@@ -76,6 +83,93 @@ TERM_GRACE_S: Final[float] = 2.0
 
 #: Poll interval while waiting out :data:`TERM_GRACE_S`.
 _POLL_S: Final[float] = 0.05
+
+
+# --------------------------------------------------------------------------- #
+# The probe environment sandbox (PDF-20, D2).
+#
+# WHY THIS EXISTS. `soffice --version` -- the OfficeConverter probe's version
+# query -- creates the user's config directory as a side effect (measured
+# against LibreOffice 26.2.5.2 on this host: a pristine redirected HOME gains
+# exactly `$HOME/.config`, and its own mtime moves). `doctor` therefore wrote
+# into the operator's home on every run, and `doctor --dry-run` wrote there too,
+# against a purity rule `CLAUDE.md` states without conditions. The write is a
+# *probe* side effect, so it is fixed at the probe, not at the verb.
+#
+# WHAT IS OVERRIDDEN, AND WHAT IS NOT. Exactly the five home-rooted variables
+# below. EVERYTHING ELSE IN THE CALLER'S ENVIRONMENT IS INHERITED UNCHANGED --
+# `PATH` above all, and `TESSDATA_PREFIX` with it. `run()`'s `env` REPLACES the
+# child environment wholesale, so a helper that built a *minimal* environment
+# instead of copying `os.environ` would strip `PATH`; the probes would then stop
+# resolving and `doctor` would report engines missing on a host that has them.
+# That is a purity fix converted into a silent wrong answer with a success exit
+# code, and it is the failure mode this function is written to make impossible:
+# `probe_env` starts from a full copy and overrides five keys.
+#
+# WHY THE TARGET IS UNWRITABLE RATHER THAN A SCRATCH DIRECTORY WE REMOVE.
+# "Zero net filesystem effect" and "create a scratch tree and delete it" are not
+# the same requirement. A directory that is created and removed still moves its
+# PARENT's mtime, which a recursive snapshot records -- so a scratch-and-sweep
+# sandbox trades one impurity (`$HOME/.config` appears) for another (`$TMPDIR`'s
+# mtime moves) and the contract rows that measure `--dry-run` purity would still
+# be red. Pointing the five variables at a path UNDER `os.devnull` removes the
+# question instead of answering it: `/dev/null` is a character device, so
+# creating anything beneath it fails with ENOTDIR for every user including root,
+# on every POSIX host, and there is no cleanup path that can fail, leak or race.
+#
+# MEASURED, NOT ASSUMED (this host, 2026-09-02): with the five variables pointed
+# at `/dev/null/pdftoolkit-probe`, `soffice --version` still prints
+# `LibreOffice 26.2.5.2 620(Build:2)`, `tesseract --version` still prints
+# `tesseract 5.5.0`, and `tesseract --list-langs` still reports the same two
+# languages it reports with a real home -- while nothing is created anywhere.
+# `tests/test_doctor.py` pins the "did not blind the probe" half so a future
+# engine that genuinely needs a writable home cannot degrade silently.
+# --------------------------------------------------------------------------- #
+
+#: The home-rooted variables a probe must not be able to write through. Every
+#: OTHER variable is inherited unchanged -- see the note above on `PATH`.
+PROBE_HOME_VARIABLES: Final[tuple[str, ...]] = (
+    "HOME",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+)
+
+#: Where those five are pointed: a path beneath the null device, which cannot be
+#: created. Not a directory this process makes, and therefore not one it has to
+#: remember to remove.
+PROBE_SANDBOX_ROOT: Final[str] = os.path.join(os.devnull, "pdftoolkit-probe")
+
+
+def probe_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment a *probe* spawn runs under: inherited, minus a home.
+
+    Args:
+        base: The environment to start from. Defaults to ``os.environ``; a test
+            passes an explicit mapping so the override can be asserted against a
+            known starting point rather than against whatever the host has.
+
+    Returns:
+        A copy of *base* with :data:`PROBE_HOME_VARIABLES` pointed at
+        :data:`PROBE_SANDBOX_ROOT` and every other variable left alone.
+
+    This is deliberately **opt-in at the three probe call sites** rather than a
+    default inside :func:`run`. ``run`` is shared with the two OPERATIONAL
+    spawns -- the conversion and the OCR call -- which depend on the caller's
+    real environment (the converter passes its own isolated profile directory
+    already, and an OCR run may legitimately need operator-installed language
+    data reachable from the real home). Forcing a redirected home under either
+    would be a silent behaviour change to a separately-verified verb.
+    ``tests/test_import_boundaries.py`` Section 2 asserts the split by
+    construction: every spawn reached from a ``probe()`` or ``languages()``
+    method passes this environment, and the two operational sites are excluded
+    by an assertion rather than by anyone remembering.
+    """
+    prepared = dict(os.environ if base is None else base)
+    for name in PROBE_HOME_VARIABLES:
+        prepared[name] = PROBE_SANDBOX_ROOT
+    return prepared
 
 
 @dataclass(frozen=True, slots=True)

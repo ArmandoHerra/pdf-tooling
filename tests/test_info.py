@@ -285,14 +285,32 @@ def test_a_user_password_document_is_exit_six(plain_pdf: Path, tmp_path: Path) -
     assert run_cli("info", str(locked)).returncode == 6
 
 
-def test_the_auth_message_names_the_flag_that_will_accept_a_password(
+def test_the_auth_message_names_a_resolution_info_can_actually_offer(
     plain_pdf: Path, tmp_path: Path
 ) -> None:
-    """§5.7's "and say so when they cannot", satisfied by naming the flag."""
+    """§5.7's "and say so when they cannot" — RE-DERIVED by PDF-20 (B-086).
+
+    This row previously asserted the message named ``--password-file``, on
+    `PDF-05` D6.3's premise that `info` would grow that flag. **The premise
+    turned out false.** `PDF-13` gave `--password-file` to `decrypt`, `encrypt`
+    and `permissions` only, and `cli/common.py` refuses a flag a verb does not
+    declare with exit 2 — so the shipped message told a user to reach for a flag
+    whose use `info` itself would reject. The old assertion was an INVERTED
+    control: it pinned the defect B-086 was filed against, and it was green
+    throughout.
+
+    What §5.7 actually requires is that the tool SAY SO when it cannot read a
+    document. Naming the verb that resolves it does that and is true on every
+    verb that can print the message; naming a flag is true on none of them.
+    """
     locked = build_encrypted_pdf(plain_pdf, tmp_path / "locked.pdf", user_password="hunter2")
     entry = info_json(str(locked))["documents"][0]
     assert entry["error"]["code"] == 6
-    assert "--password-file" in entry["error"]["message"]
+    message = entry["error"]["message"]
+    assert "pdftoolkit decrypt" in message, message
+    assert "--password-file" not in message, (
+        "the message names a flag `info` does not declare; driving it would be exit 2 (B-086)"
+    )
 
 
 def test_the_password_itself_never_appears_in_the_output(plain_pdf: Path, tmp_path: Path) -> None:

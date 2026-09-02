@@ -44,6 +44,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 __all__ = [
     "ALWAYS_GRANTED_TOKENS",
     "ENCRYPTION_ALGORITHMS",
+    "PASSWORD_HINT",
     "PERMISSION_TOKENS",
     "CompositeOutcome",
     "CompressOutcome",
@@ -395,6 +396,35 @@ PERMISSION_TOKENS: Final[tuple[str, ...]] = (
 #: deprecated bit 10 and conforming readers always permit extraction for
 #: accessibility. Reported honestly rather than echoed back as denied.
 ALWAYS_GRANTED_TOKENS: Final[tuple[str, ...]] = ("accessibility",)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-20 (B-086) — the ONE password hint. Port level for the same reason
+# `ENCRYPTION_ALGORITHMS` is: two adapters raise the same refusal and must not
+# be able to disagree about how a user resolves it.
+# --------------------------------------------------------------------------- #
+
+#: What to tell a user whose document needs a password we do not have.
+#:
+#: **Promoted here from the two adapters by PDF-20.** The text existed as two
+#: byte-identical private copies (`adapters/pikepdf_structure.py` and
+#: `adapters/pypdf_structure.py`) plus three further inline spellings of the
+#: same sentence. `pypdf_structure.py`'s own comment argued the duplication was
+#: deliberate -- *"duplicated here rather than imported so this adapter never
+#: reaches into its sibling's module for a private symbol"* -- and that
+#: objection was RIGHT about the fix it refused and does not apply to this one.
+#: A port is not a sibling adapter; it is the shared owner both adapters
+#: already import from, exactly as `PDF-13` reasoned when it moved
+#: `ENCRYPTION_ALGORITHMS` out of the same file.
+#:
+#: **The `--password-file` clause was REMOVED, and that half is the half that
+#: actually harmed a user** (B-086). Only three verbs declare that flag --
+#: `decrypt`, `encrypt` and `permissions` -- and none of them reaches this hint;
+#: they resolve a password through `ops/crypto.py`, which has no `open_document`
+#: call site. Every verb that CAN reach this message therefore printed an
+#: instruction naming a flag it would reject with exit 2. The surviving clause
+#: is true on every verb that can print it.
+PASSWORD_HINT: Final[str] = "run 'pdftoolkit decrypt' first"
 
 
 def algorithm_name(version: int, method: str, bits: int) -> str | None:
