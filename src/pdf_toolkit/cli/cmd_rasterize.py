@@ -84,9 +84,12 @@ Teardown is stated per platform. On any POSIX platform, SIGTERM, SIGINT or
 SIGHUP sent to this command alone tears the render pool down through one
 routine: no further page is written and no worker outlives it. SIGKILL to
 this command cannot be handled by it at all; the workers are still reaped
-on Linux, where each asks the kernel for PR_SET_PDEATHSIG at start-up, but
-that is a Linux-only facility -- on macOS a SIGKILLed parent can leave its
-workers running.
+on Linux under the 'fork' and 'spawn' worker start methods, where each asks
+the kernel for PR_SET_PDEATHSIG at start-up. That is a Linux-only facility,
+and it does not cover the 'forkserver' start method Python 3.14 makes the
+Linux default -- a forkserver worker's own parent is the forkserver, not
+this command. So on macOS, and on Python 3.14 for Linux, a SIGKILLed parent
+can leave its workers running: send SIGTERM instead.
 """
 
 

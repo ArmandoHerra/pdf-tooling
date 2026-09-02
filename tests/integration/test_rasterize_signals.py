@@ -63,6 +63,7 @@ docstring calls a best-effort, not a guaranteed, property.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import signal
 import subprocess
@@ -95,6 +96,11 @@ pytestmark = [
 #: measured on.
 _PAGE_COUNT = 32
 _DPI = "400"
+
+#: The `multiprocessing` start method this host will actually use. The product
+#: pins none (`ops/procpool.py` constructs a plain `ProcessPoolExecutor`), so the
+#: CLI subprocess resolves the same platform default this test process does.
+_START_METHOD: str = multiprocessing.get_start_method()
 
 #: Signal once at least this many pages already exist -- not the first one.
 #: See the module docstring for why: signalling at the very first file
@@ -319,60 +325,29 @@ def _wait_for_no_survivors(pgid: int, *, timeout: float) -> tuple[tuple[int, str
     make this arm a race rather than a control."""
     deadline = time.monotonic() + timeout
     survivors = _live_group_members(pgid)
-    while time.monotonic() < deadline and any(
-        not _is_multiprocessing_helper(entry[1]) for entry in survivors
-    ):
+    while survivors and time.monotonic() < deadline:
         time.sleep(0.05)
         survivors = _live_group_members(pgid)
     return survivors
 
 
-#: `multiprocessing`'s OWN helper processes, identified POSITIVELY by the
-#: interpreter command line they are started with. They are not render workers:
-#: they import no pdfium and no Pillow, hold no page buffer, and write no output.
-#:
-#: They matter because **Python 3.14 changed the default start method on Linux to
-#: `forkserver`**, and `ops/procpool.py` arms `PR_SET_PDEATHSIG` in the WORKER
-#: initializer -- which a forkserver/resource-tracker helper never runs. Measured
-#: on CI's `test (3.14, ubuntu-latest)` leg: a SIGKILLed parent left 1
-#: `resource_tracker` and 9 `forkserver` helpers alive in its process group, and
-#: ZERO render workers. That is the same class `PLAN §12 R-07` already accepts for
-#: temp-file residue -- a SIGKILLed process runs no code, so it cannot shut its
-#: own helper down.
-#:
-#: **This is an exclusion BY NAME, never a blanket tolerance.** A survivor that is
-#: not one of these two reds the arm, and the assertion below names it. The
-#: classifier itself is proven able to tell them apart by
-#: `test_the_multiprocessing_helper_classifier_can_tell_a_worker_from_a_helper`,
-#: so it cannot quietly start matching everything.
-_MP_HELPER_MARKERS: tuple[str, ...] = (
-    "multiprocessing.forkserver",
-    "multiprocessing.resource_tracker",
-)
-
-
-def _is_multiprocessing_helper(cmdline: str) -> bool:
-    """True only for `multiprocessing`'s own forkserver / resource-tracker.
-
-    A render worker inherits the parent's argv verbatim (`pdftoolkit rasterize
-    ...`) and never names a `multiprocessing` entry point; a forkserver helper is
-    started as `python -c ... from multiprocessing.forkserver import main ...`
-    and carries that argv appended, so the marker -- not the presence of
-    "rasterize" -- is the discriminator.
-    """
-    return any(marker in cmdline for marker in _MP_HELPER_MARKERS)
-
-
 def _assert_enumerated_zero_survivors(proc: subprocess.Popen[bytes], sig: signal.Signals) -> None:
+    """Zero survivors, with NO exclusion list.
+
+    An earlier version of this helper excluded processes whose command line named
+    `multiprocessing.forkserver` / `multiprocessing.resource_tracker`, on the
+    theory that those are infrastructure rather than render workers. **That was
+    wrong and it made the control unable to fail**: under the `forkserver` start
+    method a render worker is forked FROM the forkserver and inherits its command
+    line verbatim, so the exclusion excluded the very processes the arm exists to
+    catch. It was caught one assertion later by the "no new output" check, which
+    is exactly why this arm asserts both. Recorded rather than quietly reverted.
+    """
     survivors = _wait_for_no_survivors(proc.pid, timeout=_SURVIVOR_TIMEOUT_S)
-    workers = tuple(entry for entry in survivors if not _is_multiprocessing_helper(entry[1]))
-    assert workers == (), (
-        f"after {sig.name} to the parent PID alone, these RENDER processes are still alive "
-        f"in the launched job's own process group (pgid {proc.pid}): {workers} -- each one is "
-        f"an orphaned render worker holding pdfium/Pillow buffers. "
-        f"(Surviving `multiprocessing` helpers, which hold no buffers and write no page, are "
-        f"excluded by name and were: "
-        f"{tuple(pid for pid, line in survivors if _is_multiprocessing_helper(line))})"
+    assert survivors == (), (
+        f"after {sig.name} to the parent PID alone, these processes are still alive in "
+        f"the launched job's own process group (pgid {proc.pid}): {survivors} -- each one "
+        f"is an orphaned render worker holding pdfium/Pillow buffers"
     )
 
 
@@ -435,6 +410,23 @@ def test_sighup_to_parent_only_stops_new_output_and_leaves_no_survivors(
     _assert_enumerated_zero_survivors(proc, signal.SIGHUP)
 
 
+@pytest.mark.xfail(
+    _START_METHOD == "forkserver",
+    strict=True,
+    reason=(
+        "PDF-21 finding: PR_SET_PDEATHSIG does not protect a `forkserver` worker. The "
+        "kernel sends the death signal when the worker's OWN parent dies, and under "
+        "`forkserver` that parent is the forkserver helper, not the CLI process -- so a "
+        "SIGKILLed `pdftoolkit` leaves its render workers running AND STILL WRITING PAGES. "
+        "Measured on CI's `test (3.14, ubuntu-latest)` leg: output grew from 16 to 24 files "
+        "after the parent was reaped. Python 3.14 makes `forkserver` the DEFAULT on Linux, "
+        "so this is a live gap on a supported platform, not a hypothetical. Filed, not "
+        "fixed -- PDF-21 is a verification spec and `ops/procpool.py` is Scope > Out; "
+        "changing the start method or arming the guard in the forkserver is a behaviour "
+        "change to a shipped verb and belongs to its own spec. `strict=True` so the day the "
+        "mechanism is repaired this marker fails and has to be removed."
+    ),
+)
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason=(
@@ -474,31 +466,3 @@ def test_sigkill_to_parent_only_leaves_no_survivors_on_linux(tmp_path: Path) -> 
     assert len(list((tmp_path / "out").iterdir())) == count_after_settle == count_at_death, (
         "new output appeared after the parent was SIGKILLed -- a worker outlived it"
     )
-
-
-def test_the_multiprocessing_helper_classifier_can_tell_a_worker_from_a_helper() -> None:
-    """The exclusion above is only honest if it excludes ONLY what it names.
-
-    Both helper spellings below are the VERBATIM command lines CI's
-    `test (3.14, ubuntu-latest)` leg produced (paths shortened); the worker
-    spelling is what a render worker actually carries. Without this, the
-    classifier could drift into matching everything and the SIGKILL arm would
-    stop being able to fail -- which is the exact disease this whole wave exists
-    to end.
-    """
-    forkserver = (
-        "/x/.venv/bin/python -c import sys; from multiprocessing.forkserver import main; "
-        "main(10, 11, ['__main__'], sys_argv=sys.argv[1:], **{'sys_path': ['/x']}) "
-        "/x/.venv/bin/pdftoolkit rasterize /tmp/src/signals-source.pdf --dpi 400 "
-        "--out-dir /tmp/out --threads 8"
-    )
-    tracker = "/x/.venv/bin/python -c from multiprocessing.resource_tracker import main;main(7)"
-    worker = "/x/.venv/bin/python3 /x/.venv/bin/pdftoolkit rasterize /tmp/src.pdf --threads 8"
-
-    assert _is_multiprocessing_helper(forkserver) is True
-    assert _is_multiprocessing_helper(tracker) is True
-    # The forkserver line CONTAINS "rasterize" too, so the discriminator cannot be
-    # the verb name -- and a real worker must never be excluded.
-    assert "rasterize" in forkserver
-    assert _is_multiprocessing_helper(worker) is False
-    assert _MP_HELPER_MARKERS, "an empty marker tuple would exclude nothing and prove nothing"
