@@ -118,6 +118,13 @@ PRODUCING = tuple(
 #: superset by construction) rather than MUTATING directly.
 OUTPUT_CONSUMING_MUTATING = tuple(verb for verb in PRODUCING if "--output" in verb.consumes)
 
+#: PDF-25 / `a472acde7a` — C17's population. `C4` above covers a BOGUS
+#: SUBCOMMAND at every grouping parent; nothing covered a VALID GLOBAL FLAG at
+#: one, and all fifteen members of the block exited 2 with zero bytes on stdout
+#: there. Both factors are themselves rostered below, so this product is
+#: non-empty exactly when they are.
+GROUP_GLOBAL_FLAG_CASES = tuple((group, flag) for group in GROUPS for flag in GLOBAL_OPTIONS)
+
 
 def _ids(verbs: tuple) -> list[str]:
     return [verb.name for verb in verbs]
@@ -1226,6 +1233,17 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "Empty means AC7's red proof collects zero cases and reports green, which is the "
         "precise shape (`PDF-06` AC6) this spec exists to end",
     ),
+    Population(
+        "GROUP_GLOBAL_FLAG_CASES",
+        GROUP_GLOBAL_FLAG_CASES,
+        "C17",
+        1,
+        "PDF-25's own population, and the reason it is rostered rather than pinned inline: "
+        "`discover_groups()` returned `()` for eight specs, so a row parametrized over "
+        "GROUPS x GLOBAL_OPTIONS is one refactor from collecting zero cases and reporting "
+        "green having asserted nothing -- which is what let all fifteen flags exit 2 with an "
+        "empty stdout at `meta` without any harness noticing",
+    ),
 )
 
 _ROSTERED: Final[frozenset[str]] = frozenset(row.name for row in POPULATIONS)
@@ -1752,3 +1770,38 @@ def test_the_envelope_guard_fires_on_a_missing_key() -> None:
     assert envelope_problems("info", {**good, "schema_version": 2}) != []
     assert envelope_problems("info", {**good, "verb": "doctor"}) != []
     assert envelope_problems("info", ["not", "an", "object"]) != []
+
+
+# --------------------------------------------------------------------------- #
+# C17 (PDF-25) -- a global flag at a grouping parent exits 2, at every group.
+#
+# APPENDED, never restructured: `PDF-17` rebuilt this harness in wave 1 and
+# owns its shape; this spec adds ONE row and nothing else (`decision.md` §2's
+# file-contention table).
+#
+# `C4` above already covers a bogus SUBCOMMAND at every grouping parent. What
+# nothing covered is a VALID GLOBAL FLAG at one -- and `a472acde7a` is exactly
+# that gap: all fifteen members of the block exited 2 at `meta` with **zero
+# bytes on stdout**, in every shape. The exit code is the contract this row
+# pins (`PLAN.md` §5.6's grouping-parent clause, unchanged by PDF-25); the
+# ENVELOPE half lives in `tests/test_usage_envelope.py`, which owns the rest of
+# that row's criteria.
+#
+# `PLAN.md:145` plans a second grouped subtree, which would have inherited the
+# gap by design. This row picks it up the moment it exists.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("group_path", "flag"),
+    GROUP_GLOBAL_FLAG_CASES,
+    ids=[f"{' '.join(group)}-{flag}" for group, flag in GROUP_GLOBAL_FLAG_CASES],
+)
+def test_c17_a_global_flag_at_a_grouping_parent_exits_2(
+    group_path: tuple[str, ...], flag: str
+) -> None:
+    result = run_cli(*group_path, flag)
+    assert result.returncode == 2, (
+        f"{' '.join(group_path)} {flag} -> {result.returncode}; a group does not take the "
+        f"global block, and `PLAN.md` §5.6 rules that exit 2"
+    )

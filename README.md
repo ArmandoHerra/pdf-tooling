@@ -51,7 +51,11 @@ Rendered payloads go to **stdout**; diagnostics, warnings and progress go to **s
 | `-o json` | One object, carrying `schema_version`. |
 | `-o ndjson` | One object per item, one per line, **each line carrying its own `schema_version`** so a single streamed line is self-describing. |
 
-Errors are the one deliberate asymmetry: with `-o table` an error is a one-line `error: …` on stderr, but with `-o json`/`-o ndjson` it is an object on **stdout**, so a machine consumer reading stdout never has to also read stderr to learn that the run failed.
+Errors are the one deliberate asymmetry: with `-o table` an error is a one-line `error: …` on stderr, but with `-o json`/`-o ndjson` it is an object on **stdout**, so a machine consumer reading stdout never has to also read stderr to learn that the run failed. That holds for **every** failure you can reach, an unknown flag and a missing argument included: those are usage errors (exit 2) carrying the same envelope, not a human `Usage:` block.
+
+**A command group does not take the global block.** `meta` groups `meta get` and `meta set`, and the global flags are declared at the root and on every verb, never on a group — so `pdftoolkit meta -o json` is a usage error (exit 2) rather than a run. It names the two positions that do work: `pdftoolkit -o json meta get FILE` (before the group) and `pdftoolkit meta get FILE -o json` (after the subcommand).
+
+**Global flags with no command at all** — `pdftoolkit -o json` — are an incomplete invocation and exit 2 as well, pointing at `--help`. `pdftoolkit` on its own, with no arguments, still prints help and exits 0.
 
 The structured shapes and the exit-code table below are **public API from v1.0.0**. Breaking either requires a major version bump and a `schema_version` increment. Pre-1.0 releases are explicitly still moving.
 
@@ -63,7 +67,7 @@ Uniform across every verb.
 |---|---|---|
 | 0 | `OK` | Success — including an empty-but-valid report. A `--dry-run` mirrors the code the real run would return, so it is not always 0. |
 | 1 | `FAILURE` | The operation ran and failed — corrupt input, engine error, unwritable destination. |
-| 2 | `USAGE` | Bad invocation — unknown flag, mutually exclusive flags, malformed page range, unknown subcommand. |
+| 2 | `USAGE` | Bad invocation — unknown flag, mutually exclusive flags, malformed page range, unknown subcommand, a global flag at a command group, or global flags with no command. |
 | 3 | `ENGINE_MISSING` | A required engine or binary is unavailable. The message always carries an install hint. |
 | 4 | `NO_INPUT` | Valid invocation, nothing to act on. |
 | 5 | `REFUSED` | A safety gate declined. |
@@ -85,7 +89,7 @@ Structure-level compression plus optional image downsampling is the ceiling of a
 
 `encrypt` writes AES-256 (revision 6) by default. `--legacy` selects RC4-128, which is cryptographically broken and exists only for readers that predate PDF 1.7 ExtensionLevel 3; it also leaves document metadata unencrypted, because the format cannot encrypt metadata without AES. Every cryptographic operation is libqpdf's, reached through `pikepdf`. This tool implements no cryptography of its own — no key derivation, no cipher, no password comparison.
 
-**A password is never accepted as a command-line value.** There is no `--password`, no `--user-password` and no `--owner-password`: `argv` is world-readable in `/proc` and lands in shell history, so the harm would happen before the tool could refuse. Passing any of those three spellings is a usage error (exit 2) naming the three supported paths, in order of preference:
+**A password is never accepted as a command-line value.** There is no `--password`, no `--user-password` and no `--owner-password`: `argv` is world-readable in `/proc` and lands in shell history, so the harm would happen before the tool could refuse. Passing any of those three spellings is a usage error (exit 2) naming the three supported paths, in order of preference — in the separated form (`--password hunter2`) and in the joined one (`--password=hunter2`) alike, and the value is never echoed back in either:
 
 | Path | Spelling | Notes |
 |---|---|---|

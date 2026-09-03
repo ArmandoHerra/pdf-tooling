@@ -18,11 +18,11 @@ import functools
 import inspect
 import os
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Annotated, Any, Final, get_type_hints
+from typing import Annotated, Any, Final, get_args, get_type_hints
 
 import typer
 
@@ -32,6 +32,7 @@ from pdf_toolkit.output.logging import configure_logging
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
+    "GLOBAL_FLAG_SPELLINGS",
     "GLOBAL_OPTIONS",
     "OUTPUT_FLAGS",
     "PASSWORD_FILE_FLAGS",
@@ -42,9 +43,12 @@ __all__ = [
     "GlobalConfig",
     "consumed_output_flags",
     "current_error_format",
+    "format_from_argv",
     "get_config",
+    "given_global_flags",
     "global_options",
     "not_a_readable_file",
+    "password_flag_refusal",
     "root_global_options",
 ]
 
@@ -215,7 +219,7 @@ def not_a_readable_file(flag: str) -> UsageError:
     """The never-echo error for a flag in :data:`PASSWORD_FILE_FLAGS`.
 
     ``path=`` is deliberately absent, for the same reason
-    :func:`_password_flag_refusal` above gives: at the moment of refusal we
+    :func:`password_flag_refusal` below gives: at the moment of refusal we
     cannot tell a typo'd path from a literal password, and a rendered
     ``path=`` field would print it either way.
 
@@ -250,7 +254,7 @@ def not_a_readable_file(flag: str) -> UsageError:
     )
 
 
-def _password_flag_refusal(flag: str) -> UsageError:
+def password_flag_refusal(flag: str) -> UsageError:
     """OR-4's message: name the three supported paths, echo nothing.
 
     ``path=`` is deliberately absent. At the moment of refusal we cannot know
@@ -269,7 +273,7 @@ def _password_flag_refusal(flag: str) -> UsageError:
 def _refusing_callback(flag: str) -> Callable[[bool], None]:
     def callback(value: bool) -> None:
         if value:
-            raise _password_flag_refusal(flag)
+            raise password_flag_refusal(flag)
 
     return callback
 
@@ -458,6 +462,137 @@ GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
 )
 
 
+# --------------------------------------------------------------------------- #
+# The spelling index, DERIVED from :data:`GLOBAL_PARAMS` (PDF-25 Design §D5/§D9).
+#
+# Every consumer below needs to answer one question -- "is this token the user
+# typed a member of the global block, and if so which flag is it?" -- about a
+# command line the parser has ALREADY REJECTED, where no bound parameter
+# exists to read the answer off. Deriving the index from the same tuple Typer
+# renders and binds is what keeps that answer from becoming a second,
+# hand-typed roster beside the live one (`e138934a60`'s shape).
+# --------------------------------------------------------------------------- #
+
+
+def _declared_spellings(spec: _ParamSpec) -> tuple[str, ...]:
+    """Every command-line spelling one :class:`_ParamSpec` declares, in order.
+
+    ``typer.Option``'s FIRST positional parameter is ``default``, so a
+    single-spelling declaration lands its spelling there and leaves
+    ``param_decls`` empty (``--dry-run`` reads ``default='--dry-run',
+    param_decls=()``; ``-o/--output-format`` reads ``default='-o',
+    param_decls=('--output-format',)``). Both shapes are handled.
+
+    Deliberately NOT defensive about the annotation's shape. Every member of
+    :data:`GLOBAL_PARAMS` is an ``Annotated[T, typer.Option(...)]`` by
+    construction, and if that ever stops being true this raises at IMPORT time
+    rather than returning an empty tuple -- which would leave
+    :data:`GLOBAL_FLAG_SPELLINGS` empty and silently make every classification
+    branch that consumes it unreachable. A build failure is the right answer;
+    an inert index is the shape this product's headline defect class is made of.
+    """
+    info = get_args(spec.annotation)[1]
+    spellings: list[str] = []
+    default = getattr(info, "default", None)
+    if isinstance(default, str) and default.startswith("-"):
+        spellings.append(default)
+    spellings.extend(getattr(info, "param_decls", ()) or ())
+    return tuple(spellings)
+
+
+def _canonical_spelling(spellings: tuple[str, ...]) -> str:
+    """The long form, which every member of the block declares. See above for
+    why a missing one raises at import time instead of being skipped."""
+    return next(one for one in spellings if one.startswith("--"))
+
+
+def _build_spelling_index() -> Mapping[str, str]:
+    index: dict[str, str] = {}
+    for spec in GLOBAL_PARAMS:
+        spellings = _declared_spellings(spec)
+        canonical = _canonical_spelling(spellings)
+        for spelling in spellings:
+            index[spelling] = canonical
+    return MappingProxyType(index)
+
+
+#: Every spelling of every global-block flag -- short and long, the OR-4 hidden
+#: three included -- mapped to its canonical long spelling. Read on the ERROR
+#: path only, to classify a token Click has already refused.
+GLOBAL_FLAG_SPELLINGS: Final[Mapping[str, str]] = _build_spelling_index()
+
+#: The canonical long spelling of each global param, keyed by the Python
+#: parameter name Click reports through ``get_parameter_source``.
+_LONG_BY_PARAM: Final[Mapping[str, str]] = MappingProxyType(
+    {spec.name: _canonical_spelling(_declared_spellings(spec)) for spec in GLOBAL_PARAMS}
+)
+
+#: ``--output-format``'s spellings, derived rather than typed, so
+#: :func:`format_from_argv` below recognises exactly what the block declares.
+_OUTPUT_FORMAT_SPELLINGS: Final[tuple[str, ...]] = tuple(
+    spelling
+    for spelling, canonical in GLOBAL_FLAG_SPELLINGS.items()
+    if canonical == "--output-format"
+)
+
+
+def format_from_argv(argv: Sequence[str]) -> OutputFormat | None:
+    """The output shape named on a command line that was never parsed.
+
+    Consulted by :func:`current_error_format` below **only** when the flags
+    were never resolved -- which is exactly the case Click's parser errors
+    create, and the only way the shape can be recovered at GROUP position,
+    where ``-o`` does not exist as a parameter at all (Design §D5).
+
+    Five fences, because a reader of raw ``argv`` is precisely the kind of
+    thing that becomes a second defect:
+
+    1. It is consulted only when ``_error_format is None``. A successful parse
+       is never affected by it.
+    2. It **never influences an exit code.** It selects a rendering stream and
+       nothing else; the worst case is an error rendered as JSON where a human
+       wanted a table.
+    3. It returns ``None`` for anything it does not recognise, ``-o bogus``
+       included. It never guesses.
+    4. It **never echoes a value.** The token is compared against the
+       :class:`~pdf_toolkit.output.OutputFormat` members and discarded; it is
+       not stored, not logged and not rendered. B-068's never-echo discipline
+       is preserved by construction rather than by review.
+    5. It honours ``--``.
+
+    Because it reads ``argv`` rather than the parse tree it behaves identically
+    at root, group and leaf position, and that single property is what lets a
+    group-position failure be rendered in the shape the caller asked for
+    without attaching the global block to the group (`a472acde7a`, §D6).
+
+    The LAST occurrence wins, matching Click's own scalar-option semantics.
+    """
+    args = list(argv)
+    token: str | None = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        for spelling in _OUTPUT_FORMAT_SPELLINGS:
+            if arg == spelling:
+                if index + 1 < len(args):
+                    token = args[index + 1]
+                index += 1
+                break
+            prefix = f"{spelling}="
+            if arg.startswith(prefix):
+                token = arg[len(prefix) :]
+                break
+        index += 1
+    if token is None:
+        return None
+    try:
+        return OutputFormat(token)
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class GlobalConfig:
     """The resolved global flags for one invocation."""
@@ -493,11 +628,25 @@ _error_format: OutputFormat | None = None
 def current_error_format() -> OutputFormat:
     """The format an error should be rendered in, resolved as early as possible.
 
-    Falls back to stream auto-detection when a failure happens before the flags
-    were resolved, so an error is never rendered in a shape the caller cannot
-    parse.
+    Three tiers, narrowest first (PDF-25 Design §D5):
+
+    1. **The resolved format**, when the flags were parsed. Unchanged, and it
+       still wins over everything below it, so no successful invocation's
+       behaviour depends on the two tiers that follow.
+    2. **The shape named on the raw command line**, when they were not. Click's
+       parser errors, and the group position, both terminate before ``_apply``
+       ever runs -- so before this tier existed, an explicit ``-o json`` on a
+       TTY silently fell through to ``table``, and at group position ``-o`` was
+       never parsed at all under any circumstance.
+    3. **Stream auto-detection**, so an error is never rendered in a shape the
+       caller cannot parse.
     """
-    return _error_format if _error_format is not None else auto_format()
+    if _error_format is not None:
+        return _error_format
+    sniffed = format_from_argv(sys.argv[1:])
+    if sniffed is not None:
+        return sniffed
+    return auto_format()
 
 
 def _set_error_format(fmt: OutputFormat) -> None:
@@ -791,10 +940,61 @@ def _validate_password_file(value: str) -> None:
 
 def _apply(ctx: typer.Context, values: dict[str, Any]) -> GlobalConfig:
     config = build_config(values)
-    _set_error_format(config.output_format)
+    # ONLY an explicitly given `-o` pins the error format (PDF-25 §D5). The
+    # root callback runs BEFORE a verb's own arguments are parsed, so pinning
+    # the auto-detected fallback here made `_error_format` non-None the moment
+    # the root callback ran -- and a verb-level `-o table` that Click then
+    # refused to parse (an unknown flag beside it, say) was rendered in the
+    # AUTO shape rather than the requested one, silently. Left unset, the
+    # fallback is recomputed identically by `current_error_format()`'s third
+    # tier, so nothing about a successful run changes.
+    if values.get("output_format") is not None:
+        _set_error_format(config.output_format)
     configure_logging(verbose=config.verbose, quiet=config.quiet, no_color=config.no_color)
     ctx.obj = CliState(raw=dict(values), config=config)
     return config
+
+
+def given_global_flags(ctx: typer.Context) -> tuple[str, ...]:
+    """The canonical long spelling of every global flag actually TYPED here.
+
+    Derived from :data:`GLOBAL_PARAMS` through Click's own parameter source,
+    the same signal :func:`_was_given_explicitly` already uses for
+    explicit-wins precedence -- so a sixteenth flag joins this answer with zero
+    author action, and a flag left at its default never appears in it.
+    """
+    return tuple(
+        _LONG_BY_PARAM[spec.name] for spec in GLOBAL_PARAMS if _was_given_explicitly(ctx, spec.name)
+    )
+
+
+def _no_command_given(ctx: typer.Context, flags: tuple[str, ...]) -> UsageError:
+    """`76ece64648` -- global flags with no command is an INCOMPLETE invocation.
+
+    The rule is stated in terms of **invocation completeness**, never of output
+    shape (Design §D7). ``pdftoolkit -o json`` printed 3754 bytes of human help
+    to stdout and exited **0**, so a machine consumer reading stdout learned
+    neither that it had asked for nothing nor that it had got nothing --
+    `README.md`'s own promise, broken at the one position where the promise is
+    easiest to reach by accident.
+
+    A shape-dependent exit code (0 for ``-o table``, 2 for ``-o json``) would
+    satisfy the row's title too, and is refused: ``-o`` is documented as a
+    rendering choice, and an exit code that turns on it is a new surprise.
+
+    ``pdftoolkit`` with NO arguments at all keeps exit 0 and human help --
+    the universal convention, and no machine consumer invokes it expecting
+    data. That behaviour is preserved and newly pinned.
+
+    The prog name is read off the live context rather than imported from
+    ``cli/main.py`` (which imports THIS module).
+    """
+    program = getattr(ctx, "info_name", None) or "pdftoolkit"
+    named = ", ".join(flags)
+    return UsageError(
+        f"no command given: {named} was passed with no command, which is an incomplete "
+        f"invocation. Run '{program} --help' for the list of commands."
+    )
 
 
 def _root_handler(ctx: typer.Context, values: dict[str, Any]) -> None:
@@ -802,6 +1002,15 @@ def _root_handler(ctx: typer.Context, values: dict[str, Any]) -> None:
     # A verb re-validates against the merged values, so validating here as well
     # would reject `--no-backup version --in-place`, which is a legal spelling.
     if ctx.invoked_subcommand is None:
+        # COMPLETENESS BEFORE CONSISTENCY, and the ordering is the point. An
+        # invocation that named no command cannot be validated *as a
+        # configuration for a command*: `pdftoolkit --no-backup` would
+        # otherwise be diagnosed as "--no-backup requires --in-place" when the
+        # thing actually missing is the verb. Both tiers are exit 2, so no exit
+        # code turns on this ordering -- only which message is emitted.
+        flags = given_global_flags(ctx)
+        if flags:
+            raise _no_command_given(ctx, flags)
         validate_config(config)
 
 

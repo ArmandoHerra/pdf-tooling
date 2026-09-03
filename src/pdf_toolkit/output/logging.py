@@ -34,6 +34,7 @@ from typing import Any, Final
 from pdf_toolkit.secret import Secret
 
 __all__ = [
+    "RECORD_FORMAT",
     "REDACTION_PLACEHOLDER",
     "RedactingFilter",
     "clear_secrets",
@@ -44,6 +45,16 @@ __all__ = [
 
 LOGGER_NAME: Final[str] = "pdf_toolkit"
 REDACTION_PLACEHOLDER: Final[str] = "<redacted>"
+
+#: One format string for every handler this module installs, so a third-party
+#: record and one of ours are rendered identically rather than similarly.
+RECORD_FORMAT: Final[str] = "%(levelname)s: %(message)s"
+
+#: The attribute :func:`_build_handler` stamps on a handler it created. The
+#: root reset below removes ONLY handlers carrying it (see
+#: :func:`configure_logging`), which is what makes owning root idempotent
+#: without being hostile to a host process's own handlers.
+_OWNED_MARKER: Final[str] = "_pdf_toolkit_owned"
 
 _SECRETS: set[str] = set()
 
@@ -127,22 +138,70 @@ def color_enabled(*, no_color: bool) -> bool:
     return sys.stderr.isatty()
 
 
+def _build_handler() -> logging.StreamHandler[Any]:
+    """One stderr handler, formatter and redaction filter — built the same way
+    for our own logger and for root, so the two cannot drift apart."""
+    handler = logging.StreamHandler(stream=sys.stderr)
+    handler.setFormatter(logging.Formatter(RECORD_FORMAT))
+    handler.addFilter(RedactingFilter())
+    setattr(handler, _OWNED_MARKER, True)
+    return handler
+
+
 def configure_logging(*, verbose: int = 0, quiet: bool = False, no_color: bool = False) -> None:
-    """Install the single stderr handler for this process. Idempotent."""
+    """Install the stderr handlers for this process. Idempotent.
+
+    **Two loggers, on purpose** (PDF-25 Design §D8, `d220b7d79d`). Configuring
+    only ``pdf_toolkit`` left the ROOT logger with zero handlers, so a record
+    from a third-party engine (``pypdf._reader``'s ``"EOF marker not found"``
+    is the measured one) propagated to root, found nothing there, and was
+    emitted by :data:`logging.lastResort` — a ``WARNING``-level
+    ``_StderrHandler`` this process never installed and therefore never
+    levelled. Two consequences, both real: the chatter **ignored** ``--quiet``,
+    and it **bypassed** :class:`RedactingFilter`, so this module's redaction
+    guarantee covered none of it.
+
+    Taking ownership of root fixes both at once, because the level and the
+    filter now come from the same place our own records' do.
+
+    **Only from a CLI invocation.** This function is called from exactly one
+    place — ``cli/common.py::_apply``, i.e. once the process has been
+    established as a ``pdftoolkit`` run. A library consumer that imports
+    ``pdf_toolkit`` and never calls it keeps a pristine root logger; owning
+    root at *import* time would be a real defect, while owning it inside a CLI
+    run is the CLI owning its own process.
+
+    **Only our own handlers are removed.** Root belongs to whoever is hosting
+    the interpreter, so the reset below is keyed on a marker attribute this
+    module sets. That keeps the function idempotent (``_apply`` runs at root
+    AND at verb level on every invocation) without evicting a handler someone
+    else — a test runner's log-capture plugin, an embedding application —
+    installed for their own reasons.
+
+    Our own ``pdf_toolkit`` logger keeps ``propagate = False``, so one record
+    is never emitted twice.
+    """
+    level = resolve_level(verbose=verbose, quiet=quiet)
+
     logger = logging.getLogger(LOGGER_NAME)
-    logger.setLevel(resolve_level(verbose=verbose, quiet=quiet))
+    logger.setLevel(level)
     logger.propagate = False
 
     for existing in list(logger.handlers):
         logger.removeHandler(existing)
 
-    handler = logging.StreamHandler(stream=sys.stderr)
-    handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
-    handler.addFilter(RedactingFilter())
-    logger.addHandler(handler)
+    logger.addHandler(_build_handler())
     # The filter is installed on the logger too, so a record emitted through a
     # handler added elsewhere is still scrubbed.
     logger.addFilter(RedactingFilter())
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    for existing in list(root.handlers):
+        if getattr(existing, _OWNED_MARKER, False):
+            root.removeHandler(existing)
+    root.addHandler(_build_handler())
+
     del no_color  # Colour styling is applied by renderers, not by the logger.
 
 
