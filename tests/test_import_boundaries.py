@@ -86,6 +86,7 @@ Honest limitations, stated rather than discovered later
 from __future__ import annotations
 
 import ast
+import os
 import shutil
 import subprocess
 import sys
@@ -2321,3 +2322,377 @@ def test_benign_section_5_mentions_are_never_flagged() -> None:
     discipline."""
     found = scan_local_refusal_names(BENIGN_SECTION_5, "pdf_toolkit.ops.benign")
     assert found == [], f"false positives: {[str(item) for item in found]}"
+
+
+# --------------------------------------------------------------------------- #
+# Section 6 -- what `pdftoolkit --help` IMPORTS (PDF-29)
+#
+# APPENDED, never rewritten; Section 6 is the next free integer at this commit
+# (1 PDF-04, 2 PDF-05, 3 PDF-06, 4 B-093, 5 PDF-20), taken by re-reading the
+# file rather than from a spec, per the append-only rule this file opens with.
+#
+# WHY THIS SECTION EXISTS, AND WHAT IT REPLACES.
+#
+# `PLAN §12 R-13` is a claim about `--help` STARTUP LATENCY, and until PDF-29 it
+# was held by exactly one control: a wall-clock assertion in
+# tests/test_cli_spine.py. That control has a defect no threshold can fix. Its
+# own measured distribution on a host VERIFIED QUIET -- 20 independent
+# fastest-of-5 trials -- was min 219.7 / median 235.8 / p95 247.9 / max 248.0 ms
+# with a SPREAD OF 28.3 ms, against a 250 ms budget. **A best-of-5 estimator
+# whose dispersion is thirteen times its headroom flakes by construction**, on a
+# quiet host as much as a loaded one, which is what happened to three different
+# agents in one day and to `test (3.12, macos-14)` in run 33721445070.
+#
+# And under `-n auto` (this project's default since PDF-29) it cannot even
+# abstain honestly and still run: eight workers saturate the box by
+# construction, so the wall-clock test SKIPS on every worker and therefore
+# **does not run in CI at all**. A control that silently stops running is the
+# exact class this cycle exists to end, so it is not left implied: THIS SECTION
+# IS WHAT RUNS INSTEAD, on every leg of every CI job.
+#
+# WHY IMPORT SET IS THE RIGHT SUBSTITUTE. Startup latency in a Python CLI is
+# dominated by module import, and the import SET is deterministic, load-immune
+# and parallel-safe -- none of which wall-clock is. It cannot tell you the
+# milliseconds, and it is not trying to; it tells you the thing that MOVES the
+# milliseconds, which is the only half of the claim a suite can hold honestly.
+#
+# WHAT IT CATCHES THAT SECTION 2 AND `ENGINE_MODULES` CANNOT. Section 2's walk
+# and `tests/test_cli_spine.py::test_no_engine_library_is_imported_at_module_-
+# scope` both check a NAMED list of six-to-eight engine libraries. This section
+# names no list of offenders: it pins the set of non-stdlib packages that
+# `--help` actually pulls in, so a new eager import of ANY third-party package
+# reddens -- `hypothesis`, `requests`, `numpy`, `pkg_resources`, anything. The
+# proof of non-duplication is mechanized below: the planted module is
+# deliberately NOT in `ENGINE_MODULES`, and the test asserts the engine control
+# stays GREEN on the very tree this section turns red.
+#
+# WHAT THE PIN RECORDS TODAY, and it is not a flattering picture -- the numbers
+# below are a MEASUREMENT of the product as it is, not an endorsement of it:
+#   * `pdf_toolkit.cli.common` imports **PIL** eagerly, which drags in
+#     `defusedxml`. Pillow is deliberately NOT an engine module
+#     (`test_pillow_is_deliberately_not_an_engine_module`), so nothing shipped
+#     before this section could see it.
+#   * `pdf_toolkit.ops.textract` imports **email** eagerly.
+#   * `concurrent.futures` pulls in **multiprocessing**, which pulls in
+#     **socket**.
+# 280 modules are imported to print a help screen, over and above what a bare
+# interpreter loads. Making any of those lazy is a
+# `src/` change and is explicitly OUT of PDF-29's scope (Non-goals: not a
+# performance-engineering project); it is REPORTED as a finding instead. What
+# this section guarantees is that the number cannot quietly get worse.
+# --------------------------------------------------------------------------- #
+
+
+class HelpImports(NamedTuple):
+    """One `pdftoolkit --help` run's import census."""
+
+    returncode: int
+    total: int
+    top_level: frozenset[str]
+    non_stdlib: frozenset[str]
+
+
+#: The console script under test. Deliberately the venv's own, by path: the
+#: three-arm fallback in tests/test_cli_spine.py can resolve a globally
+#: installed (possibly STALE) `pdftoolkit`, or the `-m` bootstrap, and an import
+#: census taken from a different build is a census of a different program (C-4).
+VENV_CONSOLE_SCRIPT: Final = REPO_ROOT / ".venv" / "bin" / "pdftoolkit"
+
+#: Non-stdlib top-level packages `--help` is permitted to import, asserted as a
+#: SUPERSET (a new name reddens; a name that disappears does not). The asymmetry
+#: is deliberate: making an import lazy is the improvement this pin exists to
+#: encourage, and a pin that reddened on an improvement would be widened or
+#: deleted the first time someone made one.
+#:
+#: `org` appears only under 3.11 (`xml.sax` probing for the Jython runtime), and
+#: `sitecustomize` only in environments that install one -- the baseline
+#: subtraction cancels `sitecustomize` today, and it is left listed so an
+#: environment where it does NOT cancel cannot produce a phantom red. Measured
+#: on this host at 3.12.13 AND 3.11.15; the two differ by `org` alone, which is
+#: why this is a superset check and not an equality one.
+HELP_IMPORT_ALLOWLIST: Final = frozenset(
+    {
+        "pdf_toolkit",
+        "typer",
+        "annotated_doc",  # typer's own
+        "shellingham",  # typer's own
+        "PIL",  # FINDING: eager, via pdf_toolkit.cli.common
+        "defusedxml",  # FINDING: eager, dragged in by PIL
+        "org",  # 3.11 only: xml.sax probing for Jython
+        "sitecustomize",  # venv plumbing, not a product import
+    }
+)
+
+#: Total modules (not top-level packages) `--help` imports BEYOND what a bare
+#: interpreter loads in the same environment. Measured **280 on CPython 3.12.13
+#: and 282 on 3.11.15** on this host; pinned at 320, roughly 13% of headroom, so
+#: ordinary matrix variation across four Pythons and two operating systems
+#: cannot redden it while a new eager subsystem still can -- the planted control
+#: below moves it to 428.
+#:
+#: THIS IS A CEILING AND NEVER A FLOOR, deliberately. The subtraction can only
+#: LOWER the attributable count (a module the environment loaded first is
+#: credited to the environment), so under `make cover` -- where coverage.py
+#: itself is loaded in both censuses and drags stdlib modules the CLI also uses
+#: into the floor -- this number reads lower than 280. A lower reading can never
+#: produce a false RED, which is the direction that matters for a control that
+#: has to be trustworthy across eight matrix legs.
+HELP_MODULE_CEILING: Final = 320
+
+
+def _importtime_census(argv: list[str], env: dict[str, str]) -> tuple[int, list[str]]:
+    """(exit code, every module name `-X importtime` reported for *argv*)."""
+    result = subprocess.run(  # noqa: S603 - this interpreter, a literal argv
+        [sys.executable, "-X", "importtime", *argv],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    modules: list[str] = []
+    for line in result.stderr.splitlines():
+        if not line.startswith("import time:"):
+            continue
+        fields = line.split("|")
+        if len(fields) != 3:
+            continue
+        name = fields[2].strip()
+        if name == "imported package":
+            continue
+        modules.append(name)
+    return result.returncode, modules
+
+
+def probe_help_imports(entry: Path | None = None) -> HelpImports:
+    """Run the real console script under `-X importtime` and census the result,
+    MINUS whatever this environment loads into a bare interpreter anyway.
+
+    `-X importtime` reports EVERY module the interpreter imports, so this
+    measures the actual `--help` invocation rather than re-deriving it from an
+    AST walk -- a lazy import inside a function body is invisible to a walk and
+    fully visible here, and it is the runtime set that costs milliseconds.
+
+    WHY THE SUBTRACTION, and it is not tidiness. Under `make cover`,
+    `[tool.coverage.run] patch = ["subprocess"]` makes every child process
+    measured, so coverage.py and its whole module tree would land in this
+    census -- an instrument reporting its own instrumentation, red in CI's
+    `engines-present` job and green in every other. The obvious fix is to scrub
+    `COVERAGE_PROCESS_*` from the child env, which is what the startup-budget
+    test does; that was tried and REJECTED here, because
+    `tests/test_coverage_policy.py` pins the number of modules that scrub at
+    exactly one and a second one is a real weakening of a real control (observed
+    red: `test_exactly_one_test_module_scrubs_the_coverage_environment`, one
+    case, during this spec's own `make ci`).
+
+    Subtracting a bare-interpreter census taken in the SAME environment is
+    strictly better than scrubbing: coverage.py, `sitecustomize`, and anything
+    else the environment injects appear in BOTH censuses and cancel exactly,
+    without this file opting out of coverage measurement at all. What is left is
+    what the console script itself pulls in -- which is the only thing this
+    section is about.
+    """
+    env = dict(os.environ)
+    _, floor = _importtime_census(["-c", "pass"], env)
+    returncode, measured = _importtime_census(
+        [str(entry if entry is not None else VENV_CONSOLE_SCRIPT), "--help"], env
+    )
+    attributable = [name for name in measured if name not in set(floor)]
+    top_level = frozenset(name.split(".")[0] for name in attributable)
+    non_stdlib = frozenset(
+        name
+        for name in top_level
+        if name not in sys.stdlib_module_names and not name.startswith("_")
+    )
+    return HelpImports(returncode, len(attributable), top_level, non_stdlib)
+
+
+@pytest.fixture(scope="module")
+def help_imports() -> HelpImports:
+    if not VENV_CONSOLE_SCRIPT.exists():
+        pytest.skip(
+            f"no console script at {VENV_CONSOLE_SCRIPT}. This section measures the "
+            "project venv's own build and will not silently substitute another one "
+            "(PLAN.md 10.1 rule 5: absent precondition, skip with a reason, never pass). "
+            "Run `uv sync`."
+        )
+    return probe_help_imports()
+
+
+def test_the_help_import_census_is_not_vacuous(help_imports: HelpImports) -> None:
+    """A green census over an empty or failed run proves nothing.
+
+    This is the same non-vacuity floor Sections 2, 4 and 5 each carry, and it is
+    load-bearing here for a specific reason: if the console script exited
+    non-zero (a broken build, a missing dependency) the census would be a short
+    prefix of the real one and every assertion below would pass by measuring
+    almost nothing.
+    """
+    assert help_imports.returncode == 0, "`pdftoolkit --help` did not exit 0 under the probe"
+    assert help_imports.total >= 120, (
+        f"only {help_imports.total} module(s) attributable -- the probe did not reach the "
+        "real help path, so nothing below is measuring the product. (120, not 280: the "
+        "baseline subtraction legitimately credits modules to the environment under "
+        "`make cover`, so the floor has to sit well below the uninstrumented reading.)"
+    )
+    assert {"pdf_toolkit", "typer"} <= help_imports.non_stdlib, (
+        f"the census is missing the CLI itself: {sorted(help_imports.non_stdlib)}"
+    )
+
+
+def test_help_imports_no_third_party_package_outside_the_pin(help_imports: HelpImports) -> None:
+    """The load-immune half of `PLAN §12 R-13`.
+
+    A wall-clock budget answers "was it fast on this box, this minute". This
+    answers "did anything new become eager", which is the question that survives
+    being asked on a loaded host, in parallel, on someone else's laptop.
+    """
+    unexpected = sorted(help_imports.non_stdlib - HELP_IMPORT_ALLOWLIST)
+    assert unexpected == [], (
+        f"`pdftoolkit --help` now eagerly imports {unexpected}, which is not in this "
+        "section's pin. Startup latency in a Python CLI is dominated by module import, so "
+        "this is a startup regression whatever the wall-clock number happens to say on the "
+        "host you are reading this on. Either make the import lazy (import it inside the "
+        "function that needs it), or add it to HELP_IMPORT_ALLOWLIST **with a measured "
+        "`make gate-timing --target help-startup` distribution recorded in "
+        "perf/gate-timings.jsonl** -- widening a pin without a measurement is how the "
+        "wall-clock budget this section replaced came to be defended by nothing."
+    )
+
+
+def test_help_import_count_stays_under_the_ceiling(help_imports: HelpImports) -> None:
+    """The second net, catching an eager STDLIB subsystem the allowlist cannot.
+
+    `asyncio`, `pydoc`, `unittest`, `xmlrpc` and friends are all stdlib, so the
+    allowlist above is blind to them by construction -- and each drags in dozens
+    of modules. The count is what sees them.
+    """
+    assert help_imports.total <= HELP_MODULE_CEILING, (
+        f"`pdftoolkit --help` imports {help_imports.total} modules, over the "
+        f"{HELP_MODULE_CEILING} ceiling (measured 280 at 3.12.13 / 282 at 3.11.15 when this "
+        "was pinned). Find what became eager with "
+        f"`python -X importtime {VENV_CONSOLE_SCRIPT} --help`."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Proof that Section 6's guards fire, and that they fire on something the
+# ENGINE_MODULES control structurally cannot see. Without these, the three
+# assertions above are a claim.
+# --------------------------------------------------------------------------- #
+
+
+#: Planted deliberately: `hypothesis` is a heavy third-party package that is
+#: installed in this venv (a dev dependency) and is **NOT** in `ENGINE_MODULES`,
+#: nor in `PLAN_FORBIDDEN`/`EXTRA_FORBIDDEN`. That is the whole point -- a red
+#: the existing engine control ALSO produces would not satisfy the criterion
+#: this control exists for.
+PLANTED_EAGER_IMPORT: Final = "hypothesis"
+
+
+def _entry_with_a_planted_eager_import(tmp_path: Path) -> Path:
+    """An entry script that imports a heavy package at module scope, then runs
+    the real CLI's `main()`.
+
+    **DELIBERATE DEVIATION, and the reason is a coverage floor.** The obvious
+    plant is a full `src/` copy with the import added to `cli/main.py`, reached
+    by shadowing `pdf_toolkit` on `PYTHONPATH` -- and that is what this control
+    did first. It was **observed breaking the gate**: under
+    `[tool.coverage.run] patch = ["subprocess"]` the probe's child IS measured,
+    coverage matches `source = ["pdf_toolkit"]` by module name, and every file
+    of the planted copy entered the report as almost entirely unexecuted. The
+    total fell from ~94% to **63.24%** and `make ci` went red on
+    `--cov-fail-under=85` with 2623 tests passing.
+
+    The three ways out were all worse. An `omit` for the scratch path is
+    forbidden outright (`PDF-06:236`: *if the floor is unreachable the answer is
+    more tests -- never a lower `fail_under` and never an `omit`*). Redirecting
+    `COVERAGE_FILE` in the child does nothing: the serialized
+    `COVERAGE_PROCESS_CONFIG` carries the data-file path and wins (measured).
+    Scrubbing `COVERAGE_PROCESS_*` here works, but
+    `tests/test_coverage_policy.py` pins the number of modules that do so at
+    exactly one, and a second one weakens a shipped control to make a test
+    convenient.
+
+    Planting at the ENTRY instead costs nothing and proves the same thing,
+    because this census is a RUNTIME import census: it sees a non-stdlib
+    top-level import wherever in the graph it happens. That the census also sees
+    imports made deep INSIDE product modules is not assumed either -- it is
+    asserted directly by
+    `test_the_census_sees_imports_made_inside_product_modules`, which pins
+    `PIL`, imported by `pdf_toolkit.cli.common` and by nothing this control
+    writes.
+    """
+    entry = tmp_path / "planted_entry.py"
+    entry.write_text(
+        f"import {PLANTED_EAGER_IMPORT}  # planted, module scope\n"
+        "from pdf_toolkit.cli.main import main\n"
+        "main()\n"
+    )
+    return entry
+
+
+def test_the_census_sees_imports_made_inside_product_modules(
+    help_imports: HelpImports,
+) -> None:
+    """The half the entry-point plant cannot show, asserted directly.
+
+    `PIL` is imported by `pdf_toolkit.cli.common` -- three levels inside the
+    product, by nothing any test writes. Its presence in the census is the proof
+    that this section sees eager imports made INSIDE product modules and not
+    merely ones written at the entry point.
+    """
+    assert "PIL" in help_imports.non_stdlib, (
+        "PIL is no longer in the census. If `pdf_toolkit.cli.common` stopped importing it "
+        "eagerly that is GOOD NEWS and this assertion should be re-pointed at whatever "
+        "product-internal eager import remains -- but it must be re-pointed, not deleted, "
+        "or the planted-entry control below is the only proof this section has and it "
+        "proves the weaker half."
+    )
+
+
+def test_a_planted_eager_import_reddens_section_6(tmp_path: Path) -> None:
+    """Both nets fire on the same plant, and the engine control does not.
+
+    The last assertion is the load-bearing one: a red that
+    `test_no_engine_library_is_imported_at_module_scope` ALSO produces would
+    mean this section caught nothing the suite already had.
+    """
+    if not VENV_CONSOLE_SCRIPT.exists():
+        pytest.skip(f"no console script at {VENV_CONSOLE_SCRIPT}; run `uv sync`.")
+    planted = probe_help_imports(entry=_entry_with_a_planted_eager_import(tmp_path))
+
+    assert planted.returncode == 0, (
+        "the planted entry did not run at all, so this control proved nothing"
+    )
+    unexpected = sorted(planted.non_stdlib - HELP_IMPORT_ALLOWLIST)
+    assert PLANTED_EAGER_IMPORT in unexpected, (
+        f"Section 6's allowlist did not notice {PLANTED_EAGER_IMPORT}: {unexpected}"
+    )
+    assert planted.total > HELP_MODULE_CEILING, (
+        f"Section 6's ceiling did not notice the plant: {planted.total} modules against a "
+        f"{HELP_MODULE_CEILING} ceiling"
+    )
+    assert not (ENGINE_MODULES & planted.top_level), (
+        "the planted module IS an engine library, so the pre-existing "
+        "test_no_engine_library_is_imported_at_module_scope would have caught it too and "
+        "this section would have proved nothing new"
+    )
+
+
+def test_the_pin_is_a_superset_check_and_a_missing_import_is_not_a_red(
+    help_imports: HelpImports,
+) -> None:
+    """The asymmetry above, asserted rather than left as a comment.
+
+    Making an import lazy REMOVES a name from the census. If that reddened, the
+    first person to improve startup latency would be told they broke a test, and
+    the pin would be widened or deleted. So the direction is pinned explicitly:
+    a name in the allowlist that no longer appears is fine.
+    """
+    absent = HELP_IMPORT_ALLOWLIST - help_imports.non_stdlib
+    unexpected = help_imports.non_stdlib - HELP_IMPORT_ALLOWLIST
+    assert unexpected == frozenset(), f"guarded elsewhere; here only for contrast: {unexpected}"
+    # `absent` is deliberately not asserted empty -- this line documents that,
+    # and pins that the allowlist is not merely a restatement of the census.
+    assert absent <= HELP_IMPORT_ALLOWLIST

@@ -117,7 +117,39 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers -ra"
+# PDF-29: `-n auto` lives HERE, in the shared option layer, and in exactly one
+# place in this repository -- tests/test_gate_budget.py asserts zero `-n` /
+# `--numprocesses` occurrences in the Makefile and in .github/workflows/ci.yml,
+# and reddens naming the file and line if one appears.
+#
+# WHY HERE. `addopts` is read by EVERY invocation -- `make test`, `make cover`,
+# `make test-e2e`, `make samples-gate`, `make engines-gate` and all three CI
+# pytest steps -- whichever composition a later spec leaves behind. A setting in
+# the Makefile or in ci.yml would have to be re-applied by hand at whatever the
+# new call sites are, and one missed site is a silent local/CI divergence.
+#
+# WHY THIS LEVER AND NOT THE OTHER ONE. It runs the SAME tests locally and in
+# CI. `B-061`'s suggested alternative -- marking the slowest arms
+# `@pytest.mark.slow` and excluding them from the default local target while CI
+# keeps them -- is REFUSED on the record: it manufactures exactly the local/CI
+# divergence PDF-28 exists to eliminate. The only admissible levers make the
+# same work finish sooner.
+#
+# THE GROUNDWORK WAS ALREADY LAID, which is why this is one line and not a
+# project: pytest-xdist is already a dev dependency and already locked;
+# `[tool.coverage.run] parallel = true` below is already set with a comment that
+# names xdist; and BOTH session-scoped guards (the working-tree guard in
+# tests/conftest.py and the samples originals guard in tests/samples_guard.py)
+# are already controller-only under xdist, proven by a dedicated test that
+# spawns a real two-worker run.
+#
+# ONE THING THIS COSTS, stated rather than discovered later: a WALL-CLOCK
+# assertion cannot live in a parallel suite -- under `-n auto` the box is
+# saturated by our own workers by construction. `test_help_stays_within_the_-
+# startup_budget` therefore ABSTAINS here rather than flaking, and the control
+# that actually runs on every CI leg is the load-immune import-set pin in
+# tests/test_import_boundaries.py Section 6. See that section's header.
+addopts = "--strict-markers -ra -n auto"
 markers = [
   "e2e: subprocess-level CLI runs against the installed console script",
   "samples: real-document arm over $PDF_TOOLKIT_SAMPLES_DIR (PLAN.md §10.1) -- skips visibly when unset",

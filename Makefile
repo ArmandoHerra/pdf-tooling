@@ -30,7 +30,7 @@ endif
 
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
-        samples-gate engines-gate licenses-check artifacts-check ci clean
+        samples-gate engines-gate licenses-check artifacts-check gate-timing ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -262,6 +262,18 @@ engines-gate: ## Run both engine configurations (present + hidden) with skip-vis
 	@echo "engines-gate 2/2: engines hidden -- test + skip-visibility assertion"
 	PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice $(MAKE) test PYTEST_ARGS="--junitxml=.scratch/junit-without-engines.xml"
 	$(UV_RUN) python scripts/assert_skips.py .scratch/junit-without-engines.xml
+
+# PDF-29. DELIBERATELY NOT a prerequisite of `ci`, and that is a decision
+# rather than an omission: a gate that measures itself on every run pays the
+# measurement's cost on every run, and the measurement is only meaningful on a
+# host verified quiet anyway -- `--baseline` REFUSES on a host it cannot verify,
+# which would make `make ci` refuse on any loaded developer box. The protocol,
+# the record schema and the rule that a `quiet: false` record is an observation
+# and never a baseline all live in perf/README.md.
+GATE_TIMING_ARGS ?= --target ci --cache-state warm
+
+gate-timing: ## Measure a gate target under the PDF-29 protocol; appends one record to perf/gate-timings.jsonl
+	$(UV_RUN) python scripts/measure_gate.py $(GATE_TIMING_ARGS) --baseline
 
 licenses-check: ## Reproduce the license-gate CI job's freshness diffs locally (needs-clean-tree)
 	$(MAKE) licenses

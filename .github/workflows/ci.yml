@@ -42,9 +42,55 @@ env:
   # Pinned so a gitleaks release cannot change what this gate means overnight.
   GITLEAKS_VERSION: "8.30.1"
 
+# PDF-29 -- `timeout-minutes` on EVERY job, derived rather than picked.
+#
+# WHY IT MATTERS MOST ON `main`. `concurrency.cancel-in-progress` above is
+# FALSE for `main` pushes by design: that run is the wave gate and something is
+# waiting on it. A `main`-push run therefore has no other bound at all --
+# nothing cancels it, and without `timeout-minutes` GitHub's 360-MINUTE default
+# is the only ceiling. One leg of run 99353776694 hung for 20+ minutes against
+# 4-6 minute siblings; a job with no bound produces NO NUMBER when it hangs, it
+# just stalls. An unbounded measurement is not a measurement.
+#
+# THE DERIVATION, applied identically to all ten jobs. For each job take the
+# p95 wall-clock over the last 15 GREEN `ci.yml` runs (33609241110 ..
+# 33724105752, 2026-09-02..2026-09-03) and set the bound to >= 3x that p95,
+# rounded up, CAPPED at 30. Collected with:
+#
+#   gh run list --workflow=ci.yml --status success --limit 15 \
+#       --json databaseId --jq '.[].databaseId'
+#   gh api repos/ArmandoHerra/pdf-toolkit/actions/runs/<id>/jobs?per_page=100 \
+#       --jq '.jobs[] | [.name, .conclusion, .started_at, .completed_at] | @tsv'
+#
+# TWO PLACES THE RULE IS OVERRIDDEN, both deliberate and both stated in the
+# job's own comment rather than left for a reader to infer:
+#
+#   * A 5-MINUTE FLOOR for the seven short jobs. Their p95 is 10-20 s and is
+#     dominated by runner provisioning, not by work, so a literal 3x (45-60 s)
+#     would go red on setup jitter rather than on a hang -- a control that goes
+#     red without a defect costs more than one that stays green. 5 min is
+#     >= 15x every observed p95 in that class and still 72x tighter than the
+#     360-minute default this replaces.
+#   * THE 30 CAP BINDS on `engines-present` (3x p95 = 35.7 min). The cap wins;
+#     the bound is 2.5x p95 there, which is stated rather than smoothed over.
+#
+# The `test` job is a 4 x 2 matrix; `timeout-minutes` on the job applies to
+# EACH leg, and the p95 above is over all 120 legs in the window.
+#
+# These bounds are NOT a guess dressed as a number, and the way you can tell is
+# that the bound has been OBSERVED FIRING: PDF-29 pushed a throwaway branch
+# with one job at `timeout-minutes: 1` running `sleep 120`, recorded the run id
+# and GitHub's own annotation in its Implementation Log, and deleted the
+# branch. A timeout that has never fired is one more control that cannot fail.
+#
+# If you change a value here, change its derivation comment in the same commit
+# -- a derivation that outlives what it derived is worse than none.
 jobs:
   lint:
     name: lint
+    # PDF-29 bound: p95 14.0s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 0.7 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -62,6 +108,9 @@ jobs:
 
   typecheck:
     name: typecheck
+    # PDF-29 bound: p95 16.3s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 0.8 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -74,6 +123,9 @@ jobs:
 
   test:
     name: test
+    # PDF-29 bound: p95 524.0s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 26.2 min, rounded up; 120 matrix legs in the window. Derivation rule above `jobs:`.
+    timeout-minutes: 27
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +153,9 @@ jobs:
 
   engines-present:
     name: engines-present
+    # PDF-29 bound: p95 713.0s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 35.7 min, CAPPED at 30 -- the cap binds, not the 3x rule. Derivation rule above `jobs:`.
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -143,6 +198,9 @@ jobs:
 
   without-engines:
     name: without-engines
+    # PDF-29 bound: p95 495.3s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 24.8 min, rounded up. Derivation rule above `jobs:`.
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -173,6 +231,9 @@ jobs:
 
   sast:
     name: sast
+    # PDF-29 bound: p95 17.3s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 0.9 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -196,6 +257,9 @@ jobs:
 
   vulncheck:
     name: vulncheck
+    # PDF-29 bound: p95 19.7s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 1.0 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -210,6 +274,9 @@ jobs:
 
   secret-scan:
     name: secret-scan
+    # PDF-29 bound: p95 10.0s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 0.5 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       # fetch-depth: 0 is load-bearing here, not cosmetic: the default shallow
@@ -243,6 +310,9 @@ jobs:
 
   license-gate:
     name: license-gate
+    # PDF-29 bound: p95 17.2s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 0.9 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
     # 3.11 per PLAN §7.2 mechanism 1. scripts/licenses.py ALSO pins 3.11 for the
     # environment it measures, so this leg and a developer laptop on 3.14
     # produce a byte-identical inventory.
@@ -283,6 +353,9 @@ jobs:
 
   build:
     name: build
+    # PDF-29 bound: p95 15.6s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
+    # 3x p95 = 0.8 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

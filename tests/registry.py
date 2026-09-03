@@ -1546,13 +1546,89 @@ def _drain_pty(controller_fd: int, sink: bytearray) -> None:
         sink.extend(chunk)
 
 
+def pty_hang_timeout() -> float:
+    """The pty helper's HANG bound -- scaled by the xdist worker count.
+
+    PDF-29, and this is the SAME defect the startup budget has, found by
+    measurement rather than by reading: **a wall-clock number used as a
+    correctness bound is not portable across host load.** Under `-n auto`
+    (`pyproject.toml`'s `addopts`) eight workers share the box, so a pty-driven
+    `decrypt` that finishes in a couple of seconds alone can legitimately take
+    tens of seconds; the flat 30.0 s this defaulted to killed the child with
+    SIGKILL mid-prompt and reported
+    `test_tier_b_the_stdin_tty_axis_never_echoes_a_wrong_password_at_the_prompt`
+    as a leak failure. Reproduced deliberately: eight busy-loop children,
+    loadavg 14.12 on 8 cpus -> `TimeoutExpired ... timed out after 30.0
+    seconds`, returncode -9, with `Password: ` already on stderr.
+
+    This bound exists to stop a HUNG pty read from holding the suite open
+    forever. It is NOT a latency assertion and must never be read as one -- the
+    latency claim lives in exactly one place (`STARTUP_BUDGET_MS`), and even
+    there it abstains rather than flakes. Scaling by the worker count keeps it a
+    hang bound under every configuration: 30 s serial, 240 s at `-n auto` on
+    this 8-cpu host -- still an order of magnitude inside `ci.yml`'s
+    `timeout-minutes`, so a genuine hang is still caught by something.
+    """
+    try:
+        workers = int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1") or "1")
+    except ValueError:  # pragma: no cover - defensive
+        workers = 1
+    return 30.0 * max(1, workers)
+
+
+def _wait_until_the_child_is_reading(
+    controller: int, process: subprocess.Popen[str], bound: float
+) -> None:
+    """Block until the child has posted its `getpass` read, or *bound* elapses.
+
+    PDF-29, and this is a REAL DEFECT that `-n auto` exposed rather than a
+    tuning problem. This function replaces a flat ``time.sleep(0.5)`` whose own
+    comment conceded it was "giving it real wall-clock time rather than assuming
+    the same timing holds" -- i.e. an unstated wall-clock assumption used as a
+    correctness mechanism, which is the same defect the startup budget has and
+    the third instance of it this spec met.
+
+    WHY THE SLEEP WAS NOT MERELY SLOW, IT WAS WRONG. `getpass` disables echo
+    with ``termios.tcsetattr(fd, TCSAFLUSH, ...)``, and **TCSAFLUSH DISCARDS
+    PENDING INPUT**. If the 0.5 s elapses before the child reaches that call --
+    which is exactly what happens when eight xdist workers share the box -- the
+    password we already wrote is flushed away and the child then waits for input
+    that will never arrive. It is a HANG, not a slow test: widening the bound
+    from 30 s to 240 s reproduced the identical failure at 240 s, with
+    ``Password: `` already on the child's stderr. Reproduced deliberately with
+    eight busy-loop children at loadavg 14.12 on 8 cpus.
+
+    THE FIX IS AN OBSERVED EVENT, NOT A LONGER GUESS. The pty's line discipline
+    is shared between controller and follower, so ``tcgetattr(controller)``
+    shows ECHO cleared the instant the child's ``tcsetattr`` lands. Waiting for
+    that bit is waiting for the exact happens-before this write needs, at any
+    host load. The bound remains only so a child that never disables echo (no
+    caller does today -- `pty_stream="stdin"` with `stdin_data` has exactly one
+    call site, the `getpass` arm) degrades to the old behaviour instead of
+    hanging here.
+    """
+    import termios
+    import time
+
+    deadline = time.monotonic() + max(1.0, bound * 0.5)
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return
+        try:
+            if not termios.tcgetattr(controller)[3] & termios.ECHO:
+                return
+        except termios.error:  # pragma: no cover - controller closed under us
+            return
+        time.sleep(0.01)
+
+
 def run_cli_with_pty(
     *args: str,
     pty_stream: str,
     stdin_data: bytes | None = None,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
-    timeout: float = 30.0,
+    timeout: float | None = None,
 ) -> PtyResult:
     """Run the CLI with exactly ONE of ``stdout`` / ``stderr`` / ``stdin``
     attached to a REAL pty (`pty_stream`), the other two ordinary pipes.
@@ -1573,6 +1649,8 @@ def run_cli_with_pty(
     session leader and falls back to reading its own `stdin` (still our pty)
     the same way `getpass.getpass` always has when `/dev/tty` is unavailable.
     """
+    if timeout is None:
+        timeout = pty_hang_timeout()
     if pty_stream not in ("stdout", "stderr", "stdin"):
         raise ValueError(f"pty_stream must be one of stdout/stderr/stdin, got {pty_stream!r}")
 
@@ -1607,20 +1685,7 @@ def run_cli_with_pty(
         drain_thread = threading.Thread(target=_drain_pty, args=(controller, captured), daemon=True)
         drain_thread.start()
     elif stdin_data is not None:
-        # The child needs a moment to exec and reach its own read() (e.g.
-        # `getpass`'s termios setup) before data written to the controller is
-        # visible to it as a *line* the way a real terminal would deliver one.
-        # Writing immediately risks the write landing before the child's
-        # read call is posted; this mirrors the interactive-terminal proof
-        # already shipped (`tests/unit/test_confirm.py`'s own `_answer_on_a_pty`
-        # helper writes right after `Popen`, but that harness's target reads
-        # in a tight loop from process start -- `getpass` does not start
-        # reading until deep inside password resolution, so this function
-        # gives it real wall-clock time rather than assuming the same timing
-        # holds).
-        import time
-
-        time.sleep(0.5)
+        _wait_until_the_child_is_reading(controller, process, timeout)
         os.write(controller, stdin_data)
 
     try:

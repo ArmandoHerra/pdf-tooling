@@ -191,6 +191,10 @@ MAKEFILE_TARGETS = {
     "engines-gate",
     "licenses-check",
     "artifacts-check",
+    # PDF-29: the gate-timing protocol. Deliberately NOT in `ci`'s prerequisite
+    # list -- a gate that measures itself on every run pays for the measurement
+    # on every run, and `--baseline` refuses on a host it cannot verify quiet.
+    "gate-timing",
     "ci",
     "clean",
 }
@@ -1096,7 +1100,64 @@ ENGINE_MODULES = {"pypdf", "pikepdf", "pypdfium2", "reportlab", "pdfplumber", "f
 #: number: a second `250.0` written somewhere else is how two tests start
 #: disagreeing about what the budget is. PDF-01 owns the measurement; this is
 #: only its name.
-STARTUP_BUDGET_MS = 250.0
+#:
+#: PDF-29 RE-BASELINED THIS FROM 250.0, AND THE EVIDENCE IS RIGHT HERE. The rule
+#: applied is Design §6's, mechanically: measure first, then p95 < 225 ms leaves
+#: the constant alone and p95 >= 225 ms re-baselines to p95 x 1.25 rounded up to
+#: the next 25 ms. Nothing about the number was chosen; only the measurement was.
+#:
+#: ----------------------------- THE MEASUREMENT -----------------------------
+#: STATISTIC:    fastest-of-5, 20 independent trials.  THE STATISTIC IS PART OF
+#:               THE NUMBER. A *median under contention* and a *fastest-of-5 at
+#:               low load* are different statistics of the same distribution and
+#:               differ by tens of ms; quoting either as "headroom" without
+#:               naming which one is how this row's own ledger came to hold two
+#:               irreconcilable headroom figures (4.7 ms and ~29 ms).
+#: DATE:         2026-09-03
+#: COMMIT:       0665e64bc88d58b77993521ab3de528b99988959 (tree carrying only
+#:               PDF-29's own scripts/measure_gate.py at measurement time)
+#: HOST:         Linux-7.0.0-30-generic x86_64, 8 cpus; loadavg 1.15 at start /
+#:               1.31 peak; ZERO foreign processes at or above 25% cpu for the
+#:               whole run -- i.e. `quiet: true` by perf/README.md's definition
+#: INTERPRETER:  CPython 3.12.13, resolved through `uv run python` into this
+#:               repository's own `.venv` (never the system `python3`, which
+#:               reports 3.14.4 on this host)
+#: ENGINES:      tesseract AND soffice both present on PATH
+#: BINARY:       .venv/bin/pdftoolkit, `venv-sibling` arm (asserted, not assumed)
+#: DISTRIBUTION: min 219.712 / median 235.791 / p95 247.901 / max 247.990 ms,
+#:               SPREAD 28.278 ms
+#:
+#: WHAT THAT DISTRIBUTION MEANS. Against the old 250.0 budget the p95 left
+#: **2.1 ms of headroom against a 28.3 ms spread, on a host verified quiet**.
+#: A best-of-5 estimator whose dispersion is thirteen times its headroom flakes
+#: BY CONSTRUCTION -- on a quiet host as much as a loaded one -- which is
+#: exactly what the ledger recorded happening to three different agents in one
+#: day, and what reddened `test (3.12, macos-14)` in run 33721445070 at
+#: "fastest --help was 308 ms of 250.0 ms". The old number was not defended by
+#: this measurement; it was refuted by it.
+#:
+#: 247.901 x 1.25 = 309.876 -> rounded up to the next 25 ms = 325.0.
+#:
+#: AND THE RISK THIS CARRIES, STATED. Widening a budget can silence a genuine
+#: startup regression, and the three medians on record (224.7 -> 242.7 -> 243.2)
+#: DO trend upward across the same instrument while verbs were added. That risk
+#: is the reason this block exists rather than a round number, and the reason
+#: PDF-29 also landed a control that CANNOT be widened away: Section 6 of
+#: tests/test_import_boundaries.py pins WHAT `--help` imports, which is
+#: deterministic, load-immune and parallel-safe. A new eager import of a heavy
+#: module reddens there whatever this number says.
+STARTUP_BUDGET_MS = 325.0
+
+#: The venv console script, as a path rather than a fallback chain. C-4: the
+#: three-arm `console_script()` below can resolve a globally installed (possibly
+#: STALE) `pdftoolkit` from PATH, or the `-m` bootstrap, and until PDF-29
+#: nothing asserted which arm a startup measurement had actually used.
+VENV_CONSOLE_SCRIPT = REPO_ROOT / ".venv" / "bin" / "pdftoolkit"
+
+#: `quiet` == loadavg(1m) <= this fraction of the cpu count. The same definition
+#: perf/README.md states and scripts/measure_gate.py enforces, so the test and
+#: the protocol cannot drift into disagreeing about what "quiet" means.
+QUIET_LOAD_FRACTION = 0.25
 
 
 def test_no_engine_library_is_imported_at_module_scope() -> None:
@@ -1112,9 +1173,80 @@ def test_no_engine_library_is_imported_at_module_scope() -> None:
     assert result.returncode == 0, f"engines imported at module scope: {result.stdout.strip()}"
 
 
+def startup_gate_abstention_reason() -> str | None:
+    """Why a wall-clock startup measurement is not admissible here, or None.
+
+    THE PROBLEM THIS SOLVES, NAMED. A wall-clock assertion used as a
+    CORRECTNESS gate on a shared box goes red for reasons unrelated to the code,
+    and `B-098` states the cost exactly: *a control that goes red without a
+    defect costs more than one that stays green, because a phantom red gets
+    chased into a spec.* So this control abstains, with the observed load in the
+    reason, rather than failing -- the product's own house idiom (`PLAN.md`
+    §10.1 rule 5: absent precondition, skip with a reason, never pass) applied
+    to timing for the first time.
+    """
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker:
+        count = os.environ.get("PYTEST_XDIST_WORKER_COUNT", "?")
+        return (
+            f"parallel session: this is xdist worker {worker} of {count}. A WALL-CLOCK "
+            "assertion cannot live in a parallel suite -- under `-n auto` the box is "
+            "saturated by our own workers by construction, so any number measured here "
+            "is about the scheduler, not about the product. This is not a tuning "
+            "problem, it is a contradiction. Re-measure with "
+            "`uv run python scripts/measure_gate.py --target help-startup --baseline`, "
+            "which refuses on a host it cannot verify quiet."
+        )
+    loadavg = os.getloadavg()[0]
+    cpu_count = os.cpu_count() or 1
+    ceiling = QUIET_LOAD_FRACTION * cpu_count
+    if loadavg > ceiling:
+        return (
+            f"host not quiet: loadavg(1m) {loadavg:.2f} against the {ceiling:.2f} ceiling "
+            f"({cpu_count} cpus). Measured at {loadavg:.2f}, this gate's spread exceeds "
+            "its headroom and it would report contention as a product regression."
+        )
+    return None
+
+
 @pytest.mark.e2e
 def test_help_stays_within_the_startup_budget() -> None:
+    """R-13's wall-clock claim -- an OBSERVATION that abstains, not a CI gate.
+
+    READ THIS BEFORE TREATING A GREEN HERE AS EVIDENCE. Under `-n auto` (this
+    project's default since PDF-29) this test SKIPS on every worker, so it does
+    not run in CI at all, and saying so plainly is the point: a control that can
+    silently stop running is the exact class this cycle exists to end. What
+    replaced it in CI is **Section 6 of tests/test_import_boundaries.py**, which
+    pins the import set behind `--help`. Import set is deterministic,
+    load-immune and parallel-safe; wall-clock is none of those. The number is
+    re-measured deliberately, on a verified-quiet host, by
+    `scripts/measure_gate.py --target help-startup --baseline` (`make
+    gate-timing`), and the distribution is recorded beside STARTUP_BUDGET_MS.
+    """
     import time
+
+    reason = startup_gate_abstention_reason()
+    if reason is not None:
+        pytest.skip(reason)
+
+    # C-4, both directions. Measure the project venv's console script BY PATH,
+    # and assert that is also the arm `console_script()` would have chosen -- so
+    # a stale `make install` build on PATH can neither be measured here nor go
+    # unnoticed.
+    if not VENV_CONSOLE_SCRIPT.exists():
+        pytest.skip(
+            f"no console script at {VENV_CONSOLE_SCRIPT}; the remaining arms are a "
+            f"possibly STALE PATH install ({shutil.which('pdftoolkit')}) and the `-m` "
+            "bootstrap, whose startup path differs measurably. Run `uv sync`."
+        )
+    chosen = console_script()
+    assert chosen == [str(VENV_CONSOLE_SCRIPT)], (
+        f"console_script() resolved {chosen!r}, not the project venv's own "
+        f"{str(VENV_CONSOLE_SCRIPT)!r}. A startup number from a different binary is a "
+        "number about a different build -- `make install` leaves a global `pdftoolkit` "
+        "on PATH that may be stale, and the `-m` arm bootstraps differently."
+    )
 
     # R-13 is a claim about the product's real startup latency, not about how
     # this suite happens to be instrumented. Under `make cover`,
@@ -1142,8 +1274,15 @@ def test_help_stays_within_the_startup_budget() -> None:
         timings.append((time.perf_counter() - started) * 1000)
         assert result.returncode == 0
     # Best-of-N rather than the mean, so scheduler noise cannot flake the gate
-    # while a genuine regression still turns it red.
-    assert min(timings) < budget_ms, f"fastest --help was {min(timings):.0f} ms of {budget_ms} ms"
+    # while a genuine regression still turns it red. PDF-29 measured what that
+    # actually buys: over 20 such trials on a verified-quiet host the p95 was
+    # 247.9 ms with a 28.3 ms spread, so at the old 250.0 budget it bought
+    # 2.1 ms. See STARTUP_BUDGET_MS's block for the full distribution.
+    assert min(timings) < budget_ms, (
+        f"fastest --help was {min(timings):.0f} ms of {budget_ms} ms "
+        f"(all five: {[round(value) for value in timings]}), measured on "
+        f"{VENV_CONSOLE_SCRIPT} at loadavg {os.getloadavg()[0]:.2f}"
+    )
 
 
 def test_no_module_under_src_imports_rich() -> None:

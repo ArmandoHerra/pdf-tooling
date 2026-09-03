@@ -325,8 +325,8 @@ parser and the primary `StructureEngine` — is catastrophically slow: a
 single isolated `info` subprocess call measured 0.245s uninstrumented vs
 15.8s instrumented (~65x); the `info`/`doctor`/`cli_contract` band (84
 tests) measured 14.49s vs 544.59s (~37.6x). CI was never affected — the
-same suite ran in ~86s on Python 3.13 in the `engines-present` job — which
-is itself part of the evidence: this is not a fixed per-subprocess coverage
+`engines-present` job on Python 3.13 ran the same work at a small fraction
+of that cost (run 33287428715) — which is itself part of the evidence: this is not a fixed per-subprocess coverage
 tax (`version`/`doctor` calls, which never reach the parser, stay near
 baseline) and not the `.coverage.*` combine step (the single-call isolation
 reproduces the full multiplier with no combine involved).
@@ -348,9 +348,25 @@ line as covered the moment either arm of it executes once, so it reads
 higher for the same code — the 84-test band alone moved from 66.24%
 (branch) to 71.49% (line) under identical tests. `--cov-fail-under=85` is
 unchanged. **Re-measured total: 93.79%, engines present — the floor is
-met**, comfortably above the unchanged 85% threshold. `make cover` (full
-suite, instrumented) now completes in ~77s (was ~571s); `make ci` end to
-end completes in ~80s. Re-enabling branch coverage is a legitimate future
+met**, comfortably above the unchanged 85% threshold. Both targets became
+runnable again.
+
+**This paragraph used to state a wall-clock figure for each of them, and
+that is why there is no figure here now.** `X-109` corrected the original
+number on the record; the paragraph never followed, and a documented figure
+stayed wrong by roughly 6x for weeks while every reader took it as current.
+A bare duration in prose cannot be kept true, so the gate's wall-clock is
+kept as a **measurement with its provenance** instead: run
+`make gate-timing` (`scripts/measure_gate.py`), which records the
+interpreter, host quietness, cache state, engine presence, test count,
+coverage total and commit alongside the number, and appends one line to
+`perf/gate-timings.jsonl`. Read the most recent `quiet: true` record for
+the target you care about. `perf/README.md` states the schema, the
+definition of quiet, and the rule that a `quiet: false` record is an
+observation and never a baseline — and `tests/test_gate_budget.py` reddens
+if a bare duration claim about the gate reappears in this file.
+
+Re-enabling branch coverage is a legitimate future
 follow-up once coverage.py/CPython ship a version combination whose
 `sys.monitoring` core supports branch measurement — see the comment above
 `[tool.coverage.run]` in `pyproject.toml`.
