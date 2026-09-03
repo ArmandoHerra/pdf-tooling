@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pdf-toolkit"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "One safe, permissively-licensed command-line tool for the common PDF chores."
 readme = "README.md"
 requires-python = ">=3.11"
