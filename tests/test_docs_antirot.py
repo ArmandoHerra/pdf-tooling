@@ -1024,6 +1024,29 @@ def history_depth() -> int:
     return int(result.stdout.strip() or 0)
 
 
+def is_shallow_repository() -> bool:
+    """Whether HEAD's checkout is a DELIBERATELY shallow clone.
+
+    `git rev-parse --is-shallow-repository` prints ``"true"``/``"false"`` and
+    exits 0 in both a full and a shallow checkout. A non-zero exit here means
+    the probe itself failed (no `git` on PATH, not a repository at all, ...),
+    which is a DIFFERENT precondition than "shallow" — the caller must not
+    report that as shallow, or it reintroduces the exact silencer this helper
+    exists to remove. A failed probe therefore falls through as "not shallow",
+    leaving `history_depth()` to handle unmeasurability under its own name.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    return result.stdout.strip() == "true"
+
+
 def require_full_history() -> None:
     depth = history_depth()
     if depth < MINIMUM_HISTORY_DEPTH:
@@ -1037,6 +1060,57 @@ def require_full_history() -> None:
 
 def test_the_history_depth_precondition_is_frozen_and_reachable() -> None:
     """A depth minimum that drifted upward would turn every history arm into a
-    silent skip, which is the failure mode the skip exists to avoid."""
+    silent skip, which is the failure mode the skip exists to avoid.
+
+    PDF-30 forward-fix (CI run 33808364031). The predecessor here was
+    ``assert history_depth() >= MINIMUM_HISTORY_DEPTH or history_depth() ==
+    0`` and carried two defects. First, `ci.yml`'s `test` job checks out at
+    the default depth 1 (only `secret-scan` sets `fetch-depth: 0`), so
+    ``history_depth()`` returns 1 there and ``1 >= 72 or 1 == 0`` is False —
+    the arm reddened on CI's own deliberate posture, not a repository defect.
+    Second, and worse, ``history_depth()`` returns 0 ONLY when `git rev-list`
+    itself fails to exit 0 — i.e. the precondition is *unmeasurable*, not
+    *shallow* — so ``or history_depth() == 0`` made the whole assertion PASS
+    whenever the precondition could not be measured at all. That is a second
+    unfailable disjunct, and it violates the exact rule this spec restates in
+    D3/AC13 (X-153: a control that cannot be run must be visible as skipped,
+    never silently passed).
+
+    ``depth >= MINIMUM_HISTORY_DEPTH or depth < MINIMUM_HISTORY_DEPTH`` is
+    FORBIDDEN here — true for every integer, it neuters this exact guard.
+    Adding `fetch-depth: 0` to the `test` job is equally forbidden: PDF-30's
+    own Scope > Out states `ci.yml` (including its checkout depth) is owned
+    by PDF-28/PDF-29, so this arm must instead render three DISTINCT,
+    honestly-labelled outcomes with no disjunction anywhere:
+
+      * a deliberately shallow checkout (`git rev-parse
+        --is-shallow-repository` says so) -> SKIP naming the shallow clone;
+      * an unmeasurable depth (`git rev-list` exited non-zero) -> SKIP naming
+        the measurement failure, never borrowing the word "shallow";
+      * a full clone -> the real assertion, with teeth, against the frozen
+        minimum.
+    """
     assert MINIMUM_HISTORY_DEPTH > 0
-    assert history_depth() >= MINIMUM_HISTORY_DEPTH or history_depth() == 0
+    if is_shallow_repository():
+        pytest.skip(
+            f"{SKIP_SHALLOW_CLONE}: git rev-parse --is-shallow-repository "
+            "reports true, so the depth precondition cannot be checked "
+            "against a checkout that was never given the depth to check. "
+            "This is CI's own `test` job posture (Scope > Out), enforced "
+            "locally instead, by `make docs-gate` and by the qa-sentinel."
+        )
+    depth = history_depth()
+    if depth == 0:
+        pytest.skip(
+            "history depth unmeasurable: git rev-list --count HEAD exited "
+            "non-zero, so the depth precondition could not be measured at "
+            "all. This is NOT a shallow clone — git itself failed to answer "
+            "— and must not be reported as one."
+        )
+    assert depth >= MINIMUM_HISTORY_DEPTH, (
+        f"git rev-list --count HEAD is {depth} in a full (non-shallow, "
+        f"measurable) checkout, below the frozen minimum of "
+        f"{MINIMUM_HISTORY_DEPTH}. The minimum drifted upward without the "
+        "history actually growing to match, which would turn every history "
+        "arm into a silent skip — the failure mode this test exists to catch."
+    )
