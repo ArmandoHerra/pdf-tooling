@@ -567,7 +567,7 @@ def test_the_unregistered_cardinal_residue_does_not_grow(doc: str) -> None:
     listing = "\n".join(f"  {doc}:{line} {token!r} | {text[:90]}" for line, token, text in residue)
     assert len(residue) <= ceiling, (
         f"{doc} carries {len(residue)} unregistered cardinals, above the frozen "
-        f"ceiling of {ceiling} measured at 7afdb1a. A new cardinal claim in a "
+        f"ceiling of {ceiling} measured at 6deebb4. A new cardinal claim in a "
         f"guarded document is derived, gated by `make docs-gate`, or absent — "
         f"there is no fourth option:\n{listing}"
     )
@@ -883,17 +883,29 @@ SHORT_SHA = re.compile(r"\b([0-9a-f]{7,40})\b")
 VERDICT_ARTIFACTS = ("report.md", "REPRO.txt", "VERDICT.txt", "RUN-SUMMARY.txt")
 
 
-def known_issues_body() -> str:
-    text = read("README.md")
-    assert KNOWN_ISSUES_HEADING in text, "README.md carries no `## Known issues` section"
+def _known_issues_body_of(text: str) -> str:
+    """Pure text-level extraction, AC23. Used both by `known_issues_body()`
+    below (the real, populated README.md) and directly by
+    `test_the_known_issues_section_survives_the_vacuous_rendering` against a
+    synthetic `tmp_path` document, so the vacuous rendering is checked with
+    the exact slicing the populated state is, rather than a re-derived
+    approximation of it."""
+    assert KNOWN_ISSUES_HEADING in text, "document carries no `## Known issues` section"
     after = text.split(KNOWN_ISSUES_HEADING, 1)[1]
     return after.split("\n## ", 1)[0]
 
 
+def known_issues_body() -> str:
+    return _known_issues_body_of(read("README.md"))
+
+
 def test_the_known_issues_section_exists_and_points_by_path() -> None:
-    """AC21/AC23. The heading is asserted in BOTH states — a section that
-    vanishes when it is momentarily vacuous silently removes the affordance it
-    exists for (cycle 1's `planned.length > 0` ruling)."""
+    """AC21/AC23. The populated state: the real, current README.md's `##
+    Known issues` section names both planning-tree paths, discloses they are
+    not part of this distribution, and carries a sweep id and a short sha.
+    The vacuous state — the heading surviving when nothing is open — is a
+    different rendering of the same section, covered separately by
+    `test_the_known_issues_section_survives_the_vacuous_rendering` below."""
     body = known_issues_body()
     assert "BACKLOG.md" in body
     assert "qa/FINDINGS-LEDGER.md" in body
@@ -923,6 +935,46 @@ def test_the_no_count_criterion_can_fail() -> None:
     poisoned = known_issues_body() + "\n\nThere are 27 open findings.\n"
     stripped = SHORT_SHA.sub(" ", SWEEP_ID.sub(" ", poisoned))
     assert re.findall(r"[0-9]+", stripped) == ["27"]
+
+
+def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path) -> None:
+    """AC23. `README.md:162` promises that if a sweep ever records nothing
+    open, the section still stands and reads a no-open-findings sentence
+    rather than being deleted (cycle 1's `planned.length > 0` ruling, applied
+    here). Prose is not executed, so this builds that second rendering on a
+    synthetic `tmp_path` document — the real README.md is never written —
+    and runs it through the exact same `_known_issues_body_of` slicing the
+    populated state above uses, so the heading surviving and the section
+    still being found are both asserted mechanically rather than trusted."""
+    vacuous = (
+        f"{KNOWN_ISSUES_HEADING}\n\n"
+        "Open defects and planned work are recorded, per finding, in the "
+        "maintainer's planning tree:\n\n"
+        "- `ai_plans/pdf-toolkit/BACKLOG.md` — the groomed intake list.\n"
+        "- `ai_plans/pdf-toolkit/qa/FINDINGS-LEDGER.md` — every finding a QA "
+        "sweep has raised, with its state and its evidence.\n\n"
+        "**Those artifacts live in the maintainer's planning repository and "
+        "are not part of this distribution.**\n\n"
+        "no open findings are recorded as of sweep `2026-09-03_113318` "
+        "(`7afdb1a`)\n\n"
+        "## License\n\n"
+        "Apache-2.0 — see `LICENSE` and `NOTICE`.\n"
+    )
+    scratch = tmp_path / "README.md"
+    scratch.write_text(vacuous)
+
+    assert KNOWN_ISSUES_HEADING in vacuous, "the heading must survive the vacuous rendering"
+    body = _known_issues_body_of(scratch.read_text())
+    assert "no open findings are recorded as of sweep" in body, (
+        "the section must still be found once it is vacuous, not merely present as prose"
+    )
+    assert "not part of this distribution" in body
+
+    # AC21's digit-grep discipline binds this arm too (B-104): strip the
+    # sweep-id and short-sha tokens the vacuous sentence is allowed to carry,
+    # then no digit may survive — `grep -o … | wc -l`, never `grep -c`.
+    stripped = SHORT_SHA.sub(" ", SWEEP_ID.sub(" ", body))
+    assert re.findall(r"[0-9]+", stripped) == []
 
 
 def test_the_named_sweep_resolves_to_a_readable_verdict() -> None:
