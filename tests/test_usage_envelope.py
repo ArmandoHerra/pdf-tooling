@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import subprocess
 import sys
@@ -49,7 +50,15 @@ from pdf_toolkit.cli.common import (
     GLOBAL_OPTIONS,
     REFUSED_PASSWORD_FLAGS,
 )
-from pdf_toolkit.cli.exit_codes import AUTH, FAILURE, NO_INPUT, OK, REFUSED, USAGE
+from pdf_toolkit.cli.exit_codes import (
+    AUTH,
+    ENGINE_MISSING,
+    FAILURE,
+    NO_INPUT,
+    OK,
+    REFUSED,
+    USAGE,
+)
 from pdf_toolkit.cli.main import PROG_NAME, app
 from pdf_toolkit.output import OutputFormat
 from registry import REPO_ROOT, discover_groups, discover_verbs, run_cli, run_cli_with_pty
@@ -166,38 +175,128 @@ def error_of(stdout: str) -> dict[str, Any]:
 # codes ride the return value, and `test_ac5_the_planted_defect_zeroes_exactly_
 # the_return_signalled_codes` asserts that set rather than assuming it — so a
 # later refactor that moves an exit onto the return path is a red here.
+#
+# A SECOND CORRECTION (2026-09-03), AND IT IS THE ONE THIS BLOCK ITSELF GOT
+# WRONG. `RETURN_SIGNALLED_CODES` shipped as `(FAILURE, NO_INPUT, AUTH)` under a
+# docstring calling that "the non-zero codes THIS PRODUCT signals through
+# `typer.Exit(...)`". It is not the product's set. `cli/cmd_doctor.py` ends
+# `raise typer.Exit(ENGINE_MISSING)` whenever `--strict` finds a port
+# unavailable, so **3 rides the return value too** and the §D3 hazard zeroes it
+# exactly as it zeroes 1, 4 and 6. The exclusion was DISCLOSED rather than
+# concealed — `REACHABLE_CODES` named it and pointed at `tests/test_doctor.py`
+# — but a disclosed exclusion under a docstring that generalises to the whole
+# product is still a docstring asserting something false. It was checkable with
+# this module's OWN plant, and it was not checked, because the matrix reached no
+# invocation that exits 3.
+#
+# Both tuples now name 3 and the matrix carries a `doctor --strict` row.
+# Measured: `PATH=<an empty dir> pdftoolkit doctor --strict` is **3** through
+# the real `main()` and **0** through the plant, on a host where both system
+# binaries ARE installed — so it is the PATH scrub that produces the 3, not the
+# host. That is the whole hermeticity argument, and it is why the scrub is not
+# optional: without it this row reads 0 here and 3 on a bare container.
 # --------------------------------------------------------------------------- #
 
 
 @dataclass(frozen=True, slots=True)
 class ExitCase:
-    """One invocation, its expected exit code, and why it is in the matrix."""
+    """One invocation, its expected exit code, and why it is in the matrix.
+
+    `env_overlay` and `cwd` exist for ONE row. Every other exit code in this
+    contract is a property of the command line; `ENGINE_MISSING` is a property
+    of the MACHINE, and a row that inherits this host's environment would read 0
+    where tesseract and soffice are installed and 3 where they are not. Both
+    fields are applied to BOTH runs of a case — the real CLI and the planted
+    defect — because a plant handed a different environment measures a different
+    invocation.
+    """
 
     label: str
     code: int
     why: str
+    #: A hashable overlay onto `os.environ`, empty for every row but one.
+    env_overlay: tuple[tuple[str, str], ...] = ()
+    #: The working directory, or `None` for `run_cli`'s default of `REPO_ROOT`.
+    cwd: Path | None = None
 
 
-#: Every exit code this matrix reaches. `ENGINE_MISSING` (3) is deliberately
-#: absent and named so its absence cannot read as an oversight: it depends on a
-#: system binary being unavailable, which is an environment property rather
-#: than an invocation, and `tests/test_doctor.py` owns that axis.
-REACHABLE_CODES: Final[tuple[int, ...]] = (OK, FAILURE, USAGE, NO_INPUT, REFUSED, AUTH)
+def _env_for(case: ExitCase) -> dict[str, str] | None:
+    """The case's environment, or `None` to inherit this process's.
 
-#: The non-zero codes this product signals through `typer.Exit(...)` — i.e. as
-#: the RETURN VALUE of `app(..., standalone_mode=False)` — and therefore the
-#: exact codes the §D3 hazard can silently zero. Measured, not assumed: the
-#: control below re-derives this set from the planted defect's own behaviour
-#: and fails if it has moved.
-RETURN_SIGNALLED_CODES: Final[tuple[int, ...]] = (FAILURE, NO_INPUT, AUTH)
+    `None` and not `dict(os.environ)`: the twenty rows that do not scrub
+    anything must keep riding the default that every other `run_cli` caller in
+    this suite rides, so this remediation cannot change what they measure.
+    """
+    if not case.env_overlay:
+        return None
+    return {**os.environ, **dict(case.env_overlay)}
+
+
+#: Every exit code this matrix reaches — now every code `cli/exit_codes.py`
+#: defines, `ENGINE_MISSING` (3) included. 3 was excluded until 2026-09-03 on
+#: the argument that it "depends on a system binary being unavailable, which is
+#: an environment property rather than an invocation". The premise was right and
+#: the conclusion was wrong: an environment is something a test can CONSTRUCT,
+#: and the `doctor --strict` row below constructs it (`ExitCase.env_overlay`).
+#:
+#: WHO OWNS CODE 3, stated once so two docstrings cannot drift apart:
+#: `tests/test_doctor.py` owns 3 as a PRODUCT behaviour — the six-row report,
+#: the hints, `--strict` 3 vs plain 0 (`:222`, `:236`). This module owns 3 on
+#: exactly one axis, the TERMINAL SEAM: that `standalone_mode=False` does not
+#: swallow it. Neither is a substitute for the other, and `tests/test_doctor.py`
+#: is not weakened by this row — it is what proves 3 is reachable at all.
+REACHABLE_CODES: Final[tuple[int, ...]] = (
+    OK,
+    FAILURE,
+    USAGE,
+    ENGINE_MISSING,
+    NO_INPUT,
+    REFUSED,
+    AUTH,
+)
+
+#: The non-zero codes THIS MATRIX'S INVOCATIONS signal through `typer.Exit(...)`
+#: — i.e. as the RETURN VALUE of `app(..., standalone_mode=False)` — and
+#: therefore the codes the §D3 hazard silently zeroes on them. Measured, not
+#: assumed: the control below re-derives this set from the planted defect's own
+#: behaviour and fails if it has moved.
+#:
+#: SCOPED TO THE MATRIX ON PURPOSE, and this is the correction of 2026-09-03.
+#: The earlier wording claimed these were the codes "this product" signals by
+#: return, which no matrix can establish: `typer.Exit(result.exit_code)` appears
+#: in 26 verb modules, and `OperationResult.exit_code` is a field, so USAGE or
+#: REFUSED reaching the return path on some invocation NOT made here is possible
+#: and unmeasured. What is measured, and what the control enforces, is narrower
+#: and still the thing that matters: on these twenty-one invocations the split
+#: between raised and returned is pinned, so a refactor moving an exit across it
+#: is a red rather than a silent widening of a `SystemExit(OK)` blast radius.
+RETURN_SIGNALLED_CODES: Final[tuple[int, ...]] = (FAILURE, ENGINE_MISSING, NO_INPUT, AUTH)
 
 
 def exit_matrix(workspace: Path, good: Path, encrypted: Path) -> list[tuple[ExitCase, list[str]]]:
-    """The matrix, built against real files so every row is actually reachable."""
+    """The matrix, built against real files so every row is actually reachable.
+
+    A NOTE ON THE `why` STRINGS, corrected 2026-09-03 alongside this module's
+    return-signalled docstring and by the same evidence. Three rows read "a
+    SECOND/THIRD verb on the returned-code path"; the plant below reports them
+    among the cases that KEPT their code, so `text` and `meta get` reach 1, 4
+    and 6 by RAISING, not by returning. Only `info` returns them, because it is
+    the batch verb and ends `typer.Exit(run_exit_code(outcomes))`. The rows are
+    still worth having — a second verb reaching the same code is what stops the
+    raised/returned split being read off one verb — but they were describing a
+    mechanism they do not use, next to a docstring being fixed for exactly that.
+    """
     text_source = workspace / "source.txt"
     text_source.write_text("hello from the exit-code matrix\n", encoding="utf-8")
     occupied = workspace / "occupied.pdf"
     occupied.write_bytes(b"not a pdf, but it exists")
+    # A directory with nothing in it, used as the whole of `PATH` for the
+    # `doctor --strict` row. `tests/test_doctor.py`'s own idiom, and correct
+    # for the same reason: `run_cli` and the plant both spawn through an
+    # ABSOLUTE interpreter/console-script path, so scrubbing `PATH` hides the
+    # system binaries the port registry probes for without hiding the CLI.
+    empty_path = workspace / "an-empty-PATH"
+    empty_path.mkdir(exist_ok=True)
     return [
         (ExitCase("version", OK, "a verb that succeeds"), ["version"]),
         (ExitCase("--version", OK, "an eager flag that exits before any verb body"), ["--version"]),
@@ -209,7 +308,7 @@ def exit_matrix(workspace: Path, good: Path, encrypted: Path) -> list[tuple[Exit
             ["info", str(MALFORMED)],
         ),
         (
-            ExitCase("text <malformed>", FAILURE, "a SECOND verb on the returned-code path"),
+            ExitCase("text <malformed>", FAILURE, "a SECOND verb reaching 1 — by RAISING"),
             ["text", str(MALFORMED)],
         ),
         (
@@ -242,7 +341,7 @@ def exit_matrix(workspace: Path, good: Path, encrypted: Path) -> list[tuple[Exit
             ["info", str(workspace / "does-not-exist.pdf")],
         ),
         (
-            ExitCase("text <missing>", NO_INPUT, "a SECOND verb on the returned-code path"),
+            ExitCase("text <missing>", NO_INPUT, "a SECOND verb reaching 4 — by RAISING"),
             ["text", str(workspace / "does-not-exist.pdf")],
         ),
         (
@@ -254,11 +353,29 @@ def exit_matrix(workspace: Path, good: Path, encrypted: Path) -> list[tuple[Exit
             ["merge", str(good), str(good), "-O", str(occupied)],
         ),
         (
+            ExitCase(
+                "doctor --strict (PATH scrubbed)",
+                ENGINE_MISSING,
+                "the code this matrix used to exclude, and the reason the exclusion was "
+                "wrong: `cmd_doctor.py` raises `typer.Exit(ENGINE_MISSING)`, so 3 rides "
+                "the RETURN VALUE and the §D3 hazard zeroes it",
+                env_overlay=(("PATH", str(empty_path)),),
+                # The workspace, not `REPO_ROOT`: `--strict` also `rglob`s the
+                # working directory for stray toolkit temp files, which costs
+                # ~0.85 s over this repo (`.venv`, `.git`, `node_modules`) on
+                # each of this row's two runs, and walks a tree other xdist
+                # workers are live in. Strays never change the exit code, so
+                # nothing is lost by pointing it somewhere small and ours.
+                cwd=workspace,
+            ),
+            ["doctor", "--strict"],
+        ),
+        (
             ExitCase("info <encrypted>", AUTH, "password required, not supplied (returned)"),
             ["info", str(encrypted)],
         ),
         (
-            ExitCase("meta get <encrypted>", AUTH, "a THIRD verb on the returned-code path"),
+            ExitCase("meta get <encrypted>", AUTH, "a THIRD verb reaching 6 — by RAISING"),
             ["meta get", str(encrypted)],
         ),
     ]
@@ -292,13 +409,16 @@ raise SystemExit(OK)  # THE MUTATION: the return value is discarded.
 """
 
 
-def _run_planted_wrong_main(argv: list[str]) -> int:
+def _run_planted_wrong_main(
+    argv: list[str], *, env: dict[str, str] | None = None, cwd: Path | None = None
+) -> int:
     result = subprocess.run(  # noqa: S603 - fixed argv, never a shell
         [sys.executable, "-c", _PLANTED_WRONG_MAIN, *argv],
         capture_output=True,
         text=True,
         check=False,
-        cwd=REPO_ROOT,
+        cwd=str(cwd) if cwd is not None else REPO_ROOT,
+        env=env,
     )
     return result.returncode
 
@@ -328,7 +448,7 @@ def test_ac5_every_reachable_exit_code_survives_the_terminal_seam(
     encrypted = Path(corpus.path("encrypted_aes256"))
     failures: list[str] = []
     for case, argv in exit_matrix(workspace, good_pdf, encrypted):
-        result = run_cli(*argv)
+        result = run_cli(*argv, env=_env_for(case), cwd=case.cwd)
         if result.returncode != case.code:
             failures.append(
                 f"{case.label}: expected {case.code}, got {result.returncode} "
@@ -377,7 +497,7 @@ def test_ac5_the_planted_defect_zeroes_exactly_the_return_signalled_codes(
     for case, argv in exit_matrix(workspace, good_pdf, encrypted):
         if case.code == OK:
             continue
-        planted = _run_planted_wrong_main(argv)
+        planted = _run_planted_wrong_main(argv, env=_env_for(case), cwd=case.cwd)
         (zeroed if planted == OK else survived).setdefault(case.code, []).append(case.label)
 
     assert set(zeroed) == set(RETURN_SIGNALLED_CODES), (
