@@ -27,11 +27,11 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.ops.metadata import meta_set_run
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["meta_set_command"]
 
@@ -71,16 +71,13 @@ overwrites the input, with a .bak sidecar first. One of the two is required.
 
 def _reject_missing_sources(sources: list[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 @global_options(consumes=("--output", "--in-place"))
 def meta_set_command(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Argument(metavar="PDF", help="The PDF to tag.")],
+    source: Annotated[Path, operand_argument(metavar="PDF", help="The PDF to tag.")],
     title: Annotated[
         str | None, typer.Option("--title", help="Set /Title (and dc:title, if XMP exists).")
     ] = None,

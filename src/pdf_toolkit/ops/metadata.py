@@ -37,11 +37,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
 
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, MetadataReport, OperationResult
 from pdf_toolkit.ports.structure import MetadataFacts, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_toolkit.safety.paths import classify_operand, read_source_bytes
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -87,10 +88,7 @@ CLEARABLE_FIELDS: Final[frozenset[str]] = frozenset({"producer"})
 def reject_missing_sources(sources: Sequence[Path]) -> None:
     """`PLAN.md` §10's own contract, shared by every cmd module."""
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 # --------------------------------------------------------------------------- #
@@ -232,7 +230,7 @@ def meta_set_run(
     clears = ["producer"] if clear_producer else []
 
     outcome = engine.write_metadata(
-        source.read_bytes(), sets=sets, clears=clears, clear_all=clear_all
+        read_source_bytes(source), sets=sets, clears=clears, clear_all=clear_all
     )
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:

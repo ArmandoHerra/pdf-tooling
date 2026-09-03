@@ -31,7 +31,7 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.pages import ROTATION_ANGLES, reject_missing_sources, rotate_run
 from pdf_toolkit.output import emit_result
@@ -81,7 +81,7 @@ def rotate_command(
     ctx: typer.Context,
     sources: Annotated[
         list[Path],
-        typer.Argument(metavar="PDF...", help="One or more PDFs to rotate pages in."),
+        operand_argument(metavar="PDF...", help="One or more PDFs to rotate pages in."),
     ],
     pages: Annotated[
         str | None,

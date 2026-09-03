@@ -27,11 +27,11 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.ops.optimize import repair_run
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["repair_command"]
 
@@ -57,16 +57,13 @@ nothing.
 
 def _reject_missing_sources(sources: list[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 @global_options(consumes=("--output", "--in-place"))
 def repair_command(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Argument(metavar="PDF", help="The PDF to repair.")],
+    source: Annotated[Path, operand_argument(metavar="PDF", help="The PDF to repair.")],
     report: Annotated[
         bool,
         typer.Option("--report", help="Widen the report with the structural delta."),

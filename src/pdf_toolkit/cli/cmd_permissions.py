@@ -25,11 +25,11 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
-from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.ops.crypto import PasswordSource, permissions_run
 from pdf_toolkit.output import emit_result
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["permissions_command"]
 
@@ -65,16 +65,13 @@ on a terminal you are prompted.
 
 def _reject_missing_sources(sources: list[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 @global_options(consumes=())
 def permissions_command(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Argument(metavar="PDF", help="The PDF to report on.")],
+    source: Annotated[Path, operand_argument(metavar="PDF", help="The PDF to report on.")],
 ) -> None:
     """Report a PDF's encryption algorithm and its advisory permission bits."""
     config = get_config(ctx)

@@ -33,7 +33,7 @@ from pdf_toolkit.ops.pagerange import PageRangeError, parse
 from pdf_toolkit.ports.structure import OpenStructureDocument, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
 from pdf_toolkit.safety.naming import render_name, used_fields
-from pdf_toolkit.safety.paths import check_output_collisions
+from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = ["MODES", "default_name_template", "split_document"]
@@ -171,10 +171,7 @@ def split_document(
     *source* on every row, ``output`` the part path, ``message`` the
     resolved extent ("pages 1-10").
     """
-    if not source.exists():
-        raise NoInputError("no such file", path=str(source))
-    if source.is_dir():
-        raise UsageError("expected a PDF file, not a directory", path=str(source))
+    classify_operand(source)
 
     template = name_template if name_template is not None else default_name_template(mode)
     fields = used_fields(template)

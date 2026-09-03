@@ -37,8 +37,8 @@ from typing import Annotated, Final
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.ocr import (
     DEFAULT_DPI,
     DEFAULT_LANG,
@@ -49,6 +49,7 @@ from pdf_toolkit.ops.ocr import (
 )
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["ocr_command"]
 
@@ -85,10 +86,7 @@ def _validate_psm(psm: int) -> None:
 
 def _reject_missing_sources(sources: list[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 _HELP = """Add an invisible text layer to scanned pages. Pixels are never
@@ -129,7 +127,7 @@ def ocr_command(
     ctx: typer.Context,
     sources: Annotated[
         list[Path],
-        typer.Argument(metavar="PDF...", help="One or more PDFs to OCR."),
+        operand_argument(metavar="PDF...", help="One or more PDFs to OCR."),
     ],
     lang: Annotated[
         str,

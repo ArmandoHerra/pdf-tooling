@@ -27,8 +27,8 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.compose import (
     BASE14_FONTS,
     DEFAULT_CREATE_MARGIN,
@@ -42,6 +42,7 @@ from pdf_toolkit.ops.compose import (
     resolve_create_output,
 )
 from pdf_toolkit.output import emit_result
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["STDIN_OPERAND", "create_command"]
 
@@ -100,7 +101,7 @@ def create_command(
     ctx: typer.Context,
     source: Annotated[
         Path,
-        typer.Argument(
+        operand_argument(
             metavar="TEXT",
             exists=False,
             help="A UTF-8 text file, or '-' for standard input.",
@@ -131,10 +132,8 @@ def create_command(
     config = get_config(ctx)
     from_stdin = source == STDIN_OPERAND
 
-    if not from_stdin and not source.exists():
-        raise NoInputError("no such file", path=str(source))
-    if not from_stdin and source.is_dir():
-        raise UsageError("expected a text file, not a directory", path=str(source))
+    if not from_stdin:
+        classify_operand(source, directory_message="expected a text file, not a directory")
 
     page = parse_page_size(page_size)
     margin_pt = parse_length(margin, flag="--margin")

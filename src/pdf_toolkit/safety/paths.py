@@ -11,6 +11,15 @@ two*: the guard fired once where it should have fired twice.
 So identity is decided by :func:`canonical` plus, when the path exists,
 ``(st_dev, st_ino)`` — two names for one inode are one destination.
 
+**Operand classification lives here too** (PDF-26 §D5), for the same reason:
+"can this run read this file?" is a filesystem question about a path, decided by
+``os.access`` and ``stat``, and it was being answered twenty-three times over in
+twenty-three verb modules with the readability rung missing from every one of
+them. :func:`classify_operand` is the single owner of the **precedence** between
+missing, directory, non-regular and unreadable — an ordering slip there is
+silent and total, because ``os.access`` on a path that does not exist returns
+``False`` and would turn every verb's exit 4 into an exit 1.
+
 **Canonical form is a comparison key and nothing else.** Every message, every
 ``ItemResult.output`` and every structured payload echoes the path *as the user
 wrote it*. Canonicalizing what is printed would turn a relative path the user
@@ -18,8 +27,9 @@ typed into an absolute one they never saw, and would rewrite goldens for no
 gain; that is why each helper here takes the as-written spelling for the message
 and derives the key privately.
 
-Nothing in this module mutates the filesystem. ``os.access`` and ``stat`` are
-reads; the one module allowed to write is ``atomic.py``.
+Nothing in this module mutates the filesystem. ``os.access``, ``stat`` and
+:func:`read_source_bytes`' one ``read_bytes`` are reads; the one module allowed
+to write is ``atomic.py``.
 """
 
 from __future__ import annotations
@@ -27,26 +37,39 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Final
 
 from pdf_toolkit.errors import (
     DestinationUnwritableError,
+    FailureError,
+    NoInputError,
     OutputCollisionError,
     OutputEscapesDirError,
+    PdfToolkitError,
+    SourceUnreadableError,
     TargetExistsError,
+    UsageError,
 )
 
 __all__ = [
+    "DEFAULT_DIRECTORY_MESSAGE",
+    "MISSING_MESSAGE",
+    "UNREADABLE_MESSAGE",
     "canonical",
     "check_output_collisions",
+    "classify_operand",
     "declared_device",
     "ensure_destination_writable",
     "ensure_no_clobber",
     "ensure_within",
     "identity_key",
     "nearest_existing_ancestor",
+    "read_source_bytes",
     "resolved_device",
     "same_destination",
+    "source_read_error",
     "target_exists",
+    "unreadable_source_error",
 ]
 
 
@@ -257,3 +280,149 @@ def nearest_existing_ancestor(path: Path | str) -> Path:
         except OSError:
             continue
     return current.parents[-1]
+
+
+# --------------------------------------------------------------------------- #
+# PDF-26 §D5 — operand classification, and the §D3 read-seam belt behind it.
+# --------------------------------------------------------------------------- #
+
+#: The message :func:`classify_operand` raises for a path that does not exist.
+#: Shared verbatim with the twenty-three per-verb ladders this function
+#: replaced, so `C5`'s exit-4 contract keeps the wording it always had.
+MISSING_MESSAGE: Final[str] = "no such file"
+
+#: The default directory refusal. Parameterised rather than fixed because three
+#: verbs legitimately name a different noun (`convert` takes any file, `compose`
+#: an image, `create` a text file) and one adds the globbing hint.
+DEFAULT_DIRECTORY_MESSAGE: Final[str] = "expected a PDF file, not a directory"
+
+#: The one wording for the rung this spec adds. Deliberately says what the
+#: filesystem said and nothing more: it is not a permissions tutorial, and it
+#: never suggests a `chmod` -- this product does not change a mode bit.
+#:
+#: **It deliberately avoids the framework's own phrase, "is not readable".**
+#: That string is the signature of the parse-time veto this spec removed, and
+#: `C18` asserts its ABSENCE from every shape of every verb's output as the
+#: proof that the refusal was deleted rather than renumbered. A tool message
+#: containing the same substring would make that assertion unable to fail.
+UNREADABLE_MESSAGE: Final[str] = "exists but cannot be read"
+
+
+def classify_operand(
+    path: Path | str,
+    *,
+    as_written: Path | str | None = None,
+    missing_message: str = MISSING_MESSAGE,
+    directory_message: str = DEFAULT_DIRECTORY_MESSAGE,
+) -> None:
+    """Resolve one **input operand** into exactly one outcome, in fixed order.
+
+    The ladder, and the exit code each rung owns::
+
+        1. does not exist        -> NoInputError           4
+        2. is a directory        -> UsageError             2
+        3. is not a regular file -> UsageError             2
+        4. exists, unreadable    -> SourceUnreadableError  1
+        5. otherwise             -> return
+
+    **The order is the contract, not a tidiness preference.** Rung 4 must run
+    after rung 1 or every missing input becomes exit 1 rather than exit 4:
+    ``os.access`` answers ``False`` for a path that is not there, so getting
+    this backwards fails silently and everywhere at once.
+
+    Rung 4 is what PDF-26 adds. Rungs 1-3 are the ladder twenty-three verb
+    modules each carried inline; they are unchanged in behaviour and in wording,
+    and they live here now so rung 4 could not be added to twenty-two of them.
+
+    **Where a caller puts this call is a precedence decision.** For a verb whose
+    batch survives a bad input (``info``) it belongs on the per-item path,
+    inside the loop's own ``except PdfToolkitError`` — putting it in a pre-flight
+    that aborts the whole batch would defeat the survival half of this fix. For a
+    verb that fails closed (``merge``, and every plan-then-write verb) the
+    pre-flight validator is exactly where its own ladder already lives.
+
+    Args:
+        path: The operand, as a real filesystem path.
+        as_written: The spelling to echo in the message and ``path=`` field,
+            when it differs from *path* (``merge``'s ``path:range`` operand).
+        missing_message: Rung 1's message.
+        directory_message: Rung 2's message.
+
+    Raises:
+        NoInputError: Exit 4 — the path does not exist.
+        UsageError: Exit 2 — a directory, or not a regular file.
+        SourceUnreadableError: Exit 1 — it exists and cannot be read.
+    """
+    shown = str(as_written if as_written is not None else path)
+    candidate = Path(path)
+    if not candidate.exists():
+        raise NoInputError(missing_message, path=shown)
+    if candidate.is_dir():
+        raise UsageError(directory_message, path=shown)
+    if not candidate.is_file():
+        raise UsageError("expected a regular file", path=shown)
+    unreadable = unreadable_source_error(candidate, as_written=shown)
+    if unreadable is not None:
+        raise unreadable
+
+
+def unreadable_source_error(
+    path: Path | str,
+    *,
+    as_written: Path | str | None = None,
+) -> SourceUnreadableError | None:
+    """The coded error for *path* being an unreadable regular file, else ``None``.
+
+    The predicate rungs 4 and §D3 share, so the classifier and the read-seam
+    belt cannot come to disagree about what "unreadable" means. Returns rather
+    than raises because the belt's callers need to ask the question *about an
+    exception they are already holding* and re-raise their own error when the
+    answer is no.
+    """
+    candidate = Path(path)
+    if candidate.is_file() and not os.access(candidate, os.R_OK):
+        shown = str(as_written if as_written is not None else path)
+        return SourceUnreadableError(UNREADABLE_MESSAGE, path=shown)
+    return None
+
+
+def source_read_error(
+    path: Path | str,
+    error: OSError,
+    *,
+    as_written: Path | str | None = None,
+) -> PdfToolkitError:
+    """Map an ``OSError`` raised while READING *path* onto a coded error (§D3).
+
+    The belt to :func:`classify_operand`'s braces. That function's ``os.access``
+    is a **TOCTOU** check by construction: a file readable when the operand was
+    classified and unreadable when the engine opened it must still exit 1 with a
+    payload rather than a traceback, and this is what makes that true rather
+    than probable.
+
+    The path's own accessibility is asked first, because that is the classification
+    the caller wants and ``errno`` alone does not always carry it (``EACCES`` can
+    also come from a parent directory). Anything else stays a plain
+    :class:`FailureError`, which is the code every one of these seams already
+    returned for an unreadable file — this refines the *class and message*, never
+    the integer.
+    """
+    shown = str(as_written if as_written is not None else path)
+    unreadable = unreadable_source_error(path, as_written=shown)
+    if unreadable is not None:
+        return unreadable
+    if isinstance(error, FileNotFoundError):
+        return NoInputError(MISSING_MESSAGE, path=shown)
+    return FailureError(f"could not read PDF: {error}", path=shown)
+
+
+def read_source_bytes(path: Path | str, *, as_written: Path | str | None = None) -> bytes:
+    """*path*'s bytes, with an accessibility failure mapped to a coded error.
+
+    The one-line form of the §D3 belt for the ``source.read_bytes()`` seams in
+    ``ops/``. A read, like every other call in this module.
+    """
+    try:
+        return Path(path).read_bytes()
+    except OSError as error:
+        raise source_read_error(path, error, as_written=as_written) from error

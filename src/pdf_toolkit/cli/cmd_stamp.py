@@ -21,11 +21,12 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.overlay import DEFAULT_FROM_PAGE, DEFAULT_POSITION, stamp_run
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["stamp_command"]
 
@@ -65,19 +66,25 @@ DESTINATIONS. -O writes one file; --in-place overwrites the input, with a
 
 def _reject_missing_sources(sources: list[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 @global_options(consumes=("--output", "--in-place"))
 def stamp_command(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Argument(metavar="PDF", help="The PDF to stamp.")],
+    source: Annotated[Path, operand_argument(metavar="PDF", help="The PDF to stamp.")],
     from_: Annotated[
         Path | None,
-        typer.Option("--from", help="The PDF whose page becomes the stamp layer. Required."),
+        typer.Option(
+            "--from",
+            help="The PDF whose page becomes the stamp layer. Required.",
+            # PDF-26 §D2/E6: `--from` is an INPUT that happens to be spelled as
+            # an option, so it drops the framework's readability veto with the
+            # twenty-four positional operands rather than with the two write
+            # destinations. `ops/overlay.py::_validate_from_path` is the ladder
+            # that answers it, and it now carries the unreadable rung.
+            readable=False,
+        ),
     ] = None,
     from_page: Annotated[
         int,

@@ -15,11 +15,18 @@ Malformed / corrupt / unparseable PDF         1
 Nonexistent input path                        4
 Unknown flag                                  2
 Directory operand                             2
+Existing but unreadable input                 1
 User password required, none supplied         6
 Several inputs, at least one failed           1
 =========================================  ====
 
 The malformed-PDF **1** is the one the repair work's acceptance signal consumes.
+The unreadable-input **1** is PDF-26's, and it is the row that was MISSING: an
+operand that exists and cannot be read is an operation that ran and failed, not
+a mistyped command line, and it exited 2 on every verb until then. Every row
+above is now driven through the CLI by `tests/test_info.py`, parsed out of this
+table rather than transcribed from it, so a row cannot claim a code nothing
+measures.
 The batch row is ``PLAN.md`` §5.4's rule — *a failing input is recorded, the run
 continues, and the run exits 1 at the end with a per-input status* — so a
 multi-input run reports ``1`` and the per-item codes stay in the payload. A
@@ -48,7 +55,7 @@ from typing import Annotated, Any
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.exit_codes import FAILURE, OK
 from pdf_toolkit.ops.inspect import InspectionOutcome, inspect_paths, validate_operands
 from pdf_toolkit.output import OutputFormat, render_payload
@@ -139,7 +146,7 @@ def info_command(
     ctx: typer.Context,
     paths: Annotated[
         list[Path],
-        typer.Argument(metavar="PDF...", help="One or more PDF files."),
+        operand_argument(metavar="PDF...", help="One or more PDF files."),
     ],
     fonts: Annotated[
         bool,

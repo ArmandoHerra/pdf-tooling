@@ -54,9 +54,12 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Annotated, Final
 
 import pytest
+import typer
+import typer.core
+import typer.models
 
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot
 from pdf_toolkit.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS
@@ -124,6 +127,80 @@ OUTPUT_CONSUMING_MUTATING = tuple(verb for verb in PRODUCING if "--output" in ve
 #: there. Both factors are themselves rostered below, so this product is
 #: non-empty exactly when they are.
 GROUP_GLOBAL_FLAG_CASES = tuple((group, flag) for group in GROUPS for flag in GLOBAL_OPTIONS)
+
+
+def operand_verb_names(root: object | None = None) -> frozenset[str]:
+    """Every command on *root* that declares at least one positional operand.
+
+    Duck-typed on `param_type_name == "argument"` for the same reason
+    `registry.py::discover_verbs` duck-types its own walk: the CLI framework
+    vendors its own click, so there is no importable top-level `click.Argument`
+    to `isinstance`-check against. Deliberately NOT filtered on the parameter's
+    type name -- that filter is what excludes `merge` (E5).
+    """
+    from pdf_toolkit.cli.main import app
+
+    group = root if root is not None else typer.main.get_command(app)
+    names: set[str] = set()
+
+    def _walk(cmd: object, path: tuple[str, ...]) -> None:
+        commands = getattr(cmd, "commands", None)
+        if commands is not None:
+            for name in sorted(commands):
+                _walk(commands[name], (*path, name))
+            return
+        params = getattr(cmd, "params", ())
+        if any(getattr(param, "param_type_name", None) == "argument" for param in params):
+            names.add(" ".join(path))
+
+    _walk(group, ())
+    return frozenset(names)
+
+
+#: AC7 -- every verb that accepts an operand, derived from the LIVE tree at run
+#: time. 24 at `cdc02ee` (every command except `doctor` and `version`, which
+#: accept no operand); the size is asserted against the live walk rather than
+#: pinned to a literal, so a 25th operand verb joins this row the day it is
+#: registered and a retired one does not fail the suite for a correct reason.
+OPERAND_VERBS = tuple(verb for verb in VERBS if verb.name in operand_verb_names())
+
+
+def _unreadable_shapes() -> tuple[tuple[str, bool], ...]:
+    """AC15's `{table, json, ndjson} x {default, --quiet}` cross-product.
+
+    `output_formats()` is CONSUMED rather than re-listed (X-157), so a fourth
+    renderer joins this matrix with no action from its author. The quiet
+    dimension is a local literal rather than a module-level tuple because
+    `tty_modes()` -- the only existing two-member boolean helper -- means
+    `isatty()`, and reusing it here would make this matrix claim something it
+    does not measure.
+    """
+    from registry import output_formats
+
+    return tuple((fmt.value, quiet) for fmt in output_formats() for quiet in (False, True))
+
+
+#: The shapes `C18` drives every member of `OPERAND_VERBS` through. A traceback
+#: that only escapes under `-o ndjson --quiet` is still a traceback.
+UNREADABLE_SHAPES = _unreadable_shapes()
+
+#: AC9 / §D7 -- the SINGLE-COMBINED-ARTIFACT class, DERIVED from each verb's own
+#: OR-3 declaration rather than hand-written: N inputs -> 1 file is exactly
+#: "declares `--output` and does not declare `--out-dir`". These verbs must NOT
+#: survive a bad input; they must abort and write nothing. `merge` says why, and
+#: it is right -- *a partially merged document is a wrong document that looks
+#: right* -- and a verb that skipped an unreadable input and merged the rest
+#: would be a silent wrong answer carrying a success exit code.
+SINGLE_ARTIFACT_VERBS = tuple(
+    verb
+    for verb in OPERAND_VERBS
+    if "--output" in verb.consumes and "--out-dir" not in verb.consumes
+)
+
+#: AC10's fourth arm -- OR-3 must stay unconfused. §D4 changes the READABILITY
+#: VETO on `-O/--output`, never its consumption semantics: a verb that does not
+#: declare `--output` still exits 2 when given one, unreadable target or not.
+OUTPUT_REFUSING_VERBS = tuple(verb for verb in OPERAND_VERBS if "--output" not in verb.consumes)
 
 
 def _ids(verbs: tuple) -> list[str]:
@@ -1244,6 +1321,46 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "green having asserted nothing -- which is what let all fifteen flags exit 2 with an "
         "empty stdout at `meta` without any harness noticing",
     ),
+    Population(
+        "OPERAND_VERBS",
+        OPERAND_VERBS,
+        "C18",
+        1,
+        "PDF-26's own population, and it is DERIVED here rather than read off "
+        "`TAKES_INPUT_PATHS` because that predicate excludes `merge` -- the one verb the "
+        "roadmap named. Zero would make C18 collect zero cases across all six output "
+        "shapes at once; `test_ac13_the_operand_population_contains_merge_by_name` and "
+        "`test_ac7_the_operand_population_matches_the_live_tree` are what keep it from "
+        "silently NARROWING, which is the failure mode a floor of 1 cannot see",
+    ),
+    Population(
+        "SINGLE_ARTIFACT_VERBS",
+        SINGLE_ARTIFACT_VERBS,
+        "AC9 (fails closed)",
+        1,
+        "PDF-26 §D7's partition, derived from the OR-3 declarations rather than named. "
+        "Zero would make the fail-closed arm collect no cases -- and `merge`, the verb "
+        "whose fail-closed semantics the spec explicitly preserves, is its first member",
+    ),
+    Population(
+        "OUTPUT_REFUSING_VERBS",
+        OUTPUT_REFUSING_VERBS,
+        "AC10 arm (d)",
+        1,
+        "the OR-3 control that keeps §D4's readability change from being mistaken for a "
+        "consumption change. Zero makes the arm vacuous, and the arm is the only thing "
+        "asserting that dropping the veto did not also drop the refusal",
+    ),
+    Population(
+        "UNREADABLE_SHAPES",
+        UNREADABLE_SHAPES,
+        "C18",
+        1,
+        "AC15's {table,json,ndjson} x {default,--quiet} matrix, built from the live "
+        "`output_formats()` rather than a literal. Empty collapses C18 to zero cases "
+        "even with a full OPERAND_VERBS -- a stacked parametrize is vacuous if EITHER "
+        "dimension empties, and only one of the two was a population before this row",
+    ),
 )
 
 _ROSTERED: Final[frozenset[str]] = frozenset(row.name for row in POPULATIONS)
@@ -1805,3 +1922,556 @@ def test_c17_a_global_flag_at_a_grouping_parent_exits_2(
         f"{' '.join(group_path)} {flag} -> {result.returncode}; a group does not take the "
         f"global block, and `PLAN.md` §5.6 rules that exit 2"
     )
+
+
+# --------------------------------------------------------------------------- #
+# C18 (PDF-26) -- an existing-but-unreadable OPERAND is a coded exit-1 failure,
+# at every verb that takes one, under every output shape.
+#
+# APPENDED, never restructured: `PDF-17` owns this module's shape and `PDF-25`
+# took `C17`; `C18` is the next free integer, taken by re-reading the file
+# rather than from a spec (the spec was drafted against `2d19bcb`, before
+# `C17` existed).
+#
+# WHAT THIS PINS, AND WHY THE POPULATION IS DERIVED HERE RATHER THAN REUSED.
+# `TAKES_INPUT_PATHS` -- the population `C5` uses -- is derived from
+# `registry.py::_takes_input_paths`, which asks "does this command declare an
+# argument whose click type is named `path`". `merge`'s operand is a
+# `StringParamType`, because the `path:range` grammar needs the raw string, so
+# `merge` is ABSENT from `TAKES_INPUT_PATHS` (n=23). A `C18` modelled naively on
+# `C5` would therefore have silently omitted the one verb the roadmap named, and
+# would have reported green while the defect it exists to catch sat one verb
+# outside its parametrization. So `C18` asks the question it actually means --
+# "does this command declare a positional operand at all" -- and gets 24. The
+# predicate itself is `PDF-17`'s to fix; this spec does not touch it.
+#
+# THE DEFECT, MEASURED AT `cdc02ee` BEFORE ANYTHING CHANGED. The mechanism was
+# never in `ops/` at all: it was the FRAMEWORK's `Path` parameter type, whose
+# `readable=True` default ran `os.access(R_OK)` during argv parsing, before any
+# verb callback and before any of this product's code executed. 23 of the 24
+# exited 2 with the framework's own "is not readable" refusal and the batch
+# dead; `merge` exited 1 by printing a raw `PermissionError` traceback, which is
+# `cli/main.py`'s UNHANDLED-CRASH 1 rather than the `FAILURE` classification.
+# **No verb classified an unreadable operand correctly, `merge` included.**
+#
+# WHY THE ASSERTIONS ARE WHAT THEY ARE, AND NOT "STDOUT IS EMPTY". At `2d19bcb`
+# the refusal printed zero bytes on stdout, and the spec's AC1 was written
+# against that. `PDF-25` (wave 6) then routed every framework-level usage error
+# through the structured envelope, so at `cdc02ee` the same refusal prints a
+# well-formed 279-byte `{"kind": "usage", "code": 2, ...}` object naming "is not
+# readable". An assertion about stdout EMPTINESS would therefore now be
+# measuring PDF-25's fix rather than this one. What this row asserts instead is
+# the CLASSIFICATION: exit 1, no framework refusal text, no traceback, and --
+# under a structured shape -- an envelope carrying code 1 / kind "failure".
+# --------------------------------------------------------------------------- #
+
+
+_FRAMEWORK_REFUSAL = "is not readable"
+_TRACEBACK = "Traceback (most recent call last)"
+
+
+def _unreadable_copy(operand: Path, destination: Path) -> Path:
+    """A mode-`000` copy of *operand* at *destination*.
+
+    A COPY, never the fixture itself: the corpus is session-scoped and shared,
+    and `chmod 000` on it would break every downstream test that reuses it
+    (`registry.py::_copy_corpus_fixture`'s own hazard note). `copyfile` rather
+    than `copy`, because `copy` would carry the source's mode over and then be
+    overwritten anyway.
+    """
+    import shutil
+
+    shutil.copyfile(operand, destination)
+    destination.chmod(0o000)
+    return destination
+
+
+def _substitute_unreadable_operand(verb, args: list[str], tmp_path: Path) -> tuple[list[str], Path]:
+    """*args* with its input operand replaced by an unreadable copy of itself.
+
+    Every `INVOCATIONS` row places the input operand FIRST in its argv tail, so
+    the substitution is generic. Anti-lapse (mirrors `C15`'s `_discover_target`
+    `pytest.fail`, never a silent skip): a future row whose first element is not
+    an existing file fails HERE, by name, rather than quietly dropping out of
+    `C18`'s coverage -- and taking the fixture's "is a valid input for its verb"
+    property with it.
+    """
+    if not args:
+        pytest.fail(
+            f"{verb.name}: its INVOCATIONS row builds an empty argv tail, so C18 has no "
+            "operand to make unreadable -- an operand verb must name one"
+        )
+    operand = Path(args[0])
+    if not operand.is_file():
+        pytest.fail(
+            f"{verb.name}: its INVOCATIONS row does not begin with an existing file "
+            f"({args[0]!r}), so C18 cannot build a VALID-but-unreadable operand from it. "
+            "Every row placed the operand first when this was written; a row that no "
+            "longer does needs its own arm here, by name"
+        )
+    suffix = operand.suffix or ".bin"
+    unreadable = _unreadable_copy(
+        operand, tmp_path / f"c18-unreadable-{verb.name.replace(' ', '-')}{suffix}"
+    )
+    return [str(unreadable), *args[1:]], unreadable
+
+
+def _skip_as_root() -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root ignores mode bits; a mode-000 operand is readable as root")
+
+
+@pytest.mark.parametrize("verb", OPERAND_VERBS, ids=_ids(OPERAND_VERBS))
+@pytest.mark.parametrize(
+    ("fmt", "quiet"),
+    UNREADABLE_SHAPES,
+    ids=[f"{fmt}{'-quiet' if quiet else ''}" for fmt, quiet in UNREADABLE_SHAPES],
+)
+def test_c18_an_unreadable_operand_is_a_coded_failure(
+    verb, fmt: str, quiet: bool, corpus, tmp_path: Path
+) -> None:
+    """AC6 + AC15: exit 1, no framework refusal, no traceback, under every shape.
+
+    *Red at `cdc02ee`, before any code changed*: 23 verbs failed the exit
+    assertion (2, carrying "is not readable"); `merge` failed the traceback
+    assertion (1, carrying `PermissionError`).
+    """
+    _skip_as_root()
+    _skip_unless_engine_available(INVOCATIONS.get(verb.name))
+
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    args, unreadable = _substitute_unreadable_operand(verb, args, tmp_path)
+    extra = ["--quiet"] if quiet else []
+    try:
+        result = run_cli(verb.name, *args, "-o", fmt, *extra, cwd=tmp_path)
+    finally:
+        unreadable.chmod(0o600)
+
+    both = result.stdout + result.stderr
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 1, (
+        f"{verb.name} -o {fmt}{' --quiet' if quiet else ''}: an operand that EXISTS and "
+        f"cannot be READ is an operation that ran and failed (exit 1), never a bad "
+        f"invocation (exit 2) and never a crash -- {detail}"
+    )
+    assert _TRACEBACK not in both, (
+        f"{verb.name} -o {fmt}: a raw traceback reached the user. `cli/main.py` calls that "
+        f"'a signal, not a UX' -- {detail}"
+    )
+    assert "PermissionError" not in both, (
+        f"{verb.name} -o {fmt}: the engine's own exception name leaked -- {detail}"
+    )
+    assert _FRAMEWORK_REFUSAL not in both, (
+        f"{verb.name} -o {fmt}: the FRAMEWORK's readability veto is still firing. The "
+        f"click-level refusal had to GO, not be renumbered -- {detail}"
+    )
+    if fmt in {"json", "ndjson"}:
+        assert '"code": 1' in result.stdout and '"kind": "failure"' in result.stdout, (
+            f"{verb.name} -o {fmt}: exit 1 without a payload saying so. The per-item code "
+            f"is the half of `PLAN.md` §5.6 a single integer cannot carry -- {detail}"
+        )
+
+
+@pytest.mark.parametrize("verb", OPERAND_VERBS, ids=_ids(OPERAND_VERBS))
+def test_c18_dry_run_predicts_the_unreadable_operand_failure(verb, corpus, tmp_path: Path) -> None:
+    """AC11 (OR-7): `dry.returncode == real.returncode == 1`, and the dry run
+    leaves the tree byte-identical.
+
+    **The VALUE is pinned, not the equality.** `dry == real` alone was GREEN
+    before this spec -- 2 == 2 for the 23 framework refusals and 1 == 1 for
+    `merge`'s crash -- so an assertion phrased that way could not have failed
+    and must not be written (`C15` already pins its own values for exactly this
+    reason).
+    """
+    _skip_as_root()
+    _skip_unless_engine_available(INVOCATIONS.get(verb.name))
+
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    args, unreadable = _substitute_unreadable_operand(verb, args, tmp_path)
+    planned_out_dir = _named_out_dir(args)
+
+    env, roots = redirected_environment(tmp_path)
+    try:
+        before = snapshot(*roots)
+        dry = run_cli(verb.name, "--dry-run", *args, env=env, cwd=tmp_path)
+        assert_unchanged(before, snapshot(*roots))
+        real = run_cli(verb.name, *args, env=env, cwd=tmp_path)
+    finally:
+        unreadable.chmod(0o600)
+
+    assert dry.returncode == real.returncode == 1, (
+        f"{verb.name}: dry={dry.returncode} real={real.returncode} (expected both 1) -- "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+    if planned_out_dir is not None:
+        assert not planned_out_dir.exists(), (
+            f"{verb.name}: --dry-run created {planned_out_dir} -- a preview that makes a "
+            "directory has already written to the tree"
+        )
+
+
+def _named_out_dir(args: list[str]) -> Path | None:
+    """The `--out-dir` value in *args*, or ``None`` when the row names none."""
+    for index, token in enumerate(args):
+        if token == "--out-dir" and index + 1 < len(args):
+            return Path(args[index + 1])
+    return None
+
+
+def test_c18_the_dry_run_out_dir_clause_is_not_vacuous(corpus, tmp_path: Path) -> None:
+    """AC11's `--out-dir` half is conditional, so something has to prove the
+    condition is ever met. Without this, every member could name no `--out-dir`
+    and the clause would report green having asserted nothing."""
+    naming = [
+        verb.name
+        for verb in OPERAND_VERBS
+        if _named_out_dir(INVOCATIONS[verb.name].build(corpus, tmp_path)) is not None
+    ]
+    assert naming, (
+        "no member of OPERAND_VERBS names an --out-dir in its INVOCATIONS row, so AC11's "
+        "'a non-existent --out-dir is not created' clause never executes"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# AC12 -- the declaration guard: the half of this fix that survives PDF-27..30.
+#
+# The regression signature is precise: the defect returns the moment a new verb
+# declares a plain `Annotated[Path, typer.Argument(...)]` operand, because the
+# framework's default for a `Path` annotation is `readable=True`. That is not a
+# mistake a reviewer reliably catches -- it is the ABSENCE of a keyword. So the
+# tree is walked and the census pinned at zero.
+#
+# THE PREDICATE IS TYPER'S, NOT CLICK'S, AND THAT IS LOAD-BEARING. `click` is
+# not importable as a top-level module in this environment -- the framework
+# vendors it as `typer._click` -- so a guard written against `click.Path` /
+# `click.Argument` raises `AttributeError` or, worse, matches ZERO parameters
+# and is VACUOUSLY GREEN. `test_the_readability_scan_sees_the_live_tree_at_all`
+# below is what makes that failure mode impossible to reintroduce.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class PathParam:
+    """One path-typed parameter on the live tree."""
+
+    verb: str
+    spelling: str
+    is_operand: bool
+    vetoes_readability: bool
+
+    def __str__(self) -> str:
+        role = "operand" if self.is_operand else "option"
+        return f"{self.verb}: {self.spelling} ({role})"
+
+
+def path_parameters(root: object | None = None) -> tuple[PathParam, ...]:
+    """Every path-typed parameter on *root*, with its readability veto recorded."""
+    from pdf_toolkit.cli.main import app
+
+    group = root if root is not None else typer.main.get_command(app)
+    found: list[PathParam] = []
+
+    def _walk(cmd: object, path: tuple[str, ...]) -> None:
+        commands = getattr(cmd, "commands", None)
+        if commands is not None:
+            for name in sorted(commands):
+                _walk(commands[name], (*path, name))
+            return
+        for param in getattr(cmd, "params", ()):
+            if not isinstance(getattr(param, "type", None), typer.models.TyperPath):
+                continue
+            spellings = getattr(param, "opts", ()) or (getattr(param, "name", "?"),)
+            found.append(
+                PathParam(
+                    verb=" ".join(path) or "<root>",
+                    spelling="/".join(str(item) for item in spellings),
+                    is_operand=isinstance(param, typer.core.TyperArgument),
+                    vetoes_readability=bool(param.type.readable),
+                )
+            )
+
+    _walk(group, ())
+    return tuple(found)
+
+
+def test_ac12_no_path_parameter_vetoes_readability_on_the_live_tree() -> None:
+    """AC12. *Red at `cdc02ee` at 76/76* -- 23 operands, 26 `-O/--output`, 26
+    `--out-dir` and `stamp --from`, every one of them `readable=True`."""
+    offenders = [str(param) for param in path_parameters() if param.vetoes_readability]
+    assert offenders == [], (
+        "these path-typed parameters still let the CLI FRAMEWORK veto readability during "
+        "argv parsing, which makes an existing-but-unreadable path exit 2 before any of "
+        "this product's code runs:\n"
+        + "\n".join(f"  - {item}" for item in offenders)
+        + "\n\nDeclare an operand through `cli.common.operand_argument(...)`, and pass "
+        "`readable=False` on a path-typed OPTION. Readability is a run-time property of a "
+        "file, answered by `safety.paths.classify_operand` (exit 1), not a parse-time "
+        "property of a command line (exit 2)."
+    )
+
+
+def test_ac12_the_operand_half_of_the_guard_is_not_vacuous() -> None:
+    """The guard above is a superset of AC12's own wording ("no INPUT OPERAND
+    parameter carries `readable=True`"), and a superset assertion over an empty
+    scan is green for the worst possible reason. So the operand subset is
+    pinned non-empty and named."""
+    operands = [param for param in path_parameters() if param.is_operand]
+    assert len(operands) >= 20, (
+        f"the scan found only {len(operands)} path-typed OPERAND(s) on a tree that has 23 "
+        "-- the predicate has stopped seeing operands, which would make AC12's guard pass "
+        "having measured nothing"
+    )
+    assert [str(param) for param in operands if param.vetoes_readability] == []
+
+
+def test_the_readability_scan_sees_the_live_tree_at_all() -> None:
+    """The non-vacuity guard for the guard, and the one that catches THIS
+    cycle's signature defect: a predicate written against `click.Path` matches
+    zero parameters on a Typer tree and reports green."""
+    found = path_parameters()
+    assert len(found) >= 70, (
+        f"the scan found {len(found)} path-typed parameter(s); the live tree carries 76 "
+        "(23 operands + 26 -O/--output + 26 --out-dir + stamp --from), so the predicate "
+        "itself has stopped matching"
+    )
+    verbs = {param.verb for param in found}
+    assert "merge" in verbs and "info" in verbs, sorted(verbs)
+
+
+def test_the_readability_guard_fires_on_a_planted_declaration() -> None:
+    """AC12's red, automated: a synthetic app whose operand carries
+    `readable=True` is reported BY NAME. Synthetic rather than an edit to a real
+    verb for the same reason `test_the_roster_check_fires_on_an_unrostered_-
+    population` is -- a red proof that vandalises the tree it proves is not a
+    proof. The MANUAL plant/observe/revert against a real verb was also run
+    once; see PDF-26's Implementation Log for the verbatim message."""
+    # TWO commands, so the synthetic app is a GROUP and the walk has a verb name
+    # to report -- AC12 requires the failure to NAME the offending verb, and a
+    # single-command Typer app collapses to the root and would prove only that
+    # something, somewhere, was found.
+    planted = typer.Typer()
+
+    @planted.command("guilty")
+    def _guilty(
+        operand: Annotated[Path, typer.Argument(metavar="PDF", readable=True)],
+    ) -> None:  # pragma: no cover - never invoked; only its declaration is read
+        del operand
+
+    @planted.command("innocent")
+    def _innocent(
+        operand: Annotated[Path, typer.Argument(metavar="PDF", readable=False)],
+    ) -> None:  # pragma: no cover - never invoked
+        del operand
+
+    scanned = path_parameters(typer.main.get_command(planted))
+    assert {param.verb for param in scanned} == {"guilty", "innocent"}, scanned
+    offenders = [str(param) for param in scanned if param.vetoes_readability]
+
+    # Exactly the guilty verb, named -- and NOT the innocent one, which is what
+    # makes this guard discriminating rather than always-red.
+    assert offenders == ["guilty: operand (operand)"], offenders
+
+
+# --------------------------------------------------------------------------- #
+# AC7/AC13 -- the population is re-derived, cannot silently empty, and contains
+# `merge` BY NAME. The membership assertion is explicit rather than trusted to
+# the derivation, because the derivation is precisely what got this wrong once
+# already (`TAKES_INPUT_PATHS` excludes `merge`, E5).
+# --------------------------------------------------------------------------- #
+
+
+def test_ac13_the_operand_population_contains_merge_by_name() -> None:
+    names = {verb.name for verb in OPERAND_VERBS}
+    assert names, "OPERAND_VERBS is empty -- C18 collects zero cases and reports green"
+    assert "merge" in names, (
+        "`merge` is absent from C18's population. It is the verb the roadmap named, and it "
+        "is ABSENT from `TAKES_INPUT_PATHS` (its operand is a StringParamType, not a path) "
+        "-- which is why this row derives its own population and asserts this by name"
+    )
+    assert "merge" not in {verb.name for verb in TAKES_INPUT_PATHS}, (
+        "`merge` has joined TAKES_INPUT_PATHS, so the divergence this assertion documents "
+        "is gone. That is `PDF-17`'s predicate fix landing; re-derive C18's population "
+        "against it and consume the shared one rather than keeping two"
+    )
+
+
+def test_ac7_the_operand_population_matches_the_live_tree() -> None:
+    """AC7: size and membership against the live walk at run time, never a
+    literal. 24 at `cdc02ee`; the two verbs outside it are named because
+    'accepts no operand' is the only admissible reason to be outside."""
+    live = operand_verb_names()
+    assert {verb.name for verb in OPERAND_VERBS} == live
+    outside = {verb.name for verb in VERBS} - live
+    assert outside == {"doctor", "version"}, (
+        f"the verbs with no operand are {sorted(outside)}; at drafting they were "
+        "{'doctor', 'version'}. A verb that has LOST its operand is a fact to record; a "
+        "verb that has one and is not in C18's population is the defect this row exists for"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# AC9 (§D7) -- the single-combined-artifact class still FAILS CLOSED.
+#
+# Classification is uniform across all 24 operand verbs. CONTINUATION is not,
+# and the difference is the SHAPE OF THE OUTPUT rather than the verb's name --
+# which is why the population above is derived from the OR-3 declarations.
+#
+# The roadmap's deliverable sentence ("the other inputs are still processed ...
+# uniformly across info/rasterize/compose/merge") conflates the two. It is
+# followed here for classification and DELIBERATELY NOT followed for
+# continuation.
+#
+# THE LOAD-BEARING HALF OF THIS ROW IS THE TRACEBACK CLAUSE, not the exit code.
+# `merge` ALREADY exited 1 at `cdc02ee` -- by printing a raw `PermissionError`
+# traceback, which is `cli/main.py`'s unhandled-crash 1 rather than the FAILURE
+# classification. An arm asserting only the exit code would have been green on
+# the shipped defect, which is precisely what made B-057 ("merge already does
+# it") wrong.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("verb", SINGLE_ARTIFACT_VERBS, ids=_ids(SINGLE_ARTIFACT_VERBS))
+def test_ac9_the_single_artifact_class_fails_closed_without_a_traceback(
+    verb, corpus, tmp_path: Path
+) -> None:
+    _skip_as_root()
+    _skip_unless_engine_available(INVOCATIONS.get(verb.name))
+
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    target = _discover_target(verb, args, tmp_path)
+    args, unreadable = _substitute_unreadable_operand(verb, args, tmp_path)
+    assert not target.exists(), f"{verb.name}: the planned target pre-exists; arm is invalid"
+
+    try:
+        result = run_cli(verb.name, *args, "-o", "json", cwd=tmp_path)
+    finally:
+        unreadable.chmod(0o600)
+
+    both = result.stdout + result.stderr
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 1, detail
+    assert not target.exists(), (
+        f"{verb.name}: {target} was written despite an unreadable input. A partially "
+        "assembled artifact is a wrong answer that looks right"
+    )
+    assert "Traceback (most recent call last)" not in both, (
+        f"{verb.name}: exit 1 by CRASHING is not exit 1 by CLASSIFYING -- {detail}"
+    )
+    assert "PermissionError" not in both, detail
+    assert '"code": 1' in result.stdout and '"kind": "failure"' in result.stdout, detail
+
+
+def test_ac9_the_partition_names_both_verbs_the_spec_calls_out() -> None:
+    """§D7 names `merge` and `compose` as the single-artifact class. The
+    population is DERIVED, so this asserts the derivation agrees with the
+    spec rather than replacing it with a list."""
+    names = {verb.name for verb in SINGLE_ARTIFACT_VERBS}
+    assert {"merge", "compose"} <= names, sorted(names)
+    assert names.isdisjoint({verb.name for verb in OUTPUT_REFUSING_VERBS})
+
+
+# --------------------------------------------------------------------------- #
+# AC10 -- the `-O` masking pair, with its precedence proof (E4).
+#
+# THE DEFECT WAS MORE SEVERE THAN THE ITEM IT RODE IN ON. `-O/--output` also
+# carried `readable=True`, and readability of a WRITE TARGET is semantically
+# irrelevant -- but the veto fired BEFORE the safety spine, so an existing
+# output target with mode 000 answered **2** where mode 644 answered **5**.
+# A safety refusal reported as a typo, and unreachable by ANY flag combination:
+# adding `-f` was still 2.
+#
+# ARM (c) IS THE PRECEDENCE PROOF, and the spec is explicit that a **5** there
+# FAILS this criterion: on POSIX, replacing a file is a DIRECTORY permission, so
+# a `-f` run over an unreadable target must SUCCEED. An implementation that
+# answered 5 would be predicting a refusal the real run never reaches -- the
+# check landed at the wrong tier -- and only a pair that distinguishes the right
+# answer from a plausible wrong one can tell those apart.
+# --------------------------------------------------------------------------- #
+
+_SEED = b"AC10-SEEDED-BYTES"
+
+
+@pytest.mark.parametrize("verb", OUTPUT_CONSUMING_MUTATING, ids=_ids(OUTPUT_CONSUMING_MUTATING))
+def test_ac10_an_unreadable_output_target_reaches_the_safety_spine(
+    verb, corpus, tmp_path: Path
+) -> None:
+    """Arms (a) and (b): the answer must not depend on the target's mode.
+
+    *Red at `cdc02ee`*: (a) 5, (b) **2**.
+    """
+    _skip_as_root()
+    invocation = INVOCATIONS[verb.name]
+    args = invocation.build(corpus, tmp_path)
+    target = _discover_target(verb, args, tmp_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    codes: dict[int, int] = {}
+    for mode in (0o644, 0o000):
+        if target.exists():
+            target.chmod(0o600)
+        target.write_bytes(_SEED)
+        target.chmod(mode)
+        try:
+            codes[mode] = run_cli(verb.name, *args, cwd=tmp_path).returncode
+        finally:
+            target.chmod(0o600)
+
+    assert codes[0o644] == codes[0o000] == 5, (
+        f"{verb.name}: an occupied target answered {codes[0o644]} at mode 644 and "
+        f"{codes[0o000]} at mode 000. The two must be the same refusal -- a 2 at mode 000 "
+        "is a SAFETY GATE degraded to a usage error by a readability veto that fired "
+        "before the spine"
+    )
+    assert target.read_bytes() == _SEED, f"{verb.name}: a refused run still wrote the target"
+
+
+@pytest.mark.parametrize("verb", OUTPUT_CONSUMING_MUTATING, ids=_ids(OUTPUT_CONSUMING_MUTATING))
+def test_ac10_force_over_an_unreadable_target_succeeds(verb, corpus, tmp_path: Path) -> None:
+    """Arm (c), the precedence proof. **A 5 here FAILS this criterion.**
+
+    *Red at `cdc02ee`*: 2.
+    """
+    _skip_as_root()
+    invocation = INVOCATIONS[verb.name]
+    args = invocation.build(corpus, tmp_path)
+    target = _discover_target(verb, args, tmp_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_SEED)
+    target.chmod(0o000)
+
+    try:
+        result = run_cli(verb.name, *args, "-f", cwd=tmp_path)
+    finally:
+        if target.exists():
+            target.chmod(0o600)
+
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 0, (
+        f"{verb.name}: `-f` over an existing mode-000 target must SUCCEED -- on POSIX, "
+        f"replacing a file is a DIRECTORY permission. A 5 here means the check landed at "
+        f"a tier the real run does not reach; a 2 means the framework's veto is still "
+        f"firing -- {detail}"
+    )
+    written = target.read_bytes()
+    assert written and written != _SEED, (
+        f"{verb.name}: exit 0 but the target still holds the seeded bytes -- the run "
+        "reported success without replacing anything"
+    )
+
+
+@pytest.mark.parametrize("verb", OUTPUT_REFUSING_VERBS, ids=_ids(OUTPUT_REFUSING_VERBS))
+def test_ac10_or3_still_refuses_output_at_a_verb_that_does_not_consume_it(
+    verb, corpus, tmp_path: Path
+) -> None:
+    """Arm (d): §D4 changed the READABILITY VETO on `-O`, not OR-3's consumption
+    semantics. Unchanged at `cdc02ee` and unchanged after -- which is the point:
+    without this arm the two mechanisms could be confused, and a fix that
+    silently made `-O` universally accepted would look like a success."""
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    result = run_cli(verb.name, *args, "-O", str(tmp_path / "or3-not-consumed.out"), cwd=tmp_path)
+    assert result.returncode == 2, (
+        f"{verb.name} does not consume --output, so -O is a usage error (OR-3) -- "
+        f"exit={result.returncode} {result.stdout}{result.stderr}"
+    )
+    assert not (tmp_path / "or3-not-consumed.out").exists()

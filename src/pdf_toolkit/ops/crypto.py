@@ -95,6 +95,7 @@ from pdf_toolkit.ports.structure import (
     require_encryption,
 )
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_toolkit.safety.paths import classify_operand, read_source_bytes
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.secret import Secret
 
@@ -251,10 +252,7 @@ class _Prediction:
 
 def _validate_sources(sources: Sequence[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 def _resolve_single_target(source: Path, *, output: Path | None, in_place: bool, verb: str) -> Path:
@@ -340,7 +338,7 @@ def _refusal_result(
 
 def _read_facts(source: Path, password: Secret | None) -> EncryptionFacts:
     engine = require_encryption()
-    return engine.read_encryption(source.read_bytes(), password)
+    return engine.read_encryption(read_source_bytes(source), password)
 
 
 # --------------------------------------------------------------------------- #
@@ -426,7 +424,7 @@ def encrypt_run(
 
     started = time.monotonic()
     bytes_before = source.stat().st_size
-    data = source.read_bytes()
+    data = read_source_bytes(source)
     # The ONLY point a secret exists, and it is after every refusal above.
     owner_secret = owner.resolve()
     user_secret = user.resolve() if user is not None and user.read is not None else None
@@ -551,7 +549,7 @@ def decrypt_run(
 
     started = time.monotonic()
     bytes_before = source.stat().st_size
-    data = source.read_bytes()
+    data = read_source_bytes(source)
     secret = password.resolve()
     try:
         engine = require_encryption()

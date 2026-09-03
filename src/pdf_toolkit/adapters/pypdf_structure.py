@@ -42,6 +42,7 @@ from pdf_toolkit.ports.structure import (
     RepairOutcome,
     algorithm_name,
 )
+from pdf_toolkit.safety.paths import source_read_error
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from pypdf import PdfReader
@@ -381,7 +382,12 @@ class PypdfStructureAdapter:
             reader = PdfReader(str(path))
         except PdfReadError as error:
             raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
-        except (OSError, ValueError) as error:
+        except OSError as error:
+            # PDF-26 §D3: already exit 1, now correctly CLASSIFIED -- an
+            # unreadable source is `SourceUnreadableError`, not a generic
+            # parse failure. The integer is unchanged.
+            raise source_read_error(path, error) from error
+        except ValueError as error:
             raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
 
         encrypted = bool(reader.is_encrypted)
@@ -572,7 +578,12 @@ class PypdfStructureAdapter:
             reader = PdfReader(str(path))
         except PdfReadError as error:
             raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
-        except (OSError, ValueError) as error:
+        except OSError as error:
+            # PDF-26 §D3: already exit 1, now correctly CLASSIFIED -- an
+            # unreadable source is `SourceUnreadableError`, not a generic
+            # parse failure. The integer is unchanged.
+            raise source_read_error(path, error) from error
+        except ValueError as error:
             raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
 
         if reader.is_encrypted:
@@ -799,7 +810,16 @@ class PypdfOpenDocument:
         if self._path.is_dir():
             raise UsageError("expected a PDF file, not a directory", path=str(self._path))
 
-        handle = open(self._path, "rb")  # closed in __exit__, kept open for lazy page reads
+        try:
+            # PDF-26 §D3. This `open` sat OUTSIDE the try below -- three lines
+            # above a clause that already caught `OSError` -- so a
+            # `PermissionError` here walked out of the product as a raw
+            # traceback and exited 1 as an UNHANDLED CRASH. That was `merge
+            # <unreadable.pdf> <good.pdf>`'s "correct" exit code, and it is why
+            # B-057's "merge already classifies this" was wrong.
+            handle = open(self._path, "rb")  # closed in __exit__, kept for lazy page reads
+        except OSError as error:
+            raise source_read_error(self._path, error) from error
         try:
             reader = PdfReader(handle)
             # [B-078] pypdf raises FileNotDecryptedError LAZILY -- not at the

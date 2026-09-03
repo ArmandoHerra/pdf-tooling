@@ -42,6 +42,7 @@ from pdf_toolkit.adapters import AdapterProbe, package_probe
 from pdf_toolkit.errors import EngineMissingError, FailureError
 from pdf_toolkit.ports import BROKEN_INSTALL_HINT
 from pdf_toolkit.ports.text import ExtractedTable, TextLine
+from pdf_toolkit.safety.paths import source_read_error
 
 __all__ = ["ADAPTER", "PdfplumberTextAdapter"]
 
@@ -154,6 +155,10 @@ def _pages(path: str, page_numbers: Sequence[int]) -> Any:
 
     try:
         document = pdfplumber.open(path)
+    except OSError as error:
+        # PDF-26 §D3 -- ahead of the wide clause below so an unreadable source
+        # is classified rather than folded into "could not be read".
+        raise source_read_error(path, error) from error
     except Exception as error:  # noqa: BLE001 - pdfminer raises a wide, unstable family
         raise FailureError(f"{path}: could not be read: {error}", path=path) from error
     try:

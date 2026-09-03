@@ -11,11 +11,12 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.split import split_document
 from pdf_toolkit.output import emit_result
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["split_command"]
 
@@ -55,7 +56,7 @@ before the first byte is written; a planning failure writes nothing.
 @global_options(consumes=("--out-dir", "--name"))
 def split_command(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Argument(metavar="PDF", help="The PDF to split.")],
+    source: Annotated[Path, operand_argument(metavar="PDF", help="The PDF to split.")],
     every: Annotated[
         int | None,
         typer.Option("--every", help="Split into consecutive N-page chunks."),
@@ -87,10 +88,7 @@ def split_command(
     # `ops/split.py::split_document` repeats this check for every OTHER call
     # path into that function; the duplication is deliberate defense in depth,
     # the same posture `AtomicWriter`'s own no-clobber re-check already takes.
-    if not source.exists():
-        raise NoInputError("no such file", path=str(source))
-    if source.is_dir():
-        raise UsageError("expected a PDF file, not a directory", path=str(source))
+    classify_operand(source)
 
     modes_given = [
         name

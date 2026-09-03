@@ -39,9 +39,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pdf_toolkit.errors import NoInputError, PdfToolkitError, UsageError
+from pdf_toolkit.errors import PdfToolkitError, UsageError
 from pdf_toolkit.models import DocumentInfo
 from pdf_toolkit.ports.structure import require_linearization, require_structure
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["InspectionOutcome", "inspect_document", "inspect_paths", "validate_operands"]
 
@@ -113,15 +114,21 @@ def inspect_document(path: Path, *, fonts: bool = False, pages: bool = False) ->
 
     Raises:
         NoInputError: Exit 4 — the path does not exist.
-        UsageError: Exit 2 — the path is not a regular file.
+        UsageError: Exit 2 — the path is a directory, or not a regular file.
+        SourceUnreadableError: Exit 1 — the path exists and cannot be read.
         AuthError: Exit 6 — a user password is required and none was supplied.
         FailureError: Exit 1 — malformed, corrupt or unparseable.
         EngineMissingError: Exit 3 — a required engine is unavailable.
+
+    The first four are :func:`~pdf_toolkit.safety.paths.classify_operand`'s
+    ladder, in its fixed precedence order, called HERE — on the per-item path
+    inside :func:`inspect_paths`' own ``except PdfToolkitError`` — rather than
+    in :func:`validate_operands`, which aborts the whole batch pre-flight.
+    That placement is the survival half of PDF-26: readability is a property of
+    a file, so one unreadable input must not cost the other inputs their
+    reports.
     """
-    if not path.exists():
-        raise NoInputError("no such file", path=str(path))
-    if path.is_dir():
-        raise UsageError("expected a PDF file, not a directory", path=str(path))
+    classify_operand(path)
     if not path.is_file():
         raise UsageError("expected a regular file", path=str(path))
 

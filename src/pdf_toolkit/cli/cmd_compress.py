@@ -57,8 +57,8 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.optimize import (
     DEFAULT_IMAGE_DPI,
     DEFAULT_IMAGE_QUALITY,
@@ -66,6 +66,7 @@ from pdf_toolkit.ops.optimize import (
 )
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["ImageMode", "compress_command"]
 
@@ -129,10 +130,7 @@ failed compression is the same dishonesty this tool refuses everywhere else.
 
 def _reject_missing_sources(sources: list[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 @global_options(consumes=("--output", "--out-dir", "--name", "--in-place"))
@@ -140,7 +138,7 @@ def compress_command(
     ctx: typer.Context,
     sources: Annotated[
         list[Path],
-        typer.Argument(metavar="PDF...", help="One or more PDFs to compress."),
+        operand_argument(metavar="PDF...", help="One or more PDFs to compress."),
     ],
     lossless: Annotated[
         bool,

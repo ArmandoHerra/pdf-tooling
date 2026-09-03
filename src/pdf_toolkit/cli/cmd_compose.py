@@ -20,8 +20,8 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.compose import (
     DEFAULT_COMPOSE_MARGIN,
     compose_document,
@@ -31,7 +31,7 @@ from pdf_toolkit.ops.compose import (
 )
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
-from pdf_toolkit.safety.paths import target_exists
+from pdf_toolkit.safety.paths import classify_operand, target_exists
 
 __all__ = ["FitMode", "compose_command"]
 
@@ -98,7 +98,7 @@ def compose_command(
     ctx: typer.Context,
     sources: Annotated[
         list[Path],
-        typer.Argument(metavar="IMAGE...", help="One or more images, in page order."),
+        operand_argument(metavar="IMAGE...", help="One or more images, in page order."),
     ],
     page_size: Annotated[
         str,
@@ -132,14 +132,13 @@ def compose_command(
     # deliberate defense in depth, the same posture `AtomicWriter`'s own
     # no-clobber re-check takes.
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError(
+        classify_operand(
+            source,
+            directory_message=(
                 "expected an image file, not a directory; globbing is the "
-                "shell's job, so pass the files themselves (e.g. './scans/*.jpg')",
-                path=str(source),
-            )
+                "shell's job, so pass the files themselves (e.g. './scans/*.jpg')"
+            ),
+        )
 
     if dpi is not None and dpi <= 0:
         raise UsageError("--dpi must be greater than 0")

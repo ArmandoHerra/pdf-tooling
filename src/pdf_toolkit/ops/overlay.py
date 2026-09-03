@@ -51,6 +51,7 @@ from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.compose import require_compose
 from pdf_toolkit.ports.structure import require_composite, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, PlannedOutputs, plan_filesystem
+from pdf_toolkit.safety.paths import classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -94,10 +95,7 @@ DEFAULT_FROM_PAGE: Final[int] = 1
 def reject_missing_sources(sources: Sequence[Path]) -> None:
     """`PLAN.md` §10's own contract, shared by every cmd module."""
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 def _resolve_pages(pages_spec: str | None, page_count: int) -> PageRange:
@@ -285,12 +283,11 @@ def watermark_run(
 
 
 def _validate_from_path(from_path: Path) -> None:
-    if not from_path.exists():
-        raise NoInputError(f"--from: no such file: {from_path}", path=str(from_path))
-    if from_path.is_dir():
-        raise UsageError(
-            f"--from: expected a PDF file, not a directory: {from_path}", path=str(from_path)
-        )
+    classify_operand(
+        from_path,
+        missing_message=f"--from: no such file: {from_path}",
+        directory_message=f"--from: expected a PDF file, not a directory: {from_path}",
+    )
 
 
 def _extract_stamp_layer(from_path: Path, from_page: int) -> bytes:

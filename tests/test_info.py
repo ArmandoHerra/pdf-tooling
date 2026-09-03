@@ -460,3 +460,379 @@ def test_info_appears_in_help() -> None:
     result = run_cli("--help")
     assert result.returncode == 0
     assert "info" in result.stdout
+
+
+# --------------------------------------------------------------------------- #
+# PDF-26 -- an existing-but-unreadable operand (936e467514 / B-037).
+#
+# `info` is the reference implementation of `PLAN.md` §5.4's batch rule -- *a
+# failing input is recorded, the run continues, and the run exits 1 at the end
+# with a per-input status* -- and it is the ONLY verb on this tree with a
+# per-item outcome model to hang that rule on (`ops/inspect.py::inspect_paths`'
+# per-input `except PdfToolkitError`). So this is where the SURVIVAL half of
+# PDF-26 is asserted; the CLASSIFICATION half is uniform across all 24 operand
+# verbs and lives in `tests/test_cli_contract.py`'s C18.
+#
+# EVERY ARM BELOW DEPENDS ON MODE BITS AND THEREFORE SKIPS AS ROOT. Root ignores
+# them, so a mode-000 file is readable to root and these controls cannot fire at
+# all; a green run from a root shell would have measured nothing.
+# --------------------------------------------------------------------------- #
+
+UNREADABLE_MODE = 0o000
+
+
+def skip_as_root() -> None:
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root ignores mode bits; a mode-000 operand is readable as root")
+
+
+@pytest.fixture
+def unreadable_pdf(plain_pdf: Path, tmp_path: Path) -> Path:
+    """A valid, mode-`000` COPY of the shared fixture.
+
+    A copy, never `plain_pdf` itself: the fixture is module-scoped and shared,
+    so chmodding it would break every other test in this file. The mode is
+    restored on teardown -- a mode-000 file is not removable by an ordinary
+    recursive delete, and this product's own sweeps have left six orphaned
+    sandboxes behind for exactly that reason.
+    """
+    import shutil
+
+    target = tmp_path / "unreadable.pdf"
+    shutil.copyfile(plain_pdf, target)
+    target.chmod(UNREADABLE_MODE)
+    yield target
+    target.chmod(0o600)
+
+
+def test_ac1_an_unreadable_input_beside_a_good_one_is_exit_one_with_both_entries(
+    plain_pdf: Path, unreadable_pdf: Path
+) -> None:
+    """AC1, the recorded repro exactly as filed.
+
+    *Red at `cdc02ee`*: exit **2** with a `{"kind": "usage", "code": 2}`
+    envelope naming the framework's "is not readable", ONE entry-less error
+    object, and the readable second input never parsed let alone inspected.
+    (At `2d19bcb`, where the spec was drafted, the same refusal printed ZERO
+    bytes on stdout; PDF-25 gave it an envelope in wave 6. The classification
+    was identical in both -- which is why this asserts the classification and
+    says nothing about stdout's length.)
+    """
+    skip_as_root()
+    result = run_cli("info", "-o", "json", str(unreadable_pdf), str(plain_pdf))
+    assert result.returncode == 1, f"exit {result.returncode}: {result.stdout}{result.stderr}"
+
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["verb"] == "info"
+
+    documents = payload["documents"]
+    assert len(documents) == 2, f"expected an entry per input, in input order: {documents}"
+
+    first, second = documents
+    assert first["path"] == str(unreadable_pdf)
+    assert first["ok"] is False
+    assert first["error"]["code"] == 1
+    assert first["error"]["kind"] == "failure"
+    assert second["path"] == str(plain_pdf)
+    assert second["ok"] is True
+
+
+def test_ac2_the_second_input_is_genuinely_inspected_not_merely_listed(
+    plain_pdf: Path, unreadable_pdf: Path
+) -> None:
+    """AC2: entry 2's values are READ FROM THE REAL DOCUMENT, not defaulted.
+
+    An entry that is present but empty satisfies AC1's shape and not this
+    criterion, which is the whole reason this is a separate assertion: "the
+    batch survived" and "the batch did the work" are different claims.
+    """
+    skip_as_root()
+    alone = info_json(str(plain_pdf))["documents"][0]
+
+    result = run_cli("info", "-o", "json", str(unreadable_pdf), str(plain_pdf))
+    beside = json.loads(result.stdout)["documents"][1]
+
+    assert beside["page_count"] == alone["page_count"] == FIXTURE_PAGES
+    assert beside["size_bytes"] == alone["size_bytes"] == plain_pdf.stat().st_size
+    assert beside["pdf_version"] == alone["pdf_version"]
+
+
+@pytest.mark.parametrize("unreadable_first", [True, False], ids=["bad-first", "bad-last"])
+def test_ac3_argument_order_does_not_matter(
+    plain_pdf: Path, unreadable_pdf: Path, unreadable_first: bool
+) -> None:
+    """AC3: both orders exit 1, both carry two entries, in the order given."""
+    skip_as_root()
+    operands = (
+        [str(unreadable_pdf), str(plain_pdf)]
+        if unreadable_first
+        else [str(plain_pdf), str(unreadable_pdf)]
+    )
+    result = run_cli("info", "-o", "json", *operands)
+    assert result.returncode == 1, f"exit {result.returncode}: {result.stdout}{result.stderr}"
+
+    documents = json.loads(result.stdout)["documents"]
+    assert [document["path"] for document in documents] == operands
+    assert [document["ok"] for document in documents] == [not unreadable_first, unreadable_first]
+
+
+def test_ac4_a_single_unreadable_input_reports_its_own_code(
+    plain_pdf: Path, unreadable_pdf: Path, tmp_path: Path
+) -> None:
+    """AC4: nonexistent 4, directory 2, unreadable 1, corrupt 1 -- asserted
+    TOGETHER, so the distinction `run_exit_code` exists to preserve (a single
+    input reports its OWN code) is proved intact rather than assumed.
+
+    *Red at `cdc02ee`*: the unreadable row was 2, colliding with the directory
+    row and making the two indistinguishable to a caller.
+    """
+    skip_as_root()
+    corrupt = tmp_path / "corrupt.pdf"
+    corrupt.write_bytes(b"not a pdf at all")
+    directory = tmp_path / "a-directory"
+    directory.mkdir()
+
+    rows = {
+        "nonexistent": (tmp_path / "absent.pdf", 4),
+        "directory": (directory, 2),
+        "unreadable": (unreadable_pdf, 1),
+        "corrupt": (corrupt, 1),
+    }
+    measured = {name: run_cli("info", str(path)).returncode for name, (path, _) in rows.items()}
+    assert measured == {name: code for name, (_, code) in rows.items()}, measured
+
+    entry = info_json(str(unreadable_pdf))["documents"][0]
+    assert entry["ok"] is False
+    assert entry["error"]["code"] == 1
+
+
+def test_ac8_the_batch_survives_and_reports_every_readable_input(
+    plain_pdf: Path, unreadable_pdf: Path, tmp_path: Path
+) -> None:
+    """AC8 for the per-input-independent class: N inputs, one unreadable, and
+    **N-1 real report entries** plus one failed item carrying `code: 1`.
+
+    Three inputs rather than two, with the bad one in the MIDDLE, so this fails
+    if the run stops at the failure rather than merely if it never starts.
+    """
+    skip_as_root()
+    import shutil
+
+    second_good = tmp_path / "second-good.pdf"
+    shutil.copyfile(plain_pdf, second_good)
+
+    operands = [str(plain_pdf), str(unreadable_pdf), str(second_good)]
+    result = run_cli("info", "-o", "json", *operands)
+    assert result.returncode == 1
+
+    documents = json.loads(result.stdout)["documents"]
+    assert [document["path"] for document in documents] == operands
+    ok = [document for document in documents if document["ok"]]
+    failed = [document for document in documents if not document["ok"]]
+    assert len(ok) == 2, f"expected N-1 surviving reports: {documents}"
+    assert len(failed) == 1
+    assert failed[0]["error"]["code"] == 1
+    assert all(document["page_count"] == FIXTURE_PAGES for document in ok)
+
+
+def test_ac16_a_toctou_race_still_exits_one_without_a_traceback(unreadable_pdf: Path) -> None:
+    """AC16: with the §D5 classifier's `os.access` patched to LIE (always
+    `True`) against an operand that is in fact mode 000, the run still exits 1
+    with a coded error and no traceback -- which is what proves §D3's
+    adapter-seam mapping is load-bearing rather than decorative.
+
+    A real subprocess running the real `main()` seam; only `os.access` is
+    replaced, in the child, before the product is imported. That is the honest
+    shape of the race: readable at classify time, unreadable at open time.
+
+    *Red before §D3 landed*: this arm produced E3's `PermissionError` traceback
+    from `adapters/pypdf_structure.py`'s unguarded `open(self._path, "rb")`.
+    """
+    skip_as_root()
+    liar = (
+        "import os; os.access = lambda *a, **k: True; from pdf_toolkit.cli.main import main; main()"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", liar, "-o", "json", "info", str(unreadable_pdf)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    both = result.stdout + result.stderr
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+
+    assert result.returncode == 1, detail
+    assert "Traceback (most recent call last)" not in both, detail
+    assert "PermissionError" not in both, detail
+    entry = json.loads(result.stdout)["documents"][0]
+    assert entry["ok"] is False
+    assert entry["error"]["code"] == 1
+    assert entry["error"]["kind"] == "failure"
+
+
+def test_ac16_the_toctou_arm_holds_at_the_open_document_seam_too(
+    unreadable_pdf: Path, tmp_path: Path
+) -> None:
+    """AC16's second seam, and it exists because the FIRST one did not cover it.
+
+    §D3 belts TWO distinct pypdf entry points, and `info` only ever reaches one
+    of them (`read_document_info`'s `PdfReader(str(path))`). The other --
+    `PypdfOpenDocument.__enter__`'s bare `open(self._path, "rb")` -- is E3's
+    ACTUAL captured frame and is reached by `merge`, `split`, `extract`,
+    `delete`, `rotate`, `reorder`, `rasterize`, `text`, `tables` and `compress
+    --pages`. Removing the belt there left the `info` arm above GREEN, which is
+    how this gap was found: a control whose planted red does not fire is not a
+    control, and one arm here would have been exactly that.
+    """
+    skip_as_root()
+    liar = (
+        "import os; os.access = lambda *a, **k: True; from pdf_toolkit.cli.main import main; main()"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            liar,
+            "merge",
+            str(unreadable_pdf),
+            "-O",
+            str(tmp_path / "toctou-merge.pdf"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    both = result.stdout + result.stderr
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 1, detail
+    assert "Traceback (most recent call last)" not in both, detail
+    assert "PermissionError" not in both, detail
+    assert not (tmp_path / "toctou-merge.pdf").exists(), detail
+
+
+def test_the_toctou_arm_is_not_vacuous(unreadable_pdf: Path) -> None:
+    """The control for the control: the same subprocess shape WITHOUT the lying
+    `os.access` must reach the §D5 classifier instead, so AC16's arm is proved
+    to be exercising a different code path rather than re-measuring §D5."""
+    skip_as_root()
+    honest = "from pdf_toolkit.cli.main import main; main()"
+    result = subprocess.run(
+        [sys.executable, "-c", honest, "-o", "json", "info", str(unreadable_pdf)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+
+    entry = json.loads(result.stdout)["documents"][0]
+    assert result.returncode == 1
+    assert entry["error"]["message"] == UNREADABLE_MESSAGE, (
+        "without the patch the classifier's own message must appear; if it does not, "
+        "AC16's arm and the §D5 arm are measuring the same path and one of them is "
+        "redundant"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# AC14 -- `cli/cmd_info.py`'s PINNED EXIT-CODE TABLE, mechanized.
+#
+# The table was documentation that nothing checked, and it was INCOMPLETE: it
+# had no row for an existing-but-unreadable input, which is exactly the gap
+# PDF-26 exists to close. Adding the row by hand would repeat the mistake, so
+# every row is now PARSED OUT OF THE MODULE DOCSTRING and driven through the
+# CLI. A row whose claim is false fails; a row with no driver fails BY NAME, so
+# the table cannot grow a claim nothing measures.
+#
+# This hands `PDF-30` (which re-derives doc claims against the finished
+# surface) a table that is correct by construction rather than by review.
+# --------------------------------------------------------------------------- #
+
+
+def pinned_exit_table() -> dict[str, int]:
+    """`cmd_info.py`'s EXIT CODES table, read out of its own module docstring."""
+    import re
+
+    import pdf_toolkit.cli.cmd_info as module
+
+    docstring = module.__doc__ or ""
+    body = docstring.split("EXIT CODES, PINNED", 1)[1]
+    rows: dict[str, int] = {}
+    for line in body.splitlines():
+        match = re.fullmatch(r"(?P<label>\S.*?)\s{2,}(?P<code>\d+)\s*", line)
+        if match:
+            rows[match["label"].strip()] = int(match["code"])
+    return rows
+
+
+def test_ac14_the_pinned_exit_table_declares_the_unreadable_row() -> None:
+    """The table's completeness, asserted before its accuracy: a driver table
+    can only prove the rows that EXIST."""
+    labels = pinned_exit_table()
+    assert labels, (
+        "no rows parsed out of cmd_info.py's EXIT CODES table -- the parser has stopped "
+        "seeing the table, which would make every assertion below vacuous"
+    )
+    unreadable = [label for label in labels if "unreadable" in label.lower()]
+    assert unreadable, (
+        f"cmd_info.py's pinned exit table has no existing-but-unreadable row: {sorted(labels)}"
+    )
+    assert all(labels[label] == 1 for label in unreadable), labels
+
+
+def test_ac14_every_pinned_table_row_is_driven_through_the_cli(
+    plain_pdf: Path, unreadable_pdf: Path, tmp_path: Path
+) -> None:
+    """Every row of the table, measured. The anti-lapse half is the
+    `pytest.fail` on a row with no driver -- that is what stops the table from
+    growing a claim no test measures, which is how it came to be wrong."""
+    skip_as_root()
+    import shutil
+
+    corrupt = tmp_path / "table-corrupt.pdf"
+    corrupt.write_bytes(b"%PDF-1.4 truncated")
+    directory = tmp_path / "table-directory"
+    directory.mkdir()
+    locked = build_encrypted_pdf(plain_pdf, tmp_path / "table-locked.pdf", user_password="hunter2")
+    second_good = tmp_path / "table-second.pdf"
+    shutil.copyfile(plain_pdf, second_good)
+
+    drivers: dict[str, list[str]] = {
+        "Success (including ``--dry-run``)": [str(plain_pdf)],
+        "Malformed / corrupt / unparseable PDF": [str(corrupt)],
+        "Nonexistent input path": [str(tmp_path / "table-absent.pdf")],
+        "Unknown flag": [str(plain_pdf), "--no-such-flag"],
+        "Directory operand": [str(directory)],
+        "Existing but unreadable input": [str(unreadable_pdf)],
+        "User password required, none supplied": [str(locked)],
+        "Several inputs, at least one failed": [str(plain_pdf), str(corrupt), str(second_good)],
+    }
+
+    table = pinned_exit_table()
+    undriven = sorted(set(table) - set(drivers))
+    assert undriven == [], (
+        f"cmd_info.py's pinned exit table declares row(s) {undriven} that nothing drives "
+        "through the CLI -- add a driver here, or the table has grown a claim no test "
+        "measures (which is how it came to be incomplete in the first place)"
+    )
+
+    for label, expected in sorted(table.items()):
+        measured = run_cli("info", *drivers[label]).returncode
+        assert measured == expected, (
+            f"cmd_info.py's pinned table claims {expected} for {label!r}; the CLI returned "
+            f"{measured} for `info {' '.join(drivers[label])}`"
+        )
+
+
+def test_ac14_the_table_driver_map_has_no_dead_rows(plain_pdf: Path) -> None:
+    """The other direction: a driver whose label is no longer in the table is
+    dead weight that would silently stop asserting anything. Kept honest by
+    parsing the table rather than by remembering it."""
+    table = pinned_exit_table()
+    assert len(table) >= 8, f"the table parsed to {len(table)} rows: {sorted(table)}"
+    assert "Existing but unreadable input" in table, sorted(table)

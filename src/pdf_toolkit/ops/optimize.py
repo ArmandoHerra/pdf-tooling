@@ -72,7 +72,7 @@ from pdf_toolkit.ports.structure import (
 )
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions
+from pdf_toolkit.safety.paths import check_output_collisions, classify_operand, read_source_bytes
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -115,10 +115,7 @@ _NAME_WITHOUT_OUT_DIR: Final[str] = (
 
 def _validate_sources(sources: Sequence[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 # --------------------------------------------------------------------------- #
@@ -226,7 +223,7 @@ def _compress_one(
     pikepdf structural pass, then (only under ``--lossless``) D-12.3's Layer
     1 gate. Raises before returning on any failure — the caller never opens
     ``AtomicWriter`` for a failed item, so nothing is written (D-12.3)."""
-    data = source.read_bytes()
+    data = read_source_bytes(source)
     detail: dict[str, object] = {}
 
     if images != "keep":
@@ -433,7 +430,7 @@ def repair_run(
     started = time.monotonic()
     bytes_before = source.stat().st_size
     engine = require_structure(capability="repair")
-    outcome = engine.repair(source.read_bytes())
+    outcome = engine.repair(read_source_bytes(source))
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(outcome.output)
@@ -519,7 +516,7 @@ def linearize_run(
     started = time.monotonic()
     bytes_before = source.stat().st_size
     engine = require_structure(capability="linearize")
-    output_bytes = engine.linearize(source.read_bytes())
+    output_bytes = engine.linearize(read_source_bytes(source))
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(output_bytes)

@@ -37,6 +37,7 @@ __all__ = [
     "PageRangeError",
     "PdfToolkitError",
     "RefusedError",
+    "SourceUnreadableError",
     "TargetExistsError",
     "UsageError",
 ]
@@ -203,6 +204,29 @@ class DestinationUnwritableError(FailureError):
     filesystem simply cannot accept the write. Raised at plan time so it lands
     before an engine runs rather than after one produced bytes with nowhere to
     put them.
+    """
+
+
+class SourceUnreadableError(FailureError):
+    """Exit 1 — the input exists but its contents cannot be read.
+
+    The exact mirror of :class:`DestinationUnwritableError` above, with one
+    noun changed: nothing declined on safety grounds, the filesystem simply
+    will not hand over the bytes. An operand that exists but cannot be read is
+    **an operation that ran and failed**, not a mistyped command line, so it is
+    exit 1 and never exit 2 (PDF-26 §D5).
+
+    Additive by construction, like every class in this block: a subclass of
+    :class:`FailureError`, so it introduces no new integer and inherits
+    ``kind: "failure"``. ``cli/exit_codes.py`` is unchanged by its arrival.
+
+    The line it draws, and the reason the line is drawn *here* rather than
+    remembered: an unreadable ``--password-file`` value stays a
+    :class:`UsageError` (exit 2, value never echoed — B-068). That flag takes a
+    path to a file *holding a password*, so "not a readable file" is a
+    statement about the flag's value rather than about a file the run tried to
+    process, and a message naming it could not name the value without printing
+    a credential. This class is for operands only.
     """
 
 

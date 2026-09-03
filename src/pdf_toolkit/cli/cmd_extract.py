@@ -52,7 +52,7 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.pages import extract_run, reject_missing_sources
 from pdf_toolkit.output import emit_result
@@ -91,7 +91,7 @@ def extract_command(
     ctx: typer.Context,
     sources: Annotated[
         list[Path],
-        typer.Argument(metavar="PDF...", help="One or more PDFs to extract pages from."),
+        operand_argument(metavar="PDF...", help="One or more PDFs to extract pages from."),
     ],
     pages: Annotated[
         str | None,

@@ -34,6 +34,7 @@ from pdf_toolkit.ports.structure import (
     require_structure,
 )
 from pdf_toolkit.safety.atomic import AtomicWriter
+from pdf_toolkit.safety.paths import classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -114,11 +115,11 @@ def resolve_merge_inputs(raw_args: tuple[str, ...]) -> tuple[MergeInput, ...]:
                 f"text to be read as the path",
                 path=path_text,
             )
-        if path.is_dir():
-            raise UsageError(
-                "expected a PDF file, not a directory; globbing is the shell's job",
-                path=path_text,
-            )
+        classify_operand(
+            path,
+            as_written=path_text,
+            directory_message=("expected a PDF file, not a directory; globbing is the shell's job"),
+        )
         resolved.append(MergeInput(raw=raw, path=path, selection=selection))
     return tuple(resolved)
 

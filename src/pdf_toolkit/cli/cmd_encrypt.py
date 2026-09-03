@@ -43,19 +43,20 @@ from typing import Annotated, Final
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.password import (
     ENV_OWNER_PASSWORD,
     ENV_PASSWORD,
     plan_password,
     reject_two_stdin_streams,
 )
-from pdf_toolkit.errors import NoInputError, PdfToolkitError, RefusedError, UsageError
+from pdf_toolkit.errors import PdfToolkitError, RefusedError, UsageError
 from pdf_toolkit.ops.crypto import PasswordSource, encrypt_run
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports.structure import ALWAYS_GRANTED_TOKENS, PERMISSION_TOKENS
 from pdf_toolkit.safety.confirm import require_confirmation
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["encrypt_command", "parse_allow", "plaintext_backup_refusal"]
 
@@ -163,16 +164,13 @@ def plaintext_backup_refusal(
 
 def _reject_missing_sources(sources: list[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 @global_options(consumes=("--output", "--in-place"))
 def encrypt_command(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Argument(metavar="PDF", help="The PDF to encrypt.")],
+    source: Annotated[Path, operand_argument(metavar="PDF", help="The PDF to encrypt.")],
     owner_password_file: Annotated[
         str | None,
         typer.Option(

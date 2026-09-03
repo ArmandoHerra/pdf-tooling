@@ -19,11 +19,12 @@ from typing import Annotated, Final
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.raster import rasterize_document
 from pdf_toolkit.output import emit_result
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["RasterFormat", "rasterize_command"]
 
@@ -98,7 +99,7 @@ def rasterize_command(
     ctx: typer.Context,
     sources: Annotated[
         list[Path],
-        typer.Argument(metavar="PDF...", help="One or more PDFs to rasterize."),
+        operand_argument(metavar="PDF...", help="One or more PDFs to rasterize."),
     ],
     pages: Annotated[
         str | None,
@@ -144,10 +145,7 @@ def rasterize_command(
     # call path into that function; the duplication is deliberate defense in
     # depth, the same posture `AtomicWriter`'s own no-clobber re-check takes.
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
     if dpi is not None and width is not None:
         raise UsageError("--dpi and --width are mutually exclusive")

@@ -39,13 +39,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.errors import UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
 from pdf_toolkit.ports.office import office_binary_present, require_office
 from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions
+from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -86,10 +86,7 @@ def validate_filter(filter_name: str | None) -> None:
 
 def _validate_sources(sources: Sequence[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a file, not a directory", path=str(source))
+        classify_operand(source, directory_message="expected a file, not a directory")
 
 
 @dataclass(frozen=True, slots=True)

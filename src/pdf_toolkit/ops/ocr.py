@@ -78,7 +78,7 @@ from pdf_toolkit.ports.raster import require_raster
 from pdf_toolkit.ports.structure import StructureEngine, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions
+from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -127,10 +127,7 @@ _NAME_WITHOUT_OUT_DIR: Final[str] = (
 
 def _validate_sources(sources: Sequence[Path]) -> None:
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
 
 @dataclass(frozen=True, slots=True)

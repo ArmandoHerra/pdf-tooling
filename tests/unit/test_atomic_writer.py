@@ -259,6 +259,16 @@ def test_in_place_on_a_target_that_does_not_exist_yet_writes_no_sidecar(tmp_path
 #: Every row of Design §D8. The class half of the assertion; the subprocess half
 #: is below, except ``ConfirmationDeclinedError``, which needs a terminal and is
 #: driven through a real pty in ``tests/unit/test_confirm.py``.
+#:
+#: **PDF-26 appends one row, and the completeness guard below is what forced
+#: the choice.** ``SourceUnreadableError`` is the read-side mirror of
+#: ``DestinationUnwritableError`` -- same exit code, same ``kind``, raised by the
+#: same module (``safety/paths.py``) -- so it lands here rather than in the
+#: guard's exclusion set. The alternative was an exclusion entry, which would
+#: have exempted the new class from this table's own assertions and made the
+#: guard's promise ("a row added to errors.py without a row here would go
+#: unasserted") true of it. Its behavioural coverage is separate and named:
+#: ``tests/unit/test_safety_paths.py::test_ac5_source_unreadable_error_is_additive``.
 D8_TABLE = (
     (errors.TargetExistsError, REFUSED, "refused"),
     (errors.OutputCollisionError, REFUSED, "refused"),
@@ -268,6 +278,7 @@ D8_TABLE = (
     (errors.ConfirmationDeclinedError, REFUSED, "refused"),
     (errors.BackupWithoutInPlaceError, USAGE, "usage"),
     (errors.DestinationUnwritableError, FAILURE, "failure"),
+    (errors.SourceUnreadableError, FAILURE, "failure"),
 )
 
 

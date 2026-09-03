@@ -94,6 +94,7 @@ from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
 from pdf_toolkit.ports.compose import ImagePlacement, TextLayout, require_compose
 from pdf_toolkit.safety.atomic import AtomicWriter
+from pdf_toolkit.safety.paths import classify_operand, read_source_bytes
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -371,14 +372,13 @@ def inspect_image(path: Path, *, dpi_flag: float | None) -> ImageFacts:
     obvious fix), exit 4 for a missing file, exit 1 for a real file the decoder
     cannot read as a raster.
     """
-    if not path.exists():
-        raise NoInputError("no such file", path=str(path))
-    if path.is_dir():
-        raise UsageError(
+    classify_operand(
+        path,
+        directory_message=(
             "expected an image file, not a directory; globbing is the shell's "
-            "job, so pass the files themselves (e.g. './scans/*.jpg')",
-            path=str(path),
-        )
+            "job, so pass the files themselves (e.g. './scans/*.jpg')"
+        ),
+    )
 
     head = _read_head(path)
     if head.startswith(_PDF_MAGIC):
@@ -403,7 +403,7 @@ def inspect_image(path: Path, *, dpi_flag: float | None) -> ImageFacts:
     passthrough = False
     diverted: str | None = None
     if source_format == "JPEG":
-        frame = jpeg_frame(path.read_bytes())
+        frame = jpeg_frame(read_source_bytes(path))
         if frame is None:
             diverted = "JPEG with no readable frame header"
         else:

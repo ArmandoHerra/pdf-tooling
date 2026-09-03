@@ -48,6 +48,7 @@ __all__ = [
     "given_global_flags",
     "global_options",
     "not_a_readable_file",
+    "operand_argument",
     "password_flag_refusal",
     "root_global_options",
 ]
@@ -133,6 +134,33 @@ UNGOVERNED_FLAGS: Final[Mapping[str, str]] = MappingProxyType(
 #: dict, keyed by that module's own `__name__` -- see :func:`global_options`
 #: and :func:`consumed_output_flags`.
 _CONSUMES_BY_MODULE: dict[str, tuple[str, ...]] = {}
+
+
+def operand_argument(**kwargs: Any) -> Any:
+    """The ONE declaration of an **input operand** (PDF-26 §D2).
+
+    ``metavar`` and ``help`` stay per-verb; the readability decision does not.
+    Twenty-four positional operands are declared through this constructor and
+    the ``readable=False`` in it is written once, because it was wrong
+    twenty-three times in a row and the mechanism that made it wrong was a
+    *default*: Typer gives a ``pathlib.Path`` annotation ``readable=True``, so
+    the framework's ``Path`` converter ran ``os.access(R_OK)`` during argv
+    parsing and raised its own usage error **before any verb callback and
+    before any of this product's code executed**. An existing-but-unreadable
+    operand therefore exited 2 with the batch dead, on every verb that had one.
+
+    Readability is not a parse-time property of a command line, it is a
+    run-time property of a file, and the tool's own classifier
+    (:func:`pdf_toolkit.safety.paths.classify_operand`) is what answers it —
+    exit 1, coded, per item, with the payload the CLI contract promises.
+
+    A caller passing ``readable=`` gets a ``TypeError`` here rather than a
+    quiet override. What this constructor cannot catch is a verb that bypasses
+    it and writes a bare ``typer.Argument(...)``; that is what the live-tree
+    declaration guard in ``tests/test_cli_contract.py`` is for, and it is the
+    half of §D2 that actually holds the line for a verb nobody has written yet.
+    """
+    return typer.Argument(readable=False, **kwargs)
 
 
 def _version_callback(value: bool) -> None:
@@ -327,6 +355,18 @@ GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
                 "--output",
                 help="Single output file. Mutually exclusive with --out-dir.",
                 show_default=False,
+                # PDF-26 §D4. Two source lines, 52 live declarations, and a
+                # LIVE SAFETY GATE un-masked. Readability of a WRITE TARGET is
+                # semantically irrelevant, and the framework's veto fired
+                # BEFORE the safety spine: measured at `cdc02ee`, `compress
+                # good.pdf -O <existing target, mode 644>` refused with 5
+                # (`TargetExistsError`, correct) while the same invocation
+                # against a mode-000 target returned 2 -- a safety refusal
+                # reported as a typo, and unreachable by any flag combination
+                # because adding `-f` was still 2. With the veto off, the spine
+                # answers: 5 without `-f`, and 0 with it (replacing a file is a
+                # *directory* permission on POSIX).
+                readable=False,
             ),
         ],
         None,
@@ -339,6 +379,10 @@ GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
                 "--out-dir",
                 help="Multi-output destination directory.",
                 show_default=False,
+                # PDF-26 §D4, the other half: `--out-dir <dir, mode 000>` was
+                # 2 rather than `safety/paths.py::ensure_destination_writable`'s
+                # own answer (1, `DestinationUnwritableError`).
+                readable=False,
             ),
         ],
         None,

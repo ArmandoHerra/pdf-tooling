@@ -11,7 +11,7 @@ from typing import Annotated
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.merge import merge_documents, resolve_merge_inputs
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
@@ -71,7 +71,7 @@ def merge_command(
     ctx: typer.Context,
     inputs: Annotated[
         list[str],
-        typer.Argument(
+        operand_argument(
             metavar="INPUT...",
             help="One or more 'path' or 'path:range' operands, in argv order.",
         ),

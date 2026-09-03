@@ -29,11 +29,11 @@ from typing import Annotated, Any
 
 import typer
 
-from pdf_toolkit.cli.common import get_config, global_options
-from pdf_toolkit.errors import NoInputError, UsageError
+from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.textract import TableOutcome, extract_tables_run
 from pdf_toolkit.output import OutputFormat, render_payload
+from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["TableFormat", "TableStrategy", "build_payload", "tables_command"]
 
@@ -201,7 +201,7 @@ def tables_command(
     ctx: typer.Context,
     sources: Annotated[
         list[Path],
-        typer.Argument(metavar="PDF...", help="One or more PDFs to extract tables from."),
+        operand_argument(metavar="PDF...", help="One or more PDFs to extract tables from."),
     ],
     pages: Annotated[
         str | None,
@@ -227,10 +227,7 @@ def tables_command(
     # layer: PLAN.md §10's exit-4 contract must win over every other usage
     # error, and every other call path into the op needs it too.
     for source in sources:
-        if not source.exists():
-            raise NoInputError("no such file", path=str(source))
-        if source.is_dir():
-            raise UsageError("expected a PDF file, not a directory", path=str(source))
+        classify_operand(source)
 
     outcome = extract_tables_run(
         sources,
