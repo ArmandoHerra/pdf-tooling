@@ -740,6 +740,222 @@ def test_the_toctou_arm_is_not_vacuous(unreadable_pdf: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# AC16, THE RASTER SEAMS -- `ops/compose.py`'s THREE reads (`02096f4422`).
+#
+# The two arms above belt `pypdf`. They cover the twenty-two verbs whose operand
+# is a PDF and NOT the one whose operand is an image: `compose` reads its input
+# three separate times, through neither of the belted entry points, and the
+# first of those reads was unguarded. Driven at AC16's own condition it exited 1
+# with **zero bytes of stdout and a 3361-byte traceback** ending
+# `PermissionError` at `ops/compose.py:442, in _read_head`.
+#
+# THE FILE WAS ALREADY THE ONE §D3 EXTENDED TO, WHICH IS THE WHOLE LESSON. The
+# extension belted `:406`'s `read_source_bytes` and stopped there; `:442`'s
+# `path.open("rb")` and the two `Image.open(path)` seams -- neither of which
+# goes through `read_bytes`, so neither could be served by `read_source_bytes`
+# at all -- were left. A belt fitted to one seam in a three-seam file is not a
+# belt, and the arm that would have said so did not exist.
+#
+# ONE ARM PER SEAM, AND EACH DRIVES ITS OWN. `:442` is the first read, so it
+# SHADOWS the two below it: an operand that is mode-000 from the start can never
+# reach them, and three arms sharing that one invocation would have measured one
+# seam three times. So the later two are reached by the honest race they are
+# actually exposed to -- the operand goes unreadable *between* two reads, which
+# is the TOCTOU window `classify_operand`'s `os.access` cannot close and the
+# only reason §D3 exists. Each arm was proved red by removing ITS OWN belt and
+# confirming the other two stayed green.
+# --------------------------------------------------------------------------- #
+
+_LYING_ACCESS = "import os; os.access = lambda *a, **k: True; "
+_ENTRYPOINT = "from pdf_toolkit.cli.main import main; main()"
+
+#: How the race arms tell their child which file to pull the mode bits from.
+#: An environment variable rather than an `argv` index: the arms differ in their
+#: argv tails, and a positional guess would silently start chmodding the output
+#: path the day a row grows a flag.
+_RACE_TARGET_ENV = "PDF_TOOLKIT_TEST_RACE_TARGET"
+
+
+def build_image(path: Path, fmt: str) -> Path:
+    """A tiny real raster. JPEG takes `compose`'s passthrough path and PNG does
+    not, which is what decides whether `_decode_for_reencode` runs at all."""
+    from PIL import Image
+
+    Image.new("RGB", (32, 24), (200, 30, 30)).save(path, format=fmt)
+    return path
+
+
+def run_compose_race(
+    program: str, source: Path, tmp_path: Path, *, env: dict[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run *program* as `compose <source> -O <out>` and hand back the result.
+
+    The output path is returned rather than asserted on here because two callers
+    want the same thing said about it: `compose` is a single-artifact verb, so
+    every arm below has to show that a read that failed part-way wrote nothing.
+    """
+    import os as _os
+
+    output = tmp_path / "toctou-compose.pdf"
+    child_env = dict(_os.environ)
+    child_env.update(env or {})
+    result = subprocess.run(
+        [sys.executable, "-c", program, "-o", "json", "compose", str(source), "-O", str(output)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+        env=child_env,
+    )
+    return result, output
+
+
+def assert_coded_not_crashed(result: subprocess.CompletedProcess[str], output: Path) -> dict:
+    """The four things every AC16 arm means by "it held", and the envelope."""
+    both = result.stdout + result.stderr
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 1, detail
+    assert "Traceback (most recent call last)" not in both, detail
+    assert "PermissionError" not in both, detail
+    assert not output.exists(), (
+        f"compose is a single-artifact verb: a read that failed part-way through must "
+        f"leave NOTHING behind, and this left {output} -- {detail}"
+    )
+    envelope = json.loads(result.stdout)["error"]
+    assert envelope["code"] == 1 and envelope["kind"] == "failure", detail
+    return envelope
+
+
+def test_ac16_the_toctou_arm_holds_at_composes_header_seam(tmp_path: Path) -> None:
+    """AC16 at `ops/compose.py::_read_head` -- the recorded repro of `02096f4422`,
+    at AC16's own condition and nothing added to it.
+
+    *Red with this seam's belt removed*: exit 1, **zero bytes of stdout**, and a
+    `PermissionError` traceback at `_read_head`'s `path.open("rb")`. The other
+    two arms below stay GREEN when this belt alone is removed, because neither
+    reaches this seam.
+    """
+    skip_as_root()
+    source = build_image(tmp_path / "photo.jpg", "JPEG")
+    source.chmod(UNREADABLE_MODE)
+    try:
+        result, output = run_compose_race(_LYING_ACCESS + _ENTRYPOINT, source, tmp_path)
+    finally:
+        source.chmod(0o600)
+
+    envelope = assert_coded_not_crashed(result, output)
+    assert "is not readable" not in result.stdout, (
+        "the FRAMEWORK's parse-time veto is back; C18 asserts its absence and this "
+        f"arm must not resurrect it -- {envelope}"
+    )
+
+
+def test_ac16_the_toctou_arm_holds_at_composes_inspect_seam(tmp_path: Path) -> None:
+    """AC16 at `inspect_image`'s `Image.open` -- reached by the honest race.
+
+    This seam was **already traceback-covered** before this fix: its
+    `except (UnidentifiedImageError, OSError, ValueError)` caught the
+    `PermissionError` and produced a coded exit 1. What it produced was
+    `"could not read as an image: [Errno 13] Permission denied: <abs path>"` --
+    a raw errno and an absolute path, blaming the decoder for a file the process
+    was never allowed to open. So the belt here buys CLASSIFICATION, not the
+    absence of a crash, and this arm asserts the message rather than merely the
+    code -- otherwise it would pass with the belt removed.
+
+    *Red with this seam's belt removed*: the message reverts to `could not read
+    as an image: [Errno 13] ...`, which this asserts against by equality.
+    """
+    skip_as_root()
+    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+
+    source = build_image(tmp_path / "photo.jpg", "JPEG")
+    # The head read succeeds; the operand goes unreadable before the decoder.
+    program = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "import pdf_toolkit.ops.compose as C\n"
+        f"target = Path(os.environ[{_RACE_TARGET_ENV!r}])\n"
+        "_real_head = C._read_head\n"
+        "def racing_head(path):\n"
+        "    head = _real_head(path)\n"
+        "    target.chmod(0o000)\n"
+        "    return head\n"
+        "C._read_head = racing_head\n" + _ENTRYPOINT
+    )
+    try:
+        result, output = run_compose_race(
+            program, source, tmp_path, env={_RACE_TARGET_ENV: str(source)}
+        )
+    finally:
+        source.chmod(0o600)
+
+    envelope = assert_coded_not_crashed(result, output)
+    assert envelope["message"] == UNREADABLE_MESSAGE, (
+        "an operand that went unreadable between two reads must get the CLASSIFIER's "
+        f"sentence, not the decoder's errno -- {envelope}"
+    )
+
+
+def test_ac16_the_toctou_arm_holds_at_composes_decode_seam(tmp_path: Path) -> None:
+    """AC16 at `_decode_for_reencode`'s `Image.open` -- the widest window.
+
+    A **PNG**, deliberately: a JPEG takes the passthrough path, `raster=None`,
+    and this seam never runs at all -- an arm built on the JPEG fixture the two
+    above use would have been green with no belt anywhere in the function.
+
+    This seam also runs INSIDE the `AtomicWriter` context, so it is the one arm
+    where "wrote nothing" is a claim about a write already in progress rather
+    than about a write never started.
+
+    *Red with this seam's belt removed*: a `PermissionError` traceback at
+    `ops/compose.py`'s `_decode_for_reencode`.
+    """
+    skip_as_root()
+    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+
+    source = build_image(tmp_path / "flat.png", "PNG")
+    # Readable through the whole of `inspect_image`; unreadable before decode.
+    program = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "import pdf_toolkit.ops.compose as C\n"
+        f"target = Path(os.environ[{_RACE_TARGET_ENV!r}])\n"
+        "_real_plan = C.plan_placements\n"
+        "def racing_plan(facts, **kw):\n"
+        "    planned = _real_plan(facts, **kw)\n"
+        "    target.chmod(0o000)\n"
+        "    return planned\n"
+        "C.plan_placements = racing_plan\n" + _ENTRYPOINT
+    )
+    try:
+        result, output = run_compose_race(
+            program, source, tmp_path, env={_RACE_TARGET_ENV: str(source)}
+        )
+    finally:
+        source.chmod(0o600)
+
+    envelope = assert_coded_not_crashed(result, output)
+    assert envelope["message"] == UNREADABLE_MESSAGE, envelope
+
+
+def test_the_compose_decode_arm_reaches_the_seam_it_names(tmp_path: Path) -> None:
+    """The control for the arm above: its PNG fixture must actually be routed to
+    `_decode_for_reencode`, or the arm proves nothing about that seam.
+
+    Asserted against the product's own eligibility verdict rather than against
+    the extension, because "is this passed through" is `inspect_image`'s call
+    and a fixture that quietly became eligible would make the arm vacuous.
+    """
+    from pdf_toolkit.ops.compose import inspect_image
+
+    facts = inspect_image(build_image(tmp_path / "flat.png", "PNG"), dpi_flag=None)
+    assert not facts.passthrough, (
+        "the decode arm's fixture is passthrough-eligible, so `_decode_for_reencode` "
+        "never runs and that arm is measuring nothing"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # AC14 -- `cli/cmd_info.py`'s PINNED EXIT-CODE TABLE, mechanized.
 #
 # The table was documentation that nothing checked, and it was INCOMPLETE: it

@@ -89,12 +89,16 @@ from typing import Final
 
 from PIL import Image, UnidentifiedImageError
 
-from pdf_toolkit.errors import FailureError, NoInputError, UsageError
+from pdf_toolkit.errors import FailureError, NoInputError, PdfToolkitError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
 from pdf_toolkit.ports.compose import ImagePlacement, TextLayout, require_compose
 from pdf_toolkit.safety.atomic import AtomicWriter
-from pdf_toolkit.safety.paths import classify_operand, read_source_bytes
+from pdf_toolkit.safety.paths import (
+    classify_operand,
+    read_source_bytes,
+    unreadable_source_error,
+)
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -365,6 +369,36 @@ def _colorspace(mode: str, components: int | None) -> str:
     return "rgb"
 
 
+def _image_read_error(path: Path, error: Exception) -> PdfToolkitError:
+    """Map a failure raised while READING *path* onto a coded error (PDF-26 §D3).
+
+    The §D3 belt for this module's three raster read seams, which
+    :func:`~pdf_toolkit.safety.paths.read_source_bytes` cannot serve because none
+    of them goes through ``read_bytes``: two hand ``Image.open`` a *path* (so
+    Pillow does the opening) and one reads a header prefix rather than a whole
+    file. What they share with the belted seams is the obligation, so they share
+    the predicate rather than a second opinion about what "unreadable" means --
+    :func:`~pdf_toolkit.safety.paths.unreadable_source_error` returns rather than
+    raises for exactly this caller.
+
+    **The accessibility question is asked first, and the module's own vocabulary
+    is the fallback, not the other way round.** "Could not read as an image" is
+    true of a file nothing can open, but it names the wrong cause and hands the
+    user a raw ``[Errno 13]`` with an absolute path where the classifier has a
+    sentence for it. Everything that is *genuinely* a decode failure -- an
+    ``UnidentifiedImageError``, a truncated frame, a ``ValueError`` out of
+    Pillow -- keeps that wording unchanged, because for those it is the accurate
+    one.
+
+    Like :func:`~pdf_toolkit.safety.paths.source_read_error`, this refines the
+    **class and the message** and never the integer: both arms are exit 1.
+    """
+    unreadable = unreadable_source_error(path)
+    if unreadable is not None:
+        return unreadable
+    return FailureError(f"could not read as an image: {error}", path=str(path))
+
+
 def inspect_image(path: Path, *, dpi_flag: float | None) -> ImageFacts:
     """Sniff one operand. Every refusal here happens before anything is written.
 
@@ -394,10 +428,7 @@ def inspect_image(path: Path, *, dpi_flag: float | None) -> ImageFacts:
             mode = str(probe.mode)
             info = {str(key): value for key, value in probe.info.items()}
     except (UnidentifiedImageError, OSError, ValueError) as error:
-        raise FailureError(
-            f"could not read as an image: {error}",
-            path=str(path),
-        ) from error
+        raise _image_read_error(path, error) from error
 
     components: int | None = None
     passthrough = False
@@ -439,8 +470,18 @@ def inspect_image(path: Path, *, dpi_flag: float | None) -> ImageFacts:
 
 
 def _read_head(path: Path) -> bytes:
-    with path.open("rb") as handle:
-        return handle.read(len(_PDF_MAGIC))
+    """The operand's first bytes, for the PDF-magic sniff -- belted (§D3).
+
+    The FIRST read this module performs on an operand, and therefore the one a
+    TOCTOU race arrives at: :func:`classify_operand` has already run its
+    ``os.access`` by the time control gets here, so a file that went unreadable
+    in between fails at *this* ``open``, not at the decoder below it.
+    """
+    try:
+        with path.open("rb") as handle:
+            return handle.read(len(_PDF_MAGIC))
+    except OSError as error:
+        raise _image_read_error(path, error) from error
 
 
 # --------------------------------------------------------------------------- #
@@ -513,10 +554,19 @@ def _decode_for_reencode(path: Path, mode: str) -> Image.Image:
     Reached only for inputs :func:`inspect_image` already ruled ineligible, so
     it can never touch the passthrough path. Alpha is dropped rather than
     composited: a page is paper, and v1 does not model transparency.
+
+    Belted (§D3) like the two seams above it, and it is the LAST of the three to
+    see the operand: this is the widest race window in the module, because it
+    reopens a file :func:`inspect_image` finished with pages earlier -- and it
+    runs INSIDE the :class:`~pdf_toolkit.safety.atomic.AtomicWriter` context, so
+    a raise here must still leave nothing behind.
     """
     target = "L" if mode in ("1", "L", "LA", "I;16") else "CMYK" if mode == "CMYK" else "RGB"
-    with Image.open(path) as opened:
-        return opened.convert(target)
+    try:
+        with Image.open(path) as opened:
+            return opened.convert(target)
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise _image_read_error(path, error) from error
 
 
 def _attach_rasters(
