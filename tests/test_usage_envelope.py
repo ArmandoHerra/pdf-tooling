@@ -905,26 +905,61 @@ def readme_password_section() -> str:
     return text[start:end]
 
 
+#: The claim `README.md` makes and this spec has to make true. The table below
+#: it is parsed relative to THIS sentence, not from the top of the section, so
+#: an unrelated table elsewhere in the section can never stand in for it.
+_README_CLAIM: Final[str] = "naming the three supported paths"
+
+#: A password FILE flag, an ENVIRONMENT variable, and the stdin dash. Matched by
+#: KIND rather than by row position: the first version of this helper read
+#: `rows[0]`, `rows[1]`, `rows[2]`, which meant a reordered table silently
+#: pointed the assertions at the wrong cells — and a `PATH` metavar inside
+#: `--password-file PATH` matched a naive all-caps pattern before the real
+#: environment variable did. The env pattern requires an underscore for that
+#: reason: every environment name this product publishes is SCREAMING_SNAKE.
+_README_FILE_FLAG = re.compile(r"--[a-z-]+-file\b")
+_README_ENV_NAME = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+_README_STDIN = "`-`"
+
+
+def readme_password_rows() -> tuple[tuple[str, str], ...]:
+    """The claim's OWN table: `(Path, Spelling)` per data row."""
+    section = readme_password_section()
+    assert _README_CLAIM in section, (
+        f"README no longer carries the claim {_README_CLAIM!r} — AC16 has nothing to hold "
+        "the message against, and would otherwise pass having read nothing"
+    )
+    block = section[section.index(_README_CLAIM) :]
+    rows: list[tuple[str, str]] = []
+    for match in _TABLE_ROW.finditer(block):
+        path = match.group("path").strip()
+        spelling = match.group("spelling").strip()
+        if path == "Path" or set(path) <= set("- "):
+            continue
+        rows.append((path, spelling))
+    return tuple(rows)
+
+
 def readme_password_tokens() -> tuple[str, ...]:
     """The three supported paths, READ OUT OF THE README rather than restated.
 
-    A deletion of the table fails on the parse below, loudly, rather than
-    turning this criterion into a green that asserts nothing.
+    A deletion of the table — or of the claim sentence above it — fails on the
+    parse below, loudly, rather than turning this criterion into a green that
+    asserts nothing.
     """
-    section = readme_password_section()
-    rows = [
-        (match.group("path").strip(), match.group("spelling").strip())
-        for match in _TABLE_ROW.finditer(section)
-    ]
-    rows = [row for row in rows if not set(row[0]) <= set("- ") and row[0] != "Path"]
-    assert len(rows) >= 3, f"README's password-paths table has {len(rows)} data row(s): {rows}"
-
-    file_flags = re.findall(r"--[a-z-]+", rows[0][1])
-    assert file_flags, f"no flag spelling in the file row: {rows[0]!r}"
-    environment = re.findall(r"\b[A-Z][A-Z_]{3,}\b", rows[2][1])
-    assert environment, f"no environment variable in the environment row: {rows[2]!r}"
-    assert "`-`" in rows[1][1], f"the stdin row names no dash: {rows[1]!r}"
-    return (file_flags[0], environment[0], "stdin")
+    rows = readme_password_rows()
+    assert len(rows) >= 3, (
+        f"README's password-paths table has {len(rows)} data row(s) after the claim: {rows}"
+    )
+    spellings = [spelling for _, spelling in rows]
+    file_flag = next(
+        (m.group(0) for s in spellings for m in [_README_FILE_FLAG.search(s)] if m), ""
+    )
+    env_name = next((m.group(0) for s in spellings for m in [_README_ENV_NAME.search(s)] if m), "")
+    assert file_flag, f"no password-file flag anywhere in the table: {rows}"
+    assert env_name, f"no environment variable anywhere in the table: {rows}"
+    assert any(_README_STDIN in s for s in spellings), f"no stdin dash in the table: {rows}"
+    return (file_flag, env_name, "stdin")
 
 
 def test_ac16_the_readme_claim_and_the_message_agree() -> None:
