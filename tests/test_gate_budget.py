@@ -23,12 +23,13 @@ second.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 import pytest
 import yaml
@@ -432,33 +433,466 @@ def test_a_raised_constant_with_no_evidence_block_reddens(tmp_path: Path) -> Non
     assert missing, "a bare raised constant was accepted -- the guard is not checking the block"
 
 
+# --------------------------------------------------------------------------- #
+# The load-immune companion, and the ONE proposition it may abstain on
+#
+# WHY THIS IS AN AST WALK AND NOT A GREP, and it is the same lesson twice.
+# The first version of this guard asserted `"getloadavg" not in body`. An
+# independent verifier defeated it in one line, with the mechanism shipped ten
+# lines away in this very cycle: it planted
+# `if os.environ.get("PYTEST_XDIST_WORKER"): pytest.skip(...)` -- the abstention
+# `tests/test_cli_spine.py::test_help_stays_within_the_startup_budget` itself
+# uses -- into Section 6's bodies. The guard passed (1 passed, noticed nothing)
+# while Section 6 reported `3 skipped` on every worker. **The startup claim was
+# then held by two tests that both skip, i.e. by nothing, and this file said it
+# was fine.**
+#
+# That is `B-106`'s lesson one step along, and `AC20` in this same file already
+# applies it to prose: an exact-phrase guard *answers "is this STRING gone", not
+# "is this CLAIM gone"*. A guard naming `getloadavg` AND `PYTEST_XDIST_WORKER`
+# would be the same defect a third step along -- the next mechanism has a
+# different name too. So the proposition is stated positively and the SHAPE is
+# what is matched:
+#
+#   **Section 6 may abstain on exactly one thing: the build under test is not
+#   there to measure. Every other abstention, by any mechanism, is a red.**
+#
+# Sanctioned is decided by the guarding CONDITION, not by the function's name.
+# Keying on names is how a bypass gets written inside an already-allowlisted
+# function; keying on the condition means an xdist skip planted into the
+# sanctioned fixture itself still reddens.
+#
+# Scope is deliberately OVER-approximated: every function defined inside
+# Section 6's span, plus every module-level function anywhere in that file that
+# Section 6 transitively calls. A precise call graph is one missed edge (an
+# autouse fixture, a `getattr` dispatch) away from a false negative, and the
+# cost of the over-approximation is only that nobody may write abstention code
+# in Section 6 at all -- which is the rule being enforced.
+# --------------------------------------------------------------------------- #
+
+SECTION_SIX_BANNER: Final = "Section 6 -- what `pdftoolkit --help` IMPORTS"
+
+#: Section 6's three claim-bearing assertions. Losing one is losing the claim.
+SECTION_SIX_TESTS: Final = (
+    "test_help_imports_no_third_party_package_outside_the_pin",
+    "test_help_import_count_stays_under_the_ceiling",
+    "test_the_help_import_census_is_not_vacuous",
+)
+
+#: The ONLY admissible precondition: the venv's console script is not there, so
+#: there is no build to census (`PLAN.md` §10.1 rule 5 -- absent precondition,
+#: skip with a reason, never pass). Matched against the guarding condition's
+#: source, so it survives `if not X.exists()`, `if not X.is_file()`, and a
+#: `skipif` decorator carrying the same test.
+SANCTIONED_CONDITION: Final[re.Pattern[str]] = re.compile(
+    r"VENV_CONSOLE_SCRIPT\b[^\n]*\.(exists|is_file)\(\)"
+)
+
+#: Abstention by call. `fail` is deliberately absent -- failing is the opposite
+#: of abstaining and is what this section is FOR.
+ABSTAINING_CALLS: Final = frozenset({"skip", "xfail", "importorskip", "exit"})
+
+#: Abstention by decorator, matched on the dotted tail so `pytest.mark.skipif`,
+#: `mark.skipif` and a bare `skipif` all count.
+ABSTAINING_DECORATORS: Final = frozenset({"skip", "skipif", "xfail"})
+
+#: Abstention by exception.
+ABSTAINING_EXCEPTIONS: Final = frozenset({"SkipTest", "Skipped"})
+
+#: Sensing host load or worker identity AT ALL. Separate from the abstention
+#: rule on purpose: `modules = [] if os.getloadavg()[0] > 4 else census()` is
+#: not a skip, does not fail, and empties the census -- an abstention that
+#: reports itself as a pass. Identifiers only; comments and docstrings are
+#: exempt by construction because this reads the AST.
+LOAD_SENSING_NAMES: Final = frozenset(
+    {"getloadavg", "loadavg", "cpu_count", "sched_getaffinity", "getaffinity", "psutil"}
+)
+#: The same proposition where it hides in a string: an env-var key.
+LOAD_SENSING_LITERALS: Final = ("PYTEST_XDIST_WORKER", "XDIST_WORKER", "loadavg")
+
+
+class Abstention(NamedTuple):
+    """One way out of running, found in Section 6."""
+
+    function: str
+    mechanism: str
+    lineno: int
+    condition: str
+
+    @property
+    def sanctioned(self) -> bool:
+        return bool(SANCTIONED_CONDITION.search(self.condition))
+
+    def __str__(self) -> str:  # pragma: no cover - failure-message plumbing
+        where = self.condition or "<unconditional>"
+        return f"{self.function}:{self.lineno} abstains via {self.mechanism} on `{where}`"
+
+
+def _dotted(node: ast.AST) -> str:
+    """`pytest.mark.skipif` from the Attribute/Name chain, or ''."""
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+    return ".".join(reversed(parts))
+
+
+def section_span(text: str, banner: str) -> tuple[int, int]:
+    """1-based [start, end) line range of the banner-named section.
+
+    The end is the next section banner, so this keeps working when `PDF-30`
+    appends Section 7 -- the file is append-only and its section numbers are
+    taken by re-reading it, never from a spec.
+    """
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if banner in line), None)
+    assert start is not None, (
+        f"{banner!r} is gone from {IMPORT_BOUNDARIES.name}; the contention-immune companion "
+        "no longer exists and the startup claim is held by a test that skips under `-n auto`, "
+        "i.e. by nothing"
+    )
+    for index in range(start + 1, len(lines)):
+        if re.match(r"^#\s*Section \d+ --", lines[index]):
+            return start + 1, index + 1
+    return start + 1, len(lines) + 1
+
+
+def _abstentions_in(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[Abstention]:
+    found: list[Abstention] = []
+    is_test = function.name.startswith("test_")
+
+    for decorator in function.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        dotted = _dotted(target)
+        if dotted.split(".")[-1] in ABSTAINING_DECORATORS:
+            condition = ""
+            if isinstance(decorator, ast.Call) and decorator.args:
+                condition = ast.unparse(decorator.args[0])
+            found.append(Abstention(function.name, f"@{dotted}", decorator.lineno, condition))
+
+    def visit(node: ast.AST, guards: tuple[str, ...]) -> None:
+        """Check *node* itself, THEN descend -- an early `return` IS the
+        statement in an `if` body, so a child-only walk never sees it. (It did
+        not: this walk's own fourth red control caught the omission.)"""
+        if isinstance(node, ast.If):
+            condition = ast.unparse(node.test)
+            visit(node.test, guards)
+            for statement in node.body:
+                visit(statement, (*guards, condition))
+            for statement in node.orelse:
+                visit(statement, (*guards, f"not ({condition})"))
+            return
+        if isinstance(node, ast.Call):
+            dotted = _dotted(node.func)
+            tail = dotted.split(".")[-1]
+            # `pytest.skip` and a bare `skip` imported from pytest both count;
+            # `sys.exit` and `os._exit` do not -- they are not abstentions,
+            # they are the harness dying.
+            if tail in ABSTAINING_CALLS and (dotted == tail or "pytest" in dotted):
+                found.append(Abstention(function.name, dotted, node.lineno, " and ".join(guards)))
+        if isinstance(node, ast.Raise) and node.exc is not None:
+            raised = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+            if _dotted(raised).split(".")[-1] in ABSTAINING_EXCEPTIONS:
+                found.append(
+                    Abstention(
+                        function.name,
+                        f"raise {_dotted(raised)}",
+                        node.lineno,
+                        " and ".join(guards),
+                    )
+                )
+        if isinstance(node, ast.Return) and is_test and guards:
+            found.append(
+                Abstention(function.name, "conditional return", node.lineno, " and ".join(guards))
+            )
+        for child in ast.iter_child_nodes(node):
+            visit(child, guards)
+
+    for statement in function.body:
+        visit(statement, ())
+    return found
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    names = {
+        _dotted(child.func).split(".")[0]
+        for child in ast.walk(node)
+        if isinstance(child, ast.Call) and _dotted(child.func)
+    }
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        names |= {argument.arg for argument in node.args.args}  # fixtures, by name
+    return names
+
+
+def section_six_functions(text: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every function defined in Section 6, plus every module-level function in
+    the file it transitively reaches (a helper planted three sections up and
+    called from here abstains just as effectively)."""
+    tree = ast.parse(text)
+    start, end = section_span(text, SECTION_SIX_BANNER)
+    module_functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    selected = {name: node for name, node in module_functions.items() if start <= node.lineno < end}
+    frontier = list(selected.values())
+    while frontier:
+        for name in _called_names(frontier.pop()):
+            if name in module_functions and name not in selected:
+                selected[name] = module_functions[name]
+                frontier.append(module_functions[name])
+    return list(selected.values())
+
+
+def section_six_abstentions(text: str) -> list[Abstention]:
+    """Every way out of running that Section 6 can reach, by any mechanism."""
+    found: list[Abstention] = []
+    for function in section_six_functions(text):
+        found.extend(_abstentions_in(function))
+    # Module scope too: `pytest.skip(..., allow_module_level=True)` inside the
+    # section would silence every test in the FILE, not merely this section.
+    tree = ast.parse(text)
+    start, end = section_span(text, SECTION_SIX_BANNER)
+    loose = [
+        node
+        for node in tree.body
+        if start <= node.lineno < end
+        and not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    ]
+    if loose:
+        holder = ast.parse("def _module_scope() -> None:\n    pass\n").body[0]
+        assert isinstance(holder, ast.FunctionDef)  # narrowing, for mypy
+        holder.name = "<module scope>"
+        holder.body = loose
+        found.extend(_abstentions_in(holder))
+    return sorted(found, key=lambda item: item.lineno)
+
+
+def section_six_load_sensing(text: str) -> list[str]:
+    """Identifiers and env-var literals in Section 6's CODE (never its prose)
+    that sense host load or worker identity."""
+    offenders: list[str] = []
+    docstrings: set[int] = set()
+    for function in section_six_functions(text):
+        for node in ast.walk(function):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                first = node.body[0] if node.body else None
+                if (
+                    isinstance(first, ast.Expr)
+                    and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)
+                ):
+                    docstrings.add(id(first.value))
+        for node in ast.walk(function):
+            if isinstance(node, ast.Attribute) and node.attr in LOAD_SENSING_NAMES:
+                offenders.append(f"{function.name}:{node.lineno} {_dotted(node)}")
+            elif isinstance(node, ast.Name) and node.id in LOAD_SENSING_NAMES:
+                offenders.append(f"{function.name}:{node.lineno} {node.id}")
+            elif (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+                and any(token in node.value for token in LOAD_SENSING_LITERALS)
+            ):
+                offenders.append(f"{function.name}:{node.lineno} {node.value!r}")
+    return offenders
+
+
 def test_the_load_immune_companion_exists_and_cannot_abstain() -> None:
-    """The other half of Design §6, and the reason the abstention above is
-    honest rather than a quiet retreat.
+    """The other half of Design §6, and the reason the wall-clock test's
+    abstention is honest rather than a quiet retreat.
 
     Under `-n auto` the wall-clock startup test SKIPS on every worker, so it
-    does not run in CI at all. That is only acceptable because a control that
-    CANNOT abstain replaced it. This test pins that: Section 6 of
-    tests/test_import_boundaries.py must exist, and its three assertions must
-    not be guarded by a quietness precondition. Nobody gets to `fix` a flake by
-    teaching the replacement to skip too.
+    does not run in CI at all. That is only tolerable because a control that
+    CANNOT abstain replaced it. Nobody gets to `fix` a flake by teaching the
+    replacement to skip too -- by ANY mechanism, which is the correction this
+    guard carries after an independent verifier walked through the first
+    version of it using the xdist skip shipped ten lines away.
     """
     text = IMPORT_BOUNDARIES.read_text()
-    assert "Section 6 -- what `pdftoolkit --help` IMPORTS" in text, (
-        "the contention-immune companion is gone; the startup claim is now held by a test "
-        "that skips under `-n auto`, i.e. by nothing"
-    )
-    for name in (
-        "test_help_imports_no_third_party_package_outside_the_pin",
-        "test_help_import_count_stays_under_the_ceiling",
-        "test_the_help_import_census_is_not_vacuous",
-    ):
+    section_span(text, SECTION_SIX_BANNER)  # asserts the section still exists
+
+    for name in SECTION_SIX_TESTS:
         assert f"def {name}" in text, f"Section 6 lost {name}"
-    body = text[text.index("class HelpImports") :]
-    assert "getloadavg" not in body, (
-        "Section 6 has grown a load precondition. Its whole point is being load-IMMUNE -- "
-        "if it can abstain, the startup claim is held by two tests that both skip."
+
+    unsanctioned = [item for item in section_six_abstentions(text) if not item.sanctioned]
+    assert unsanctioned == [], (
+        "Section 6 has grown an abstention that is not the build-absent precondition:\n  "
+        + "\n  ".join(str(item) for item in unsanctioned)
+        + "\nIts whole point is being load-IMMUNE. If it can abstain, the startup claim is "
+        "held by two tests that both skip, i.e. by nothing. The only admissible "
+        "precondition is `VENV_CONSOLE_SCRIPT.exists()`."
     )
+
+    sensing = section_six_load_sensing(text)
+    assert sensing == [], (
+        f"Section 6's code senses host load or worker identity: {sensing}. Even without a "
+        "skip, that is an abstention -- a census narrowed under load reports itself as a "
+        "pass."
+    )
+
+
+def test_the_abstention_walk_is_not_vacuous() -> None:
+    """A walk that finds nothing everywhere is indistinguishable from a walk
+    that is broken, and would pass the guard above forever.
+
+    `expertise/product.yaml`: *a uniform negative across a population expected
+    to be split is the signature of a dead instrument.* Section 6 legitimately
+    carries the build-absent precondition in two places, so the split is
+    available on the live tree: the walk must FIND them, and must classify them
+    as sanctioned.
+    """
+    found = section_six_abstentions(IMPORT_BOUNDARIES.read_text())
+    assert found, (
+        "the walk found no abstention at all in Section 6, which carries the "
+        "`VENV_CONSOLE_SCRIPT.exists()` precondition in its module-scope fixture and in "
+        "its planted-import control. The walk is dead, so the guard above proves nothing."
+    )
+    assert {item.function for item in found} >= {
+        "help_imports",
+        "test_a_planted_eager_import_reddens_section_6",
+    }, f"the walk missed a known abstention: {[str(item) for item in found]}"
+    assert all(item.sanctioned for item in found), (
+        f"a live abstention is not the sanctioned one: {[str(item) for item in found]}"
+    )
+
+
+def plant_in_section_six(text: str, function: str, snippet: str) -> str:
+    """Insert *snippet* into *function*'s body, after its docstring."""
+    tree = ast.parse(text)
+    node = next(
+        item
+        for item in ast.walk(tree)
+        if isinstance(item, ast.FunctionDef) and item.name == function
+    )
+    indent = " " * node.body[0].col_offset
+    lines = text.splitlines()
+    planted = [indent + line if line else "" for line in snippet.strip("\n").splitlines()]
+    at = node.body[0].end_lineno or node.body[0].lineno
+    return "\n".join([*lines[:at], *planted, *lines[at:]]) + "\n"
+
+
+def plant_decorator_on(text: str, function: str, decorator: str) -> str:
+    tree = ast.parse(text)
+    node = next(
+        item
+        for item in ast.walk(tree)
+        if isinstance(item, ast.FunctionDef) and item.name == function
+    )
+    first = node.decorator_list[0].lineno if node.decorator_list else node.lineno
+    lines = text.splitlines()
+    return "\n".join([*lines[: first - 1], decorator, *lines[first - 1 :]]) + "\n"
+
+
+#: The four bypasses, planted into the SAME function of the LIVE file, so each
+#: red is the bypass a real agent would write and not a toy. `getloadavg` is the
+#: original case the string guard caught; `PYTEST_XDIST_WORKER` is the one it
+#: waved through; the decorator is the same proposition moved out of the body,
+#: where an inline-call check would miss it; the bare conditional return is
+#: abstention with no pytest API at all.
+ABSTENTION_PLANTS: Final = (
+    (
+        "getloadavg",
+        "inline",
+        """
+if os.getloadavg()[0] > 2.0:
+    pytest.skip("host is loaded; cannot census reliably")
+""",
+    ),
+    (
+        "PYTEST_XDIST_WORKER",
+        "inline",
+        """
+worker = os.environ.get("PYTEST_XDIST_WORKER")
+if worker:
+    pytest.skip(f"parallel session: this is xdist worker {worker}")
+""",
+    ),
+    (
+        "skipif decorator",
+        "decorator",
+        '@pytest.mark.skipif(os.environ.get("PYTEST_XDIST_WORKER") is not None, reason="xdist")',
+    ),
+    (
+        "conditional return",
+        "inline",
+        """
+if help_imports.total > 0:
+    return
+""",
+    ),
+)
+
+
+@pytest.mark.parametrize(("label", "kind", "snippet"), ABSTENTION_PLANTS)
+def test_every_abstention_mechanism_reddens_the_companion_guard(
+    label: str, kind: str, snippet: str
+) -> None:
+    """The RED, four ways, and the second case is the one that matters.
+
+    An independent verifier planted case 2 -- the xdist skip -- and the previous
+    string-matching guard reported `1 passed` while Section 6 reported
+    `3 skipped` on every worker. If any of these four stops reddening, this
+    guard has decayed back into a phrase match and Section 6 can be taught to
+    abstain again.
+    """
+    target = "test_help_imports_no_third_party_package_outside_the_pin"
+    text = IMPORT_BOUNDARIES.read_text()
+    planted = (
+        plant_in_section_six(text, target, snippet)
+        if kind == "inline"
+        else plant_decorator_on(text, target, snippet)
+    )
+    assert planted != text, f"the {label} plant did not modify the source"
+
+    unsanctioned = [item for item in section_six_abstentions(planted) if not item.sanctioned]
+    assert [item for item in unsanctioned if item.function == target], (
+        f"the {label} bypass was NOT caught: {[str(item) for item in unsanctioned]}. This is "
+        "the exact defect this guard was rewritten to end -- a guard that catches one named "
+        "mechanism answers 'is this STRING gone', not 'is this CLAIM gone' (`B-106`)."
+    )
+    # And the same plant leaves the LIVE tree clean, so the red is the plant's.
+    assert [item for item in section_six_abstentions(text) if not item.sanctioned] == []
+
+
+def test_the_sanctioned_precondition_cannot_be_used_as_a_trojan() -> None:
+    """Keying on the CONDITION rather than on the function name, asserted.
+
+    The obvious next bypass is to write the load abstention INSIDE the fixture
+    that is already permitted to skip. A name-keyed allowlist would wave that
+    through; this one does not, because what is sanctioned is the proposition
+    `the build is absent`, not the identity of the function stating it.
+    """
+    text = IMPORT_BOUNDARIES.read_text()
+    planted = plant_in_section_six(
+        text,
+        "help_imports",
+        'if os.environ.get("PYTEST_XDIST_WORKER"):\n    pytest.skip("not under xdist")\n',
+    )
+    caught = [item for item in section_six_abstentions(planted) if not item.sanctioned]
+    assert [item for item in caught if item.function == "help_imports"], (
+        f"an xdist skip inside the sanctioned fixture was accepted: {[str(i) for i in caught]}"
+    )
+
+
+def test_load_sensing_reddens_even_without_a_skip() -> None:
+    """An abstention that reports itself as a pass: narrow the census under
+    load, assert nothing, stay green. No `pytest.skip` is involved, so the
+    abstention walk above is blind to it by construction -- which is why the
+    load-sensing rule is a second, separate proposition rather than a
+    convenience."""
+    text = IMPORT_BOUNDARIES.read_text()
+    assert section_six_load_sensing(text) == []
+    planted = plant_in_section_six(
+        text,
+        "test_help_import_count_stays_under_the_ceiling",
+        "if os.getloadavg()[0] > 4.0:\n    help_imports = help_imports._replace(total=0)\n",
+    )
+    assert section_six_load_sensing(planted), "a planted `os.getloadavg()` was not seen"
 
 
 # --------------------------------------------------------------------------- #
