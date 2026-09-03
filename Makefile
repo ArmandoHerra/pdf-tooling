@@ -30,7 +30,8 @@ endif
 
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
-        samples-gate engines-gate licenses-check artifacts-check gate-timing ci clean
+        samples-gate engines-gate licenses-check artifacts-check gate-timing \
+        docs-gate ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -282,6 +283,90 @@ licenses-check: ## Reproduce the license-gate CI job's freshness diffs locally (
 artifacts-check: ## Reproduce the build job's license-file assertion locally (needs-built-artifact)
 	uv build
 	uv run --no-project python scripts/assert_artifacts.py
+
+# PDF-30 / B-099. The instruction `Re-run it; do not copy it` was written into
+# TESTING.md and had no carrier, so the figure drifted anyway -- B-099 measured
+# `8 passed, 18 skipped` and it was `8 passed, 20 skipped` when PDF-30 re-ran
+# the same command. This is that instruction given a carrier: the documented
+# command runs VERBATIM and the figure the document quotes is compared against
+# what the run reported, naming the document, the quoted value and the measured
+# value on any disagreement.
+define DOCS_GATE_ENGINES_ASSERT
+import pathlib, re, sys
+report = pathlib.Path(".scratch/docs-gate-engines-hidden.txt").read_text()
+tail = re.search(r"(\d+) passed, (\d+) skipped", report)
+if tail is None:
+    sys.exit(
+        "make docs-gate: the engines-hidden run reported no `N passed, M skipped` "
+        "line at all. An exit code alone cannot tell that apart from a run that "
+        "collected nothing, which is how a green control stops controlling."
+    )
+measured = "%s passed, %s skipped" % (tail.group(1), tail.group(2))
+doc = pathlib.Path("TESTING.md").read_text()
+quoted = re.findall(r"`(\d+ passed, \d+ skipped)`", doc)
+if not quoted:
+    sys.exit(
+        "make docs-gate: TESTING.md quotes no `N passed, M skipped` figure for the "
+        "engines-hidden configuration, so this arm would compare nothing."
+    )
+wrong = [figure for figure in quoted if figure != measured]
+if wrong:
+    sys.exit(
+        "make docs-gate: TESTING.md quotes %s for the engines-hidden run; the "
+        "documented command just reported %s. Re-run it; do not copy it."
+        % (", ".join(repr(f) for f in wrong), measured)
+    )
+print("docs-gate: TESTING.md's engines-hidden figure agrees with the run (%s)" % measured)
+endef
+export DOCS_GATE_ENGINES_ASSERT
+
+# PDF-30. The documentation gate. DELIBERATELY NOT a prerequisite of `ci`, and
+# that is a decision rather than an omission: `PDF-29` is halving a gate that
+# had doubled and `PDF-28` asserts `make ci`'s target list against `ci.yml`'s
+# job list, so a wave-8 target quietly joining `ci` would fight both. If its
+# measured wall clock ever argues for inclusion, that is a number for the PM,
+# not a decision taken in this recipe (decision.md §5 R-1).
+#
+# THE ARMS THAT CANNOT ALWAYS RUN SAY SO. Two of them read the maintainer's
+# planning tree (`PDF_TOOLKIT_PLANNING_DIR`) and four read git history deeper
+# than a shallow checkout. `ci.yml`'s `test` job has neither, so in CI those
+# arms SKIP -- and a skipped arm is NEVER agreement. `-rs` prints every skip
+# reason and the epilogue below repeats the count, so "it ran" and "it could
+# not run" can never be read as the same green (X-153).
+define DOCS_GATE_EPILOGUE
+import re, sys
+text = sys.stdin.read()
+sys.stdout.write(text)
+# pytest AGGREGATES identical skip reasons as `SKIPPED [N] <reason>`, so
+# counting LINES here would report 1 where 5 arms skipped -- a control that
+# reports the wrong answer, which is the failure this whole target exists to
+# end. The bracketed count is the number of arms.
+skipped = re.findall(r"^SKIPPED \[(\d+)\] (.*)$$", text, re.MULTILINE)
+arms = sum(int(count) for count, _ in skipped)
+print("")
+print("docs-gate: %d arm(s) skipped, in %d class(es)." % (arms, len(skipped)))
+for count, reason in skipped:
+    print("  SKIPPED [%s] -- %s" % (count, reason))
+if skipped:
+    print("")
+    print("  A SKIPPED ARM IS NOT AGREEMENT. Re-run with PDF_TOOLKIT_PLANNING_DIR")
+    print("  pointed at the planning tree, and in a full (non-shallow) clone, to")
+    print("  turn these into real comparisons. `make ci` does not run this target.")
+endef
+export DOCS_GATE_EPILOGUE
+
+docs-gate: ## Re-run the documented commands and compare the figures the docs quote (PDF-30; NOT part of `ci`)
+	@mkdir -p .scratch
+	@echo "docs-gate 1/3: the documented engines-hidden command, run VERBATIM"
+	@PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice $(UV_RUN) pytest \
+	  tests/integration/test_ocr.py tests/integration/test_office.py -rs -q \
+	  2>&1 | tee .scratch/docs-gate-engines-hidden.txt | tail -1
+	@echo "docs-gate 2/3: TESTING.md's quoted figure must equal what that run reported"
+	@$(UV_RUN) python -c "$$DOCS_GATE_ENGINES_ASSERT"
+	@echo "docs-gate 3/3: the derived, history and planning-artifact arms"
+	@$(UV_RUN) pytest tests/test_docs_antirot.py tests/test_changelog_history.py \
+	  tests/test_docstring_pointers.py -rs -q -p no:randomly \
+	  | $(UV_RUN) python -c "$$DOCS_GATE_EPILOGUE"
 
 ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate; ends by printing what CI additionally gates
 	@uv run python scripts/gate_parity.py epilogue

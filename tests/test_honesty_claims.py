@@ -383,3 +383,201 @@ def test_the_disclosure_helpers_can_fail() -> None:
         "-y",
         "--yes",
     }
+
+
+# --------------------------------------------------------------------------- #
+# PDF-30 / B-106 / `74861772f5` -- the OR-7-superseded PREVIEW claim, as a
+# PROPOSITION rather than as a string.
+#
+# Appended at this module's own anchor. The `ac8`/`ac9` sections above belong to
+# PDF-12 and the disclosure section to PDF-24; neither is touched, and the
+# `FORBIDDEN_CLAIM_PATTERNS` list is neither narrowed nor widened (X-15).
+#
+# WHY THREE PATTERNS AND NOT ONE LITERAL. `[B-101]` removed the "a dry run
+# always exits 0" claim from `README.md:64` and `cli/exit_codes.py` with an
+# exact-phrase grep and reported a clean 3 -> 0. A FOURTH copy survived in
+# `safety/atomic.py`, stating the same proposition in different words -- *"The
+# dry run's own exit status is 0 either way"*. The grep answered "is this STRING
+# gone", not "is this CLAIM gone". A single literal here would rebuild that
+# failure inside the fix for it, so the proposition is carried by several
+# paraphrases and each one is shown to match a DISTINCT rewording.
+# --------------------------------------------------------------------------- #
+
+#: The claim OR-7 supersedes: that `--dry-run` has a fixed exit status of its
+#: own, independent of what the real run would return. Every pattern is
+#: anchored on a dry-run subject so ordinary prose about exit 0 is untouched.
+OR7_SUPERSEDED_PREVIEW_PATTERNS = [
+    r"dry[- ]run(?:'s)?[^.\n]{0,60}\bexit(?:s|\s+status|\s+code)?\b[^.\n]{0,40}\b(?:is\s+)?0\b"
+    r"[^.\n]{0,30}\beither way\b",
+    r"dry[- ]run(?:'s)?[^.\n]{0,60}\balways\s+exits?\s+0\b",
+    r"a\s+dry\s+run[^.\n]{0,40}\bexit(?:s|\s+status)?\b[^.\n]{0,30}\bzero\b",
+    r"\bexit(?:s|\s+status|\s+code)?\b[^.\n]{0,30}\bis\s+(?:always\s+)?0\b[^.\n]{0,40}"
+    r"\bunder\s+--?dry[- ]run\b",
+]
+_OR7_COMPILED = [re.compile(pattern, re.IGNORECASE) for pattern in OR7_SUPERSEDED_PREVIEW_PATTERNS]
+
+#: The surfaces `[B-101]` swept, plus the one it missed.
+_OR7_TARGETS = (
+    SRC / "safety" / "atomic.py",
+    SRC / "safety" / "confirm.py",
+    SRC / "cli" / "exit_codes.py",
+    SRC / "cli" / "common.py",
+    REPO_ROOT / "README.md",
+    REPO_ROOT / "CLAUDE.md",
+    REPO_ROOT / "TESTING.md",
+)
+
+
+def _or7_findings(text: str, *, label: str) -> list[str]:
+    findings: list[str] = []
+    for pattern in _OR7_COMPILED:
+        for match in pattern.finditer(text):
+            # The struck clause is preserved in place, inside `~~ ~~`, as the
+            # audit trail this project's own convention requires (PDF-08/12/15).
+            # A struck claim is a record, not a live claim.
+            window = text[max(0, match.start() - 120) : match.end() + 40]
+            if "~~" in window or "Struck by" in window:
+                continue
+            findings.append(f"{label}: {pattern.pattern!r} matched {match.group(0)!r}")
+    return findings
+
+
+def test_ac26_no_surface_states_the_or7_superseded_preview_claim() -> None:
+    """AC26. `--dry-run` MIRRORS the real exit code; nothing may say otherwise."""
+    findings: list[str] = []
+    for path in _OR7_TARGETS:
+        if path.is_file():
+            findings.extend(_or7_findings(path.read_text(encoding="utf-8"), label=str(path)))
+    assert findings == [], "OR-7-superseded preview claim(s):\n" + "\n".join(findings)
+
+
+def test_ac26_each_pattern_matches_a_distinct_rewording() -> None:
+    """AC26's RED, and it is the criterion itself: a single literal would have
+    let B-106 through again. Each paraphrase is shown to bite on its own."""
+    rewordings = [
+        # The `atomic.py` wording, verbatim, pre-fix. This is the copy `[B-101]`
+        # missed and the reason this test takes propositions rather than strings.
+        "The dry run's *own* exit status is 0 either way -- this is the prediction.",
+        "A dry-run always exits 0, whatever the real run would have returned.",
+        "A dry run reports the plan and its exit status is zero.",
+        "The exit code is always 0 under --dry-run, so scripts may ignore it.",
+    ]
+    assert len(rewordings) == len(_OR7_COMPILED), (
+        "every pattern must be shown red on a rewording of its own, or an unproven "
+        "pattern is riding along on another's evidence"
+    )
+    for index, (pattern, text) in enumerate(zip(_OR7_COMPILED, rewordings, strict=True)):
+        assert pattern.search(text), (
+            f"pattern {index} ({pattern.pattern!r}) does not match its own rewording {text!r}"
+        )
+    # Every rewording is caught by the SET, which is the property that matters.
+    for text in rewordings:
+        assert _or7_findings(text, label="<synthetic>"), f"the set missed {text!r}"
+
+
+def test_ac26_honest_prose_about_exit_zero_is_not_forbidden() -> None:
+    """The negative control. OR-7 forbids a claim about the dry run's OWN code;
+    it does not forbid the exit-code table, nor a clean run exiting 0."""
+    honest = (
+        "A successful run exits 0, including an empty-but-valid report. "
+        "A --dry-run mirrors the code the real run would return, so it is not always 0."
+    )
+    assert _or7_findings(honest, label="<synthetic>") == []
+
+
+def test_ac26_a_struck_claim_is_a_record_and_not_a_live_claim() -> None:
+    """The struck clause stays in place as the audit trail; the guard must read
+    it as history. Without this the convention and the guard would fight."""
+    struck = (
+        "**~~The dry run's own exit status is 0 either way.~~ Struck by PDF-30 "
+        "(`74861772f5` / B-106): OR-7 makes --dry-run MIRROR the real exit code.**"
+    )
+    assert _or7_findings(struck, label="<synthetic>") == []
+
+
+# --------------------------------------------------------------------------- #
+# PDF-30 / `0f5e62bc35` -- `--allow print-highres` also grants `print`.
+#
+# The doc claim is compared against THE TOOL'S OWN OUTPUT, not against
+# `adapters/pikepdf_structure.py:84`'s comment -- a comment is one more
+# hand-maintained claim. And the assertion is made by a DIFFERENT consumer
+# (`permissions`) than the one that computes it (`encrypt`), which is this
+# product's second headline failure mode answered directly.
+# --------------------------------------------------------------------------- #
+
+_HIGHRES_DISCLOSURE = "also grants"
+
+
+def test_ac25_the_readme_and_the_help_both_disclose_the_implication() -> None:
+    """AC25's documentation half, on both surfaces a user actually reads."""
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    permission_section = readme.split("**Permission bits are advisory.**", 1)[1].split("\n\n", 1)[0]
+    assert "print-highres" in permission_section
+    assert _HIGHRES_DISCLOSURE in permission_section.lower() or "grants `print`" in (
+        permission_section
+    ), "README.md's --allow paragraph does not disclose that print-highres implies print"
+
+    help_text = _help_text_for("encrypt")
+    assert "print-highres" in help_text
+    assert "ALSO GRANTS" in help_text.upper(), (
+        "`encrypt --help` lists the eight-token vocabulary and says nothing about "
+        "the implication; the user asks for one token and the tool reports two"
+    )
+
+
+def _help_text_for(verb: str) -> str:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from registry import run_cli
+
+    result = run_cli(verb, "--help")
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+@pytest.mark.e2e
+def test_ac25_the_tool_itself_reports_print_alongside_print_highres(tmp_path: Path) -> None:
+    """AC25's behavioural half. `encrypt --allow print-highres`, then
+    `permissions -o json` — the grant set the DOCUMENT is compared against is
+    the one the product prints, and a different verb prints it."""
+    import json
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from registry import run_cli
+
+    source = tmp_path / "source.txt"
+    source.write_text("permission implication probe\n")
+    plain = tmp_path / "plain.pdf"
+    made = run_cli("create", str(source), "-O", str(plain))
+    assert made.returncode == 0, made.stderr
+
+    password = tmp_path / "owner.txt"
+    password.write_text("probe\n")
+    password.chmod(0o600)
+    encrypted = tmp_path / "encrypted.pdf"
+    sealed = run_cli(
+        "encrypt",
+        str(plain),
+        "--allow",
+        "print-highres",
+        "--owner-password-file",
+        str(password),
+        "-O",
+        str(encrypted),
+    )
+    assert sealed.returncode == 0, sealed.stderr
+
+    reported = run_cli("permissions", str(encrypted), "-o", "json")
+    assert reported.returncode == 0, reported.stderr
+    granted = json.loads(reported.stdout)["items"][0]["detail"]["granted"]
+    assert "print-highres" in granted
+    assert "print" in granted, (
+        "the user asked for `print-highres` alone; `permissions` must report "
+        "`print` as well, which is the implication the documents now disclose"
+    )

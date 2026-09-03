@@ -195,6 +195,11 @@ MAKEFILE_TARGETS = {
     # list -- a gate that measures itself on every run pays for the measurement
     # on every run, and `--baseline` refuses on a host it cannot verify quiet.
     "gate-timing",
+    # PDF-30: the documentation gate. Deliberately NOT in `ci`'s prerequisite
+    # list either -- `PDF-29` is halving a gate that had doubled, and two of
+    # this target's arms cannot run in CI's shallow, planning-tree-less checkout
+    # at all, so joining `ci` would trade a real local gate for a skipped one.
+    "docs-gate",
     "ci",
     "clean",
 }
@@ -1585,43 +1590,67 @@ def test_changelog_prepends_every_spec_entry_below_the_anchor() -> None:
     entries are never dated before its own original landing entry.** PDF-07's
     first entry appended at the bottom still fails -- on the date check, which
     it violated all along.
+
+    GENERALIZED A FOURTH TIME BY PDF-30, AND ONE ASSERTION DELETED OUTRIGHT
+    ----------------------------------------------------------------------
+    The remediation clause above was a **tautology** (B-080) and is deleted
+    rather than repaired. Its entailment is recorded here so nobody re-derives
+    it: `original_date[n]` was built top-down with overwrite, so it held the
+    BOTTOM-most entry's date for `n`; the date list is asserted non-increasing
+    top-to-bottom three lines earlier, so the bottom-most date for any `n` is
+    the MINIMUM of that `n`'s dates; and `d < min(dates_for_n)` is
+    unsatisfiable. It could never fire while the assertion above it held -- the
+    PM's exhaustive result over 66,429 synthetic entry lists was **0** fires.
+    It read as coverage and was not.
+
+    Its *intent* -- remediations are prepended above the original -- now lives
+    in `tests/test_changelog_history.py`, measured against **git** rather than
+    against a date ordering that already implied it: every heading a commit adds
+    must sit above every heading that existed at its parent.
+
+    The population also widens. It was a `PDF-NN`-only heading regex, which
+    matched 46 of the 65 `## ` headings at `7afdb1a` -- 17 `[B-NNN]` entries and
+    the 2 `[Task: PDF-16 ...]` entries (B-107) sat outside every check here,
+    the newest-first assertion included, and the `len(entries) == len(headings)`
+    guard compared two PDF-only populations and was therefore self-consistent
+    and blind. Parsing is now tolerant of both landed forms -- no entry is
+    edited to fit a regex (`changelog.md:16`) -- and covers all 65.
     """
     text = (REPO_ROOT / "changelog.md").read_text()
     anchor = "<!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->"
     assert anchor in text
-    headings = re.findall(r"^## \[PDF-\d\d\].*$", text, re.MULTILINE)
-    assert headings, "changelog carries no [PDF-NN] entries"
+    headings = re.findall(r"^## .*$", text, re.MULTILINE)
+    assert headings, "changelog carries no entries at all"
     # Every entry lives below the anchor, and the newest one is immediately below it.
     assert text.index(anchor) < text.index(headings[0])
     # PDF-01's entry is never lost or edited — a lost prepend is exactly what
     # this file's own header warns a HEAD-level heading grep would hide.
     assert any(h.startswith("## [PDF-01] Project scaffold & CLI spine") for h in headings)
 
-    # Every heading carries its spec number and its date, so neither check below
-    # can silently pass over an entry whose heading is malformed.
-    entries = re.findall(
-        r"^## \[PDF-(\d\d)\][^\n]*\u2014 (\d{4}-\d{2}-\d{2})\s*$", text, re.MULTILINE
+    # Tolerant on the way in: the canonical form AND the two frozen historical
+    # `[Task: PDF-NN ...]` headings, so an id-keyed read finds PDF-16's two
+    # entries without any landed entry being rewritten to suit this parser.
+    canonical = re.compile(r"^## \[(PDF-\d\d|B-\d+)\] .+ \u2014 (\d{4}-\d{2}-\d{2})$")
+    historical = re.compile(r"^## \[Task: (PDF-\d\d) \u2014 .+\] - (\d{4}-\d{2}-\d{2})$")
+    entries: list[tuple[str, str]] = []
+    unparsed: list[str] = []
+    for heading in headings:
+        match = canonical.match(heading) or historical.match(heading)
+        if match is None:
+            unparsed.append(heading)
+        else:
+            entries.append((match.group(1), match.group(2)))
+    assert unparsed == [], (
+        f"{len(unparsed)} heading(s) match neither the canonical form nor the two "
+        f"frozen historical ones, so every check below would pass over them "
+        f"silently: {unparsed}"
     )
-    assert len(entries) == len(headings), (
-        f"{len(headings) - len(entries)} entry heading(s) lack a trailing "
-        f"'\u2014 YYYY-MM-DD'; the format is fixed by this file's own header"
-    )
+    assert len(entries) == len(headings)
 
-    # Newest first, literally: dates never increase as you read down.
+    # Newest first, literally: dates never increase as you read down. This now
+    # covers the [B-NNN] and [Task: ...] entries it previously could not see.
     dates = [date for _, date in entries]
     assert dates == sorted(dates, reverse=True), f"entries are not newest-first: {dates}"
-
-    # A spec's remediations are prepended ABOVE its original landing entry, so
-    # none of them may be dated before it. Independent of the order in which
-    # specs happened to land, which is a scheduling fact and not a property of
-    # this file (PDF-08 landed after PDF-13; see the docstring).
-    original_date: dict[str, str] = {}
-    for number, date in entries:  # bottom-most wins: iterate top-down, overwrite
-        original_date[number] = date
-    misfiled = [(number, date) for number, date in entries if date < original_date[number]]
-    assert misfiled == [], (
-        f"a remediation entry predates its spec's own original landing entry: {misfiled}"
-    )
 
 
 # --------------------------------------------------------------------------- #

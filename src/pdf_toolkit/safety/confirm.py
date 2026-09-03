@@ -39,9 +39,17 @@ Until B-093 every one of the fifteen CLI call sites guarded this function with
 exited **0** where the real run exited **5** — ``cmd --dry-run && cmd`` green-lit
 a run that then refused. The rule now lives **here**, in the one shared check
 every call site already funnels through, rather than in fifteen guards a
-sixteenth verb would have to rediscover; ``tests/test_cli_spine.py`` asserts,
-against the AST rather than a comment, that no ``cli/cmd_*.py`` module
-re-introduces such a guard.
+sixteenth verb would have to rediscover; ``tests/test_import_boundaries.py``
+Section 4 asserts, against the AST rather than a comment, that no
+``cli/cmd_*.py`` module re-introduces such a guard.
+
+*Corrected by PDF-30 (`b408baff4a`). This paragraph named the CLI-spine module*
+``test_cli_spine.py`` *instead, which exists and holds* **zero**
+``require_confirmation`` *references — so an existence-only check would have
+passed it. A pointer that sends the next reader somewhere nothing is wrong is
+worse than no pointer, and*
+``tests/test_docstring_pointers.py::test_the_resolver_is_red_on_the_pre_fix_confirm_pointer``
+*is where that pre-fix pair is kept as this guard's named red.*
 
 **This is the only correct home for it.** The gate's own inputs — the resolved
 input count, and which targets already exist — are verb-specific, so the check

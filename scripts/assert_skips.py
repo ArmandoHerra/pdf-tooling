@@ -55,6 +55,62 @@ from pathlib import Path
 
 ENGINE_REASON = re.compile(r"engine|tesseract|soffice|libreoffice", re.IGNORECASE)
 
+# PDF-30 -- THE TWO NEW SKIP CLASSES ARE NAMED, NOT ABSORBED
+# ----------------------------------------------------------
+# This script has always answered one question -- how many skips are
+# engine-gated -- and reported everything else as an unbroken remainder. PDF-30
+# adds two skip classes that are neither engine-gated nor noise: an arm that
+# needs the maintainer's planning tree (`PDF_TOOLKIT_PLANNING_DIR`, absent in
+# CI by construction) and an arm that needs git history deeper than a shallow
+# checkout. Both are legitimately unrunnable in CI and both must stay VISIBLE:
+# a skipped arm is never agreement, and a class that disappears into a
+# remainder is a class nobody can notice growing.
+#
+# The census below is REPORTING ONLY. Neither exit-code rule changes, so the
+# `engines-present`/`without-engines` jobs behave exactly as they did.
+SKIP_CLASSES = {
+    "engine-gated": ENGINE_REASON,
+    "planning-directory-absent": re.compile(r"planning directory absent", re.IGNORECASE),
+    "shallow-clone": re.compile(r"shallow clone", re.IGNORECASE),
+    "samples-corpus-absent": re.compile(r"PDF_TOOLKIT_SAMPLES_DIR", re.IGNORECASE),
+    "parallel-session": re.compile(r"parallel session", re.IGNORECASE),
+}
+
+
+def _skip_reason(case: ET.Element) -> str | None:
+    """The reason text of *case*'s skip, or None if it is not a real skip.
+
+    An `xfail` serializes as the same `<skipped>` element shape, and it is not a
+    skip -- B-081, kept in one place so the census and the count cannot come to
+    disagree about what they are counting.
+    """
+    skipped = case.find("skipped")
+    if skipped is None or skipped.get("type") == "pytest.xfail":
+        return None
+    return f"{skipped.get('message', '')} {skipped.text or ''}"
+
+
+def _skip_census(cases: list[ET.Element]) -> tuple[dict[str, int], int]:
+    """How many skips fall in each named class, and how many in none.
+
+    First match wins, so the classes stay a partition and a skip is never
+    counted twice. `unclassified` is deliberately printed rather than dropped:
+    a growing remainder is the thing this census exists to make visible.
+    """
+    census = dict.fromkeys(SKIP_CLASSES, 0)
+    unclassified = 0
+    for case in cases:
+        reason = _skip_reason(case)
+        if reason is None:
+            continue
+        for name, pattern in SKIP_CLASSES.items():
+            if pattern.search(reason):
+                census[name] += 1
+                break
+        else:
+            unclassified += 1
+    return census, unclassified
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Assert engine-gated SKIP visibility.")
@@ -89,19 +145,23 @@ def main(argv: list[str] | None = None) -> int:
 
     engine_skips = 0
     for case in cases:
-        skipped = case.find("skipped")
-        if skipped is None:
-            continue
-        if skipped.get("type") == "pytest.xfail":
-            # B-081: an xfail is not a skip -- its reason text may still name
-            # an engine, but that is not what this count is asking about.
-            continue
-        reason = f"{skipped.get('message', '')} {skipped.text or ''}"
-        if ENGINE_REASON.search(reason):
+        # B-081: an xfail is not a skip -- its reason text may still name an
+        # engine, but that is not what this count is asking about. The
+        # exclusion lives in `_skip_reason` so this count and the census below
+        # cannot come to disagree about what a skip is.
+        reason = _skip_reason(case)
+        if reason is not None and ENGINE_REASON.search(reason):
             engine_skips += 1
 
     print(f"engine-gated skips: {engine_skips}")
     print(f"(scanned {len(cases)} testcases, 0 failures, 0 errors)")
+
+    census, unclassified = _skip_census(cases)
+    total_skips = sum(census.values()) + unclassified
+    print(f"skips by class ({total_skips} total):")
+    for name in SKIP_CLASSES:
+        print(f"  {name}: {census[name]}")
+    print(f"  unclassified: {unclassified}")
 
     if args.expect_zero:
         if engine_skips:

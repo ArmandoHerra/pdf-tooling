@@ -609,9 +609,18 @@ class AtomicWriter:
         """The status a real run of this invocation would have exited with.
 
         ``OK`` when the plan found nothing to refuse. Under ``--dry-run`` over an
-        occupied target this is ``5``; over an unwritable destination, ``1``. The
-        dry run's *own* exit status is 0 either way — this is the prediction, not
-        the verdict on the prediction.
+        occupied target this is ``5``; over an unwritable destination, ``1``.
+
+        **~~The dry run's own exit status is 0 either way.~~ Struck by PDF-30
+        (`74861772f5` / B-106): operator ruling OR-7 makes ``--dry-run`` MIRROR
+        the exit code the real run would return, so the dry run's own status is
+        this value, not zero.** The product's own pinned tests refute the struck
+        clause directly — ``test_c15_dry_run_predicts_an_occupied_target_refusal``
+        asserts ``dry == real == 5``, and the unwritable arm ``1``. This is the
+        same claim ``[B-101]`` removed from ``README.md`` and
+        ``cli/exit_codes.py``, stated here in different words, which is exactly
+        why that fix's exact-phrase grep returned a clean 3→0 and still left this
+        behind: it answered *is this STRING gone*, not *is this CLAIM gone*.
         """
         refusal = self.planned_refusal
         return OK if refusal is None else refusal.exit_code

@@ -1,6 +1,6 @@
 # pdf-toolkit
 
-An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftoolkit`) for the common PDF chores — merge, split, extract, rotate, PDF→images, images→PDF, create, text/tables, compress, encrypt, metadata, watermark, OCR, and Office→PDF — built on a permissively licensed engine stack (pypdf, pypdfium2, reportlab, pikepdf, pdfplumber, Tesseract, LibreOffice) with nothing AGPL or GPL on the call graph.
+An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftoolkit`) for the common PDF chores — `merge`, `split`, `extract`, `delete`, `rotate`, `reorder`, `rasterize`, `compose`, `create`, `text`, `tables`, `compress`, `repair`, `linearize`, `encrypt`, `decrypt`, `permissions`, `meta`, `watermark`, `stamp`, `ocr` and `convert`, plus `doctor`, `info` and `version` — built on a permissively licensed engine stack (pypdf, pypdfium2, reportlab, pikepdf, pdfplumber, Tesseract, LibreOffice) with nothing AGPL or GPL on the call graph.
 
 Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write-to-temp-then-rename, and inputs that are never mutated unless you ask for `--in-place`.
 
@@ -29,6 +29,23 @@ uv run pdftoolkit --help
 ## What exists today
 
 The CLI spine, the output contract and the exit-code contract are in place end-to-end, and every verb named at the top of this file — structure, raster, compose, text, optimize, crypto and overlay operations alike — is shipped behind them, not merely specified.
+
+The complete top-level roster, by family:
+
+| Family | Commands |
+|---|---|
+| Structure | `merge`, `split`, `extract`, `delete`, `rotate`, `reorder` |
+| Raster & compose | `rasterize`, `compose`, `create` |
+| Text | `text`, `tables` |
+| Optimize | `compress`, `repair`, `linearize` |
+| Crypto | `encrypt`, `decrypt`, `permissions` |
+| Metadata & overlay | `meta` (`get` / `set`), `watermark`, `stamp` |
+| Engine-backed | `ocr`, `convert` |
+| Diagnostics | `doctor`, `info`, `version` |
+
+That table is asserted against the live command tree by set-inclusion, so a verb
+shipped tomorrow turns the check red with no author action — but
+`uv run pdftoolkit --help` remains the authoritative list.
 
 ```bash
 uv run pdftoolkit --help               # the full verb tree; always the authoritative list
@@ -108,7 +125,7 @@ No secure erasure is claimed, anywhere. A resolved password is held in a buffer 
 
 `encrypt --in-place` needs one more word from you, and it is the one place where the safety default and the security default point in opposite directions. The `.bak` sidecar is a copy of the **original**, so an in-place encryption would leave plaintext sitting next to the ciphertext, silently. So it refuses (exit 5) unless you pass `--no-backup` (keep no plaintext copy) or `-y` (keep it, knowingly).
 
-**Permission bits are advisory.** They are a request to the reader, not a lock: only cooperating readers honour them, any reader holding the file may ignore every bit, and a reader that can display a page can extract it. Encryption protects the content; the bits on their own protect nothing. `--allow` takes a comma-separated, repeatable list from `print`, `print-highres`, `copy`, `modify`, `annotate`, `forms`, `assemble`, `accessibility`, plus the exclusive `all` and `none`; omitting it grants nothing. `accessibility` is granted whatever you ask for — PDF 2.0 deprecated that bit and conforming readers always permit it — and `permissions` reports what the document actually grants rather than what was requested.
+**Permission bits are advisory.** They are a request to the reader, not a lock: only cooperating readers honour them, any reader holding the file may ignore every bit, and a reader that can display a page can extract it. Encryption protects the content; the bits on their own protect nothing. `--allow` takes a comma-separated, repeatable list from `print`, `print-highres`, `copy`, `modify`, `annotate`, `forms`, `assemble`, `accessibility`, plus the exclusive `all` and `none`; omitting it grants nothing. `accessibility` is granted whatever you ask for — PDF 2.0 deprecated that bit and conforming readers always permit it — and `permissions` reports what the document actually grants rather than what was requested. **`print-highres` also grants `print`**: a reader permitted to print at full resolution may obviously print at low resolution, and the format has no spelling for “high but not low”, so asking for the one token grants two. That is the format's behaviour rather than this tool's choice, and it is disclosed at the flag that causes it instead of being left for `permissions` to reveal afterwards.
 
 `decrypt` round-trips the **page tree** byte for byte: the decoded content streams, the page dictionaries and every embedded image's raw bytes come back identical. The whole file does not, and nothing here claims it does — `/ID`, `/Encrypt`, the trailer, the cross-reference table and object numbering all legitimately change on any resave.
 
@@ -130,6 +147,19 @@ make ci        # the full local gate: format, lint, types, tests, licenses, SAST
 `make help` lists every target. `make ci` is a **subset** of CI, run with the same commands — it does not predict CI. What runs locally, what does not, and why is declared in `.github/gate-parity.toml` and printed by `make ci`'s own epilogue on every run. No target degrades to a weaker substitute or exits 0 when its check did not run.
 
 Contributions are accepted under the Developer Certificate of Origin (`git commit -s`). See `CONTRIBUTING.md` for the commit conventions and `TESTING.md` for how to run each suite.
+
+## Known issues
+
+Open defects and planned work are recorded, per finding, in the maintainer's planning tree:
+
+- `ai_plans/pdf-toolkit/BACKLOG.md` — the groomed intake list.
+- `ai_plans/pdf-toolkit/qa/FINDINGS-LEDGER.md` — every finding a QA sweep has raised, with its state and its evidence.
+
+**Those artifacts live in the maintainer's planning repository and are not part of this distribution.** They are not shipped in the sdist or the wheel and are not present in a clone of this repository; the paths above are where they live for anyone reading this source tree beside it.
+
+The most recent sweep carrying a readable verdict is `2026-09-03_113318`, taken at commit `7afdb1a`. This section names a sweep and a commit and never a tally — a count is wrong the day after it is written, and the ledger's own header could not hold one still for two days. Read the ledger for what is open right now.
+
+If a sweep ever records nothing open, this section still stands and reads *no open findings are recorded as of sweep `<id>` (`<sha>`)*. It is not deleted: a momentarily vacuous pointer is still the affordance, and deleting it silently removes the only place a user is told where the defects are.
 
 ## License
 

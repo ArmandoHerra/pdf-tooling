@@ -98,6 +98,13 @@ that bit and conforming readers always permit it.
 --allow takes a comma-separated list, repeatable, from: print,
 print-highres, copy, modify, annotate, forms, assemble, accessibility, plus
 the exclusive 'all' and 'none'. Omitted means none (deny by default).
+
+'print-highres' ALSO GRANTS 'print'. A reader permitted to print at full
+resolution may obviously print at low resolution, and the format has no
+spelling for "high but not low" -- so asking for the one token grants two,
+and 'permissions' reports both. That is the format's behaviour, not this
+tool's choice, and it is disclosed here because you would otherwise learn it
+from 'permissions' rather than from the flag that caused it.
 """
 
 

@@ -7,9 +7,15 @@ uv sync
 make test          # everything
 make test-e2e      # only the subprocess-level CLI tests
 make cover         # the suite under coverage, against the project's floor (also runs in `make ci`)
-make samples-scratch  # copy $PDF_TOOLKIT_SAMPLES_DIR -> .scratch/samples/ + write the originals manifest
-make samples-check    # re-hash the originals against that manifest -- never a CI job (see below)
+make samples-gate     # the whole @samples chain, in the one correct order (see below)
+make docs-gate        # re-run the documented commands and compare the figures this file quotes
 ```
+
+`make samples-gate` is **the sanctioned `@samples` ordering**, and the only
+sanctioned one: it encodes the chain once, as a target, so no spec and no reader
+has a recipe left to re-type. `make samples-scratch` and `make samples-check` are
+its constituent steps and are described under **The `samples` fixture** below as
+what the gate runs, never as an ordering for a human to reproduce by hand.
 
 Individual files and selections work as usual:
 
@@ -23,13 +29,16 @@ uv run pytest --update-golden -q          # regenerate tests/golden/ files; revi
 
 ## The generated fixture corpus
 
-`tests/corpus.py` builds seven deterministic PDFs (`multipage_text`, `rotated`,
-`jpeg_page`, `encrypted_aes256`, `metadata_rich`, `single_page`, `tabular`)
+`tests/corpus.py` builds seventeen deterministic PDFs (`multipage_text`,
+`ten_page_text`, `rotated`, `jpeg_page`, `encrypted_aes256`, `metadata_rich`,
+`single_page`, `tabular`, `metadata_typed`, `xmp_bearing`, `xmp_disagreement`,
+`residual_surfaces`, `no_contents_page`, `empty_contents_page`, `stamp_source`,
+`rotate_absent`, `shared_contents_pages`)
 with `reportlab`, once per test session, into pytest's own scratch directory
 — never into the repository tree. Each fixture's expected values (page count,
 per-page text, rotation, metadata, encryption, cell grid) live in the same
 file as its generator, so a fixture can never silently drift from what a test
-asserts against it. Six of the seven are byte-identical across two
+asserts against it. Sixteen of the seventeen are byte-identical across two
 independent builds; `encrypted_aes256` is the one honest exemption (a fresh
 AES-256 salt every build) and is instead proven semantically. See
 `tests/corpus.py`'s module docstring and `tests/test_corpus.py`.
@@ -52,7 +61,7 @@ contract.
 `tests/registry.py::discover_verbs()` walks the **live** Typer command tree
 with no skip list, no filter and no hard-coded verb name — a new verb is
 covered automatically the next time the suite runs. `tests/test_cli_contract.py`
-parameterizes thirteen checks (`--help`, exit codes, dry-run purity,
+parameterizes eighteen checks (`--help`, exit codes, dry-run purity,
 no-clobber, JSON-on-a-pipe, bulk non-TTY posture) over that discovery.
 
 **The registration contract.** A verb that needs a specific argv shape (e.g.
@@ -77,8 +86,16 @@ correctly reports `version`/`doctor`/`info` as non-mutating today. See
 
 ```bash
 export PDF_TOOLKIT_SAMPLES_DIR=/path/to/your/samples
-uv run pytest -m samples -q
+make samples-gate
 ```
+
+**Run the target, not the recipe.** A hand-typed `pytest -m samples` beside a
+hand-typed `make samples-check` is exactly what B-046 propagated three specs
+deep before X-115 encoded the ordering once, as a target: an ordering that is
+re-typed is an ordering that can be got wrong, and steps 1 and 4 of the chain
+below have no exit code that can tell a correct run from a vacuous one. The
+individual steps are described here so a red can be read; they are not an
+ordering to reproduce by hand.
 
 The operator's own real-document corpus, entirely outside the repository and
 **never committed**. Six rules bind it, restated here because they are the
@@ -157,7 +174,9 @@ review the diff before committing. An ordinary run never writes a golden file
 into existence: a missing one fails loudly with that instruction rather than
 being silently created, which is what keeps `tests/golden/` out of the
 working-tree guard's way. Goldens are built from the generated corpus only,
-never from a sample (`PLAN.md` §10.1 rule 4). Empty at PDF-06 landing — see
+never from a sample (`PLAN.md` §10.1 rule 4). At this commit three golden files live in
+`tests/golden/`; the directory was empty at PDF-06's landing and the
+sentence that said so outlived the first golden by three specs — see
 `tests/golden/README.md`.
 
 ## The working-tree guard
@@ -175,12 +194,50 @@ Measured against the landed suite at PDF-06's own commit (`uv run pytest -rs
 
 | Configuration | Total skips | What they are |
 |---|---|---|
-| **Engines present** (`tesseract` + `soffice` on `PATH`) | non-zero, but **zero are engine-gated** — `scripts/assert_skips.py --expect-zero` asserts exactly that. The non-zero remainder is the pre-existing safety-spine skips (see below) plus four `test_cli_contract.py` parametrize sets that are empty until a mutating verb or a subcommand group exists (`C4`, `C9`, `C10`/`C11`/`C13`), plus the `samples`-marked arms (unset). **Every remaining skip is conditional.** PDF-15 originally shipped one that was not — `test_ac7_rotated_page_returns_the_expected_text` carried an unconditional `@pytest.mark.skip` because `adapters/pdfium_raster.py` double-applied `/Rotate`; **B-094 fixed the adapter and the test now runs**, gated only by the ordinary `requires("tesseract")` marker. |
-| **Engines hidden** (`PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice`) | the engines-present count **plus at least 20 engine-gated skips** — `tests/test_doctor.py`'s existing arms (PDF-05) and `tests/test_testdata.py`'s tesseract-recovery arm (PDF-06, 7 together) **plus PDF-15's own 18** (13 in `tests/integration/test_ocr.py`, 5 in `tests/integration/test_office.py`; re-measured at B-099 by running the documented command verbatim, three times: `PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest tests/integration/test_ocr.py tests/integration/test_office.py -rs -q` reports `8 passed, 18 skipped` — **all 18 engine-gated**, none unconditional, since B-094 unskipped AC7 and added three rotated-page arms beside it. The pass count had read `7` since PDF-15 landed: B-094 corrected the skip half of this figure and carried the pass half across by transcription rather than re-running it, which is how a count stays one low through three sweeps. Re-run it; do not copy it). `scripts/assert_skips.py` (no `--expect-zero`) asserts this count is **non-zero**; a zero here is a regression, not vacuity, as of PDF-06. |
+| **Engines present** (`tesseract` + `soffice` on `PATH`) | non-zero, but **zero are engine-gated** — `scripts/assert_skips.py --expect-zero` asserts exactly that. The non-zero remainder is the pre-existing safety-spine skips (see below) plus the `samples`-marked arms (unset). All five parametrize sets are non-empty in `test_cli_contract.py` — `GROUPS`, `MUTATING`, `DESTRUCTIVE`, `PRODUCING` and `OUTPUT_CONSUMING_MUTATING` — and each is derived from the live registry, so none of them can silently empty out; this sentence previously named four of them (`C4`, `C9`, `C10`/`C11`/`C13`) as empty, which was stale in whole rather than in part. **Every remaining skip is conditional.** PDF-15 originally shipped one that was not — `test_ac7_rotated_page_returns_the_expected_text` carried an unconditional `@pytest.mark.skip` because `adapters/pdfium_raster.py` double-applied `/Rotate`; **B-094 fixed the adapter and the test now runs**, gated only by the ordinary `requires("tesseract")` marker. |
+| **Engines hidden** (`PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice`) | the engines-present count **plus at least 20 engine-gated skips** — `tests/test_doctor.py`'s existing arms (PDF-05) and `tests/test_testdata.py`'s tesseract-recovery arm (PDF-06, 7 together) **plus PDF-15's own 20** (15 in `tests/integration/test_ocr.py`, 5 in `tests/integration/test_office.py`). The documented command is `PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest tests/integration/test_ocr.py tests/integration/test_office.py -rs -q` and it reports `8 passed, 20 skipped` — **all 20 engine-gated**, none unconditional, since B-094 unskipped AC7 and added three rotated-page arms beside it. **`make docs-gate` now re-runs that command and compares this figure**, which is B-099's instruction — *re-run it, do not copy it* — given a carrier at last. It needed one: B-099 measured `18` and the figure was `20` when PDF-30 re-ran it, the `test_ocr.py` half having drifted 13 → 15 across the intervening waves with nothing able to observe it. `scripts/assert_skips.py` (no `--expect-zero`) asserts this count is **non-zero**; a zero here is a regression, not vacuity, as of PDF-06. |
 
 Both counts are read with `-rs` (`pytest`'s own reason-printing flag) — a
 skip is information, not noise: it says which guarantee this particular run
 did not check, and why.
+
+## The documentation gate — `make docs-gate`
+
+```bash
+make docs-gate
+```
+
+Everything above states figures about this repository, and until PDF-30 nothing
+could observe one going wrong: `tests/test_docs_antirot.py` was scoped to
+`README.md` and `CLAUDE.md`, so this file was unguarded by construction and five
+of its claims were stale — three of them spelled-out words the guard's own regex
+could not have matched even had the file been in scope.
+
+The rule now has no fourth option. **In a guarded document a cardinal claim
+about this repository is derived from source at test time, produced by a
+documented command this gate re-runs and compares, or absent.** Figures cheap
+enough to derive live in `tests/test_docs_antirot.py`'s `DERIVED_FIGURES`
+registry and run in microseconds on every `make test`. `make docs-gate` re-runs
+the run-and-compare arms — the ones that cost a real process — plus the arms
+that read the maintainer's planning tree:
+
+| Arm | What it compares |
+|---|---|
+| engines-hidden | runs the documented `PDF_TOOLKIT_TEST_HIDE_ENGINES` command **verbatim** and compares the `N passed, M skipped` figure this file quotes |
+| derived figures | `tests/test_docs_antirot.py` — every registered claim against its derivation |
+| changelog history | `tests/test_changelog_history.py` — no-loss, prepend position, entry owed, forward format |
+| docstring pointers | `tests/test_docstring_pointers.py` — every `tests/…py` path named under `src/` resolves |
+| planning artifacts | spec header ↔ `SPEC-INDEX.md` roster agreement, and the README's known-issues sweep pointer |
+
+**It is not a prerequisite of `make ci` and it is not a CI job**, deliberately:
+`ci.yml` checks out this repository alone and shallow, so the planning-tree and
+history arms cannot run there. **Where an arm cannot run it SKIPS with a reason
+and the target says so — a skipped arm is never reported as agreement**, and the
+skip classes it can report — `planning directory absent` and `shallow clone` —
+are named in `scripts/assert_skips.py`'s own verdict rather than absorbed into
+its remainder. Point `PDF_TOOLKIT_PLANNING_DIR` at the planning tree to run the
+arms that need it. Its real enforcement is therefore local, this target, and the
+`qa-sentinel`.
 
 ## Safety-spine test arms (`PDF-04`)
 
@@ -306,7 +363,12 @@ subprocess-measured child's data file — several tests spawn the CLI with
 `cwd` inside a temp directory — always lands next to the parent's, never
 inside a purity-snapshot root.
 
-**Re-measured total: 91.29%, engines present — the floor is met.** `ci.yml`'s
+**Re-measured at `d777dd8`: 91.29%, engines present — the floor was met.**
+A coverage total is true at one commit and at no other, so it is written
+commit-anchored here or it is not written at all: the two totals in this file
+were once quoted bare, disagreed with each other and with `changelog.md`'s own
+`94.00%`, and no document said which — if any — was live. For the total at the
+commit you are on, run `make cover`. `ci.yml`'s
 `engines-present` job now enforces `--cov-fail-under=85` as well (the
 `without-engines` job does not, matching Design §6's "adapters/ get a lower
 bar where an engine is absent" via configuration, not via `omit`). `fail_under`
@@ -347,9 +409,10 @@ intentional trade-off, not an oversight: line coverage credits a branch's
 line as covered the moment either arm of it executes once, so it reads
 higher for the same code — the 84-test band alone moved from 66.24%
 (branch) to 71.49% (line) under identical tests. `--cov-fail-under=85` is
-unchanged. **Re-measured total: 93.79%, engines present — the floor is
+unchanged. **Re-measured at `ebb1cd3`: 93.79%, engines present — the floor was
 met**, comfortably above the unchanged 85% threshold. Both targets became
-runnable again.
+runnable again. That figure, too, is anchored to the commit it was taken at and
+is not a claim about HEAD.
 
 **This paragraph used to state a wall-clock figure for each of them, and
 that is why there is no figure here now.** `X-109` corrected the original
