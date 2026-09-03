@@ -146,9 +146,11 @@ def _normalize_layer_geometry(
 ) -> bytes:
     """Design §D4 route (a) -- the one genuine design gap this spec closes.
 
-    ``StructureEngine.composite_layer`` (`ports/structure.py:606`) merges a
-    one-page layer onto the original page via a raw ``page.merge_page`` --
-    no transform, no matrix argument. So the layer handed to it must
+    ``StructureEngine.composite_layer`` (`ports/structure.py`) merges a
+    one-page layer onto an already-appended writer page via a raw
+    content-stream concatenation (`PDF-23` D3 migrated it off the reader-
+    attached ``page.merge_page`` this comment used to name) -- no transform,
+    no matrix argument, either way. So the layer handed to it must
     ALREADY be sized to the original page's own UNROTATED ``MediaBox``
     (*page_width_pt* x *page_height_pt*) and, when the page carries a
     non-zero ``/Rotate``, must already carry the geometric INVERSE of that

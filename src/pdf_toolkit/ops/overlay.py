@@ -11,12 +11,14 @@ a reportlab `Canvas`. This module prints nothing and calls no `sys.exit`.
 Design D4.1 -- one primitive, reusable by `PDF-15`
 ------------------------------------------------------
 The actual merge happens inside `StructureEngine.composite_layer`, called
-against an already-open document HANDLE, never against serialized bytes: it
-mutates the reader's own selected pages IN PLACE, and the caller then reuses
-the SAME `new_writer()` + `append_pages()` + `write()` path every other
-page-addressing verb already uses (`ops/pages.py::rotate_run` is the donor).
-`composite_layer` may be called MULTIPLE times against the same open
-document -- once per distinct layer/page-subset -- before that single write,
+against an already-created WRITER whose full page range is already
+appended -- never against serialized bytes and never against the reader's
+own pages (`PDF-23` migrated this off the reader-attached compositing call
+pypdf 6.16.2 deprecates and 7.0.0 removes). This module therefore creates
+the writer and calls `append_pages` BEFORE compositing,
+the exact reverse of the ordering this module used before `PDF-23` --
+`composite_layer` may still be called MULTIPLE times against the same
+writer -- once per distinct layer/page-subset -- before that single write,
 which is what lets `watermark` composite several page geometries into ONE
 output (Design §D3's caching rule).
 
@@ -219,8 +221,16 @@ def watermark_run(
         for number in selected:
             pages_by_geometry.setdefault(geometry_by_page[number], []).append(number)
 
+        # Design D3.1 -- the writer is created and the FULL page range
+        # appended BEFORE any compositing, the reverse of this module's own
+        # ordering before `PDF-23`: `composite_layer` now operates on
+        # `writer`'s own already-appended pages, never the reader's.
+        writer = structure_engine.new_writer()
+        writer.append_pages(document, list(range(1, page_count + 1)))
+
         layer_cache: dict[tuple[float, float], bytes] = {}
         composited: list[int] = []
+        copied: list[int] = []
         blank: list[int] = []
         for geometry, numbers in pages_by_geometry.items():
             if geometry not in layer_cache:
@@ -237,13 +247,12 @@ def watermark_run(
                 )
                 layer_cache[geometry] = buffer.getvalue()
             outcome = structure_engine.composite_layer(
-                document, layer=layer_cache[geometry], pages=numbers, position=position
+                writer, layer=layer_cache[geometry], pages=numbers, position=position
             )
             composited.extend(outcome.pages_composited)
+            copied.extend(outcome.pages_copied)
             blank.extend(outcome.blank_pages)
 
-        writer = structure_engine.new_writer()
-        writer.append_pages(document, list(range(1, page_count + 1)))
         with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
             writer.write(atomic.stream)
 
@@ -258,7 +267,7 @@ def watermark_run(
         bytes_before=bytes_before,
         bytes_after=bytes_after,
         duration_ms=duration_ms,
-        detail={"pages_composited": sorted(composited)},
+        detail={"pages_composited": sorted(composited), "pages_copied": sorted(copied)},
     )
     return OperationResult(
         schema_version=_SCHEMA_VERSION,
@@ -356,12 +365,14 @@ def stamp_run(
             )
         selected = sorted(selection.as_set())
 
-        outcome = structure_engine.composite_layer(
-            document, layer=layer_bytes, pages=selected, position=position
-        )
-
+        # Design D3.1 -- writer created, full range appended, BEFORE compositing.
         writer = structure_engine.new_writer()
         writer.append_pages(document, list(range(1, page_count + 1)))
+
+        outcome = structure_engine.composite_layer(
+            writer, layer=layer_bytes, pages=selected, position=position
+        )
+
         with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
             writer.write(atomic.stream)
 
@@ -376,7 +387,10 @@ def stamp_run(
         bytes_before=bytes_before,
         bytes_after=bytes_after,
         duration_ms=duration_ms,
-        detail={"pages_composited": sorted(outcome.pages_composited)},
+        detail={
+            "pages_composited": sorted(outcome.pages_composited),
+            "pages_copied": sorted(outcome.pages_copied),
+        },
     )
     return OperationResult(
         schema_version=_SCHEMA_VERSION,

@@ -21,13 +21,25 @@ and PDF-12's ``--lossless`` gate already prove that mechanism preserves.
 
 Design §D4 route (a) -- the geometry gap, closed in the ADAPTER, not here
 ---------------------------------------------------------------------------
-``composite_layer`` takes no transform argument: it is a raw
-``page.merge_page``, content-stream concatenation only. So the layer this
-module hands it must already be sized and rotated to the ORIGINAL page's own
-UNROTATED space before it ever reaches this module -- which is exactly what
-``OcrEngine.text_layer`` (``adapters/tesseract_ocr.py``) does, because an
-engine import (pypdf, to apply that transform) is legal there and forbidden
-here. See that adapter's ``_normalize_layer_geometry`` for the derivation.
+``composite_layer`` takes no transform argument: it is a raw content-stream
+concatenation onto an already-appended writer page, no transform of its own.
+So the layer this module hands it must already be sized and rotated to the
+ORIGINAL page's own UNROTATED space before it ever reaches this module --
+which is exactly what ``OcrEngine.text_layer`` (``adapters/tesseract_ocr.py``)
+does, because an engine import (pypdf, to apply that transform) is legal
+there and forbidden here. See that adapter's ``_normalize_layer_geometry``
+for the derivation.
+
+``PDF-23`` migration -- the writer is created and the source document's full
+page range appended BEFORE the per-page compositing loop below, not after:
+``composite_layer`` now operates on the writer's own already-appended pages
+(never the reader's), which is what removes the reader-attached compositing
+deprecation this module used to carry and confines each page's own layer to
+that page alone even when the source shares one ``/Contents`` object across
+several pages (``PDF-23`` D3/D4). The reader handle stays open for the
+WHOLE of this block regardless -- ``render_page`` reads from the source path
+directly, but the writer's own cloned pages must not be resolved after the
+underlying reader handle closes.
 
 THE ENGINE IS DEMANDED LAZILY -- AND THAT IS DELIBERATE, NOT AN OVERSIGHT
 ---------------------------------------------------------------------------
@@ -323,8 +335,18 @@ def ocr_run(
 
             with structure_engine.open_document(item.source) as document:
                 page_count = document.page_count
+                # Design D3.3 -- writer created, full range appended, BEFORE
+                # the per-page compositing loop -- the reverse of this
+                # module's own ordering before `PDF-23`. The reader
+                # (`document`) stays open for the rest of this block: the
+                # writer's own cloned pages must not be resolved after it
+                # closes.
+                writer = structure_engine.new_writer()
+                writer.append_pages(document, list(range(1, page_count + 1)))
+
                 ocrd: list[int] = []
                 skipped: list[int] = []
+                copied: list[int] = []
                 for page in pages:
                     if skip_text_pages and page.has_text:
                         skipped.append(page.number)
@@ -355,12 +377,11 @@ def ocr_run(
                         # Design §D2: one page of pixels held at a time.
                         rendered.image.close()
                     outcome = structure_engine.composite_layer(
-                        document, layer=layer_bytes, pages=[page.number], position="overlay"
+                        writer, layer=layer_bytes, pages=[page.number], position="overlay"
                     )
                     ocrd.extend(outcome.pages_composited)
+                    copied.extend(outcome.pages_copied)
 
-                writer = structure_engine.new_writer()
-                writer.append_pages(document, list(range(1, page_count + 1)))
                 with AtomicWriter(item.target, policy=policy, kind="pdf") as atomic:
                     writer.write(atomic.stream)
 
@@ -378,7 +399,11 @@ def ocr_run(
                     bytes_before=bytes_before,
                     bytes_after=bytes_after,
                     duration_ms=duration_ms,
-                    detail={"pages_ocrd": sorted(ocrd), "pages_skipped": sorted(skipped)},
+                    detail={
+                        "pages_ocrd": sorted(ocrd),
+                        "pages_skipped": sorted(skipped),
+                        "pages_copied": sorted(copied),
+                    },
                 )
             )
     finally:

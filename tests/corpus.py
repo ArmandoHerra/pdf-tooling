@@ -52,6 +52,7 @@ __all__ = [
     "Corpus",
     "FixtureSpec",
     "build_corpus",
+    "changed_pages",
 ]
 
 _LETTER: Final[tuple[float, float]] = letter  # (612.0, 792.0) in points
@@ -495,6 +496,86 @@ def _build_empty_contents_page(root: Path) -> tuple[Path, FixtureSpec]:
     return path, spec
 
 
+#: `PDF-23` Design §D7's own fixture: THREE pages whose `/Contents` all
+#: point at the SAME shared indirect stream object -- `4adc417234` / B-097's
+#: exact reproducer. Not extractable text (base-14 font resources are
+#: deliberately not wired -- this fixture proves a STRUCTURAL property, the
+#: `page_texts` slot is `("", "", "")` per `no_contents_page`'s own
+#: precedent, so `"" in text` passes trivially on every page).
+_SHARED_CONTENTS_STREAM: Final[bytes] = b"1 0 0 RG 1 w 72 700 468 20 re S"
+
+
+def _build_shared_contents_pages(root: Path) -> tuple[Path, FixtureSpec]:
+    """Design §D7's own fixture -- the corpus's SEVENTEENTH builder, not the
+    "sixteenth" the spec text predicts: the corpus already held SIXTEEN
+    builders at this HEAD (`rotate_absent` landed in wave 1, after the
+    `2d19bcb` count of fifteen the spec's own D7 corrected the roadmap's
+    "ninth" to). Recorded here in the same spirit as D7's own correction --
+    the instruction ("check the existing fixtures first") was followed; only
+    the number drifted again since it was written.
+
+    Neither `no_contents_page` nor `empty_contents_page` can express this
+    shape: shared `/Contents` is a RELATION between two or more pages, and
+    both of those are single-page fixtures by construction (§D7).
+
+    Built with `PdfWriter.add_blank_page` (sets no `/Contents` at all) plus
+    ONE manually-registered `StreamObject`, whose indirect reference is then
+    assigned -- BY OBJECT IDENTITY, never by value -- to all three pages'
+    `/Contents` key. This is the one deliberate sharing in this fixture, not
+    a side effect of anything else. `tests/test_corpus.py`'s own
+    fixture-integrity test for `shared_contents_pages` asserts the count of
+    distinct `raw_get("/Contents")` object numbers across the three pages is
+    EXACTLY 1 -- Design §D7's "proven able to fail" requirement: a future
+    pypdf writing this fixture with three distinct streams must fail THAT
+    test loudly, never let every scoping test built on top of it silently
+    downgrade to a tautology.
+    """
+    path = root / "shared_contents_pages.pdf"
+    writer = PdfWriter()
+    stream = StreamObject()
+    stream.set_data(_SHARED_CONTENTS_STREAM)
+    shared_ref = writer._add_object(stream)  # noqa: SLF001 - fixture construction
+    for _ in range(3):
+        page = writer.add_blank_page(width=_LETTER[0], height=_LETTER[1])
+        page[NameObject("/Contents")] = shared_ref
+    with open(path, "wb") as handle:  # noqa: PTH123 - test-only scratch
+        writer.write(handle)
+    spec = FixtureSpec(
+        name="shared_contents_pages",
+        page_count=3,
+        page_size=_LETTER,
+        page_texts=("", "", ""),
+        rotate_key_absent_on=(0, 1, 2),
+    )
+    return path, spec
+
+
+def changed_pages(before: Path, after: Path) -> frozenset[int]:
+    """Design §D5.2 -- the set of 1-based page indices whose DECODED
+    `/Contents` differs between *before* and *after*, derived from the
+    produced files themselves, never from an `OperationResult`.
+
+    Reuses `tests/pagetree.py`'s own content-coalescing helper
+    (`_content_bytes` -- private by convention, not by mechanism; D5.2's own
+    text: "no test writes its own") rather than a second, independently
+    drifting implementation of "hash a page's decoded content, coalesced
+    across a `/Contents` array". `pagetree.py` is not edited by this spec
+    (only imported) -- `PDF-13` owns it.
+    """
+    import pikepdf
+
+    from pagetree import _content_bytes  # noqa: PLC0415 - reuse, not a new mechanism
+
+    with pikepdf.Pdf.open(str(before)) as before_pdf, pikepdf.Pdf.open(str(after)) as after_pdf:
+        return frozenset(
+            index
+            for index, (before_page, after_page) in enumerate(
+                zip(before_pdf.pages, after_pdf.pages, strict=True), start=1
+            )
+            if _content_bytes(before_page) != _content_bytes(after_page)
+        )
+
+
 #: The literal ASCII marker `stamp_source` draws, and the marker
 #: `tests/unit/test_overlay.py`/`tests/integration/test_overlay_preservation.py`
 #: locate with `bytes.index` (never `find`) to prove content-stream order
@@ -589,6 +670,7 @@ _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_empty_contents_page,
     _build_stamp_source,
     _build_rotate_absent,
+    _build_shared_contents_pages,
 )
 
 FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
@@ -610,6 +692,7 @@ FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
         "empty_contents_page",
         "stamp_source",
         "rotate_absent",
+        "shared_contents_pages",
     )
 )
 

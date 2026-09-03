@@ -1348,3 +1348,74 @@ def test_the_arm_a_title_precondition_pin_is_quiet_when_the_precondition_holds()
     """The positive half: a pin that raised unconditionally would fail Arm A
     for the wrong reason on every host with a corpus."""
     assert_title_absent(["Author", "Producer"], "some-sample.pdf")
+
+
+# --------------------------------------------------------------------------- #
+# PDF-23 -- AC19. Over a COPY of `catalogo_arquitectura_2017_2023_0.pdf`
+# (originals are never an operand, HC-2 rule 1; the `PDF-06` originals
+# SHA-256 manifest is verified byte-identical before/after by the SESSION
+# -level `samples_guard` plugin -- this arm asserts nothing about it itself,
+# it inherits the guard).
+#
+# `watermark --pages 3,7` against the copy: AC5's count clause (the
+# message's own integer and `detail["pages_composited"]` both equal the
+# changed-page set derived from the file) and AC7's untouched-page property
+# (every unselected page's decoded content is unchanged). Nothing about the
+# sample's own content is quoted anywhere -- only filename, page count, size
+# and hash (HC-2 rule 4), matching the discipline every earlier `@samples`
+# arm in this file already keeps.
+# --------------------------------------------------------------------------- #
+
+_PDF23_SAMPLE_NAME = "catalogo_arquitectura_2017_2023_0.pdf"
+_PDF23_SAMPLE_SELECTION = "3,7"
+
+
+@pytest.mark.samples
+def test_ac19_watermark_pages_scopes_and_counts_over_a_real_document(
+    samples, tmp_path: Path
+) -> None:
+    import sys
+
+    tests_dir = Path(__file__).resolve().parent
+    if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, str(tests_dir))
+    from corpus import changed_pages
+    from pdf_toolkit.ops.overlay import watermark_run
+
+    copy_path = samples.copy(_PDF23_SAMPLE_NAME)
+    target = tmp_path / "watermarked.pdf"
+    result = watermark_run(
+        copy_path,
+        text="DRAFT",
+        pages_spec=_PDF23_SAMPLE_SELECTION,
+        position="overlay",
+        font_size=36.0,
+        color=(0.5, 0.5, 0.5),
+        opacity=0.3,
+        rotate_deg=0.0,
+        output=target,
+        in_place=False,
+        policy=_read_only_policy(),
+    )
+    assert result.exit_code == 0
+
+    expected = frozenset({3, 7})
+    changed = changed_pages(copy_path, target)
+
+    # AC5 -- the count clause, over a real document.
+    item = result.items[0]
+    reported_count = int(item.message.split()[1])
+    assert reported_count == len(changed), (
+        f"{_PDF23_SAMPLE_NAME}: message count {reported_count} != changed-set size {len(changed)}"
+    )
+    assert set(item.detail["pages_composited"]) == changed, (
+        f"{_PDF23_SAMPLE_NAME}: detail['pages_composited'] disagrees with the file"
+    )
+    # AC7 -- unselected pages untouched, over a real document. `changed`
+    # itself is the property being asserted (derived from decoded content,
+    # never from `OperationResult`), so if `changed != expected` that IS
+    # the AC7/AC5 failure -- no page text, title or metadata value is ever
+    # inspected or quoted to reach this conclusion.
+    assert changed == expected, (
+        f"{_PDF23_SAMPLE_NAME}: changed set {sorted(changed)} != selection {sorted(expected)}"
+    )

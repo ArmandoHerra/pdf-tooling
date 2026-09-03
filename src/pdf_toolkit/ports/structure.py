@@ -321,19 +321,35 @@ class MetadataWriteOutcome:
 
 @dataclass(frozen=True, slots=True)
 class CompositeOutcome:
-    """One `watermark`/`stamp` compositing pass (D4.1): merges *layer* onto
-    each selected page of an already-open document, IN PLACE, via
-    ``page.merge_page`` -- never producing a writer or serialized bytes
-    itself. The actual serialization reuses the SAME `new_writer()` +
-    `append_pages()` + `write()` path every page-addressing verb already
-    uses (`ops/pages.py`'s `rotate_run` is the donor): `set_rotation` stamps
-    the WRITER's pages POST-append; `composite_layer` stamps the READER's
-    pages PRE-append, which is exactly what `append_pages`'s own
-    clone-on-add (`add_page`) picks up automatically.
+    """One `watermark`/`stamp`/`ocr` compositing pass (D4.1, migrated by
+    `PDF-23` D3/D4): merges *layer* onto each selected page of an
+    already-open WRITER, POST-append -- the SAME shape `set_rotation`
+    already uses (`ops/pages.py`'s `rotate_run` is the donor), no longer
+    the asymmetric pre-append shape this docstring used to describe.
+    Producing no bytes itself; the caller still owns `write()`.
+
+    **The scoping guarantee (`PDF-23` D2/D4), and it is the point of this
+    method's existence:** the mutation is confined to `pages` and nothing
+    else, even when two or more of the writer's pages share one
+    `/Contents` object (legal PDF, and the ordinary output of a
+    template-driven producer -- `4adc417234` / B-097). A selected page
+    whose `/Contents` is shared is copy-on-written (a fresh stream object,
+    registered on the writer, before the merge) so the shared object a
+    SIBLING page still points at is never touched; an UNSELECTED page's
+    `/Contents` object identity and decoded content are therefore always
+    unchanged, whether or not it happens to share an object with a
+    selected one.
     """
 
     pages_composited: tuple[int, ...]
     """1-based, in the order composited -- the selection's own order."""
+
+    pages_copied: tuple[int, ...]
+    """The subset of `pages_composited` whose `/Contents` was copy-on-written
+    because it was shared with another page of the document at merge time
+    (D4.1/D5.1). A reporting surface, not a warning -- how a later reader
+    explains an output-size increase on an otherwise ordinary-looking
+    selection. Empty on a document with no `/Contents` sharing at all."""
 
     blank_pages: tuple[int, ...]
     """Pages with no `/Contents` key at merge time (D4.4): overlay and
@@ -635,27 +651,43 @@ class StructureEngine(Protocol):
 
     def composite_layer(
         self,
-        document: OpenStructureDocument,
+        writer: StructureWriter,
         *,
         layer: bytes,
         pages: Sequence[int],
         position: str,
     ) -> CompositeOutcome:
-        """The `watermark`/`stamp` compositing primitive (D4.1), reusable by
-        `PDF-15`'s `ops/ocr.py` through this SAME port method.
+        """The `watermark`/`stamp`/`ocr` compositing primitive (D4.1,
+        migrated to a writer-attached, post-append shape by `PDF-23` D3),
+        reusable by `PDF-15`'s `ops/ocr.py` through this SAME port method.
 
         Merges *layer* -- a one-page PDF, already serialized: the generated
-        watermark text layer or the selected `--from` page -- onto each of
-        *pages* (1-based, sorted, deduplicated) of *document*, IN PLACE, via
-        ``page.merge_page(layer_page, over=(position == "overlay"))``.
-        *document* stays open for the caller to then `new_writer()` +
-        `append_pages()` + `write()`, exactly as every other page-addressing
-        verb does -- this method produces no writer and no bytes itself.
+        watermark text layer or the selected `--from`/OCR page -- onto each
+        of *pages* (1-based, sorted, deduplicated) of an already-appended
+        *writer*'s own pages. The caller creates *writer* and appends the
+        SOURCE document's full page range (`new_writer()` + `append_pages()`)
+        BEFORE calling this method -- never after -- so that `pages[i]`
+        addresses `writer`'s own `i`-th appended page directly; this method
+        may then be called MULTIPLE times against the same *writer* (once per
+        distinct layer/page-subset) before the caller's own `write()`.
+
+        **Copy-on-write (D4).** Before merging a selected page whose raw,
+        unresolved `/Contents` entry names an object number shared by more
+        than one of `writer`'s own pages, this method first builds a fresh
+        content-stream object carrying that page's current decoded content,
+        registers it on `writer`, and repoints the page's `/Contents` at it
+        -- so the merge never mutates an object a sibling page still
+        depends on. An UNSELECTED page is never visited at all. This is what
+        makes the guarantee `CompositeOutcome`'s own docstring states hold
+        even on a document whose pages share one `/Contents` object (legal
+        PDF; the ordinary output of a template-driven producer).
 
         Args:
-            document: An already-open, already-``__enter__``ed document.
+            writer: An already-created `StructureWriter` with the source
+                document's pages already appended (`append_pages`).
             layer: A one-page PDF, already serialized.
-            pages: 1-based, sorted, deduplicated.
+            pages: 1-based, sorted, deduplicated -- indices into `writer`'s
+                own already-appended page sequence.
             position: ``"overlay"`` or ``"underlay"``.
 
         Raises:

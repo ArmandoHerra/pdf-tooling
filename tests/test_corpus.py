@@ -131,6 +131,36 @@ def test_the_absent_rotate_state_is_expressible_at_all(built: Corpus) -> None:
     assert int(rotated.pages[0]["/Rotate"]) == 0
 
 
+def test_shared_contents_pages_actually_shares_one_content_object(built: Corpus) -> None:
+    """`PDF-23` Design §D7's own "proven able to fail" requirement.
+
+    Every scoping test built on `shared_contents_pages` is a tautology the
+    moment this fixture stops sharing -- a future pypdf writing it with
+    THREE distinct streams would make `4adc417234`'s reproduction (AC1)
+    vacuously green for the wrong reason. This test is the fixture's own
+    property, asserted directly and independently of any compositing code:
+    the three pages' RAW (unresolved) `/Contents` entries all name the SAME
+    object number, and that count of distinct object numbers is exactly 1.
+    """
+    from pypdf.generic import IndirectObject
+
+    reader = pypdf.PdfReader(str(built.path("shared_contents_pages")))
+    assert len(reader.pages) == 3, "shared_contents_pages no longer has three pages"
+    object_numbers = set()
+    for page in reader.pages:
+        raw = page.raw_get("/Contents")
+        assert isinstance(raw, IndirectObject), (
+            "shared_contents_pages's own /Contents is no longer an indirect reference -- "
+            "the sharing predicate (Design §D4.1) has nothing to detect"
+        )
+        object_numbers.add(raw.idnum)
+    assert len(object_numbers) == 1, (
+        f"shared_contents_pages's three pages reference {len(object_numbers)} distinct "
+        "/Contents objects, not one -- every scoping test built on this fixture is now a "
+        "tautology (Design §D7's own failure mode)"
+    )
+
+
 def test_six_unencrypted_fixtures_are_byte_identical_across_two_builds(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:

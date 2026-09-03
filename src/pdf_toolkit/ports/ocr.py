@@ -74,10 +74,11 @@ class OcrEngine(Protocol):
         *page_height_pt* -- the ORIGINAL page's own **unrotated** ``MediaBox``
         dimensions (:attr:`~pdf_toolkit.models.PageInfo.width_pt` /
         ``height_pt``) -- with its content pre-rotated by the geometric
-        inverse of *rotation* (Design §D4 route (a)): ``composite_layer``'s
-        own ``page.merge_page`` performs a raw content-stream concatenation
-        with no transform of its own, so the layer must already be correct
-        in the page's own unrotated space before it crosses this port. *dpi*
+        inverse of *rotation* (Design §D4 route (a)): ``composite_layer``
+        performs a raw content-stream concatenation onto an already-appended
+        writer page, with no transform of its own (`PDF-23` D3), so the
+        layer must already be correct in the page's own unrotated space
+        before it crosses this port. *dpi*
         is passed to tesseract explicitly (``--dpi``) rather than left to the
         image's own metadata; the exact box tesseract emits is then measured
         back and rescaled (never assumed), so the 0.5 pt tolerance is a

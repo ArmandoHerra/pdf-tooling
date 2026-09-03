@@ -819,3 +819,107 @@ def test_ac13_group_kill_survives_a_forking_child(tmp_path: Path) -> None:
     with __import__("contextlib").suppress(ProcessLookupError, PermissionError):
         os.killpg(result.pgid, 0)
         raise AssertionError("process group survived the timeout")
+
+
+# --------------------------------------------------------------------------- #
+# PDF-23 AC3 -- `ocr` is the third consumer, and the reason B-092 asked for
+# one spec covering all three. `4adc417234`'s own observation, reproduced:
+# pre-fix, `ocr --pages 2` on the shared-`/Contents` fixture reported
+# `pages_ocrd: [2]` while all THREE pages gained the text layer.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.requires("tesseract")
+def test_pdf23_ac3_ocr_scopes_to_selection_on_shared_contents(corpus, tmp_path: Path) -> None:
+    import sys as _sys
+
+    tests_dir = Path(__file__).resolve().parents[1]
+    if str(tests_dir) not in _sys.path:  # pragma: no cover - import plumbing
+        _sys.path.insert(0, str(tests_dir))
+    from corpus import changed_pages
+
+    source = corpus.path("shared_contents_pages")
+    target = tmp_path / "ocrd.pdf"
+    result = ocr_run(
+        [source],
+        lang="eng",
+        dpi=200,
+        psm=3,
+        skip_text_pages=False,
+        pages_spec="2",
+        output=target,
+        out_dir=None,
+        name_template=None,
+        in_place=False,
+        policy=_policy(),
+    )
+    assert result.exit_code == 0, result
+    item = result.items[0]
+    assert item.detail["pages_ocrd"] == [2]
+
+    changed = changed_pages(source, target)
+    assert changed == frozenset({2}), (
+        f"ocr changed {sorted(changed)}, not exactly {{2}} -- 4adc417234's own defect"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-23 AC12 -- `ocr`'s own `composite_layer` call contributes ZERO pypdf
+# deprecation warnings, but the RUN as a whole does not read zero, and this
+# test says why rather than silently asserting a wrong number.
+#
+# MEASURED, not assumed, and it corrects this spec's own Design §D6:
+# `adapters/tesseract_ocr.py::_normalize_layer_geometry` calls
+# `page.add_transformation(...)` on `reader.pages[0]` -- a page from a FRESH
+# `PdfReader`, still UNATTACHED to any writer at that point (the
+# `PdfWriter().add_page(page)` call happens AFTER, not before). §D6 claims
+# this call site "carries no deprecation... writer-attached by
+# construction" -- that claim is wrong, verified by a `-W error` traceback
+# that resolves entirely inside `_normalize_layer_geometry`, never inside
+# `composite_layer`. This call site is `PDF-15`'s (`ocr`'s geometry
+# normalization, D6/Scope > Out) and is NOT touched by this spec.
+#
+# The bound asserted here is `<= 1 per OCR'd page`, not `== 0`: this proves
+# `composite_layer`'s own contribution is zero (a regression there would
+# push the count to 2-per-page) without falsely claiming the whole `ocr`
+# pipeline is deprecation-free, which it is not and this spec does not
+# promise.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.requires("tesseract")
+def test_pdf23_ac12_composite_layer_itself_adds_no_deprecation_to_ocr(
+    corpus, tmp_path: Path
+) -> None:
+    import warnings
+
+    source = corpus.path("shared_contents_pages")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = ocr_run(
+            [source],
+            lang="eng",
+            dpi=200,
+            psm=3,
+            skip_text_pages=False,
+            pages_spec="2",
+            output=tmp_path / "ocrd-ac12.pdf",
+            out_dir=None,
+            name_template=None,
+            in_place=False,
+            policy=_policy(),
+        )
+    assert result.exit_code == 0, result
+    pypdf_deprecations = [
+        item
+        for item in caught
+        if issubclass(item.category, DeprecationWarning) and "pypdf" in (item.filename or "")
+    ]
+    # One page selected -- at most ONE residual warning (`_normalize_layer_
+    # geometry`'s own, out of this spec's scope), never two (which would
+    # mean `composite_layer` itself regressed).
+    assert len(pypdf_deprecations) <= 1, (
+        f"{len(pypdf_deprecations)} pypdf DeprecationWarning(s) for one OCR'd page -- "
+        f"composite_layer's own migration may have regressed: "
+        f"{[str(item.message) for item in pypdf_deprecations]}"
+    )

@@ -32,6 +32,14 @@ classifiers = [
 # license data are generated from the lockfile and diffed in CI, so an
 # incremental addition turns an unrelated commit's gate red.
 dependencies = [
+  # PDF-23 (2026-09-02, §D8 Arm A): the `<7` ceiling STAYS. Probed at
+  # implementation time (`json.load(urlopen('https://pypi.org/pypi/pypdf/json'))`)
+  # -- no `7.x` release exists (latest published: 6.16.2, the version already
+  # pinned as the floor). The deprecated reader-attached `replace_contents`
+  # call this ceiling used to contain is gone (AC12); the ceiling is now a
+  # precaution against an unreleased major, not a containment for a known
+  # unreliable call. Re-probe and lift to `<8` once 7.0.0 ships and the suite
+  # has run against it -- tracked as a PDF-23 follow-up, not filed here.
   "pypdf[crypto]>=6.16.2,<7",
   "pypdfium2>=5.13.0,<6",
   "reportlab>=5.0.1,<6",

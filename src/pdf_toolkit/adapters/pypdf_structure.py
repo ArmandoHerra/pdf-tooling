@@ -693,15 +693,24 @@ class PypdfStructureAdapter:
 
     def composite_layer(
         self,
-        document: PypdfOpenDocument,
+        writer: PypdfStructureWriter,
         *,
         layer: bytes,
         pages: Sequence[int],
         position: str,
     ) -> CompositeOutcome:
-        """The `watermark`/`stamp` compositing primitive (D4.1)."""
+        """The `watermark`/`stamp`/`ocr` compositing primitive (D3/D4).
+
+        `PDF-23` migration: *writer* is already-appended (the caller's own
+        `new_writer()` + `append_pages()`, done BEFORE this is ever called),
+        so every merge below lands on a page already attached to a
+        `PdfWriter` -- `replace_contents`'s WRITER branch, which emits no
+        `DeprecationWarning` (AC12), unlike the READER-attached shape this
+        method used before B-092/B-097.
+        """
         from pypdf import PdfReader
         from pypdf.errors import PdfReadError
+        from pypdf.generic import DecodedStreamObject, IndirectObject, NameObject
 
         try:
             layer_reader = PdfReader(io.BytesIO(layer))
@@ -709,24 +718,63 @@ class PypdfStructureAdapter:
         except (PdfReadError, IndexError, OSError, ValueError) as error:
             raise FailureError(f"could not read the composite layer: {error}") from error
 
-        reader = document._open_reader  # noqa: SLF001 -- same adapter's own
+        pdf_writer = writer._writer  # noqa: SLF001 -- same adapter's own
         # internal pair, mirroring `PypdfStructureWriter.append_pages` above.
         over = position == "overlay"
+
+        # Design D4.1 -- the sharing predicate, a SNAPSHOT taken once before
+        # any mutation below: the set of `/Contents` object numbers
+        # referenced by MORE THAN ONE of the writer's own pages, from the
+        # RAW (unresolved) entry -- `raw_get` never dereferences, which is
+        # what makes the object's IDENTITY, not its content, the thing
+        # compared. A direct `/Contents` ARRAY has no object number of its
+        # own and is therefore never a member of this map (D4.5: that shape
+        # already scopes correctly on its own and is deliberately left
+        # alone -- `replace_contents`'s array branch re-registers fresh
+        # element objects rather than substituting one shared object).
+        contents_refcount: dict[int, int] = {}
+        for wpage in pdf_writer.pages:
+            raw = wpage.raw_get("/Contents") if "/Contents" in wpage else None
+            if isinstance(raw, IndirectObject):
+                contents_refcount[raw.idnum] = contents_refcount.get(raw.idnum, 0) + 1
+        shared_object_numbers = frozenset(
+            number for number, count in contents_refcount.items() if count > 1
+        )
+
         composited: list[int] = []
         blank: list[int] = []
+        copied: list[int] = []
         for number in pages:
-            page = reader.pages[number - 1]
+            page = pdf_writer.pages[number - 1]
+            current_contents = page.get_contents()
+            if current_contents is None:
+                blank.append(number)
+            else:
+                raw = page.raw_get("/Contents") if "/Contents" in page else None
+                if isinstance(raw, IndirectObject) and raw.idnum in shared_object_numbers:
+                    # Design D4.2 -- copy-on-write: a FRESH stream object
+                    # carrying this SELECTED page's own current decoded
+                    # content, registered on the writer, and pointed at
+                    # BEFORE the merge -- so the merge below never mutates
+                    # the object number a SIBLING page still depends on.
+                    # An unselected page is never visited at all.
+                    fresh = DecodedStreamObject()
+                    fresh.set_data(current_contents.get_data())
+                    page[NameObject("/Contents")] = pdf_writer._add_object(fresh)  # noqa: SLF001
+                    copied.append(number)
             # `get_contents()` re-derives a FRESH `ContentStream` from the
             # underlying object on every call (verified against pypdf
             # 6.16.2's own source) rather than caching a mutated one, which
             # is what makes reusing the SAME `layer_page` across every
             # selected page safe: `merge_page` never mutates its `page2`
             # argument, only `self`.
-            if page.get_contents() is None:
-                blank.append(number)
             page.merge_page(layer_page, over=over)
             composited.append(number)
-        return CompositeOutcome(pages_composited=tuple(composited), blank_pages=tuple(blank))
+        return CompositeOutcome(
+            pages_composited=tuple(composited),
+            pages_copied=tuple(copied),
+            blank_pages=tuple(blank),
+        )
 
 
 class PypdfOpenDocument:
