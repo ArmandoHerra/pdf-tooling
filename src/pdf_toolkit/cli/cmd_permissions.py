@@ -37,8 +37,8 @@ VERB = "permissions"
 
 _HELP = """Report a PDF's encryption algorithm and permission bits.
 
-Reports only: this verb writes nothing, so -O, --out-dir, --name and
---in-place each exit 2.
+REPORTS, NEVER WRITES: this verb writes no files, so -O/--output,
+--out-dir, --name, --in-place, -f/--force and -y/--yes each exit 2.
 
 PERMISSIONS ARE ADVISORY. The bits are a request to the reader, not a lock:
 only cooperating readers honour them, any reader that holds the file may

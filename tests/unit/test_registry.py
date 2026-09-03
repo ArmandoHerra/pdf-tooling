@@ -72,11 +72,73 @@ def test_discover_verbs_returns_no_duplicates() -> None:
     assert len(names) == len(set(names))
 
 
-def test_info_is_the_only_verb_that_takes_input_paths() -> None:
-    verbs = {verb.name: verb for verb in discover_verbs()}
-    assert verbs["info"].takes_input_paths is True
-    assert verbs["doctor"].takes_input_paths is False
-    assert verbs["version"].takes_input_paths is False
+def test_the_expected_verbs_are_classified_as_taking_input_paths_or_not() -> None:
+    """B-050 (PDF-24 AC16). Was `test_info_is_the_only_verb_that_takes_input_paths`,
+    and **the name asserted a falsehood**: `split`, `rasterize` and twenty more
+    also take input paths, and have since `PDF-07`. The old body could never
+    notice, because it named three verbs and checked those three -- it was an
+    `info`/`doctor`/`version` spot-check wearing a universal claim.
+
+    Renamed to what it asserts and WIDENED to the invariant the old name was
+    reaching for: the set of verbs with `takes_input_paths is True` equals a
+    pinned expected set, in the same explicit-named-set shape
+    `test_the_expected_verbs_are_classified_mutating_or_not` already uses. The
+    next verb that takes paths now fails loudly instead of passing silently
+    forever -- a tripwire, exactly like the two pins above it.
+
+    **`merge` is in `expected_not`, and PDF-24's own AC16 says it should be in
+    the pinned TRUE set. The spec is wrong and the code is right.** Measured at
+    `8fd2146`: the predicate is `param_type_name == "argument" and
+    param.type.name == "path"` -- it answers *does this verb declare a Click
+    `Path`-typed positional*, not the looser human notion *does this verb read a
+    file*. `merge`'s operand is the §4.2 `path:range` grammar and is therefore
+    declared `list[str]` (`cmd_merge.py`: `metavar="INPUT..."`, *"One or more
+    'path' or 'path:range' operands"*), so the predicate answers False for it
+    and is correct to. `split` and `rasterize` -- the spec's other two named
+    examples -- ARE in the TRUE set.
+
+    Pinning the measurement rather than the spec's sentence is the whole point
+    of the rename: writing `merge` into the TRUE set to match a spec would have
+    replaced one name that asserts a falsehood with a body that asserts one.
+
+    `version` and `doctor` are the only two verbs that take no operand at all:
+    one reports distribution metadata, the other probes the host.
+    """
+    expected_takes_paths = {
+        "info",
+        "split",
+        "rasterize",
+        "compose",
+        "create",
+        "text",
+        "tables",
+        "compress",
+        "repair",
+        "linearize",
+        "encrypt",
+        "decrypt",
+        "permissions",
+        "extract",
+        "delete",
+        "rotate",
+        "reorder",
+        "meta get",
+        "meta set",
+        "watermark",
+        "stamp",
+        "ocr",
+        "convert",
+    }
+    expected_not = {"version", "doctor", "merge"}
+    assert expected_takes_paths & expected_not == set()
+    assert len(expected_takes_paths) + len(expected_not) == len(discover_verbs())
+    for verb in discover_verbs():
+        if verb.name in expected_takes_paths:
+            assert verb.takes_input_paths is True, f"{verb.name} should take input paths"
+        elif verb.name in expected_not:
+            assert verb.takes_input_paths is False, f"{verb.name} should take no input path"
+        else:  # pragma: no cover - a new verb landing without updating this pin
+            raise AssertionError(f"{verb.name} is not in either expected set -- update this pin")
 
 
 def test_the_expected_verbs_are_classified_page_addressing_or_not() -> None:

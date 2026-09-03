@@ -11,6 +11,7 @@ arrive later: this file owns the spine, and there is no ``conftest.py`` here yet
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -18,7 +19,11 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import typing
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
+from typing import Final
 
 import pytest
 
@@ -27,6 +32,10 @@ from pdf_toolkit.cli import exit_codes
 from pdf_toolkit.cli.common import (
     GLOBAL_OPTIONS,
     GLOBAL_PARAMS,
+    OUTPUT_FLAGS,
+    REFUSED_PASSWORD_FLAGS,
+    SAFETY_FLAGS,
+    UNGOVERNED_FLAGS,
     build_config,
     validate_config,
 )
@@ -34,25 +43,112 @@ from pdf_toolkit.models import SCHEMA_VERSION, ItemResult, OperationResult
 from pdf_toolkit.output import OutputFormat, emit_error, emit_result, render_payload
 from pdf_toolkit.output.logging import RedactingFilter, clear_secrets, register_secret
 
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
+    sys.path.insert(0, str(TESTS_DIR))
+
+from registry import (  # noqa: E402
+    _module_dotted_name,
+    discover_verbs,
+)
+from registry import run_cli as registry_run_cli  # noqa: E402
+from test_license_policy import EXTRA_FORBIDDEN, PLAN_FORBIDDEN  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-#: Names that must never appear in packaging, source, or the build entry points.
-#: The realistic violation is a convenience shell-out, not a declared dependency,
-#: which is why this looks at the Makefile as well as at the code.
-FORBIDDEN_NAMES = (
-    "fitz",
-    "pymupdf",
-    "pdf2image",
-    "pdftoppm",
-    "pdftotext",
-    "pdftocairo",
-    "pdfinfo",
-    "ghostscript",
-    "ocrmypdf",
-    "img2pdf",
-    "pandoc",
-    "pdftk",
+# --------------------------------------------------------------------------- #
+# HC-1, textual tier -- B-026 (PDF-24 Design §D8)
+#
+# There are TWO HC-1 name instruments in this repository and they used to
+# DISAGREE. `tests/test_license_policy.py` is a four-shape AST walk over exact
+# normalized names, list = PLAN_FORBIDDEN (13) + EXTRA_FORBIDDEN (10) = 23,
+# with a freshness control (`assert len(PLAN_FORBIDDEN) == 13`). This file is
+# the TEXTUAL tier -- a whole-file scan, which is the tier that catches a name
+# inside a shell-out STRING the AST walk's four shapes cannot see. Its list was
+# hand-typed at TWELVE and was missing `gs` and all ten tightening additions,
+# `poppler` included, and NOTHING asserted the two lists related.
+#
+# ONE LIST NOW. The names are IMPORTED, never re-typed; a divergence is
+# impossible rather than merely unlikely. `tests/test_license_policy.py` belongs
+# to PDF-28 and is READ here, never edited -- two hand-maintained lists is the
+# defect, one list with one owner is the fix, and one list with two owners would
+# be a new defect.
+# --------------------------------------------------------------------------- #
+
+#: The one list, derived. 23 names at this writing; the number is never asserted
+#: here -- `test_license_policy.py::test_forbidden_set_contains_the_plan_list`
+#: owns the freshness control and deleting an entry reds it there.
+SHARED_FORBIDDEN_NAMES: Final[tuple[str, ...]] = tuple(
+    dict.fromkeys(PLAN_FORBIDDEN + EXTRA_FORBIDDEN)
 )
+
+#: **The AC21 `gs` decision, written down BESIDE the list with its reason** --
+#: because the arrangement this replaces made the identical choice BY SILENCE
+#: (`gs` was simply absent from the twelve).
+#:
+#: `gs` is matched by the textual tier with a WORD BOUNDARY, not by plain
+#: substring. Measured at `8fd2146` over this tier's own haystacks
+#: (`pyproject.toml`, `Makefile`, every `src/**/*.py`): plain substring `gs`
+#: returns **282 occurrences across 59 (file, name) pairs**, and **every one of
+#: them is inside a longer identifier or English word** -- `warnings` (105),
+#: `flags` (34), `args` (31), `belongs` (10), `output_flags` (10), `alongside`,
+#: `strings`, `langs`, `siblings`, `kwargs`, `settings`, `spellings`, `logs`,
+#: `findings`, `docstrings` and nineteen more. `\bgs\b` returns **zero**. The
+#: population excluded is therefore named, counted, and shown not to contain the
+#: target (X-255).
+#:
+#: **This is a TIGHTENING, not a disarm, in both directions.** `gs` is not in
+#: the twelve-name list this replaces, so nothing that was matched stops being
+#: matched; and a word boundary still matches every realistic leak shape --
+#: `subprocess.run(["gs", ...])`, a bare `gs -sDEVICE=...` recipe line, and
+#: `/usr/bin/gs` (a `/` is not a word character). Ghostscript is additionally
+#: covered by the AST tier, which matches `gs` on EXACT equality over imports,
+#: `subprocess` argv[0] and `os.exec*`/`os.spawn*` basenames -- where the
+#: realistic leak actually lives.
+#:
+#: **Scoped PER NAME, deliberately.** A blanket word-boundary rewrite of all 23
+#: would be a WEAKENING, not a tightening: `\bpdftk\b` does NOT match
+#: `use_pdftk_fallback`, because `_` is a word character. Every other name keeps
+#: plain substring matching for exactly that reason.
+WORD_BOUNDARY_NAMES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "gs": (
+            "two characters; plain substring matches 'flags', 'args', 'warnings', 'settings' "
+            "and 31 more enclosing words across 59 (file, name) pairs, none of them a "
+            "Ghostscript reference. A word boundary still matches the realistic leak shapes "
+            "(a shell-out argv[0], a bare recipe token, an absolute path) and the AST tier in "
+            "tests/test_license_policy.py covers imports and argv[0] on exact equality."
+        ),
+    }
+)
+
+#: The plain-substring subset of the shared list. **This is the name five other
+#: test modules import and use as `name in text.lower()`**
+#: (`tests/unit/test_textract.py`, `tests/unit/test_verb_help_content.py`,
+#: `tests/unit/test_compose.py`, `tests/integration/test_text_tables_cli.py`),
+#: so it must stay substring-safe: every member here is long enough that a
+#: substring hit is a real hit. Twelve names before PDF-24, twenty-two after --
+#: those five consumers were widened by ten names with zero edits of their own.
+FORBIDDEN_NAMES: Final[tuple[str, ...]] = tuple(
+    name for name in SHARED_FORBIDDEN_NAMES if name not in WORD_BOUNDARY_NAMES
+)
+
+#: **The defined false-positive story** (AC20). Whole-file matching stays as the
+#: textual tier -- it is the tier that sees a name in a shell-out string -- and
+#: it gains an ENUMERATED, PER-`(file, name)`, INDIVIDUALLY-JUSTIFIED exemption
+#: so a module under `src/` can cite `PLAN.md` §7.2 by name without any name
+#: silently leaving the scan.
+#:
+#: **It is EMPTY, and that is the strongest form of it.** X-255: an exclusion
+#: list added to a control while making it pass is presumptively a DISARM. This
+#: tier passes at `8fd2146` with zero exemptions, so nothing here was added to
+#: make anything green. The mechanism is proven on synthetic input below, and
+#: `test_an_exemption_cannot_silence_a_whole_name` proves it cannot be widened
+#: into one -- a bare skip list with no reasons is the same defect one level up.
+#:
+#: Keys are `(repo-relative POSIX path, forbidden name)`. A wildcard is not
+#: REPRESENTABLE: there is no path-glob form and no name-only form.
+TEXTUAL_EXEMPTIONS: Final[Mapping[tuple[str, str], str]] = MappingProxyType({})
 
 CORE_DEPENDENCIES = {
     "pypdf",
@@ -205,6 +301,56 @@ def test_base_error_defaults_to_failure_and_carries_the_redaction_marker() -> No
     assert errors.AuthError("nope", redacted=True).redacted is True
 
 
+def _error_descendants() -> tuple[type[errors.PdfToolkitError], ...]:
+    def walk(cls: type[errors.PdfToolkitError]) -> list[type[errors.PdfToolkitError]]:
+        found = [cls]
+        for child in cls.__subclasses__():
+            found.extend(walk(child))
+        return found
+
+    return tuple(walk(errors.PdfToolkitError))
+
+
+def test_every_error_class_carries_a_published_exit_code() -> None:
+    """PDF-01 AC8's SURVIVING invariant, and the half nothing measured.
+
+    AC8 as written requires *"exactly one exception class per non-zero code"*.
+    That is **no longer true and is correctly no longer true**: the mapping is
+    many-to-one (`REFUSED` alone carries seven concrete classes). The property
+    the exit-code table actually depends on is the partition plus membership:
+    **one BASE class per non-zero code** (the assertion above, which reads
+    `PdfToolkitError.__subclasses__()` -- direct subclasses only) **and every
+    concrete descendant's `exit_code` a member of `ALL_EXIT_CODES`**.
+
+    **No cardinality is pinned here, deliberately.** A criterion pinning an
+    error-class COUNT would turn a later spec red for adding a correctly
+    classified subclass, which is a control failing for a reason it does not
+    claim.
+    """
+    descendants = _error_descendants()
+    assert len(descendants) > len(errors.PdfToolkitError.__subclasses__()), (
+        "the walk found no subclass beyond the direct ones -- it is not transitive"
+    )
+    offenders = [
+        f"{cls.__name__}: exit_code={cls.exit_code!r}"
+        for cls in descendants
+        if cls.exit_code not in exit_codes.ALL_EXIT_CODES
+    ]
+    assert offenders == [], (
+        "every error class's exit_code must be a published integer (D-09 -- the table is "
+        f"public API and renumbering is a major bump): {offenders}"
+    )
+    # A descendant may only narrow the MESSAGE, never the code's meaning: each
+    # concrete class carries the code of exactly one base.
+    base_codes = {base.exit_code for base in errors.PdfToolkitError.__subclasses__()}
+    for cls in descendants:
+        if cls is errors.PdfToolkitError:
+            continue
+        assert cls.exit_code in base_codes, (
+            f"{cls.__name__} carries exit_code {cls.exit_code}, which no base class owns"
+        )
+
+
 # --------------------------------------------------------------------------- #
 # The command surface
 # --------------------------------------------------------------------------- #
@@ -235,6 +381,18 @@ def test_base_error_defaults_to_failure_and_carries_the_redaction_marker() -> No
         # reachable_through_a_flag_consuming_verb below for the message half.
         (("--name", "a/b", "split", "x.pdf"), 2),
         (("--threads", "0", "version"), 2),
+        # PDF-24 AC27: the same table at the POST-VERB spelling. `--no-backup`
+        # already carried both (PDF-01's own F-4 resolution); the other four
+        # invocation errors were pinned pre-verb only, so the §4.2 inheritance
+        # contract was asserted for one flag and assumed for four. The global
+        # block is declared at BOTH levels from one source of truth, and a
+        # divergence at the verb level is a public-API regression (D-09), not a
+        # cosmetic defect.
+        (("version", "-q", "-v"), 2),
+        (("version", "-O", "x.pdf", "--out-dir", "d"), 2),
+        (("version", "--password-file", "/no/such/file"), 2),
+        (("split", "x.pdf", "--name", "a/b"), 2),
+        (("version", "--threads", "0"), 2),
     ],
     ids=lambda value: str(value),
 )
@@ -307,6 +465,24 @@ def test_version_flag_reports_tool_python_and_engine_versions() -> None:
     assert "Python" in line
     assert re.search(r"pypdf \d+\.\d+", line), line
 
+    # PDF-24: the three clauses above assert LABELS, not VALUES. `"Python" in
+    # line` is satisfied by the literal word sitting in `version_line()`'s own
+    # f-string -- MEASURED: replacing `python_version()`'s whole return value
+    # with a constant left this test GREEN. AC7 requires the line to carry
+    # *the running Python version* and *the tool version*, so both are asserted
+    # against a value computed here rather than against a word.
+    import platform
+
+    from pdf_toolkit import __version__ as tool_version
+
+    assert platform.python_version() in line, (
+        f"--version does not carry the running interpreter's version "
+        f"({platform.python_version()}): {line}"
+    )
+    assert tool_version in line, (
+        f"--version does not carry the tool version ({tool_version}): {line}"
+    )
+
 
 @pytest.mark.e2e
 def test_every_entry_point_prints_byte_identical_help() -> None:
@@ -327,6 +503,457 @@ def test_every_entry_point_prints_byte_identical_help() -> None:
             [str(alias), "--help"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
         )
         assert aliased.stdout == canonical.stdout
+
+
+# --------------------------------------------------------------------------- #
+# PDF-24 -- the governance partition of the global-flag block, and the two
+# by-construction controls over it.
+#
+# Before this section the governance surface was ONE hand-typed tuple
+# (`OUTPUT_FLAGS`) plus a comment naming eleven flags in prose. A comment is not
+# a control: it cannot fail. `996f9eb6bc` is what a prose-only classification
+# produced -- `--force` and `-y` advertised, accepted and silently ignored at
+# exit 0 on all five verbs that write nothing.
+#
+# Two INDEPENDENT ways a flag could exist without being checked are closed here:
+#   * the ENFORCEMENT axis -- a flag in `GLOBAL_OPTIONS` that no class governs;
+#   * the ROSTER axis -- a `_ParamSpec` in `GLOBAL_PARAMS` that renders and binds
+#     on all 26 verbs but is absent from `GLOBAL_OPTIONS`, which every other
+#     control in this repository iterates. Nothing asserted the two agreed, and
+#     every existing assertion is a PRESENCE check, never an equality.
+# --------------------------------------------------------------------------- #
+
+
+def declared_spellings(spec: object) -> tuple[str, ...]:
+    """Every command-line spelling one `_ParamSpec` declares, in its own order.
+
+    Read off the `typer.Option` sitting in the `Annotated` metadata rather than
+    re-typed. `typer.Option`'s FIRST positional parameter is `default`, so a
+    single-spelling declaration lands its spelling there and leaves
+    `param_decls` empty -- verified at `8fd2146`, where `--dry-run` reads
+    `default='--dry-run', param_decls=()` and `-o/--output-format` reads
+    `default='-o', param_decls=('--output-format',)`. Both shapes are handled,
+    and `test_the_derivation_is_not_vacuous` below is what stops a typer upgrade
+    turning this into a silently empty set.
+    """
+    annotation = getattr(spec, "annotation", None)
+    args = typing.get_args(annotation)
+    if len(args) < 2:
+        return ()
+    info = args[1]
+    spellings: list[str] = []
+    default = getattr(info, "default", None)
+    if isinstance(default, str) and default.startswith("-"):
+        spellings.append(default)
+    spellings.extend(getattr(info, "param_decls", ()) or ())
+    return tuple(spellings)
+
+
+def derived_global_options() -> tuple[str, ...]:
+    """`GLOBAL_OPTIONS`, computed from `GLOBAL_PARAMS` minus the OR-4 hidden three.
+
+    Declaration order is preserved because C2 and the §4.2 root-vs-verb diff
+    both read `GLOBAL_OPTIONS` in order.
+    """
+    refused = set(REFUSED_PASSWORD_FLAGS)
+    derived: list[str] = []
+    for spec in GLOBAL_PARAMS:
+        for spelling in declared_spellings(spec):
+            if spelling.startswith("--") and spelling not in refused:
+                derived.append(spelling)
+    return tuple(derived)
+
+
+def test_the_derivation_is_not_vacuous() -> None:
+    """The non-vacuity proof for `derived_global_options` itself.
+
+    Without it, a typer upgrade that moved `param_decls` could make the
+    derivation return `()` -- and `test_global_options_equals_the_derived_roster`
+    would then compare an empty tuple against an empty tuple only if
+    `GLOBAL_OPTIONS` were also emptied, but every OTHER control in this file
+    iterates `GLOBAL_OPTIONS` and would go vacuously green on an empty roster.
+    Both failure directions are pinned here.
+    """
+    derived = derived_global_options()
+    assert derived, "the derivation returned nothing -- it is not measuring the block"
+    assert len(derived) == len(set(derived)), f"the derivation duplicates a spelling: {derived}"
+    for expected in ("--dry-run", "--output-format", "--output", "--threads", "--version"):
+        assert expected in derived, expected
+    assert declared_spellings(GLOBAL_PARAMS[0]) == ("--dry-run",)
+    assert "--output-format" in declared_spellings(GLOBAL_PARAMS[1])
+    assert "-o" in declared_spellings(GLOBAL_PARAMS[1])
+
+
+def test_global_options_equals_the_derived_roster() -> None:
+    """AC4 -- the ROSTER axis, closed.
+
+    A sixteenth `_ParamSpec` added to `GLOBAL_PARAMS` and not to
+    `GLOBAL_OPTIONS` renders in all 26 helps, binds at runtime, and was
+    invisible to every control in this repository before this assertion --
+    including the contract harness's C2, whose whole job is policing this block.
+
+    Equality, not containment, and ORDER-SENSITIVE: `GLOBAL_OPTIONS`'s order is
+    read by C2 and by the §4.2 root-vs-verb diff.
+    """
+    assert GLOBAL_OPTIONS == derived_global_options()
+
+
+def test_the_hidden_password_refusals_stay_out_of_the_block() -> None:
+    """OR-4, and the reason AC4's derivation must SUBTRACT rather than filter by
+    `hidden=`: `tests/test_password_leaks.py`'s disjointness assertion is a free
+    red control on this derivation, and a derivation that accidentally included
+    the hidden three would turn it red rather than passing quietly."""
+    assert set(REFUSED_PASSWORD_FLAGS) & set(GLOBAL_OPTIONS) == set()
+    declared = {spelling for spec in GLOBAL_PARAMS for spelling in declared_spellings(spec)}
+    assert set(REFUSED_PASSWORD_FLAGS) <= declared, (
+        "the hidden three must still be DECLARED -- subtracting them from the block is "
+        "the point; removing them from the parameter list would delete OR-4's refusal"
+    )
+
+
+def test_the_global_block_is_exhaustively_partitioned() -> None:
+    """AC5 -- the ENFORCEMENT axis, closed *by construction*.
+
+    Pairwise disjoint, union exactly `set(GLOBAL_OPTIONS)`, every ungoverned
+    member carrying a non-empty reason. Adding a sixteenth flag to
+    `GLOBAL_OPTIONS` without classifying it is a red test from here on, which is
+    the literal reading of this item's deliverable -- *a flag cannot be declared
+    without being checked*.
+    """
+    governed_output = set(OUTPUT_FLAGS)
+    governed_safety = set(SAFETY_FLAGS)
+    ungoverned = set(UNGOVERNED_FLAGS)
+
+    assert governed_output & governed_safety == set()
+    assert governed_output & ungoverned == set()
+    assert governed_safety & ungoverned == set()
+
+    assert governed_output | governed_safety | ungoverned == set(GLOBAL_OPTIONS)
+    assert len(OUTPUT_FLAGS) + len(SAFETY_FLAGS) + len(UNGOVERNED_FLAGS) == len(GLOBAL_OPTIONS)
+
+    for flag, reason in UNGOVERNED_FLAGS.items():
+        assert reason.strip(), (
+            f"{flag} is classified ungoverned and carries no reason -- that is *inert by "
+            "omission*, which is the state this partition exists to make unrepresentable"
+        )
+        assert len(reason.strip()) > 20, (
+            f"{flag}'s reason is a placeholder, not a reason: {reason!r}"
+        )
+
+
+def test_the_partition_control_can_fail_on_all_three_arms() -> None:
+    """AC5's own red proof, driven on synthetic data so no real declaration is
+    vandalised to prove the control fires (the `tests/test_acceptance_audit.py`
+    discipline). The three arms are the three ways a partition breaks."""
+
+    def problems(
+        block: tuple[str, ...],
+        output: tuple[str, ...],
+        safety: tuple[str, ...],
+        ungoverned: Mapping[str, str],
+    ) -> list[str]:
+        found = []
+        classes = (set(output), set(safety), set(ungoverned))
+        if set(output) & set(safety) or set(output) & set(ungoverned):
+            found.append("not disjoint")
+        if set(safety) & set(ungoverned):
+            found.append("not disjoint")
+        if set.union(*classes) != set(block):
+            found.append("not total")
+        if any(not reason.strip() for reason in ungoverned.values()):
+            found.append("blank reason")
+        return found
+
+    good = problems(("--a", "--b", "--c"), ("--a",), ("--b",), {"--c": "because"})
+    assert good == []
+    # (a) a flag in the block and in no class
+    assert problems(("--a", "--b", "--c", "--d"), ("--a",), ("--b",), {"--c": "because"}) != []
+    # (b) one flag named in two classes
+    assert problems(("--a", "--b", "--c"), ("--a", "--b"), ("--b",), {"--c": "because"}) != []
+    # (c) a blank reason
+    assert problems(("--a", "--b", "--c"), ("--a",), ("--b",), {"--c": "  "}) != []
+
+
+def test_the_or3_output_flags_are_byte_unchanged() -> None:
+    """AC7 / D10 -- the three properties this spec must NOT move. `OUTPUT_FLAGS`
+    keeps the same four members in the same order: `test_c14_output_flag_matrix`
+    and the `54500b06e5` regression cells read it, and reordering it perturbs
+    the OR-3 message the `54500b06e5` cells assert verbatim."""
+    assert OUTPUT_FLAGS == ("--output", "--out-dir", "--name", "--in-place")
+    assert SAFETY_FLAGS == ("--force", "--yes")
+
+
+def test_every_leaf_verb_declares_its_output_flag_consumption_exactly_once() -> None:
+    """AC17 -- the VERB axis of the same by-construction property AC5 gives the
+    FLAG axis: a verb cannot be registered without declaring.
+
+    `consumed_output_flags()` returns `()` for an undecorated module too, so
+    membership in the declaration registry is what distinguishes *declared
+    nothing* from *never declared* -- the distinction a `consumes == ()` check
+    structurally cannot make, and the one B-115's population depends on.
+    """
+    from pdf_toolkit.cli import common as cli_common
+
+    verbs = discover_verbs()
+    group = typer_root_command()
+    modules = {}
+    _collect_leaf_modules(group, (), modules)
+
+    assert len(verbs) == len(modules), (
+        f"{len(verbs)} leaf verbs but {len(modules)} resolvable callback modules"
+    )
+    undeclared = sorted(
+        name for name, module in modules.items() if module not in cli_common._CONSUMES_BY_MODULE
+    )
+    assert undeclared == [], (
+        f"leaf verb(s) {undeclared} have no @global_options(consumes=...) declaration -- "
+        "OR-3 would never check them and every global output flag would be silently inert"
+    )
+    # One declaration per verb, and no orphan declarations left behind.
+    assert len(set(modules.values())) == len(modules), "two leaf verbs share one callback module"
+    assert len(cli_common._CONSUMES_BY_MODULE) == len(verbs), (
+        f"{len(cli_common._CONSUMES_BY_MODULE)} declarations for {len(verbs)} leaf verbs"
+    )
+
+
+def typer_root_command() -> object:
+    import typer
+
+    from pdf_toolkit.cli.main import app
+
+    return typer.main.get_command(app)
+
+
+def _collect_leaf_modules(cmd: object, path: tuple[str, ...], out: dict[str, str]) -> None:
+    commands = getattr(cmd, "commands", None)
+    if commands is not None:
+        for name in sorted(commands):
+            _collect_leaf_modules(commands[name], (*path, name), out)
+        return
+    module = _module_dotted_name(cmd)
+    assert module is not None, f"leaf verb {' '.join(path)} has no resolvable callback module"
+    out[" ".join(path)] = module
+
+
+# --------------------------------------------------------------------------- #
+# B-115 / `996f9eb6bc` -- `--force` and `--yes` on a verb that writes nothing.
+#
+# The population is DERIVED FROM THE LIVE REGISTRY inside every test below,
+# never hand-listed: a sixth `consumes == ()` verb joins the grid with zero
+# author action. That is the whole point of the fix.
+# --------------------------------------------------------------------------- #
+
+
+def non_consuming_verbs() -> tuple[str, ...]:
+    return tuple(sorted(verb.name for verb in discover_verbs() if verb.consumes == ()))
+
+
+#: A valid argv tail per non-consuming verb, so the refusal is measured against
+#: an otherwise-well-formed invocation rather than against a parse error. The
+#: three path verbs get a REAL fixture -- `PDF-25` owns the empty-stdout answer
+#: a non-existent path produces under `-o json`, and borrowing it here would
+#: measure that defect instead of this one.
+def _non_consuming_argv(verb: str, fixture: Path) -> list[str]:
+    return [] if verb in {"version", "doctor"} else [str(fixture)]
+
+
+@pytest.fixture(scope="module")
+def spine_fixture(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One real single-page PDF, built by the corpus builders, copied per use."""
+    from corpus import build_corpus
+
+    return build_corpus(tmp_path_factory.mktemp("pdf24")).path("single_page")
+
+
+def test_the_non_consuming_population_is_derived_and_non_empty() -> None:
+    """The precondition for every grid below. A population that silently went
+    empty would make the whole B-115 section pass by iterating nothing."""
+    population = non_consuming_verbs()
+    assert population == ("doctor", "info", "meta get", "permissions", "version")
+    assert len(population) == 5
+    for verb in population:
+        assert verb in {v.name for v in discover_verbs()}
+
+
+@pytest.mark.e2e
+def test_ac8_safety_flags_are_refused_on_every_verb_that_writes_nothing(
+    spine_fixture: Path, tmp_path: Path
+) -> None:
+    """AC8 / B-115. Exit 2, structured envelope on STDOUT under `-o json`, the
+    message naming the verb and the flag's LONG spelling -- for both spellings
+    of both flags, on every `consumes == ()` verb the live registry reports.
+
+    Pinned explicitly because it is an intended change to an observable answer:
+    `permissions <missing.pdf> --force` moves **4 -> 2**, matching what
+    `permissions <missing.pdf> -O x` already returns.
+    """
+    source = tmp_path / "spine.pdf"
+    source.write_bytes(spine_fixture.read_bytes())
+
+    cells = 0
+    for verb in non_consuming_verbs():
+        argv = _non_consuming_argv(verb, source)
+        for short, long in (("-f", "--force"), ("-y", "--yes")):
+            for spelling in (short, long):
+                result = registry_run_cli(verb, *argv, spelling, "-o", "json")
+                cells += 1
+                assert result.returncode == 2, (
+                    f"{verb} {spelling} -> {result.returncode}\n{result.stdout}{result.stderr}"
+                )
+                payload = json.loads(result.stdout)
+                assert payload["schema_version"] == SCHEMA_VERSION
+                assert payload["error"]["code"] == 2
+                assert payload["error"]["kind"] == "usage"
+                message = payload["error"]["message"]
+                assert message == f"{verb} does not accept {long} (this verb writes no files)", (
+                    f"{verb} {spelling}: {message!r}"
+                )
+    assert cells == 20, f"the grid measured {cells} cells, not 5 verbs x 4 spellings"
+
+
+@pytest.mark.e2e
+def test_ac8_a_missing_input_no_longer_outranks_the_safety_refusal() -> None:
+    """The one precedence consequence pinned deliberately rather than discovered
+    in a diff. Measured at `8fd2146`: `permissions /no/such.pdf --force` was
+    **4**; it is **2** now, which is the same answer
+    `permissions /no/such.pdf -O x` already gave, so no NEW precedence class is
+    introduced -- two flags joined a relation the product already ships."""
+    refused = registry_run_cli("permissions", "/no/such.pdf", "--force", "-o", "json")
+    assert refused.returncode == 2
+    already = registry_run_cli("permissions", "/no/such.pdf", "-O", "x.pdf", "-o", "json")
+    assert already.returncode == 2
+    # ...and the missing-input tier is still reachable when no flag pre-empts it.
+    plain = registry_run_cli("permissions", "/no/such.pdf", "-o", "json")
+    assert plain.returncode == 4
+
+
+@pytest.mark.e2e
+def test_ac9_dry_and_real_agree_as_pairs_including_a_discriminating_row(
+    spine_fixture: Path, tmp_path: Path
+) -> None:
+    """AC9 / OR-7, measured as PAIRS and not as two independent tables.
+
+    A dry/real matrix showing the same number everywhere is equally consistent
+    with a preview that has gone silent, so the matrix carries a DISCRIMINATING
+    row where a different tier answers: `merge a.pdf b.pdf -O out.pdf --force`
+    is `0 == 0` while `version --force` is `2 == 2`. Per X-185, `dry == real`
+    means the exit code AND the `-o json` envelope shape, so both are compared.
+    """
+    source = tmp_path / "spine.pdf"
+    source.write_bytes(spine_fixture.read_bytes())
+
+    def envelope_shape(text: str) -> object:
+        payload = json.loads(text)
+        if "error" in payload:
+            return ("error", sorted(payload["error"]), payload["error"]["code"])
+        return ("result", sorted(payload))
+
+    for verb in non_consuming_verbs():
+        argv = _non_consuming_argv(verb, source)
+        for spelling in ("-f", "--force", "-y", "--yes"):
+            real = registry_run_cli(verb, *argv, spelling, "-o", "json")
+            dry = registry_run_cli(verb, *argv, spelling, "--dry-run", "-o", "json")
+            assert dry.returncode == real.returncode == 2, (
+                f"{verb} {spelling}: dry={dry.returncode} real={real.returncode}"
+            )
+            assert envelope_shape(dry.stdout) == envelope_shape(real.stdout)
+
+    # The discriminating row: a verb that DOES consume `--force` answers 0 == 0
+    # through a different tier, so the grid above cannot be a silent preview.
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    a.write_bytes(spine_fixture.read_bytes())
+    b.write_bytes(spine_fixture.read_bytes())
+    target = tmp_path / "merged.pdf"
+    real = registry_run_cli(
+        "merge", str(a), str(b), "-O", str(target), "--force", "-o", "json", cwd=tmp_path
+    )
+    target.unlink(missing_ok=True)
+    dry = registry_run_cli(
+        "merge",
+        str(a),
+        str(b),
+        "-O",
+        str(target),
+        "--force",
+        "--dry-run",
+        "-o",
+        "json",
+        cwd=tmp_path,
+    )
+    assert dry.returncode == real.returncode == 0, (
+        f"discriminating row: dry={dry.returncode} real={real.returncode}\n{real.stderr}"
+    )
+    assert envelope_shape(dry.stdout) == envelope_shape(real.stdout)
+
+
+@pytest.mark.e2e
+def test_ac10_a_non_consuming_verb_creates_no_file_and_leaves_its_input_intact(
+    spine_fixture: Path, tmp_path: Path
+) -> None:
+    """AC10 -- the premise the refusal message ASSERTS, pinned behaviourally and
+    **by a different consumer than the one that computes it**.
+
+    `consumes == () ⟹ writes no files` is load-bearing for both the refusal and
+    the disclosure, and until now only the message asserted it.
+
+    The obvious static oracle DOES NOT WORK and is deliberately not used:
+    `registry.is_mutating` is transitive import-reachability to `AtomicWriter`,
+    and `permissions` is pinned `is_mutating=True` while declaring `consumes=()`
+    (`tests/unit/test_registry.py`) because it shares `ops/crypto.py` with the
+    producing crypto verbs. A control asserting `consumes == () ⟹ not
+    is_mutating` would go red on a correctly-classified verb.
+    """
+    for verb in non_consuming_verbs():
+        scratch = tmp_path / verb.replace(" ", "_")
+        scratch.mkdir()
+        source = scratch / "input.pdf"
+        source.write_bytes(spine_fixture.read_bytes())
+        before = hashlib.sha256(source.read_bytes()).hexdigest()
+        argv = _non_consuming_argv(verb, source)
+
+        result = registry_run_cli(verb, *argv, "-o", "json", cwd=scratch)
+        assert result.returncode == 0, f"{verb} -> {result.returncode}\n{result.stderr}"
+
+        after = sorted(p.name for p in scratch.iterdir())
+        assert after == ["input.pdf"], f"{verb} wrote {set(after) - {'input.pdf'}} into {scratch}"
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == before, (
+            f"{verb} mutated its own input"
+        )
+
+
+@pytest.mark.e2e
+def test_ac11_the_output_flag_refusal_and_no_backup_have_not_regressed(
+    spine_fixture: Path, tmp_path: Path
+) -> None:
+    """AC11 -- `54500b06e5` has not regressed and `--no-backup` has NOT been
+    silently reclassified into `SAFETY_FLAGS`.
+
+    `--no-backup` is refused on these verbs too, but for the UNIVERSAL
+    `--no-backup requires --in-place` reason that applies identically to all 26
+    -- which is exactly why it sits in `UNGOVERNED_FLAGS` with that reason
+    recorded, and why it is not named in the disclosure sentence.
+    """
+    source = tmp_path / "spine.pdf"
+    source.write_bytes(spine_fixture.read_bytes())
+
+    for verb in non_consuming_verbs():
+        argv = _non_consuming_argv(verb, source)
+        result = registry_run_cli(verb, *argv, "-O", "out.pdf", "-o", "json")
+        assert result.returncode == 2
+        message = json.loads(result.stdout)["error"]["message"]
+        assert message == f"{verb} does not accept --output (this verb writes no files)", message
+
+        backup = registry_run_cli(verb, *argv, "--no-backup", "-o", "json")
+        assert backup.returncode == 2
+        backup_message = json.loads(backup.stdout)["error"]["message"]
+        assert "--no-backup requires --in-place" in backup_message, backup_message
+        assert verb not in backup_message, (
+            "--no-backup's message is UNIVERSAL, not verb-specific -- a verb name in it "
+            "would mean it had been reclassified into SAFETY_FLAGS"
+        )
+    assert "--no-backup" in UNGOVERNED_FLAGS
+    assert "--no-backup" not in set(SAFETY_FLAGS) | set(OUTPUT_FLAGS)
 
 
 # --------------------------------------------------------------------------- #
@@ -578,16 +1205,172 @@ def test_both_console_scripts_point_at_the_same_entry_point() -> None:
     assert scripts["pdftoolkit"] == scripts["pdf-toolkit"] == "pdf_toolkit.cli.main:main"
 
 
-def test_no_forbidden_engine_name_appears_in_packaging_source_or_build() -> None:
+def hc1_haystacks() -> list[Path]:
+    """The textual tier's population: packaging, the build, and every source file.
+
+    The Makefile is in here because the realistic HC-1 violation is a
+    convenience shell-out, not a declared dependency.
+    """
     haystacks = [REPO_ROOT / "pyproject.toml", REPO_ROOT / "Makefile"]
     haystacks.extend(sorted((REPO_ROOT / "src").rglob("*.py")))
+    return haystacks
+
+
+def forbidden_name_findings(
+    text: str,
+    *,
+    relpath: str,
+    names: tuple[str, ...] = SHARED_FORBIDDEN_NAMES,
+    exemptions: Mapping[tuple[str, str], str] = TEXTUAL_EXEMPTIONS,
+) -> list[str]:
+    """One file's textual-tier findings, `name` by `name`.
+
+    Parameterized on the data rather than reading module globals, so the red
+    proofs below drive it with synthetic input instead of vandalising the real
+    tree -- the discipline `tests/test_acceptance_audit.py` already uses.
+    """
+    lowered = text.lower()
+    findings: list[str] = []
+    for name in names:
+        if (relpath, name) in exemptions:
+            continue
+        if name in WORD_BOUNDARY_NAMES:
+            hit = re.search(rf"\b{re.escape(name)}\b", lowered) is not None
+        else:
+            hit = name in lowered
+        if hit:
+            findings.append(f"{relpath}: {name}")
+    return findings
+
+
+def names_silenced_everywhere(
+    exemptions: Mapping[tuple[str, str], str],
+    relpaths: tuple[str, ...],
+    names: tuple[str, ...] = SHARED_FORBIDDEN_NAMES,
+) -> list[str]:
+    """Names whose every haystack is exempted -- i.e. silenced outright.
+
+    AC20's teeth. A per-`(file, name)` exemption is a false-positive story; an
+    exemption that reaches every file is a deleted name wearing one.
+    """
+    silenced = []
+    for name in names:
+        exempted = {path for (path, exempt_name) in exemptions if exempt_name == name}
+        if relpaths and all(path in exempted for path in relpaths):
+            silenced.append(name)
+    return silenced
+
+
+def test_no_forbidden_engine_name_appears_in_packaging_source_or_build() -> None:
     offenders: list[str] = []
-    for path in haystacks:
-        text = path.read_text().lower()
-        offenders.extend(
-            f"{path.relative_to(REPO_ROOT)}: {name}" for name in FORBIDDEN_NAMES if name in text
-        )
-    assert offenders == []
+    for path in hc1_haystacks():
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        offenders.extend(forbidden_name_findings(path.read_text(), relpath=rel))
+    assert offenders == [], "PLAN §7.2 forbidden names found by the textual tier:\n" + "\n".join(
+        offenders
+    )
+
+
+def test_the_textual_tier_reads_the_shared_list_and_never_a_second_one() -> None:
+    """AC18. `FORBIDDEN_NAMES` used to be twelve hand-typed names against the AST
+    tier's twenty-three, with nothing asserting the two related. It is derived
+    now, so adding a name to `PLAN_FORBIDDEN` reaches BOTH tiers with no edit
+    here."""
+    assert set(SHARED_FORBIDDEN_NAMES) == set(PLAN_FORBIDDEN) | set(EXTRA_FORBIDDEN)
+    assert len(SHARED_FORBIDDEN_NAMES) == len(set(PLAN_FORBIDDEN) | set(EXTRA_FORBIDDEN))
+    # Nothing is dropped on the way to the two matchers.
+    assert set(FORBIDDEN_NAMES) | set(WORD_BOUNDARY_NAMES) == set(SHARED_FORBIDDEN_NAMES)
+    assert set(FORBIDDEN_NAMES) & set(WORD_BOUNDARY_NAMES) == set()
+    # Non-vacuity: the tier is not scanning an empty roster over an empty tree.
+    assert len(SHARED_FORBIDDEN_NAMES) >= 20
+    assert len(hc1_haystacks()) >= 40
+
+
+def test_the_textual_tier_still_catches_a_plain_substring_name() -> None:
+    """The positive control for the 22 substring names, on synthetic input."""
+    planted = 'subprocess.run(["pdf' + 'totext", path])'
+    assert forbidden_name_findings(planted, relpath="src/x.py") == ["src/x.py: pdftotext"]
+    docstring = "This module is not " + "pdftk" + " and shares no code with it."
+    assert forbidden_name_findings(docstring, relpath="src/y.py") == ["src/y.py: pdftk"]
+
+
+def test_the_gs_decision_matches_a_leak_and_not_an_identifier() -> None:
+    """AC21 -- the `gs` decision, mechanized in both directions.
+
+    The reason lives beside the list in `WORD_BOUNDARY_NAMES`; this is the
+    proof that the reason is true.
+    """
+    assert "gs" in PLAN_FORBIDDEN, "the AST tier's own list must still carry it"
+    assert WORD_BOUNDARY_NAMES["gs"].strip(), "the decision must carry its reason as data"
+
+    for leak in (
+        'subprocess.run(["gs", "-q", "-sDEVICE=pdfwrite"])',
+        "\tgs -sDEVICE=pdfwrite -o out.pdf in.pdf",
+        'shutil.which("/usr/bin/gs")',
+    ):
+        assert forbidden_name_findings(leak, relpath="src/x.py") == ["src/x.py: gs"], leak
+
+    identifiers = "flags args warnings settings strings kwargs output_flags belongs alongside"
+    assert forbidden_name_findings(identifiers, relpath="src/x.py") == []
+
+
+def test_a_blanket_word_boundary_rewrite_would_be_a_weakening_not_a_tightening() -> None:
+    """Why `WORD_BOUNDARY_NAMES` is scoped PER NAME and holds exactly one entry.
+
+    `_` is a word character, so `\\bpdftk\\b` does not match `use_pdftk_fallback`.
+    A blanket rewrite would silently disarm every name against underscore-
+    embedded identifiers -- the disarm shape X-255 forbids, arriving as a
+    tidy-up.
+    """
+    embedded = "def use_pdftk_fallback(path):\n    return None\n"
+    assert forbidden_name_findings(embedded, relpath="src/x.py") == ["src/x.py: pdftk"]
+    assert re.search(r"\bpdftk\b", embedded) is None
+    assert set(WORD_BOUNDARY_NAMES) == {"gs"}
+
+
+def test_an_exemption_suppresses_exactly_one_file_and_one_name() -> None:
+    """AC20 -- the mechanism, proven on synthetic input rather than by adding a
+    live exemption to make something pass."""
+    text = "This module is not " + "pdftk" + " and does not shell out to pdf" + "totext."
+    assert sorted(forbidden_name_findings(text, relpath="src/a.py")) == [
+        "src/a.py: pdftk",
+        "src/a.py: pdftotext",
+    ]
+    scoped = MappingProxyType({("src/a.py", "pdftk"): "cites PLAN.md §7.2 in a docstring"})
+    assert forbidden_name_findings(text, relpath="src/a.py", exemptions=scoped) == [
+        "src/a.py: pdftotext"
+    ]
+    # The SAME exemption does not reach a different file.
+    assert sorted(forbidden_name_findings(text, relpath="src/b.py", exemptions=scoped)) == [
+        "src/b.py: pdftk",
+        "src/b.py: pdftotext",
+    ]
+
+
+def test_an_exemption_cannot_silence_a_whole_name() -> None:
+    """AC20's teeth: every name in the shared list is still matched somewhere the
+    exemption does not reach. *Observed red by:* exempting `pdftk` for every
+    haystack rather than for one file."""
+    relpaths = tuple(p.relative_to(REPO_ROOT).as_posix() for p in hc1_haystacks())
+    assert names_silenced_everywhere(TEXTUAL_EXEMPTIONS, relpaths) == []
+
+    global_exemption = MappingProxyType({(path, "pdftk"): "because" for path in relpaths})
+    assert names_silenced_everywhere(global_exemption, relpaths) == ["pdftk"]
+
+
+def test_every_live_exemption_names_a_real_file_a_real_name_and_a_reason() -> None:
+    """A stale exemption is a silencer waiting for its file to change. Empty at
+    `8fd2146`; the loop is the forward constraint, and its own emptiness is
+    stated rather than left to be inferred."""
+    relpaths = {p.relative_to(REPO_ROOT).as_posix() for p in hc1_haystacks()}
+    for (path, name), reason in TEXTUAL_EXEMPTIONS.items():
+        assert path in relpaths, f"exemption names a file the tier does not scan: {path}"
+        assert name in SHARED_FORBIDDEN_NAMES, f"exemption names an unknown forbidden name: {name}"
+        assert reason.strip(), f"exemption ({path}, {name}) carries no reason"
+    assert TEXTUAL_EXEMPTIONS == {}, (
+        "the live exemption list is empty at this commit -- if that changes, this assertion "
+        "is the place the change is argued, not the place it is hidden"
+    )
 
 
 # --------------------------------------------------------------------------- #

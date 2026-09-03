@@ -18,9 +18,10 @@ import functools
 import inspect
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Annotated, Any, Final, get_type_hints
 
 import typer
@@ -35,6 +36,8 @@ __all__ = [
     "OUTPUT_FLAGS",
     "PASSWORD_FILE_FLAGS",
     "REFUSED_PASSWORD_FLAGS",
+    "SAFETY_FLAGS",
+    "UNGOVERNED_FLAGS",
     "CliState",
     "GlobalConfig",
     "consumed_output_flags",
@@ -68,13 +71,59 @@ GLOBAL_OPTIONS: Final[tuple[str, ...]] = (
 #: Default worker cap for multi-file operations.
 DEFAULT_THREADS: Final[int] = min(8, os.cpu_count() or 1)
 
+# --------------------------------------------------------------------------- #
+# The governance partition of :data:`GLOBAL_OPTIONS` (PDF-24 Design §D2).
+#
+# Every member of the block lands in EXACTLY ONE of the three classes below,
+# and `tests/test_cli_spine.py`'s partition control asserts pairwise
+# disjointness plus union == set(GLOBAL_OPTIONS). Adding a sixteenth flag
+# without classifying it is a RED TEST, not a silently inert flag.
+#
+# This replaced a prose comment that named eleven flags in English and could
+# not fail. `996f9eb6bc` is what that cost: `--force` and `-y` were advertised,
+# accepted and silently ignored at exit 0 on all five verbs that write nothing
+# — *inert by omission* rather than *inert by design, disclosed*.
+# --------------------------------------------------------------------------- #
+
 #: OR-3 (`decision.md` §0.5, Design §D12) — the global flags whose *consumption*
-#: a verb must declare. NOT the whole :data:`GLOBAL_OPTIONS` block: `--force`,
-#: `--no-backup`, `-y`, `--threads`, `--password-file`, `-o/--output-format`,
-#: `--dry-run`, `-q`, `-v`, `--no-color` and `--version` are ungoverned by
-#: design (PDF-07's spec, Scope > Out) — widening this tuple is a defect, not
-#: an improvement. `-O` is `--output`'s short spelling and is governed with it.
+#: a verb must declare, refused per-verb by :func:`_check_output_flag_consumption`.
+#: Unchanged by PDF-24: same four members, same order, same message text — three
+#: shipped criteria and the `54500b06e5` regression cells depend on all three.
+#: `-O` is `--output`'s short spelling and is governed with it.
 OUTPUT_FLAGS: Final[tuple[str, ...]] = ("--output", "--out-dir", "--name", "--in-place")
+
+#: B-115 / `996f9eb6bc` — governed CENTRALLY rather than per-verb: refused on any
+#: verb that consumes no output flag at all (``consumes == ()``), because a verb
+#: that writes nothing has no output to overwrite and no destructive bulk run to
+#: confirm. Derived from a fact the product already publishes — the
+#: ``consumes == ()`` branch of :func:`_check_output_flag_consumption` already
+#: emits the literal detail *"this verb writes no files"* — so no verb gains a
+#: second hand-maintained declaration.
+SAFETY_FLAGS: Final[tuple[str, ...]] = ("--force", "--yes")
+
+#: Universal by design, each with its reason recorded AS DATA rather than in a
+#: comment: greppable, testable, and quotable. A member with a blank reason
+#: fails the partition control — *inert by design, disclosed* is the safe state;
+#: *inert by omission* is the one this product's headline defect class is made of.
+UNGOVERNED_FLAGS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "--dry-run": (
+            "every verb has a plan phase, and OR-7 makes the preview meaningful even on a "
+            "verb that writes nothing (dry == real)"
+        ),
+        "--output-format": "selects the shape of a payload every verb emits",
+        "--no-backup": (
+            "governed elsewhere, and more strictly: SafetyPolicy.validate() refuses it "
+            "without --in-place UNIVERSALLY, so it is never silently inert on any verb"
+        ),
+        "--password-file": "any verb may meet an encrypted input, including the report-only ones",
+        "--quiet": "a property of the stderr stream, which every verb has",
+        "--verbose": "a property of the stderr stream, which every verb has",
+        "--no-color": "a property of the stderr stream, which every verb has",
+        "--threads": "validated universally (< 1 exits 2) and consumed opportunistically",
+        "--version": "eager; it exits before a verb body runs at all",
+    }
+)
 
 #: Attribute name the OR-3 declaration is recorded under on a verb module's
 #: dict, keyed by that module's own `__name__` -- see :func:`global_options`
@@ -532,13 +581,17 @@ def validate_config(
     2. The OR-3 consumption check — before every shape check below, so a verb
        that cannot honour ``--name`` at all does not lecture the user about
        template syntax.
+    2a. B-115 / `996f9eb6bc` — the :data:`SAFETY_FLAGS` check, in the SAME
+        tier as 2 and immediately after it, so an invocation naming both an
+        output flag and a safety flag still reports the OUTPUT flag first and
+        the `54500b06e5` regression cells keep their verbatim message.
     2b. The B-076 ``--in-place``-vs-output-target conflict check — a
         DIFFERENT dimension from 2 (a conflict BETWEEN two flags a verb
         legitimately declares consuming, not an undeclared flag), so it runs
         only once 2 has already confirmed every given flag is declared.
     3. ``SafetyPolicy.validate()``, the name-template shape check, the
        password-file shape check, ``--threads``, ``--quiet``/``--verbose`` —
-       unchanged, just now reached after 1, 2 and 2b.
+       unchanged, just now reached after 1, 2, 2a and 2b.
 
     All tiers exit 2, so no exit code changes anywhere — only which message
     is emitted.
@@ -548,6 +601,7 @@ def validate_config(
 
     if consumes is not None:
         _check_output_flag_consumption(config, verb=verb or "this command", consumes=consumes)
+        _check_safety_flag_consumption(config, verb=verb or "this command", consumes=consumes)
         _check_in_place_output_conflict(config, verb=verb or "this command", consumes=consumes)
 
     # Delegated, not duplicated: ``SafetyPolicy`` owns this rule, so the CLI and
@@ -601,6 +655,55 @@ def _check_output_flag_consumption(
     else:
         detail = "this verb writes no files"
     raise UsageError(f"{verb} does not accept {flags_text} ({detail})")
+
+
+#: B-115 / `996f9eb6bc`: whether each :data:`SAFETY_FLAGS` member was actually
+#: given, read off the resolved config -- the same "differs from the
+#: ``GLOBAL_PARAMS`` default" idiom :data:`_OUTPUT_FLAG_GIVEN` above uses, so
+#: BOTH spellings of each flag (`-f`/`--force`, `-y`/`--yes`) are caught by
+#: value rather than by re-parsing argv for a spelling.
+_SAFETY_FLAG_GIVEN: Final[dict[str, Callable[[GlobalConfig], bool]]] = {
+    "--force": lambda config: config.force is True,
+    "--yes": lambda config: config.assume_yes is True,
+}
+
+
+def _check_safety_flag_consumption(
+    config: GlobalConfig, *, verb: str, consumes: tuple[str, ...]
+) -> None:
+    """B-115 / `996f9eb6bc` — the central refusal for :data:`SAFETY_FLAGS`.
+
+    OR-3's rationale covers these two verbatim: *a global flag a verb cannot
+    honour is a usage error, exit 2, never silently ignored.* ``--force``
+    means *permit overwriting an existing output*; ``version`` produces no
+    output to overwrite. ``-y`` is the flag that lets a **bulk destructive
+    run proceed on a non-TTY** (:func:`require_confirmation`'s own gate), and
+    a user who learns it is harmless on ``info`` has learned the single most
+    expensive thing this CLI can teach.
+
+    **The population is DERIVED, not declared.** The condition is exactly
+    ``consumes == ()`` — the same classification
+    :func:`_check_output_flag_consumption` already publishes in user-visible
+    text as *"this verb writes no files"*. A second required keyword on
+    :func:`global_options` would have meant twenty-six edits, twenty-six
+    chances to get it wrong, and a second hand-maintained per-verb fact —
+    reproducing the shape the partition above exists to remove. A sixth
+    ``consumes=()`` verb inherits this refusal with zero author action.
+
+    Exit 2, in the tier :func:`_check_output_flag_consumption` already
+    occupies and immediately after it, so an invocation naming both an output
+    flag and a safety flag still reports the output flag first (AC11's
+    verbatim `54500b06e5` message is unperturbed). Because the tier is reached
+    during flag resolution, **before** any plan is built, OR-7's
+    ``dry == real == 2`` is structural rather than incidental.
+    """
+    if consumes:
+        return
+    offending = tuple(flag for flag in SAFETY_FLAGS if _SAFETY_FLAG_GIVEN[flag](config))
+    if not offending:
+        return
+    flags_text = ", ".join(offending)
+    raise UsageError(f"{verb} does not accept {flags_text} (this verb writes no files)")
 
 
 #: B-076 -- the three of :data:`OUTPUT_FLAGS` that name an actual destination

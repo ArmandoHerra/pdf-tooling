@@ -150,7 +150,11 @@ def info_command(
         typer.Option("--pages-detail", help="Include a per-page size/rotation/text report."),
     ] = False,
 ) -> None:
-    """Report page count, encryption, version, metadata and structure."""
+    """Report page count, encryption, version, metadata and structure.
+
+    REPORTS, NEVER WRITES: this verb writes no files, so -O/--output,
+    --out-dir, --name, --in-place, -f/--force and -y/--yes each exit 2.
+    """
     config = get_config(ctx)
     payload, outcomes = build_payload(
         tuple(paths),

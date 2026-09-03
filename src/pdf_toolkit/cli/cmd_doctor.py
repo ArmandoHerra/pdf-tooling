@@ -113,7 +113,11 @@ def doctor_command(
         ),
     ] = False,
 ) -> None:
-    """Report which engines resolved, and how."""
+    """Report which engines resolved, and how.
+
+    REPORTS, NEVER WRITES: this verb writes no files, so -O/--output,
+    --out-dir, --name, --in-place, -f/--force and -y/--yes each exit 2.
+    """
     config = get_config(ctx)
     payload = build_payload(strict=strict, dry_run=config.dry_run)
     text = _render(payload, config.output_format)

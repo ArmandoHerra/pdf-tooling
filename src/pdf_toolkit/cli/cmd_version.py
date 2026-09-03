@@ -115,7 +115,11 @@ def build_result(*, dry_run: bool = False) -> OperationResult:
 
 @global_options(consumes=())
 def version_command(ctx: typer.Context) -> None:
-    """Report the tool, runtime and engine versions."""
+    """Report the tool, runtime and engine versions.
+
+    REPORTS, NEVER WRITES: this verb writes no files, so -O/--output,
+    --out-dir, --name, --in-place, -f/--force and -y/--yes each exit 2.
+    """
     config = get_config(ctx)
     result = build_result(dry_run=config.dry_run)
     emit_result(result, config.output_format)

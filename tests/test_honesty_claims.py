@@ -155,3 +155,231 @@ def test_ac9_the_page_box_dpi_limitation_is_in_help_and_readme() -> None:
 
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8").lower()
     assert "page box" in readme or "page's own width" in readme
+
+
+# --------------------------------------------------------------------------- #
+# PDF-24 / B-116 / `0d10c01634` -- the write-flag refusal, DISCLOSED.
+#
+# Appended at this spec's own anchor. The `ac8`/`ac9` sections above belong to
+# PDF-12 and are not touched (X-15: append, never rewrite).
+#
+# Before this section, `version`, `doctor` and `info` advertised seven
+# write-related flags in their rendered help, refused four of them at runtime
+# and disclosed NOTHING, while `permissions` and `meta get` disclosed plainly.
+# The disclosure fix uses the idiom `test_ac9_*` above already establishes --
+# pin a specific sentence into a specific verb's `--help` -- and UPGRADES it in
+# one respect: **the expected flag list is COMPUTED, not typed.**
+#
+# A hand-typed disclosure sentence is a hand-maintained list of refused flags,
+# which is the same defect shape as the two hand-typed forbidden-name lists
+# `PDF-24` is de-duplicating in `tests/test_cli_spine.py`. The derivation is
+# also what caught the thing this item most easily gets wrong: it reads as
+# "make three verbs match two", and it is actually "make five verbs match a
+# derived list that has ITSELF changed" -- the two verbs that already disclosed
+# named FOUR flags, and the refused set is SIX after B-115.
+# --------------------------------------------------------------------------- #
+
+import sys as _sys  # noqa: E402
+
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in _sys.path:  # pragma: no cover - import plumbing
+    _sys.path.insert(0, str(_TESTS_DIR))
+
+from pdf_toolkit.cli.common import (  # noqa: E402
+    OUTPUT_FLAGS,
+    SAFETY_FLAGS,
+    UNGOVERNED_FLAGS,
+)
+from registry import discover_verbs, run_cli  # noqa: E402
+
+#: The marker that opens the disclosure sentence on every verb that carries one.
+#: In the voice `meta get` already used; `permissions` was migrated onto it so
+#: the five sentences are one sentence, not five paraphrases.
+DISCLOSURE_MARKER = "REPORTS, NEVER WRITES:"
+
+#: The short spellings, per long spelling, that the sentence must also name --
+#: because a user pastes `-y`, not `--yes`. Derived from the block's own
+#: declarations would be circular here (the test would then assert whatever the
+#: block says); these three are the ones the two ORIGINAL disclosures named, and
+#: they are what makes the sentence useful rather than merely correct.
+_SHORT_SPELLINGS = {"--output": "-O", "--force": "-f", "--yes": "-y"}
+
+
+def _dewrapped(text: str) -> str:
+    """Undo Click's help wrapping, which breaks at hyphens.
+
+    `--in-place` is rendered as `--in-` + newline + `place` whenever the
+    paragraph happens to wrap there, and Click caps help bodies at ~78 columns
+    regardless of `COLUMNS` -- verified at `8fd2146`, where `COLUMNS=200` and
+    `COLUMNS=120` produce byte-identical bodies. A test that searched the raw
+    text for `--in-place` would therefore pass or fail on sentence length.
+    """
+    return " ".join(re.sub(r"-\n\s*", "-", text).split())
+
+
+def _disclosure_sentence(help_text: str) -> str | None:
+    """The disclosure sentence alone, or `None` when the verb carries none.
+
+    Scoped to the SENTENCE and never to the whole body: the Options section
+    names every global flag on every verb, so a body-wide search would report
+    every verb as disclosing everything.
+    """
+    body = _dewrapped(help_text)
+    start = body.find(DISCLOSURE_MARKER)
+    if start == -1:
+        return None
+    end = body.find(".", start)
+    return body[start : end + 1] if end != -1 else body[start:]
+
+
+def _refused_spellings(consumes: tuple[str, ...]) -> set[str]:
+    """`(OUTPUT_FLAGS | SAFETY_FLAGS) - consumes`, plus the short spellings.
+
+    COMPUTED. Six long names / nine spellings for a `consumes == ()` verb after
+    B-115 -- which is why the two verbs that already disclosed, naming four,
+    had to be updated too.
+    """
+    refused = [flag for flag in (*OUTPUT_FLAGS, *SAFETY_FLAGS) if flag not in consumes]
+    spellings = set(refused)
+    spellings.update(_SHORT_SPELLINGS[flag] for flag in refused if flag in _SHORT_SPELLINGS)
+    return spellings
+
+
+def _named_spellings(sentence: str) -> set[str]:
+    """Every flag spelling the sentence names, long and short."""
+    return set(re.findall(r"(?<![\w-])(--?[A-Za-z][\w-]*)", sentence))
+
+
+def _non_consuming() -> tuple[str, ...]:
+    return tuple(sorted(verb.name for verb in discover_verbs() if verb.consumes == ()))
+
+
+@pytest.mark.e2e
+def test_ac12_every_verb_that_writes_nothing_discloses_the_refusal() -> None:
+    """AC12 / B-116. The population is derived from the live registry, so a
+    sixth `consumes == ()` verb joins with zero author action."""
+    population = _non_consuming()
+    assert population == ("doctor", "info", "meta get", "permissions", "version")
+    missing = []
+    for verb in population:
+        result = run_cli(verb, "--help")
+        assert result.returncode == 0, result.stderr
+        if _disclosure_sentence(result.stdout) is None:
+            missing.append(verb)
+    assert missing == [], f"verbs that write nothing and disclose nothing: {missing}"
+
+
+@pytest.mark.e2e
+def test_ac13_the_disclosure_names_exactly_the_derived_refused_set() -> None:
+    """AC13 -- the pinned claim is DERIVED, not a literal sentence typed here.
+
+    Equality, not containment. A disclosure that OVER-claims is as false as one
+    that under-claims, and over-claiming is the shape a copy-paste between verbs
+    produces.
+    """
+    verbs = {verb.name: verb for verb in discover_verbs()}
+    for name in _non_consuming():
+        result = run_cli(name, "--help")
+        assert result.returncode == 0, result.stderr
+        sentence = _disclosure_sentence(result.stdout)
+        assert sentence is not None, name
+        expected = _refused_spellings(verbs[name].consumes)
+        assert len(expected) == 9, f"{name}: expected nine spellings, got {sorted(expected)}"
+        assert _named_spellings(sentence) == expected, (
+            f"{name} discloses {sorted(_named_spellings(sentence))}, "
+            f"derived set is {sorted(expected)}\nsentence: {sentence}"
+        )
+        # The full long-spelling half restated against the rendered BODY, which
+        # is AC13's own wording.
+        body = _dewrapped(result.stdout)
+        for flag in (*OUTPUT_FLAGS, *SAFETY_FLAGS):
+            assert flag in body, f"{name} --help does not name {flag}"
+
+
+@pytest.mark.e2e
+def test_ac14_no_verb_names_a_flag_it_consumes_as_refused() -> None:
+    """AC14 -- the NEGATIVE half, over EVERY leaf verb rather than only the five.
+
+    *Observed red by:* copying `version`'s disclosure verbatim into `merge`'s
+    docstring -- `merge` consumes `--output`, so the sentence would claim a
+    refusal the verb does not perform.
+    """
+    offenders = []
+    for verb in discover_verbs():
+        result = run_cli(verb.name, "--help")
+        assert result.returncode == 0, result.stderr
+        sentence = _disclosure_sentence(result.stdout)
+        if sentence is None:
+            continue
+        named = _named_spellings(sentence)
+        over_claimed = {
+            flag
+            for flag in verb.consumes
+            if flag in named or _SHORT_SPELLINGS.get(flag, "\0") in named
+        }
+        if over_claimed:
+            offenders.append(f"{verb.name}: claims to refuse {sorted(over_claimed)}, consumes them")
+        derived = _refused_spellings(verb.consumes)
+        if named != derived:
+            offenders.append(f"{verb.name}: discloses {sorted(named)}, derived {sorted(derived)}")
+    assert offenders == [], "\n".join(offenders)
+
+
+@pytest.mark.e2e
+def test_ac15_no_backup_is_never_named_in_a_disclosure_sentence() -> None:
+    """AC15. `--no-backup` IS refused on these five verbs -- but for the
+    UNIVERSAL `--no-backup requires --in-place` reason that applies identically
+    to all twenty-six. Naming it in a five-verb *this verb writes nothing*
+    sentence would assert a verb-specific fact that is not one.
+
+    It sits in `UNGOVERNED_FLAGS` with exactly that reason recorded as data,
+    which is what makes this assertion a consequence of the partition rather
+    than a separate rule someone has to remember.
+    """
+    assert "--no-backup" in UNGOVERNED_FLAGS
+    assert "--in-place" in UNGOVERNED_FLAGS["--no-backup"]
+    for verb in discover_verbs():
+        result = run_cli(verb.name, "--help")
+        sentence = _disclosure_sentence(result.stdout)
+        if sentence is None:
+            continue
+        assert "--no-backup" not in sentence, f"{verb.name}: {sentence}"
+
+
+def test_the_disclosure_helpers_can_fail() -> None:
+    """The non-vacuity proof for the three helpers above, on synthetic input.
+
+    Without it, a `_disclosure_sentence` that always returned `None` would make
+    AC13, AC14 and AC15 pass by skipping every verb -- the exact vacuity this
+    cycle exists to end.
+    """
+    assert _disclosure_sentence("no marker here") is None
+    wrapped = (
+        "  REPORTS, NEVER WRITES: this verb writes no files, so -O/--output, --in-\n"
+        "  place each exit 2.\n\n  Next paragraph."
+    )
+    sentence = _disclosure_sentence(wrapped)
+    assert sentence is not None
+    assert "--in-place" in sentence, sentence
+    assert "Next paragraph" not in sentence
+    assert _named_spellings(sentence) == {"-O", "--output", "--in-place"}
+    assert _refused_spellings(()) == {
+        "-O",
+        "--output",
+        "--out-dir",
+        "--name",
+        "--in-place",
+        "-f",
+        "--force",
+        "-y",
+        "--yes",
+    }
+    assert _refused_spellings(("--output",)) == {
+        "--out-dir",
+        "--name",
+        "--in-place",
+        "-f",
+        "--force",
+        "-y",
+        "--yes",
+    }

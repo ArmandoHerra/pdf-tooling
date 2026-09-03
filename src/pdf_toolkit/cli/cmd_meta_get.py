@@ -57,7 +57,8 @@ one is "right" and never emits a merged, single answer.
 parsing loses custom namespaces, so an operator auditing what they are about
 to share may need the packet itself, not just the parsed fields.
 
-REPORTS, NEVER WRITES: -O, --out-dir, --name and --in-place all exit 2.
+REPORTS, NEVER WRITES: this verb writes no files, so -O/--output,
+--out-dir, --name, --in-place, -f/--force and -y/--yes each exit 2.
 """
 
 
