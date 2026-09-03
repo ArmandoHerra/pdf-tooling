@@ -239,6 +239,44 @@ def assert_pure(*roots: Path | str) -> Iterator[Snapshot]:
     assert_unchanged(before, snapshot(*roots))
 
 
+#: The longest ``$TMPDIR`` a child may be handed.
+#:
+#: PDF-29. ``sockaddr_un.sun_path`` is 108 bytes including the NUL, so a Unix
+#: socket path may be at most 107 characters. CPython's ``multiprocessing``
+#: forkserver binds ``<TMPDIR>/pymp-XXXXXXXX/listener-XXXXXXXX`` -- exactly 32
+#: characters past ``$TMPDIR`` -- so ``$TMPDIR`` itself must stay at or under 75.
+#:
+#: **This is not hypothetical and it is not a round number.** With `-n auto`
+#: (`pyproject.toml`'s `addopts`) pytest inserts a `popen-gwN` component into
+#: every temporary path, and
+#: `/tmp/pytest-of-runner/pytest-0/popen-gw1/test_ac12_the_five_preconditio2/tmp`
+#: is **76** characters: 108 with the socket suffix, **one over the limit**.
+#: `test (3.14, ubuntu-latest)` failed on exactly that in run 33738793820 with
+#: `OSError: AF_UNIX path too long`, and only on 3.14/Linux -- 3.11-3.13 default
+#: `multiprocessing` to `fork` (no socket at all) and macOS to `spawn`. Ten
+#: characters of worker suffix were the whole difference.
+_AF_UNIX_SAFE_TMPDIR_LEN: Final[int] = 75
+
+
+def _af_unix_safe_tmpdir(base: Path) -> Path:
+    """``base/"tmp"`` when it fits, else a short unique sibling of *base*.
+
+    The fallback keeps every property the redirection exists for -- the
+    directory is unique per test, it is returned as a snapshot root so a stray
+    write is still caught, and it lives inside the same pytest numbered root as
+    *base*, so pytest's own temporary-directory retention removes it on exactly
+    the same schedule. Only its NAME is short, and only when it has to be.
+
+    Shortening unconditionally was rejected: it would change the path every
+    existing purity test runs under in order to fix a case none of them hit.
+    """
+    natural = base / "tmp"
+    if len(str(natural)) <= _AF_UNIX_SAFE_TMPDIR_LEN:
+        return natural
+    digest = hashlib.sha256(base.name.encode("utf-8")).hexdigest()[:10]
+    return base.parent / f"t-{digest}"
+
+
 def redirected_environment(
     base: Path,
     env: Mapping[str, str] | None = None,
@@ -255,7 +293,7 @@ def redirected_environment(
     reproducibility harness: a ``__pycache__`` entry is a real filesystem write,
     it is not the one under test, and letting it happen makes the signal noisy.
     """
-    tmp = base / "tmp"
+    tmp = _af_unix_safe_tmpdir(base)
     home = base / "home"
     tmp.mkdir(parents=True, exist_ok=True)
     home.mkdir(parents=True, exist_ok=True)
