@@ -28,7 +28,7 @@ from typing import Annotated
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
-from pdf_toolkit.errors import UsageError
+from pdf_toolkit.errors import FailureError, PdfToolkitError, UsageError
 from pdf_toolkit.ops.compose import (
     BASE14_FONTS,
     DEFAULT_CREATE_MARGIN,
@@ -42,7 +42,7 @@ from pdf_toolkit.ops.compose import (
     resolve_create_output,
 )
 from pdf_toolkit.output import emit_result
-from pdf_toolkit.safety.paths import classify_operand
+from pdf_toolkit.safety.paths import classify_operand, unreadable_source_error
 
 __all__ = ["STDIN_OPERAND", "create_command"]
 
@@ -157,10 +157,54 @@ def create_command(
     raise typer.Exit(result.exit_code)
 
 
+def _input_read_error(source: Path, error: OSError) -> PdfToolkitError:
+    """Map a failure raised while READING *source* onto a coded error (PDF-26 §D3).
+
+    The §D3 belt for this verb's one operand read. `compose` and `create` are the
+    two verbs that turn NON-PDF input into PDF, and they were the two the belt
+    missed together: every seam it reached first reads a PDF, so
+    :func:`~pdf_toolkit.safety.paths.read_source_bytes` -- whose own fallback
+    says ``could not read PDF`` -- serves none of them. It cannot serve this one
+    either. A `.txt` operand is definitionally not a PDF, and answering a failing
+    disk with ``could not read PDF`` would swap one wrong sentence for another
+    rather than remove it.
+
+    **The accessibility question is asked first, and this verb's own vocabulary
+    is the fallback, not the other way round.**
+    :func:`~pdf_toolkit.safety.paths.unreadable_source_error` is the same
+    predicate :func:`~pdf_toolkit.safety.paths.classify_operand`'s rung 4 uses
+    and the same one `ops/compose.py::_image_read_error` asks, so the belt and
+    the classifier cannot come to disagree about what "unreadable" means at the
+    one verb where both run. Everything else keeps the noun
+    `cli/password.py::_read_file` already uses for its own read -- the thing
+    actually being read, never the thing being produced.
+
+    Unlike :func:`~pdf_toolkit.safety.paths.source_read_error` this has **no
+    ``FileNotFoundError`` rung**, deliberately: that rung answers 4, and this
+    seam has only ever answered 1. Refining an unhandled crash into a coded
+    failure is this belt's whole job; renumbering a race it was not asked about
+    is not. Both arms here are exit 1 -- the class and the message are refined,
+    the integer never is.
+    """
+    unreadable = unreadable_source_error(source)
+    if unreadable is not None:
+        return unreadable
+    return FailureError(f"could not read the input file: {error}", path=str(source))
+
+
 def _read_input(source: Path, *, from_stdin: bool) -> bytes:
-    """The one input, as bytes. Never blocks on an interactive terminal."""
+    """The one input, as bytes. Never blocks on an interactive terminal.
+
+    The file read is belted (§D3): :func:`classify_operand` has already run its
+    ``os.access`` by the time control reaches here, so an operand that went
+    unreadable in between fails at THIS ``read_bytes`` -- the TOCTOU window that
+    check cannot close, and the only reason the belt exists.
+    """
     if not from_stdin:
-        return source.read_bytes()
+        try:
+            return source.read_bytes()
+        except OSError as error:
+            raise _input_read_error(source, error) from error
     try:
         interactive = sys.stdin.isatty()
     except (AttributeError, ValueError):  # pragma: no cover - closed/replaced stream

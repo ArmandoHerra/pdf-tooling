@@ -956,6 +956,149 @@ def test_the_compose_decode_arm_reaches_the_seam_it_names(tmp_path: Path) -> Non
 
 
 # --------------------------------------------------------------------------- #
+# AC16, THE TEXT SEAM -- `cli/cmd_create.py`'s ONE read (ruling on `02096f4422`).
+#
+# The three arms above belt `ops/compose.py`. The sweep that accompanied them
+# FILED this seam rather than fixing it, because it sits outside `ops/`; the
+# ruling belts it, on the sweep's own finding that this is one PATTERN and not
+# one file. `compose` and `create` are the two verbs that turn NON-PDF input
+# into PDF, and the belt covered PDF-reading engine seams and missed BOTH
+# non-PDF input readers uniformly. Belting one and knowingly leaving its twin
+# would move the falsehood rather than remove it.
+#
+# Measured at `ef4cad2` before anything changed, at AC16's own condition:
+# `create` exited 1 with **zero bytes of stdout** and a 3452-byte
+# `PermissionError` traceback at `cmd_create.py:163, in _read_input`, on
+# `return source.read_bytes()`. A live drive of all 24 operand-taking verbs at
+# that same condition found this seam and NO other still tracebacking.
+#
+# ONE ARM, TWO DRIVES, AND THE SECOND IS NOT PADDING. AC16's condition patches
+# `os.access` to LIE, which is what reaches the seam at all -- but it lies to
+# the BELT'S OWN PREDICATE too (`unreadable_source_error` asks `os.access`), so
+# under it the belt necessarily lands on its FALLBACK arm and a
+# `SourceUnreadableError` is not observable by construction. That drive proves
+# the CRASH IS GONE. The honest race -- the operand going unreadable BETWEEN
+# `classify_operand` and the read, the TOCTOU window `os.access` cannot close
+# and the only reason §D3 exists -- is the only condition under which the
+# predicate answers truthfully, and it is what proves the CLASSIFICATION. Both
+# are exit 1: this belt refines the class and the message and never the integer,
+# and unlike `safety/paths.py::source_read_error` it has no `FileNotFoundError`
+# rung precisely because that rung answers 4.
+#
+# `compose`'s `assert_coded_not_crashed` is deliberately NOT reused: its
+# not-written message names `compose` by hand, and this arm must not be able to
+# redden any of the three arms above it.
+# --------------------------------------------------------------------------- #
+
+
+def run_create_race(
+    program: str, source: Path, tmp_path: Path, *, env: dict[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run *program* as `create <source> -O <out>` and hand back the result.
+
+    `-O` is named rather than left to `resolve_create_output`'s derivation, so
+    the path this arm asserts was NOT written is the same one the product was
+    told to write -- a derived name would make that assertion about a guess.
+    """
+    import os as _os
+
+    output = tmp_path / "toctou-create.pdf"
+    child_env = dict(_os.environ)
+    child_env.update(env or {})
+    result = subprocess.run(
+        [sys.executable, "-c", program, "-o", "json", "create", str(source), "-O", str(output)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+        env=child_env,
+    )
+    return result, output
+
+
+def assert_create_coded_not_crashed(result: subprocess.CompletedProcess[str], output: Path) -> dict:
+    """The four things this arm means by "it held", and the envelope."""
+    both = result.stdout + result.stderr
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 1, detail
+    assert "Traceback (most recent call last)" not in both, detail
+    assert "PermissionError" not in both, detail
+    assert not output.exists(), (
+        f"create is a single-artifact verb: a read that failed before a byte was laid "
+        f"down must leave NOTHING behind, and this left {output} -- {detail}"
+    )
+    envelope = json.loads(result.stdout)["error"]
+    assert envelope["code"] == 1 and envelope["kind"] == "failure", detail
+    return envelope
+
+
+def test_ac16_the_toctou_arm_holds_at_creates_text_seam(tmp_path: Path) -> None:
+    """AC16 at `cli/cmd_create.py::_read_input` -- the sibling of `compose`'s
+    header seam, and the second and last member of the same pattern.
+
+    *Red with this seam's belt removed*, at BOTH drives: exit 1, **zero bytes of
+    stdout**, and a `PermissionError` traceback at `_read_input`'s
+    `source.read_bytes()`. The three `compose` arms above stay GREEN when this
+    belt alone is removed -- they never enter this module.
+    """
+    skip_as_root()
+    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+
+    # Drive 1 -- AC16's own condition, the recorded repro, verbatim. Proves the
+    # crash is gone. Cannot observe the classification: the patch lies to the
+    # belt's predicate too, so this necessarily lands on the fallback arm.
+    source = tmp_path / "note.txt"
+    source.write_text("hello world\nsecond line\n", encoding="utf-8")
+    source.chmod(UNREADABLE_MODE)
+    try:
+        result, output = run_create_race(_LYING_ACCESS + _ENTRYPOINT, source, tmp_path)
+    finally:
+        source.chmod(0o600)
+
+    envelope = assert_create_coded_not_crashed(result, output)
+    assert "is not readable" not in result.stdout, (
+        "the FRAMEWORK's parse-time veto is back; C18 asserts its absence and this "
+        f"arm must not resurrect it -- {envelope}"
+    )
+    assert "could not read PDF" not in result.stdout, (
+        "`create`'s operand is a TEXT file and is definitionally not a PDF. Belting "
+        "this seam with `read_source_bytes` would print the PDF noun at a `.txt`, "
+        f"swapping one wrong sentence for another rather than removing it -- {envelope}"
+    )
+
+    # Drive 2 -- the honest race, the window `os.access` cannot close. The ONLY
+    # condition under which the predicate answers truthfully, and therefore the
+    # only one that can prove this seam produces the classifier's own error
+    # rather than merely some coded error.
+    raced = tmp_path / "raced.txt"
+    raced.write_text("hello world\n", encoding="utf-8")
+    program = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "import pdf_toolkit.cli.cmd_create as C\n"
+        f"target = Path(os.environ[{_RACE_TARGET_ENV!r}])\n"
+        "_real_resolve = C.resolve_create_output\n"
+        "def racing_resolve(*a, **k):\n"
+        "    resolved = _real_resolve(*a, **k)\n"
+        "    target.chmod(0o000)\n"
+        "    return resolved\n"
+        "C.resolve_create_output = racing_resolve\n" + _ENTRYPOINT
+    )
+    try:
+        result, output = run_create_race(
+            program, raced, tmp_path, env={_RACE_TARGET_ENV: str(raced)}
+        )
+    finally:
+        raced.chmod(0o600)
+
+    envelope = assert_create_coded_not_crashed(result, output)
+    assert envelope["message"] == UNREADABLE_MESSAGE, (
+        "an operand that went unreadable between `classify_operand` and the read must "
+        f"get the CLASSIFIER's own sentence, exactly as the belted `merge` does -- {envelope}"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # AC14 -- `cli/cmd_info.py`'s PINNED EXIT-CODE TABLE, mechanized.
 #
 # The table was documentation that nothing checked, and it was INCOMPLETE: it
