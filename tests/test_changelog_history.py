@@ -75,14 +75,22 @@ FORMAT_BASELINE = "7f4183f"
 
 #: B-042. Three commits owe an entry and wrote none — plus a FOURTH that landed
 #: after this spec was drafted (`b3c92f7`, the `PDF-18` wave), which is the class
-#: recurring rather than a list being wrong. **No entry is back-filled**
-#: (`changelog.md:15-16`); the register keeps the debt visible at its exact size
-#: and a fifth member is a test failure.
+#: recurring rather than a list being wrong, and a FIFTH (`be89f36`, `[B-218]`)
+#: registered by `PDF-34` under X-467: X-408 first ruled `036fd0a353` PAY, but
+#: both guard arms evaluate `CHANGELOG not in touched_files(sha)` over a
+#: LANDED commit and `be89f36`'s touched-file set (`README.md`,
+#: `website/src/components/QuickStart.astro`) is immutable — no entry written
+#: in any later commit can change what `touched_files(be89f36)` returns, so
+#: paying leaves the guard saying the identical false thing it said before.
+#: Registration is the only disposition a landed commit's debt has available.
+#: **No entry is back-filled** (`changelog.md:15-16`); the register keeps the
+#: debt visible at its exact size and a sixth member is a test failure.
 ENTRY_OWED_EXEMPT = {
     "81e31e9": "[PDF-16] fix: ruff-format the OG image generator script",
     "85dd844": "[PDF-04] fix: two platform-dependent safety-spine test defects",
     "26f4c79": "[PDF-09] fix: make AC5/AC26 tests spawn-safe, not fork-only",
     "b3c92f7": "[PDF-18] fix: AC12's convert cell must respect engine absence, not assume it",
+    "be89f36": "[B-218] docs: install lines flip to PyPI now that pdf-tooling 0.1.1 is live",
 }
 
 #: The single commit in this repository's history that DESTROYED a landed entry.
@@ -438,16 +446,20 @@ def test_every_spec_or_remediation_commit_writes_its_own_entry() -> None:
 def test_the_entry_owed_register_is_frozen_reachable_and_older_than_head() -> None:
     """The register's own anti-lapse assertion.
 
-    The spec froze this at THREE. It is FOUR at `7afdb1a`: `b3c92f7` landed in
-    the `PDF-18` wave, after the spec was drafted, and owes an entry it never
-    wrote. That is B-042's class RECURRING, reported as a finding rather than
-    quietly absorbed — and the size is asserted so a fifth is a test failure.
+    The spec froze this at THREE. It was FOUR at `7afdb1a`: `b3c92f7` landed
+    in the `PDF-18` wave, after the spec was drafted, and owed an entry it
+    never wrote. It is FIVE as of `PDF-34`'s landing (X-467): `be89f36`
+    (`[B-218]`) is a LANDED commit whose touched-file set is immutable, so
+    X-408's "pay" disposition was withdrawn and registration ruled the only
+    disposition available — X-408 is struck, not the register's own design.
+    Each growth is B-042's class RECURRING, reported as a finding rather than
+    quietly absorbed — and the size is asserted so a sixth is a test failure.
     """
     require_full_history()
-    assert len(ENTRY_OWED_EXEMPT) == 4, (
-        "the register was three at 2d19bcb and is four at 7afdb1a; growing it is "
-        "the B-042 class recurring and is a FINDING for the PM, never an edit "
-        "made to reach green"
+    assert len(ENTRY_OWED_EXEMPT) == 5, (
+        "the register was three at 2d19bcb, four at 7afdb1a, and is five as of "
+        "PDF-34 (X-467, be89f36/[B-218]); growing it is the B-042 class recurring "
+        "and is a FINDING for the PM, never an edit made to reach green"
     )
     reachable = set(commits())
     for sha, subject in ENTRY_OWED_EXEMPT.items():
