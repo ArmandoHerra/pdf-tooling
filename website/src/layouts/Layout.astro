@@ -8,7 +8,7 @@ interface Props {
 }
 
 const {
-  title = 'pdf-toolkit — Every common PDF chore. One safe CLI. No copyleft underneath.',
+  title = 'pdf-tooling — Every common PDF chore. One safe CLI. No copyleft underneath.',
   description = "An Apache-2.0 PDF toolkit CLI in Python — merge, split, extract, rotate, PDF↔images, text, tables, compress, encrypt, metadata, watermark, OCR and Office→PDF — over pypdf, pdfium, pikepdf, reportlab and pdfplumber, with nothing AGPL or GPL on the call graph.",
 } = Astro.props;
 
@@ -26,7 +26,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
     <link rel="canonical" href={canonicalUrl} />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="pdf-toolkit" />
+    <meta property="og:title" content="pdf-tooling" />
     <meta property="og:description" content="Every common PDF chore. One safe CLI. No copyleft underneath." />
     <meta property="og:image" content={ogImage} />
     <meta property="og:url" content={canonicalUrl} />
@@ -34,7 +34,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="pdf-toolkit" />
+    <meta name="twitter:title" content="pdf-tooling" />
     <meta name="twitter:description" content="Every common PDF chore. One safe CLI. No copyleft underneath." />
     <meta name="twitter:image" content={ogImage} />
 

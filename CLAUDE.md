@@ -4,7 +4,7 @@
 
 ## What this repository is
 
-`pdf-toolkit` is an Apache-2.0 command-line tool for the common PDF chores. It **orchestrates** permissively licensed PDF engines; it does not implement PDF parsing, rendering or codecs, and it never will — that is a multi-year project and the classic memory-safety attack surface.
+`pdf-tooling` is an Apache-2.0 command-line tool for the common PDF chores. It **orchestrates** permissively licensed PDF engines; it does not implement PDF parsing, rendering or codecs, and it never will — that is a multi-year project and the classic memory-safety attack surface.
 
 **Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-tooling/specs/SPEC-INDEX.md`; history in `changelog.md`.
 

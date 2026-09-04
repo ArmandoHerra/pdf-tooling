@@ -1,4 +1,4 @@
-# pdf-toolkit
+# pdf-tooling
 
 An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftoolkit`) for the common PDF chores — `merge`, `split`, `extract`, `delete`, `rotate`, `reorder`, `rasterize`, `compose`, `create`, `text`, `tables`, `compress`, `repair`, `linearize`, `encrypt`, `decrypt`, `permissions`, `meta`, `watermark`, `stamp`, `ocr` and `convert`, plus `doctor`, `info` and `version` — built on a permissively licensed engine stack (pypdf, pypdfium2, reportlab, pikepdf, pdfplumber, Tesseract, LibreOffice) with nothing AGPL or GPL on the call graph.
 
@@ -10,7 +10,7 @@ Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write
 
 ## This is not `pdftk`
 
-`pdf-toolkit` shares no code with `pdftk`, is not a fork of it, and is not a drop-in replacement for it. `pdftk` is GPL-licensed; this project is **Apache-2.0**, and its engine policy forbids anything under AGPL, GPL or LGPL from appearing as an import, an optional extra, or a `subprocess` fallback. The console script is named `pdftoolkit` precisely so the two cannot be confused on your `PATH`.
+`pdf-tooling` shares no code with `pdftk`, is not a fork of it, and is not a drop-in replacement for it. `pdftk` is GPL-licensed; this project is **Apache-2.0**, and its engine policy forbids anything under AGPL, GPL or LGPL from appearing as an import, an optional extra, or a `subprocess` fallback. The console script is named `pdftoolkit` precisely so the two cannot be confused on your `PATH`.
 
 The PyPI **distribution** to install is **`pdf-tooling`**. The distribution named `pdftoolkit` on PyPI is an unrelated GPL-3.0 project and is not this software. The names this project owns, and which of them moved, are the contract in [Naming](#naming).
 

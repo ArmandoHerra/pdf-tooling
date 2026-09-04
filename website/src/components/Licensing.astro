@@ -16,7 +16,7 @@ function normalize(name: string): string {
 // PINNED LINUX/CPython-3.11 measurement venv (scripts/licenses.py), so it
 // omits platform-marker-only packages (colorama: Windows only via
 // typer/click; brotlicffi: non-CPython only) that `uv export`'s universal
-// lockfile still lists. pdf-toolkit's own pyproject.toml classifiers name
+// lockfile still lists. pdf-tooling's own pyproject.toml classifiers name
 // only POSIX/Linux and macOS as supported platforms, so the count computed
 // below — from what actually resolves on a supported platform — is the
 // honest one; see the PDF-16 Implementation Log for the full derivation.

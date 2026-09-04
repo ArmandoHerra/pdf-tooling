@@ -1,4 +1,4 @@
-# pdf-toolkit — developer entry points.
+# pdf-tooling — developer entry points.
 #
 # `make ci` is a SUBSET of CI, run with the same commands -- it does not
 # predict CI. What runs locally, what does not, and why is declared in

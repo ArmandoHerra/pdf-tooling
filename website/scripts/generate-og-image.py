@@ -12,9 +12,16 @@ separate install step is needed.
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 
 from PIL import Image, ImageDraw, ImageFont
+
+#: The tracked artifact this script owns. `--out` exists so a checker can
+#: regenerate into a scratch path and byte-compare WITHOUT overwriting the
+#: committed PNG -- a test that clobbers the artifact it is verifying proves
+#: nothing. The no-argument invocation is unchanged and still writes here.
+DEFAULT_OUT = pathlib.Path(__file__).resolve().parent.parent / "public" / "og-image.png"
 
 WIDTH, HEIGHT = 1200, 630
 BG_TOP = (15, 23, 42)  # surface-900  #0f172a
@@ -54,7 +61,7 @@ def _vertical_gradient(width: int, height: int, top: tuple, bottom: tuple) -> Im
 
 
 def _draw_document(draw: ImageDraw.ImageDraw, cx: int, cy: int, r: float) -> None:
-    """Frame + folded-corner document, echoing website/src/assets/pdf-toolkit-logo.svg."""
+    """Frame + folded-corner document, echoing website/src/assets/pdf-tooling-logo.svg."""
     f = r * 1.58
     draw.rounded_rectangle(
         [cx - f, cy - f, cx + f, cy + f],
@@ -91,7 +98,10 @@ def _draw_document(draw: ImageDraw.ImageDraw, cx: int, cy: int, r: float) -> Non
         )
 
 
-def main() -> None:
+def render(out_path: pathlib.Path) -> pathlib.Path:
+    """Render the card to `out_path` and return it. Deterministic for a fixed
+    font set; `_load_font` probes the filesystem, so two hosts with different
+    fonts legitimately produce different bytes."""
     img = _vertical_gradient(WIDTH, HEIGHT, BG_TOP, BG_BOTTOM)
     draw = ImageDraw.Draw(img)
 
@@ -103,7 +113,7 @@ def main() -> None:
     footer_font = _load_font(FONT_CANDIDATES_REGULAR, 24)
 
     text_x = 350
-    draw.text((text_x, 190), "pdf-toolkit", font=title_font, fill=TEXT)
+    draw.text((text_x, 190), "pdf-tooling", font=title_font, fill=TEXT)
     draw.text(
         (text_x, 310), "Every common PDF chore. One safe CLI.", font=tagline_font, fill=SUBTEXT
     )
@@ -115,8 +125,21 @@ def main() -> None:
         fill=(203, 213, 225),
     )
 
-    out_path = pathlib.Path(__file__).resolve().parent.parent / "public" / "og-image.png"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG")
+    return out_path
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--out",
+        type=pathlib.Path,
+        default=DEFAULT_OUT,
+        help="where to write the PNG (default: the tracked website/public/og-image.png)",
+    )
+    args = parser.parse_args(argv)
+    out_path = render(args.out)
     print(f"Wrote {out_path} ({WIDTH}x{HEIGHT})")
 
 

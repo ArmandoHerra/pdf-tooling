@@ -1,4 +1,4 @@
-"""pdf-toolkit — one safe command-line tool for the common PDF chores.
+"""pdf-tooling — one safe command-line tool for the common PDF chores.
 
 The distribution is ``pdf-tooling``; the import package is ``pdf_toolkit``; the
 console scripts are ``pdftoolkit`` and ``pdf-toolkit``. The three names differ
