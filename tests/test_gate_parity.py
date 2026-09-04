@@ -409,8 +409,8 @@ def test_no_claim_site_asserts_local_equals_ci() -> None:
     tracked_md = [line for line in result.stdout.splitlines() if line.strip()]
     # PLAN.md carries the SAME sixth statement of this claim at §8.1:595 and is
     # operator-owned (OR-13, X-158) -- excluded by name, not by omission. It is
-    # not tracked inside apps/pdf-toolkit at all (it lives in the layer repo's
-    # ai_plans/pdf-toolkit/PLAN.md, a symlink into ai_docs/), so this glob would
+    # not tracked inside apps/pdf-tooling at all (it lives in the layer repo's
+    # ai_plans/pdf-tooling/PLAN.md, a symlink into ai_docs/), so this glob would
     # never see it regardless; the exclusion below is a named decision anyway.
     #
     # changelog.md is ALSO excluded by name, not by omission, and for a

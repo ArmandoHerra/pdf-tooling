@@ -4,15 +4,42 @@ An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftoolkit
 
 Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write-to-temp-then-rename, and inputs that are never mutated unless you ask for `--in-place`.
 
-**Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-toolkit/specs/SPEC-INDEX.md`; history in `changelog.md`.
+**Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-tooling/specs/SPEC-INDEX.md`; history in `changelog.md`.
 
-- **Website:** https://armandoherra.github.io/pdf-toolkit/ — the public landing page (source in `website/`).
+- **Website:** https://armandoherra.github.io/pdf-tooling/ — the public landing page (source in `website/`).
 
 ## This is not `pdftk`
 
 `pdf-toolkit` shares no code with `pdftk`, is not a fork of it, and is not a drop-in replacement for it. `pdftk` is GPL-licensed; this project is **Apache-2.0**, and its engine policy forbids anything under AGPL, GPL or LGPL from appearing as an import, an optional extra, or a `subprocess` fallback. The console script is named `pdftoolkit` precisely so the two cannot be confused on your `PATH`.
 
-The PyPI **distribution** to install is **`pdf-tooling`**. The distribution named `pdftoolkit` on PyPI is an unrelated GPL-3.0 project and is not this software. The import package is `pdf_toolkit`, and the installed console scripts are `pdftoolkit` and `pdf-toolkit`; the three names differ deliberately.
+The PyPI **distribution** to install is **`pdf-tooling`**. The distribution named `pdftoolkit` on PyPI is an unrelated GPL-3.0 project and is not this software. The names this project owns, and which of them moved, are the contract in [Naming](#naming).
+
+## Naming
+
+The names below are this project's contract. They differ deliberately, and a reader
+citing any of them should cite the table rather than the prose around it.
+
+| Kind | Name |
+|---|---|
+| PyPI distribution | `pdf-tooling` |
+| Repository | `github.com/ArmandoHerra/pdf-tooling` |
+| Import package | `pdf_toolkit` |
+| Console scripts | `pdftoolkit` (canonical), `pdf-toolkit` (alias) |
+
+**Why the distribution is not `pdf-toolkit`.** That name sits too close to names already
+on PyPI, and the distribution called `pdftoolkit` there is an unrelated GPL-3.0 project
+that is not this software. The repository followed the distribution; the import package
+and both console scripts did not, because they are published surfaces and moving them
+would break an install that already works.
+
+**Both console scripts are supported.** `pdftoolkit` is canonical and `pdf-toolkit` is a
+documented alias; they resolve to the same entry point, and the alias is not deprecated
+by this rename.
+
+**Release history, so the install lines above can be read against it.** `v0.1.0` was
+git-install-only and was never published to PyPI under either name; `v0.1.1` is the
+first published release, as `pdf-tooling`; `v0.2.0` is the first published under the
+renamed repository.
 
 ## Getting Started
 
@@ -26,8 +53,8 @@ pdftoolkit --help
 
 ```bash
 # Prerequisites: Python >= 3.11 and uv (https://docs.astral.sh/uv/)
-git clone https://github.com/ArmandoHerra/pdf-toolkit.git
-cd pdf-toolkit
+git clone https://github.com/ArmandoHerra/pdf-tooling.git
+cd pdf-tooling
 uv sync
 uv run pdftoolkit --help
 ```
@@ -160,8 +187,8 @@ Contributions are accepted under the Developer Certificate of Origin (`git commi
 
 Open defects and planned work are recorded, per finding, in the maintainer's planning tree:
 
-- `ai_plans/pdf-toolkit/BACKLOG.md` — the groomed intake list.
-- `ai_plans/pdf-toolkit/qa/FINDINGS-LEDGER.md` — every finding a QA sweep has raised, with its state and its evidence.
+- `ai_plans/pdf-tooling/BACKLOG.md` — the groomed intake list.
+- `ai_plans/pdf-tooling/qa/FINDINGS-LEDGER.md` — every finding a QA sweep has raised, with its state and its evidence.
 
 **Those artifacts live in the maintainer's planning repository and are not part of this distribution.** They are not shipped in the sdist or the wheel and are not present in a clone of this repository; the paths above are where they live for anyone reading this source tree beside it.
 

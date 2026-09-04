@@ -2,7 +2,7 @@
 
 The worked example the six sibling specs (`PDF-19`, `PDF-20`, `PDF-21`,
 `PDF-24`, `PDF-27`, `PDF-28`) copy. Read Design §9.5 of
-`ai_plans/pdf-toolkit/specs/PDF-17_*.md` for the seven rules; this file is what
+`ai_plans/pdf-tooling/specs/PDF-17_*.md` for the seven rules; this file is what
 following them produces.
 
 `PDF-06`'s header reads **Status: Implemented (2026-08-29)**, its criteria are

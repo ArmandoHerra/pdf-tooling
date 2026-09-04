@@ -641,11 +641,21 @@ SKIP_SHALLOW_CLONE = "shallow clone"
 
 
 def planning_dir() -> Path:
-    """The resolved planning tree, existing or not."""
+    """The resolved planning tree, existing or not.
+
+    The plan-dir name is **derived from the repository directory name**, never
+    hardcoded. The layer invariant is ``apps/<name> == repo name ==
+    ai_plans/<name>``, so ``REPO_ROOT.name`` is the one token that is correct on
+    BOTH sides of a repository rename — which is what removes the flag day. A
+    hardcoded literal here is correct on the day it is written and wrong at the
+    next rename, and its failure mode is the expensive one: ``require_planning_dir``
+    below SKIPS rather than fails, so every arm that depends on it goes quiet
+    while the suite stays green. A skipped arm is not agreement.
+    """
     override = os.environ.get(PLANNING_DIR_ENV)
     if override:
         return Path(override)
-    return REPO_ROOT.parent.parent / "ai_plans" / "pdf-toolkit"
+    return REPO_ROOT.parent.parent / "ai_plans" / REPO_ROOT.name
 
 
 def require_planning_dir() -> Path:
@@ -950,8 +960,8 @@ def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path)
         f"{KNOWN_ISSUES_HEADING}\n\n"
         "Open defects and planned work are recorded, per finding, in the "
         "maintainer's planning tree:\n\n"
-        "- `ai_plans/pdf-toolkit/BACKLOG.md` — the groomed intake list.\n"
-        "- `ai_plans/pdf-toolkit/qa/FINDINGS-LEDGER.md` — every finding a QA "
+        "- `ai_plans/pdf-tooling/BACKLOG.md` — the groomed intake list.\n"
+        "- `ai_plans/pdf-tooling/qa/FINDINGS-LEDGER.md` — every finding a QA "
         "sweep has raised, with its state and its evidence.\n\n"
         "**Those artifacts live in the maintainer's planning repository and "
         "are not part of this distribution.**\n\n"
@@ -1166,3 +1176,144 @@ def test_the_history_depth_precondition_is_frozen_and_reachable() -> None:
         "history actually growing to match, which would turn every history "
         "arm into a silent skip — the failure mode this test exists to catch."
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-31 D4 — the naming contract: a section with a stable anchor, derived
+# where it can be
+# --------------------------------------------------------------------------- #
+
+#: The heading the operator's blog post links. Asserted as a rendered ANCHOR
+#: rather than as a literal heading string, because what a reader's link
+#: resolves against is the slug, not the text.
+NAMING_HEADING = "## Naming"
+NAMING_ANCHOR = "naming"
+
+
+def github_anchor(heading_text: str) -> str:
+    """GitHub's heading slug: lowercase, punctuation dropped, spaces hyphenated."""
+    slug = heading_text.strip().lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    return re.sub(r"\s+", "-", slug).strip("-")
+
+
+def naming_section(text: str | None = None) -> str:
+    """The body of `README.md`'s `## Naming` section, heading excluded."""
+    body = read("README.md") if text is None else text
+    start = body.find(f"{NAMING_HEADING}\n")
+    assert start != -1, (
+        f"README.md carries no {NAMING_HEADING!r} section; the naming contract is "
+        "the citable form of the four names and its absence is the failure"
+    )
+    after = start + len(NAMING_HEADING)
+    nxt = re.search(r"^## ", body[after:], re.MULTILINE)
+    return body[after : after + nxt.start()] if nxt else body[after:]
+
+
+def naming_table_rows(text: str | None = None) -> dict[str, str]:
+    """The `| Kind | Name |` rows of the naming table, Kind -> Name cell."""
+    rows: dict[str, str] = {}
+    for line in naming_section(text).splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) != 2 or set(cells[0]) <= {"-", ":"} or cells[0] == "Kind":
+            continue
+        rows[cells[0]] = cells[1]
+    return rows
+
+
+def declared_console_scripts() -> set[str]:
+    """The console scripts pyproject.toml DECLARES — the source of truth."""
+    import tomllib
+
+    with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    return set(project["scripts"])
+
+
+def test_the_naming_section_anchor_is_exactly_the_linked_slug() -> None:
+    """AC9. The operator's blog post links `#naming`; a later doc reshuffle
+    must break a test rather than a reader's link."""
+    assert github_anchor("Naming") == NAMING_ANCHOR
+    headings = [line for line in read("README.md").splitlines() if line.startswith(NAMING_HEADING)]
+    assert headings == [NAMING_HEADING], (
+        f"README.md must carry exactly one {NAMING_HEADING!r} heading rendering the "
+        f"anchor #{NAMING_ANCHOR}; it carries {headings}"
+    )
+
+
+def test_the_naming_table_names_every_kind_of_name() -> None:
+    """AC9. The contract has a row per KIND of name, and the three rows that
+    can be derived are compared against their source of truth rather than read."""
+    rows = naming_table_rows()
+    assert set(rows) == {
+        "PyPI distribution",
+        "Repository",
+        "Import package",
+        "Console scripts",
+    }, f"the naming table's kinds are {sorted(rows)}"
+
+    import tomllib
+
+    with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+
+    # Derived, not transcribed: distribution from [project] name, import
+    # package from the src/ package directory, repository from [project.urls].
+    assert f"`{project['name']}`" == rows["PyPI distribution"]
+    packages = sorted(
+        p.name for p in (REPO_ROOT / "src").iterdir() if (p / "__init__.py").is_file()
+    )
+    assert packages == ["pdf_toolkit"], f"src/ declares {packages}"
+    assert f"`{packages[0]}`" == rows["Import package"]
+    repo_url = project["urls"]["Repository"].removeprefix("https://")
+    assert f"`{repo_url}`" == rows["Repository"], (
+        f"the naming table's Repository row is {rows['Repository']}, and "
+        f"[project.urls].Repository derives `{repo_url}`"
+    )
+
+
+def test_the_naming_table_command_rows_equal_the_declared_console_scripts() -> None:
+    """AC10. Set equality in BOTH directions against `[project.scripts]`.
+
+    A third console script added tomorrow reddens the table with zero author
+    action, and a name in the table that is not declared fails too. Neither
+    half is redundant: the first catches an omission, the second a phantom.
+    """
+    tabled = set(re.findall(r"`([^`]+)`", naming_table_rows()["Console scripts"]))
+    declared = declared_console_scripts()
+    assert tabled == declared, (
+        f"the naming table lists {sorted(tabled)} and [project.scripts] declares "
+        f"{sorted(declared)}; missing from the table: {sorted(declared - tabled)}; "
+        f"in the table but not declared: {sorted(tabled - declared)}"
+    )
+
+
+def test_the_naming_table_check_can_fail_in_both_directions() -> None:
+    """AC10's RED, two-sided, on scratch strings rather than the real README."""
+    declared = declared_console_scripts()
+
+    # (a) a third console script is declared and the table does not list it
+    incomplete = set(declared)
+    assert incomplete != declared | {"pdftk-compat"}
+
+    # (b) the table lists a name that is not declared
+    phantom = declared | {"pdftoolkit-legacy"}
+    assert phantom != declared
+
+    # and the parser really does read the row it claims to read
+    scratch = (
+        "## Naming\n\n| Kind | Name |\n|---|---|\n| Console scripts | `only-one` |\n\n## Next\n"
+    )
+    assert set(re.findall(r"`([^`]+)`", naming_table_rows(scratch)["Console scripts"])) == {
+        "only-one"
+    }
+
+
+def test_the_naming_section_records_which_release_was_first_on_pypi() -> None:
+    """AC9. The history a reader needs to interpret the install lines above it."""
+    body = naming_section()
+    assert "git-install-only" in body
+    assert "v0.1.1" in body and "first published release" in body
+    assert "v0.2.0" in body

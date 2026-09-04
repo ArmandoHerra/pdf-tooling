@@ -5,7 +5,7 @@ spec's `@samples` arm — `PLAN.md` §10.1, Design §10.
 exactly ONE section below this module's own PDF-06 section, in a delimited
 block naming its own spec ID, and never edits another spec's section.
 `decision.md` §2's execution rule (one engineer at a time in
-`apps/pdf-toolkit`) is what makes an append-only shared file safe; the cycle
+`apps/pdf-tooling`) is what makes an append-only shared file safe; the cycle
 close audits it with `git log -p -- tests/test_samples.py`, never a grep at
 HEAD (append-only shared files are not contention-free —
 `expertise/product.yaml`, 2026-08-22).

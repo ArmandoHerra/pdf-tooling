@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pdf-tooling"
-version = "0.1.1"
+version = "0.2.0"
 description = "One safe, permissively-licensed command-line tool for the common PDF chores."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -61,9 +61,9 @@ pdftoolkit = "pdf_toolkit.cli.main:main"
 pdf-toolkit = "pdf_toolkit.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/ArmandoHerra/pdf-toolkit"
-Repository = "https://github.com/ArmandoHerra/pdf-toolkit"
-Changelog = "https://github.com/ArmandoHerra/pdf-toolkit/blob/main/changelog.md"
+Homepage = "https://github.com/ArmandoHerra/pdf-tooling"
+Repository = "https://github.com/ArmandoHerra/pdf-tooling"
+Changelog = "https://github.com/ArmandoHerra/pdf-tooling/blob/main/changelog.md"
 
 [dependency-groups]
 dev = [

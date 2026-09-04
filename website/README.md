@@ -4,7 +4,7 @@ The public landing page for pdf-toolkit — a single-page marketing/onboarding
 site built with [Astro](https://astro.build) + [Tailwind CSS v4](https://tailwindcss.com),
 deployed to GitHub Pages by `.github/workflows/deploy-website.yml`.
 
-Implements `ai_plans/pdf-toolkit/specs/PDF-16_project-website.md` **Phase A**
+Implements `ai_plans/pdf-tooling/specs/PDF-16_project-website.md` **Phase A**
 (donors: `apps/mediakit/website`, `apps/kubewright/website`).
 
 ## Prerequisites
@@ -161,7 +161,7 @@ see PDF-16's Implementation Log for why a second generator was not written.
 Recorded here per honesty rule 7 — every figure on this page was re-derived
 at landing rather than copied from the spec. The authoritative account,
 including the AC-by-AC status table, is the **Implementation Log** section of
-`ai_plans/pdf-toolkit/specs/PDF-16_project-website.md`. In summary:
+`ai_plans/pdf-tooling/specs/PDF-16_project-website.md`. In summary:
 
 - **No `website/scripts/generate-licenses-json.py`.** PDF-02 already writes
   `website/src/data/licenses.json` from `scripts/licenses.py generate` once

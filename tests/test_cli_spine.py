@@ -1735,3 +1735,110 @@ def test_registered_secrets_are_scrubbed_from_every_log_record() -> None:
         assert "<redacted>" in record.getMessage()
     finally:
         clear_secrets()
+
+
+# --------------------------------------------------------------------------- #
+# PDF-31 D6 — criteria-by-absence: assert what did NOT change
+#
+# The repository and the distribution moved; the import package, both console
+# scripts, the corpus byte strings and the existing tags did not. Absence is
+# asserted rather than assumed, because a blanket substitution over this tree
+# would be wrong far more often than it is right, and the names above are what
+# it would have corrupted.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_console_script_alias_is_still_declared() -> None:
+    """AC22. `[project.scripts]` declares EXACTLY the two keys, both pointing
+    at the same entry point. The alias is published, it is installed by a real
+    `pip install`, and removing it is a breaking change to a distribution that
+    is already on PyPI — a separate item with its own deprecation window, not
+    a tidy-up folded into a rename.
+    """
+    project = load_pyproject()["project"]
+    assert isinstance(project, dict)
+    scripts = project["scripts"]
+    assert set(scripts) == {"pdftoolkit", "pdf-toolkit"}, (
+        f"[project.scripts] declares {sorted(scripts)}; the alias `pdf-toolkit` is "
+        "PUBLISHED and pinned, and dropping it is a breaking change, not a rename"
+    )
+    assert set(scripts.values()) == {"pdf_toolkit.cli.main:main"}
+
+
+def test_the_alias_arms_that_pin_it_still_exist_and_still_run() -> None:
+    """AC22. The two arms that would have to be DELETED to drop the alias are
+    asserted to still be present, by name.
+
+    A criterion that only re-asserted the declaration would stay green while
+    its own evidence was deleted underneath it; what makes the alias safe is
+    that removing it costs two passing assertions, so those are what is pinned.
+    """
+    spine = Path(__file__).read_text()
+    assert "def test_both_console_scripts_point_at_the_same_entry_point()" in spine
+    assert 'alias = Path(sys.executable).parent / "pdf-toolkit"' in spine, (
+        "test_cli_spine.py's alias arm constructs the CONSOLE-SCRIPT path and must "
+        "not be swept: it is character-identical in shape to the planning-dir "
+        "fallback in test_docs_antirot.py and opposite in disposition"
+    )
+
+
+def test_the_import_package_is_still_pdf_toolkit() -> None:
+    """AC24. The distribution moved; the import package did not."""
+    packages = sorted(
+        p.name for p in (REPO_ROOT / "src").iterdir() if (p / "__init__.py").is_file()
+    )
+    assert packages == ["pdf_toolkit"], f"src/ declares {packages}"
+    import importlib
+
+    assert importlib.import_module("pdf_toolkit") is not None
+
+
+def test_the_corpus_and_golden_name_strings_are_byte_identical() -> None:
+    """AC23. Class E — the corpus producer/title strings and the goldens that
+    read them back. Changing either half without the other reddens the golden;
+    changing both is churn with no user-facing meaning.
+
+    This asserts the PRODUCER and the GOLDEN carry the same literal, so the
+    pair cannot be swept in lockstep and pass silently.
+    """
+    info = json.loads((REPO_ROOT / "tests" / "golden" / "meta_get.json").read_text())["info"]
+    assert info["Author"] == "pdf-toolkit test corpus"
+    assert info["Producer"] == "pdf-toolkit test corpus"
+    assert info["Title"] == "pdf-toolkit corpus: metadata_rich"
+    assert info["Keywords"] == "pdf-toolkit,fixture,metadata"
+
+    corpus = (REPO_ROOT / "tests" / "corpus.py").read_text()
+    assert '"pdf-toolkit test corpus"' in corpus
+    assert '"pdf-toolkit corpus: metadata_rich"' in corpus
+    assert '"pdf-toolkit,fixture,metadata"' in corpus
+
+
+def test_the_existing_release_tags_are_untouched() -> None:
+    """AC25. History is not rewritten and the tags are neither moved nor
+    re-pointed. The object ids are the ones recorded before the sweep.
+    """
+    frozen = {
+        "v0.1.0": "7b17304809bda4625875f0491835e75c320aa0db",
+        "v0.1.1": "816674b3eea4f991ced36701f6b4f2e28f826e03",
+    }
+    listed = subprocess.run(
+        ["git", "tag", "--list"], cwd=REPO_ROOT, capture_output=True, text=True, check=False
+    )
+    if listed.returncode != 0:
+        pytest.skip("git tag --list unavailable in this checkout")
+    tags = set(listed.stdout.split())
+    if not frozen.keys() <= tags:
+        pytest.skip(
+            f"tags absent from this checkout ({sorted(tags)}); a shallow or "
+            "tagless clone cannot check that tags were not moved, and must not "
+            "report that it did"
+        )
+    for tag, oid in frozen.items():
+        got = subprocess.run(
+            ["git", "rev-parse", f"{tag}^{{}}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert got == oid, f"{tag} points at {got}, not the recorded {oid}"

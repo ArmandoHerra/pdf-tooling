@@ -59,7 +59,7 @@ env:
 #
 #   gh run list --workflow=ci.yml --status success --limit 15 \
 #       --json databaseId --jq '.[].databaseId'
-#   gh api repos/ArmandoHerra/pdf-toolkit/actions/runs/<id>/jobs?per_page=100 \
+#   gh api repos/ArmandoHerra/pdf-tooling/actions/runs/<id>/jobs?per_page=100 \
 #       --jq '.jobs[] | [.name, .conclusion, .started_at, .completed_at] | @tsv'
 #
 # TWO PLACES THE RULE IS OVERRIDDEN, both deliberate and both stated in the

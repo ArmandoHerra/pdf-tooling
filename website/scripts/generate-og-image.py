@@ -110,7 +110,7 @@ def main() -> None:
     draw.text((text_x, 358), "No copyleft underneath.", font=tagline_font, fill=SUBTEXT)
     draw.text(
         (text_x, 440),
-        "pypdf · pdfium · pikepdf · reportlab — github.com/ArmandoHerra/pdf-toolkit",
+        "pypdf · pdfium · pikepdf · reportlab — github.com/ArmandoHerra/pdf-tooling",
         font=footer_font,
         fill=(203, 213, 225),
     )
