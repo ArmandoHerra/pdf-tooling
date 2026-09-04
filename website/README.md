@@ -17,7 +17,7 @@ Implements `ai_plans/pdf-toolkit/specs/PDF-16_project-website.md` **Phase A**
 ```bash
 cd website
 npm install
-npm run dev       # http://localhost:4321/pdf-toolkit/
+npm run dev       # http://localhost:4321/pdf-tooling/
 ```
 
 ```bash
@@ -66,7 +66,7 @@ because it is a verbatim donor copy (PLAN.md §11.1.4).
    if not, do it manually here.)
 2. Push to `main` with a change under `website/**`, or run the workflow via
    **Actions → Deploy Website → Run workflow**.
-3. Site becomes available at `https://armandoherra.github.io/pdf-toolkit/`.
+3. Site becomes available at `https://armandoherra.github.io/pdf-tooling/`.
 
 ## Current target: GitHub Pages project URL
 
@@ -77,7 +77,7 @@ This site is configured for the **project-pages URL**, not a custom domain
 ```js
 // astro.config.mjs
 site: 'https://armandoherra.github.io',
-base: '/pdf-toolkit',
+base: '/pdf-tooling',
 ```
 
 Because `base` is a non-root path, every internal link to a `public/` asset
@@ -95,7 +95,7 @@ When a domain is registered (`PLAN.md` §11.1.8), this is the exact diff:
    domain:
    ```js
    site: 'https://example.com',
-   // base: '/pdf-toolkit',   <- delete this line
+   // base: '/pdf-tooling',   <- delete this line
    ```
    (Every place that currently calls `withBase()`/imports `base` from
    `src/lib/site.ts` keeps working unchanged — `import.meta.env.BASE_URL`
@@ -116,17 +116,17 @@ When a domain is registered (`PLAN.md` §11.1.8), this is the exact diff:
 4. **Repo Settings → Pages** — enter the custom domain, wait for DNS check
    to go green, then check **Enforce HTTPS**.
 
-5. **`website/public/robots.txt` and any hardcoded `armandoherra.github.io/pdf-toolkit`
-   strings** (search the repo — `grep -rn "armandoherra.github.io/pdf-toolkit" website/src website/public`)
+5. **`website/public/robots.txt` and any hardcoded `armandoherra.github.io/pdf-tooling`
+   strings** (search the repo — `grep -rn "armandoherra.github.io/pdf-tooling" website/src website/public`)
    — update to the new domain. `Astro.site`-derived URLs (canonical, OG image)
    update automatically from step 1 and need no manual edits.
 
 ## Base path gotcha (`src/lib/site.ts`)
 
 `import.meta.env.BASE_URL` reflects the configured `base` **verbatim** — with
-`base: '/pdf-toolkit'` (no trailing slash), `BASE_URL` is `"/pdf-toolkit"`, not
-`"/pdf-toolkit/"`. Naively writing `` `${base}og-image.png` `` silently
-produces the broken path `/pdf-toolkitog-image.png` (the exact bug the
+`base: '/pdf-tooling'` (no trailing slash), `BASE_URL` is `"/pdf-tooling"`, not
+`"/pdf-tooling/"`. Naively writing `` `${base}og-image.png` `` silently
+produces the broken path `/pdf-toolingog-image.png` (the exact bug the
 donor sites' implementations caught and documented; inherited here verbatim).
 Always go through `withBase('some-public-file.ext')` from `src/lib/site.ts`
 for any hand-written path into `public/`; never concatenate `BASE_URL`
