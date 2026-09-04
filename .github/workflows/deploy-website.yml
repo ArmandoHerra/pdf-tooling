@@ -19,8 +19,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # PDF-34 D7 / AC15 (`B-164`). Until this job existed, a push to `main` under
+  # `paths:` above published this site with NOTHING in front of it -- no
+  # `needs:`, no `workflow_run`, no `uses: ./.github/workflows/ci.yml` anywhere
+  # in the file. The release path had been gated since PLAN §11; the publish
+  # path never was, and nobody had connected the two.
+  #
+  # `workflow_call`, NOT `workflow_run`, and the reasoning is recorded here so
+  # nobody re-derives it under time pressure. A local `uses:` call gates THE
+  # EXACT COMMIT being published, keeps the `paths:` filter above intact, and
+  # is the idiom `release.yml` already uses. `workflow_run` supports no path
+  # filter and needs an explicit `head_sha` checkout that, if omitted, ships a
+  # DIFFERENT commit from the one that went green -- a gate that green-lights
+  # one commit and publishes another, which is this spec's failure mode in its
+  # purest form.
+  #
+  # It fails closed in every direction: a red gate, or a cancelled one, skips
+  # `build` and `deploy`, so the outcome is always "the site is not published"
+  # and never "the site is published unverified". `workflow_dispatch` is
+  # preserved and now runs the gate too -- a manual publish is gated exactly
+  # like an automatic one, which is the point.
+  gate:
+    name: gate (full CI)
+    # Deliberately NOT SHA-pinned, same exemption and same reason as
+    # release.yml's: a LOCAL reusable workflow is addressed by path and always
+    # runs at the caller's commit, so it carries no third-party supply-chain
+    # risk. Pinning it would freeze the publish gate to a stale copy of CI.
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
     name: Build
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

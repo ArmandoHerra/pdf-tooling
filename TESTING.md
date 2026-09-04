@@ -239,6 +239,29 @@ its remainder. Point `PDF_TOOLKIT_PLANNING_DIR` at the planning tree to run the
 arms that need it. Its real enforcement is therefore local, this target, and the
 `qa-sentinel`.
 
+### The strict posture — `DOCS_GATE_STRICT`
+
+By default this target prints its skip census and still exits `0`. That default
+is unchanged and the reason is not inertia: `ci.yml` checks out this repository
+alone, so the planning arms skip there for a reason that is not a defect, and a
+gate that failed on them would be honestly shaped and wrongly aimed.
+
+Set `DOCS_GATE_STRICT=1` and a skipped arm becomes an exit code rather than a
+paragraph:
+
+```bash
+DOCS_GATE_STRICT=1 make docs-gate
+```
+
+The target already printed `A SKIPPED ARM IS NOT AGREEMENT` and then exited `0`
+anyway — the rule stated by the gate, about the gate, with nothing enforcing it.
+This setting is that sentence made enforceable. Use it wherever the clone is
+full **and** the planning tree is present: a maintainer checkout, or a cadence
+that runs where both trees exist. That is the only posture in which *every arm
+ran* is a fair expectation, so a skip there is news rather than weather. Where
+either precondition is missing the unset default stays correct, and the census
+still names every class it could not run.
+
 ## Safety-spine test arms (`PDF-04`)
 
 The write chokepoint's guarantees are the ones a user acts on, so each of

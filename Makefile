@@ -9,6 +9,16 @@
 
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
+# PDF-34 / B-231: `-o pipefail` ONLY, and the narrowness is deliberate and
+# asserted by a test. Without this, a recipe line that pipes a failing
+# command into a reader inherits the READER's status, so `docs-gate`'s arms 1
+# and 3 discarded pytest's verdict and the target exited 0 on a red suite --
+# a gate that cannot fail is not a gate, eight lines after this file says so.
+# `-e` is excluded because make already checks each recipe line's status, so
+# it buys nothing here and would change four `;`-chained recipes; `-u` is
+# excluded because `ARGS`/`PYTEST_ARGS` and several `$$`-shell variables
+# expand empty BY DESIGN. `-c` stays last: make appends the command to it.
+.SHELLFLAGS := -o pipefail -c
 
 ARGS ?=
 PYTEST_ARGS ?=
@@ -327,14 +337,28 @@ export DOCS_GATE_ENGINES_ASSERT
 # measured wall clock ever argues for inclusion, that is a number for the PM,
 # not a decision taken in this recipe (decision.md §5 R-1).
 #
-# THE ARMS THAT CANNOT ALWAYS RUN SAY SO. Two of them read the maintainer's
-# planning tree (`PDF_TOOLKIT_PLANNING_DIR`) and four read git history deeper
-# than a shallow checkout. `ci.yml`'s `test` job has neither, so in CI those
-# arms SKIP -- and a skipped arm is NEVER agreement. `-rs` prints every skip
-# reason and the epilogue below repeats the count, so "it ran" and "it could
-# not run" can never be read as the same green (X-153).
+# THE ARMS THAT CANNOT ALWAYS RUN SAY SO. MEASURED at PDF-34 HEAD by running
+# the thing in each condition, because the previous figures here ("two" and
+# "four") were BOTH wrong and nothing checked them -- a stale count in the
+# comment above a skip census is the same defect this target exists to end:
+#   FIVE  arms read the maintainer's planning tree (`PDF_TOOLKIT_PLANNING_DIR`);
+#         recipe: PDF_TOOLKIT_PLANNING_DIR=/nonexistent make docs-gate
+#   ELEVEN arms read git history deeper than a shallow checkout, in TWO classes
+#         -- 10 against MINIMUM_HISTORY_DEPTH, plus 1 that cannot check a depth
+#         precondition against a checkout never given the depth to check it;
+#         recipe: run the three arm-3 files inside `git clone --depth 1`.
+# `ci.yml`'s `test` job has neither, so in CI all SIXTEEN skip -- and a skipped
+# arm is NEVER agreement. `-rs` prints every skip reason and the epilogue below
+# repeats the count, so "it ran" and "it could not run" can never be read as
+# the same green (X-153).
+#
+# PDF-34 D3: `DOCS_GATE_STRICT=1` turns that sentence into an exit code. Unset
+# (the default) is byte-for-byte today's behaviour -- skips are printed and
+# counted and the target still exits 0 -- because the five planning arms
+# LEGITIMATELY cannot run in CI, which checks out this repository alone. The
+# cadence that CAN see both trees runs it strict, where zero arms may skip.
 define DOCS_GATE_EPILOGUE
-import re, sys
+import os, re, sys
 text = sys.stdin.read()
 sys.stdout.write(text)
 # pytest AGGREGATES identical skip reasons as `SKIPPED [N] <reason>`, so
@@ -352,6 +376,21 @@ if skipped:
     print("  A SKIPPED ARM IS NOT AGREEMENT. Re-run with PDF_TOOLKIT_PLANNING_DIR")
     print("  pointed at the planning tree, and in a full (non-shallow) clone, to")
     print("  turn these into real comparisons. `make ci` does not run this target.")
+# PDF-34 D3. For as long as this epilogue has existed it has PRINTED
+# "A SKIPPED ARM IS NOT AGREEMENT" and then exited 0 anyway -- the rule stated
+# in prose, by the gate, about itself, with nothing enforcing it. Strict mode
+# is that sentence as an exit code, and it is opt-in for one measured reason:
+# CI checks out this repository alone, so the five planning arms skip there for
+# a reason that is not a defect, and a strict CI run would fail honestly-shaped
+# but wrongly. The Tier-2 cadence runs where BOTH trees exist, so zero arms may
+# skip and any skip is real news.
+if skipped and os.environ.get("DOCS_GATE_STRICT", "").strip() not in ("", "0", "false", "no"):
+    print("")
+    print("  DOCS_GATE_STRICT=1: %d skipped arm(s) in %d class(es) is a FAILURE."
+          % (arms, len(skipped)))
+    print("  A SKIPPED ARM IS NOT AGREEMENT -- and under this posture that is an")
+    print("  exit code, not a paragraph. Classes above name what could not run.")
+    sys.exit(1)
 endef
 export DOCS_GATE_EPILOGUE
 

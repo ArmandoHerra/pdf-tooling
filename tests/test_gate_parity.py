@@ -465,6 +465,59 @@ def test_the_coverage_floor_is_defined_only_in_the_makefile() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# PDF-34 D2 / AC3 — the shell posture is asserted, not merely written once
+# --------------------------------------------------------------------------- #
+
+_SHELLFLAGS_LINE: Final[re.Pattern[str]] = re.compile(r"^\.SHELLFLAGS\s*:?=\s*(.+)$", re.MULTILINE)
+
+
+def test_the_makefile_declares_pipefail_and_neither_dash_e_nor_dash_u() -> None:
+    """`docs-gate` exited 0 on a red suite for as long as this file existed,
+    because two of its arms pipe pytest into a reader and, with no
+    `.SHELLFLAGS`, a pipeline's status is its LAST command's status. Asserting
+    the flag rather than merely writing it is the whole point: the defect it
+    repairs (`B-231`) is indistinguishable from correctness by reading, and a
+    later edit that deletes this line would restore a silently-passing gate --
+    which is exactly how `833321e40b` happened, a missing `with:` block
+    downgrading a gate with nothing to notice.
+
+    The negative half is equally load-bearing and is NOT belt-and-braces.
+    `-e` and `-u` are excluded by MEASUREMENT, not taste (PDF-34 E3): `make`
+    already checks each recipe line's own status, so `-e` buys nothing for this
+    defect and would change the semantics of four `;`-chained recipes; `-u`
+    would abort recipes that reference deliberately-empty variables. Pinning
+    the exclusion makes a future "hardening" edit argue with a test instead of
+    slipping past a reviewer as an obvious improvement.
+    """
+    text = MAKEFILE_PATH.read_text()
+    matches = _SHELLFLAGS_LINE.findall(text)
+    assert matches, (
+        "Makefile declares no .SHELLFLAGS, so every pipe-bearing recipe line "
+        "inherits its LAST command's exit status and any gate built on a "
+        "pipeline can exit 0 while its arms are red (PDF-34 / B-231)"
+    )
+    assert len(matches) == 1, f"expected exactly one .SHELLFLAGS declaration, found {matches}"
+    flags = matches[0].strip()
+
+    assert "pipefail" in flags, f".SHELLFLAGS must set pipefail; got {flags!r}"
+    assert flags.split()[-1] == "-c", (
+        f".SHELLFLAGS must end with -c (make appends the command string to it); got {flags!r}"
+    )
+
+    tokens = flags.split()
+    assert "-e" not in tokens, (
+        f"-e is excluded by measurement (PDF-34 E3), not oversight; got {flags!r}"
+    )
+    assert "-u" not in tokens, (
+        f"-u is excluded by measurement (PDF-34 E3), not oversight; got {flags!r}"
+    )
+    for combined in tokens:
+        if combined.startswith("-") and not combined.startswith("--") and combined != "-o":
+            assert "e" not in combined[1:], f"-e smuggled inside {combined!r}: {flags!r}"
+            assert "u" not in combined[1:], f"-u smuggled inside {combined!r}: {flags!r}"
+
+
+# --------------------------------------------------------------------------- #
 # PDF-02 AC1/AC2/AC3/AC17 — mechanized (PDF-28 Design §6, AC22)
 # --------------------------------------------------------------------------- #
 
@@ -493,10 +546,32 @@ def test_pdf02_ac1_ci_yml_defines_exactly_the_ten_named_jobs() -> None:
 
 
 def test_pdf02_ac2_every_external_action_reference_is_sha_pinned_with_a_version_comment() -> None:
-    """The local `uses: ./...` reusable-workflow reference in release.yml is
-    the ONE documented exemption (PDF-02's own Implementation Log, 'AC2 — one
-    principled, documented exemption'): a local reference always runs at the
-    caller's commit and carries no third-party supply-chain risk."""
+    """The local `uses: ./...` reusable-workflow references are the documented
+    exemption (PDF-02's own Implementation Log, 'AC2 — one principled,
+    documented exemption'): a local reference is addressed by path and always
+    runs at the CALLER'S commit, so it carries no third-party supply-chain risk
+    and there is no SHA that could sensibly pin it.
+
+    THE SAFETY HALF IS `external_uses == sha_pinned` AND IT IS UNTOUCHED. That
+    is the assertion that makes this test a supply-chain gate; it was 34 == 34
+    before PDF-34 and is 34 == 34 after. The `local_refs` assertion below is a
+    freshness pin on the EXEMPTION, and it moved from 1 to 2 at PDF-34 under
+    that spec's own D4 discriminator, stated there for the gate-parity counts
+    and binding identically here: **a frozen count may be bumped iff the
+    population it counts demonstrably grew and the new member is declared in
+    the same commit.** Both halves hold. The population grew because PDF-34 D7
+    gave `deploy-website.yml` the gate `release.yml` already had (`B-164`: the
+    publish path had NO gate in front of it), and the new member is declared at
+    its own site with the exemption's reasoning written beside it. Nothing was
+    relaxed to reach green: a THIRD undeclared local reference still reddens
+    here, which is the whole job of this line.
+
+    Recorded rather than quietly done, because a bumped count is exactly what
+    gaming looks like from the outside: the alternative was to leave this arm
+    red, which would have reddened `main` permanently and — through the very
+    `needs: gate` D7 adds — blocked every subsequent publish. Reverting is one
+    line if the PM rules otherwise.
+    """
     workflow_files = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
     all_uses = 0
     local_refs = 0
@@ -512,7 +587,12 @@ def test_pdf02_ac2_every_external_action_reference_is_sha_pinned_with_a_version_
             sha_pinned += 1
     external_uses = all_uses - local_refs
     assert external_uses == sha_pinned, (all_uses, local_refs, sha_pinned)
-    assert local_refs == 1, "the local ./ci.yml reference in release.yml is the one exemption"
+    assert local_refs == 2, (
+        "the local ./ci.yml references in release.yml (the release gate) and "
+        "deploy-website.yml (the publish gate, PDF-34 D7 / B-164) are the two "
+        "documented exemptions; a third is a FINDING, never a bump made to "
+        "reach green"
+    )
 
 
 def test_pdf02_ac3_least_privilege_scoping() -> None:
