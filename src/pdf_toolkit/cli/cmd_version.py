@@ -35,7 +35,7 @@ ENGINE_DISTRIBUTIONS: Final[tuple[str, ...]] = (
     "pillow",
 )
 
-_TOOL_DISTRIBUTION: Final[str] = "pdf-toolkit"
+_TOOL_DISTRIBUTION: Final[str] = "pdf-tooling"
 _UNKNOWN: Final[str] = "unknown"
 
 

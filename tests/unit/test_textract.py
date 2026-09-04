@@ -371,7 +371,7 @@ def _unavailable_text_engine() -> EngineReport:
         version=None,
         kind="python-package",
         detail="forced unavailable by this test",
-        hint="uv tool install --force pdf-toolkit",
+        hint="uv tool install --force pdf-tooling",
     )
 
 
@@ -409,7 +409,7 @@ def test_ac5_layout_with_the_adapter_unresolved_exits_3_and_never_falls_back(
     captured = capsys.readouterr()
 
     assert code == 3
-    assert "uv tool install --force pdf-toolkit" in captured.err
+    assert "uv tool install --force pdf-tooling" in captured.err
     assert "pdftoolkit doctor" in captured.err
     # No extracted text, and no payload claiming the layout strategy ran.
     assert captured.out == ""

@@ -1281,7 +1281,7 @@ def test_raster_engine_unavailable_exits_3_with_a_hint(
 
     def _missing(*, capability: str | None = None) -> object:
         raise EngineMissingError(
-            "RasterEngine is unavailable. Install it with: uv tool install --force pdf-toolkit. "
+            "RasterEngine is unavailable. Install it with: uv tool install --force pdf-tooling. "
             "Run 'pdftoolkit doctor' to see which engines resolved."
         )
 

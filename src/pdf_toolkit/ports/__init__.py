@@ -113,7 +113,7 @@ KIND_OPTIONAL_EXTRA: Final[str] = "optional-extra"
 #: What to tell a user whose *wheel* is missing. Those five engines are hard
 #: install dependencies, so "absent" means a broken installation rather than a
 #: system package they chose not to install (``PLAN.md`` §5.5).
-BROKEN_INSTALL_HINT: Final[str] = "uv tool install --force pdf-toolkit"
+BROKEN_INSTALL_HINT: Final[str] = "uv tool install --force pdf-tooling"
 
 #: OS-aware install hints for the two ports that can legitimately be absent.
 #: A module-level table so a test can monkeypatch ``sys.platform`` and assert

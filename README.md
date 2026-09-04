@@ -12,7 +12,7 @@ Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write
 
 `pdf-toolkit` shares no code with `pdftk`, is not a fork of it, and is not a drop-in replacement for it. `pdftk` is GPL-licensed; this project is **Apache-2.0**, and its engine policy forbids anything under AGPL, GPL or LGPL from appearing as an import, an optional extra, or a `subprocess` fallback. The console script is named `pdftoolkit` precisely so the two cannot be confused on your `PATH`.
 
-The PyPI **distribution** to install is **`pdf-toolkit`** — with the hyphen. The distribution named `pdftoolkit` on PyPI is an unrelated GPL-3.0 project and is not this software. The import package is `pdf_toolkit`, and the installed console scripts are `pdftoolkit` and `pdf-toolkit`; the three names differ deliberately.
+The PyPI **distribution** to install is **`pdf-tooling`**. The distribution named `pdftoolkit` on PyPI is an unrelated GPL-3.0 project and is not this software. The import package is `pdf_toolkit`, and the installed console scripts are `pdftoolkit` and `pdf-toolkit`; the three names differ deliberately.
 
 ## Getting Started
 

@@ -52,7 +52,7 @@ WEBSITE_DATA_DIR = ROOT / "website" / "src" / "data"
 WEBSITE_JSON = WEBSITE_DATA_DIR / "licenses.json"
 # The distribution name of this project itself. Excluded from the GENERATED
 # artifacts (see cmd_generate) but NOT from the blocking check.
-SELF = "pdf-toolkit"
+SELF = "pdf-tooling"
 
 # PLAN.md §7.2 mechanism 1 + §12 R-11. THIS PATTERN IS THE PRODUCT'S ENTIRE PITCH.
 # Widening it is a defect, not caution: MPL-2.0 is PERMITTED and RECORDED
@@ -294,10 +294,10 @@ def cmd_generate(_: argparse.Namespace) -> int:
     # --no-license-path is load-bearing for determinism, not cosmetic: the path
     # embeds the absolute venv location, which differs between a laptop and a
     # CI runner and would make the freshness diff fail on a machine difference.
-    # --ignore-packages pdf-toolkit is LOAD-BEARING, not tidiness. pyproject's
+    # --ignore-packages pdf-tooling is LOAD-BEARING, not tidiness. pyproject's
     # [project] license-files lists THIRD_PARTY_LICENSES so the file ships inside
     # both artifacts (PLAN §11 / AC16). That makes pip-licenses --with-license-file
-    # read this very file back out of pdf-toolkit's own .dist-info and embed it in
+    # read this very file back out of pdf-tooling's own .dist-info and embed it in
     # the regenerated output — the inventory would contain a copy of itself and its
     # content would depend on how pdf-toolkit happened to be built and installed.
     # Excluding the first party from its own third-party inventory removes the

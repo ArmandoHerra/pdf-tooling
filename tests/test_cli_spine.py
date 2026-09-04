@@ -999,7 +999,7 @@ def test_table_output_is_a_human_table_on_stdout() -> None:
     lines = result.stdout.splitlines()
     assert lines[0].startswith("input")
     assert set(lines[1].replace(" ", "")) == {"-"}
-    assert any("pdf-toolkit" in line for line in lines)
+    assert any("pdf-tooling" in line for line in lines)
 
 
 @pytest.mark.e2e

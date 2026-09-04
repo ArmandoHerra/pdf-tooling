@@ -9,7 +9,7 @@
 # Trusted Publishing (OIDC) means there is NO PyPI token in this repository and
 # none is ever created (D-12). The remaining operator half — registering a
 # pending publisher at https://pypi.org/manage/account/publishing/ for project
-# `pdf-toolkit`, workflow `release.yml`, environment `pypi` — rides with B-015.
+# `pdf-tooling`, workflow `release.yml`, environment `pypi` — rides with B-015.
 name: Release
 
 "on":
@@ -77,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/pdf-toolkit
+      url: https://pypi.org/p/pdf-tooling
     permissions:
       id-token: write     # PyPI Trusted Publishing (OIDC). No token, anywhere.
     steps:

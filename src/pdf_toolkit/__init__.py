@@ -1,6 +1,6 @@
 """pdf-toolkit — one safe command-line tool for the common PDF chores.
 
-The distribution is ``pdf-toolkit``; the import package is ``pdf_toolkit``; the
+The distribution is ``pdf-tooling``; the import package is ``pdf_toolkit``; the
 console scripts are ``pdftoolkit`` and ``pdf-toolkit``. The three names differ
 deliberately (see README).
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 __all__ = ["__version__"]
 
-_DISTRIBUTION = "pdf-toolkit"
+_DISTRIBUTION = "pdf-tooling"
 _UNKNOWN_VERSION = "0.0.0+unknown"
 
 
