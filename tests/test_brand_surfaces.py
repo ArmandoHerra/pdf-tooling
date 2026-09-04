@@ -52,8 +52,9 @@ import hashlib
 import importlib.util
 import subprocess
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Final
+from typing import Final
 
 import pytest
 
