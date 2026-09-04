@@ -20,6 +20,11 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-34] X-474 (1/2): AC17's cron tightened to `*/5 * * * *` for a bounded observation window — 2026-09-04
+
+- **Temporary, and stated as temporary in the diff itself.** The prior entry landed `docs-gate`'s weekly `schedule:` on paper; AC17 also requires an OBSERVED `event: schedule` run, not merely the cron expression sitting in the file — *"a workflow whose `schedule:` has never fired is a cadence on paper."* GitHub delivers `schedule:` only from the default branch and often late, so the cron is tightened to `*/5 * * * *` for a capped 90-minute observation window starting from this commit's push, watched via `gh run list --workflow=ci.yml --json databaseId,event,status,conclusion,createdAt` filtered to `event == "schedule"`.
+- **A follow-up commit resets this to weekly unconditionally**, whether or not a scheduled run is observed inside the cap — this file is never left carrying a tightened cron. That reset entry records AC17's final disposition (LANDED or PARTIAL) with its evidence.
+
 ## [PDF-34] D4/D5/AC10/AC11/AC12/AC17: the deferred unit lands — `docs-gate` runs in CI, `test`'s history arms stop skipping, and a weekly cadence — 2026-09-04
 
 - **D4, landed with its own measured bound, not deferred behind it.** The new single-leg `docs-gate` job (`ubuntu-latest`, `fetch-depth: 0`, `uv sync --locked`, `make docs-gate`) sits between `secret-scan` and `license-gate`. `timeout-minutes: 5` carries a real p95, re-derived independently rather than transcribed: five green **job** conclusions (`gh api .../jobs`, not the enclosing run — see the next bullet) on throwaway branch `pdf34-p95-measure`, ids `33913473653, 33913606349, 33913611800, 33913616874, 33913621276` (2026-09-04), durations `[20, 19, 19, 19, 16]` s from `started_at`/`completed_at`. `scripts/measure_gate.py::summarize()`'s own index formula — `index = round(0.95 * (n-1))`, `n=5` → `index=4` → the sorted array's last element — gives **p95 = 20.0s**; 3x = 1.0 min, raised to the 5 min floor, matching every other job's derivation shape in this file.

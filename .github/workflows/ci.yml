@@ -19,14 +19,14 @@ name: CI
   # "the release job is gated behind the full ci.yml job set" literally true
   # rather than approximately so.
   workflow_call:
-  # PDF-34 D8 Tier 1 / AC17: a cadence that fires with time, not only with a
-  # commit -- an action deprecation, a `git` behaviour change, a base-image
-  # bump. Weekly, Sunday 06:00 UTC. This is workflow-level (GitHub has no
-  # per-job schedule), so a scheduled run exercises the full job set, not
-  # only `docs-gate`; that is a wider net than the criterion requires, not a
-  # narrower one.
+  # PDF-34 X-474 TEMPORARY, bounded observation window: tightened to every 5
+  # minutes so a real `event: schedule` run can be observed within a capped
+  # 90-minute wait, since GitHub delivers `schedule:` only from the default
+  # branch and often late. A follow-up commit resets this to weekly
+  # regardless of whether a run was observed -- this value is NEVER the
+  # landed state.
   schedule:
-    - cron: "0 6 * * 0"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
