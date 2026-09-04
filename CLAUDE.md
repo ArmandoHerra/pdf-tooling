@@ -36,7 +36,7 @@ Each package's `__init__.py` states its own contract in its docstring. Read it b
 
 ## Conventions
 
-- Python `>=3.11`, managed exclusively by `uv`. No hand-rolled virtualenv, no `pip install` in any documented path.
+- Python `>=3.11`; this repo's own development environment is managed exclusively by `uv` (no hand-rolled virtualenv). End users install the published package however they prefer — `uv tool install pdf-tooling` and `pip install pdf-tooling` are both documented.
 - Frozen `dataclasses` with explicit `to_dict()`. Not pydantic: startup time is a user-facing feature of a tool meant to sit in a shell loop.
 - A hand-rolled table formatter. `rich` must not be imported anywhere under `src/`, even though the CLI framework pulls it into the environment.
 - Engine versions come from distribution metadata, never from importing the engine and reading `__version__`.
