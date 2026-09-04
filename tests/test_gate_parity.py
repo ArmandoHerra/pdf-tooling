@@ -200,17 +200,19 @@ def load_manifest() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_independent_scan_finds_ten_jobs_seventeen_legs_nineteen_gating_steps() -> None:
+def test_the_independent_scan_finds_eleven_jobs_eighteen_legs_twenty_gating_steps() -> None:
+    """PDF-34 D4: `docs-gate` is a new single-leg job with one gating step
+    (`make docs-gate`), re-derived at implementation HEAD -- 10/17/19 -> 11/18/20."""
     names, leg_count, gating_counts = independent_derive_from_ci()
-    assert len(names) == 10, names
-    assert leg_count == 17, leg_count
-    assert sum(gating_counts.values()) == 19, gating_counts
+    assert len(names) == 11, names
+    assert leg_count == 18, leg_count
+    assert sum(gating_counts.values()) == 20, gating_counts
 
 
 def test_manifest_parses_with_tomllib_and_declares_schema_version_1() -> None:
     manifest = load_manifest()
     assert manifest["schema_version"] == 1
-    assert len(manifest["check"]) == 19
+    assert len(manifest["check"]) == 20
 
 
 def test_gate_parity_check_subcommand_agrees_with_the_independent_scan() -> None:
@@ -530,12 +532,29 @@ _PDF02_EXPECTED_JOBS: Final[tuple[str, ...]] = (
     "sast",
     "vulncheck",
     "secret-scan",
+    "docs-gate",
     "license-gate",
     "build",
 )
 
 
 def test_pdf02_ac1_ci_yml_defines_exactly_the_ten_named_jobs() -> None:
+    """PDF-34 D4 X-472 coordinate 5: `_PDF02_EXPECTED_JOBS` above gains
+    `docs-gate` at its scan-derived position (between `secret-scan` and
+    `license-gate`). This is a CONTRACT CHANGE, not a silent count edit --
+    PDF-02 AC1 asserted a ten-job CI and PDF-34 D4 authorises the eleventh.
+
+    The function NAME is left un-renamed on purpose even though it now reads
+    "ten" over an eleven-member tuple: `tests/acceptance/audit_pdf_02.py:63`'s
+    `covering=(...)` cites this exact node id, and that file is OUTSIDE
+    PDF-34's Scope In table (E6, same class PDF-30 AC28 ruled out of a
+    citation sweep). Renaming here would silently break an out-of-scope
+    acceptance-audit pointer instead of fixing it -- FILED, not fixed. PDF-02
+    AC1's audit claim prose ("...exactly the ten jobs...") is stale the moment
+    the assertion below passes against eleven names; both the covering
+    pointer's name and the claim prose are a PDF-02 re-verification's or the
+    PM's to correct, not this spec's.
+    """
     names, _legs, _counts = independent_derive_from_ci()
     assert names == _PDF02_EXPECTED_JOBS, names
     text = CI_WORKFLOW.read_text()

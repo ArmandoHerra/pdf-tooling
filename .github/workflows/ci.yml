@@ -19,6 +19,14 @@ name: CI
   # "the release job is gated behind the full ci.yml job set" literally true
   # rather than approximately so.
   workflow_call:
+  # PDF-34 D8 Tier 1 / AC17: a cadence that fires with time, not only with a
+  # commit -- an action deprecation, a `git` behaviour change, a base-image
+  # bump. Weekly, Sunday 06:00 UTC. This is workflow-level (GitHub has no
+  # per-job schedule), so a scheduled run exercises the full job set, not
+  # only `docs-gate`; that is a wider net than the criterion requires, not a
+  # narrower one.
+  schedule:
+    - cron: "0 6 * * 0"
 
 permissions:
   contents: read
@@ -137,7 +145,15 @@ jobs:
         os: [ubuntu-latest, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
+      # PDF-34 D5 (X-473 measured: delta ~=0-1s on both ubuntu-latest and
+      # macos-14 -- seconds against PDF-29's 331.25s `make ci` budget, and a
+      # DIFFERENT budget besides: this is CI wall clock, not the local gate).
+      # fetch-depth: 0 closes 833321e40b literally here: the ten history-depth
+      # arms and both `036fd0a353` changelog-debt arms now RUN on the job that
+      # matters most instead of skipping silently against a shallow checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
@@ -307,6 +323,39 @@ jobs:
           name: gitleaks-report
           path: gitleaks-report.json
           if-no-files-found: ignore
+
+  docs-gate:
+    name: docs-gate
+    # "green runs" below counts the docs-gate JOB's own conclusion, on throwaway
+    # measurement branch pdf34-p95-measure; the surrounding RUN is red there by
+    # construction, on the pre-derivation `test` job (X-473). This is the same
+    # throwaway-branch shape this file's header records PDF-29 using.
+    # PDF-34 bound: p95 20.0s over 5 green runs (33913473653..33913621276, 2026-09-04);
+    # 3x p95 = 1.0 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
+    # PDF-34 D4/D8 Tier 1. The first job in the repository's history to run
+    # arms 1 and 2 anywhere but a maintainer's laptop.
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is load-bearing here, for the identical reason it is on
+      # secret-scan above: a shallow checkout makes require_full_history()
+      # skip arm 3's ten history-depth checks (833321e40b) and both of the
+      # changelog-debt arms this target exists to run (036fd0a353) -- this is
+      # the first job in the repository's history to run those arms anywhere
+      # but a maintainer's own full clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --locked
+      # Non-strict (DOCS_GATE_STRICT unset): the five planning arms legitimately
+      # skip here, because this checkout is `apps/pdf-tooling` alone and the
+      # maintainer's planning tree lives in a separate repository (D8 Tier 1 /
+      # Tier 2 split). The Tier-2 cadence that CAN see both trees runs it strict.
+      - run: make docs-gate
 
   license-gate:
     name: license-gate

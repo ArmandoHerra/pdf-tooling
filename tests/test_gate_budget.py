@@ -53,8 +53,14 @@ TREND_FILE: Final[Path] = PERF_DIR / "gate-timings.jsonl"
 #: `timeout-minutes` may never exceed this. Design §7.
 TIMEOUT_CEILING: Final = 30
 
-#: The ten jobs, re-derived from the mapping rather than asserted from memory.
-EXPECTED_JOB_COUNT: Final = 10
+#: The eleven jobs, re-derived from the mapping rather than asserted from
+#: memory. PDF-34 D4/X-472 coordinate 1: `docs-gate` moves this 10 -> 11,
+#: consumed at `test_ci_yml_parses_to_exactly_eleven_jobs` (renamed
+#: accordingly) and at `test_every_timeout_is_preceded_by_its_derivation`
+#: (one bound per job) -- both pass here because `docs-gate` lands with its
+#: own p95-derived `timeout-minutes` and derivation comment in the same
+#: commit (X-473), not deferred to a follow-up.
+EXPECTED_JOB_COUNT: Final = 11
 
 
 # --------------------------------------------------------------------------- #
@@ -257,7 +263,7 @@ def test_the_shell_string_test_is_not_mistaken_for_a_worker_count() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_ci_yml_parses_to_exactly_ten_jobs() -> None:
+def test_ci_yml_parses_to_exactly_eleven_jobs() -> None:
     jobs = ci_jobs()
     assert len(jobs) == EXPECTED_JOB_COUNT, sorted(jobs)
 

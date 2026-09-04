@@ -139,6 +139,15 @@ in_make_ci = false
 reason = "needs-pinned-external-binary"
 note = "gitleaks is pinned to GITLEAKS_VERSION in CI; a local binary is a different scanner (PDF-28 V-5)."
 
+# --- docs-gate ------------------------------------------------------------ #
+
+[[check]]
+job = "docs-gate"
+step = "make docs-gate"
+local = "docs-gate"
+in_make_ci = false
+note = "PDF-30 AC30: docs-gate is deliberately NOT a prerequisite of `make ci` -- PDF-29 owns the gate's wall-clock budget. The local target runs the IDENTICAL command; this job's only difference is fetch-depth: 0, which a laptop's own clone already has."
+
 # --- license-gate -------------------------------------------------------------- #
 
 [[check]]
