@@ -17,6 +17,14 @@ The PyPI **distribution** to install is **`pdf-tooling`**. The distribution name
 ## Getting Started
 
 ```bash
+uv tool install pdf-tooling
+# or: pip install pdf-tooling
+pdftoolkit --help
+```
+
+### From source
+
+```bash
 # Prerequisites: Python >= 3.11 and uv (https://docs.astral.sh/uv/)
 git clone https://github.com/ArmandoHerra/pdf-toolkit.git
 cd pdf-toolkit

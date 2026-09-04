@@ -11,9 +11,9 @@
 // `watermark --pages N` appears in any example below, because both also
 // modify pages sharing a /Contents object — see PLAN.md §11.1.6. Other
 // verbs' page selection (as used by `rotate` here) is unaffected.
-const install = `# Install (the repository is public; this line is live today)
-uv tool install git+https://github.com/ArmandoHerra/pdf-toolkit
-# or: pipx install git+https://github.com/ArmandoHerra/pdf-toolkit`;
+const install = `# Install (published on PyPI)
+uv tool install pdf-tooling
+# or: pip install pdf-tooling`;
 
 const commands = `pdftoolkit doctor                                                    # which engines resolved, and how
 pdftoolkit merge a.pdf b.pdf -O merged.pdf                           # concatenate PDFs into one file
@@ -26,7 +26,7 @@ pdftoolkit compress report.pdf -O small.pdf                          # lossless 
     <div class="mx-auto max-w-2xl text-center">
       <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">Quick Start</h2>
       <p class="mt-4 text-lg text-surface-100">
-        Install <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdf-toolkit</code>;
+        Install <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdf-tooling</code>;
         the command is <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftoolkit</code>.
         This is not <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftk</code> —
         it shares no code with it and is Apache-2.0.
@@ -46,8 +46,8 @@ pdftoolkit compress report.pdf -O small.pdf                          # lossless 
     </div>
 
     <p class="mt-6 text-sm text-surface-100">
-      Until the first PyPI release, install straight from the repository — no package-index
-      install, no Homebrew formula, no system package, no container image yet.
+      Published on PyPI as <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdf-tooling</code> —
+      no Homebrew formula, no system package, no container image yet.
       Every verb <a href="#verbs" class="text-primary-400 underline hover:text-primary-300">listed below</a> is shipped —
       <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdftoolkit --help</code> is the authoritative
       list of what actually exists.
