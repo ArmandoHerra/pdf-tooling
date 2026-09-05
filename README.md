@@ -109,6 +109,31 @@ Errors are the one deliberate asymmetry: with `-o table` an error is a one-line 
 
 **Global flags with no command at all** — `pdftoolkit -o json` — are an incomplete invocation and exit 2 as well, pointing at `--help`. `pdftoolkit` on its own, with no arguments, still prints help and exits 0.
 
+### The collection key
+
+Every `-o json` envelope that carries a collection of rows carries them under `items`. `doctor` and `info` additionally publish that same list under a name of their own, and both names are frozen: `doctor`'s `ports` is pinned by the plan's own `pdftoolkit doctor -o json | jq '.ports[] | select(.available == false)'` example, and `info`'s `documents` is its shipped shape. Neither is being renamed. The alias was added beside them so that a single `jq` expression works against every verb.
+
+| Verb | Primary key | Universal alias | Relationship |
+|---|---|---|---|
+| every verb that returns an operation result | `items` | `items` | the same list |
+| `info` | `documents` | `items` | the same list |
+| `doctor` | `ports` | `items` | the same list |
+
+`meta get` publishes a single document's report rather than a collection, so it has no row collection and names none.
+
+Every `-o json` envelope also carries `exit_code`, `warnings` and `duration_ms`, on every verb. `warnings` is a list and is `[]` when empty — never `null`, never absent. `exit_code` is the code the process exits with for the run the envelope describes, and `duration_ms` is `0` on the verbs whose output must be reproducible byte-for-byte.
+
+### `schema_version` is `1`, and this is what would move it
+
+`schema_version` is `1` and stays `1` for as long as the envelope changes only by **addition**. Adding a key never moves it; nor does adding a verb, an item field, or an output format. It increments on the first change a consumer that reads keys by name cannot survive, which is exactly this list:
+
+- a published key is **renamed**;
+- a published key is **removed**;
+- a published key's **type** changes — including `[]` becoming `null`, or a scalar becoming an object;
+- a published key's **meaning** changes while its name and type stay the same.
+
+An increment is **coupled to a major version bump**; they move together or not at all.
+
 The structured shapes and the exit-code table below are **public API from v1.0.0**. Breaking either requires a major version bump and a `schema_version` increment. Pre-1.0 releases are explicitly still moving.
 
 ## Exit codes
@@ -159,6 +184,23 @@ Run `chmod 600` on any password file. The tool warns when one is readable by gro
 No secure erasure is claimed, anywhere. A resolved password is held in a buffer that is zeroed after use, but Python may already have copied it while decoding the file, and swap and core dumps are outside a process's control. The same goes for the `.bak` sidecar and for temporary files: they are deleted, not shredded.
 
 `encrypt --in-place` needs one more word from you, and it is the one place where the safety default and the security default point in opposite directions. The `.bak` sidecar is a copy of the **original**, so an in-place encryption would leave plaintext sitting next to the ciphertext, silently. So it refuses (exit 5) unless you pass `--no-backup` (keep no plaintext copy) or `-y` (keep it, knowingly).
+
+### The permission vocabularies
+
+`pdftoolkit info -o json` and `pdftoolkit permissions -o json` are **both public output**, and they spell some of their permission tokens differently. That is a documented divergence, not a defect to be tidied: both spellings shipped, both are `schema_version: 1` public API, and renaming either would break a published contract. So the crossing is published here instead. **`--allow` accepts the left column only** — the right column is `info`'s output spelling and is not an input token.
+
+| `--allow` / `permissions` | `info` | `ISO 32000-1 Table 22` bit |
+|---|---|---|
+| `print` | `print` | `3` |
+| `modify` | `modify` | `4` |
+| `copy` | `copy` | `5` |
+| `annotate` | `annotate` | `6` |
+| `forms` | `fill-forms` | `9` |
+| `accessibility` | `extract-accessibility` | `10` |
+| `assemble` | `assemble` | `11` |
+| `print-highres` | `print-high-resolution` | `12` |
+
+The tokens spelled identically on both surfaces need no translation; the ones that diverge are the same bit under a different name. Without this table, a consumer that runs both verbs against the same encrypted document sees phantom differences on every file. The table is derived from the source constants by a test, so it cannot rot away from what the tool actually emits.
 
 **Permission bits are advisory.** They are a request to the reader, not a lock: only cooperating readers honour them, any reader holding the file may ignore every bit, and a reader that can display a page can extract it. Encryption protects the content; the bits on their own protect nothing. `--allow` takes a comma-separated, repeatable list from `print`, `print-highres`, `copy`, `modify`, `annotate`, `forms`, `assemble`, `accessibility`, plus the exclusive `all` and `none`; omitting it grants nothing. `accessibility` is granted whatever you ask for — PDF 2.0 deprecated that bit and conforming readers always permit it — and `permissions` reports what the document actually grants rather than what was requested. **`print-highres` also grants `print`**: a reader permitted to print at full resolution may obviously print at low resolution, and the format has no spelling for “high but not low”, so asking for the one token grants two. That is the format's behaviour rather than this tool's choice, and it is disclosed at the flag that causes it instead of being left for `permissions` to reveal afterwards.
 

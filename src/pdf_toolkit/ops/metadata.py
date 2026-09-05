@@ -162,6 +162,17 @@ def _build_report(source: Path, facts: MetadataFacts, *, include_xmp_raw: bool) 
         xmp_raw=facts.xmp_raw if include_xmp_raw else None,
         disagreements=_compute_disagreements(facts),
         residual_surfaces=facts.residual_surfaces,
+        # PDF-39 (B-143) -- the three envelope-level keys, supplied EXPLICITLY
+        # rather than left to the dataclass defaults, so the one construction
+        # site states the values and a reader does not have to go looking for
+        # them. `meta get` reads a document and reports; it produces no
+        # warnings, its duration is pinned at 0 by the golden (see the field's
+        # own docstring in `models.py`), and this report exists only on the
+        # path that exits 0 -- a failing operand raises before `_build_report`
+        # is ever reached.
+        warnings=(),
+        duration_ms=0,
+        exit_code=0,
     )
 
 

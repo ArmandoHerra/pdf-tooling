@@ -176,10 +176,59 @@ review the diff before committing. An ordinary run never writes a golden file
 into existence: a missing one fails loudly with that instruction rather than
 being silently created, which is what keeps `tests/golden/` out of the
 working-tree guard's way. Goldens are built from the generated corpus only,
-never from a sample (`PLAN.md` §10.1 rule 4). At this commit three golden files live in
+never from a sample (`PLAN.md` §10.1 rule 4). At this commit four golden files live in
 `tests/golden/`; the directory was empty at PDF-06's landing and the
 sentence that said so outlived the first golden by three specs — see
 `tests/golden/README.md`.
+
+## The envelope key register — `tests/golden/envelope_keys.json`
+
+`tests/golden/envelope_keys.json` is **not an ordinary golden**, does **not**
+respond to `--update-golden`, and is the only evidence this repository holds
+that no public key has been renamed or removed. It freezes, per invocable
+leaf, the sorted top-level `-o json` key set and the sorted key set of an
+`-o ndjson` line, **as measured at `d03bee3` (= tag `v0.2.0`)**, and
+`tests/test_envelope_contract.py` asserts that every live envelope is a
+**superset** of it.
+
+Superset and not equality, deliberately. An addition is a strict superset; a
+rename or a removal is not. So additive change stays free and destructive
+change stops.
+
+**Regenerating this file to make a red go green is FORBIDDEN.** These are the
+only sanctioned outcomes when the guard reddens:
+
+1. **You added a key.** Then nothing needs regenerating — an addition already
+   satisfies a superset assertion, and if it does not, you did not add a key.
+2. **You renamed, removed, retyped or repurposed a published key.** That is a
+   `schema_version` increment coupled to a major version bump, it is the
+   project manager's decision and never an engineer's, and the register is
+   regenerated only after that decision has been taken.
+
+There is no third case. If the register reddens on a leaf nobody predicted,
+that is information: record it, file it, and escalate. **A register generated
+after the work asserts nothing**, which is why the register was generated before
+any of `PDF-39`'s edits and why its provenance is asserted by
+`test_the_register_exists_and_declares_where_it_came_from`.
+
+The sanctioned regeneration path, once a decision authorises it:
+
+```bash
+PDF_TOOLKIT_ENVELOPE_REGISTER_REGENERATE=1 \
+  uv run pytest tests/test_envelope_contract.py -k register -p no:randomly
+```
+
+That run rewrites a **tracked** file, so the working-tree guard below reports
+it and the session exits 1 with the filename listed. That is correct and is
+not a failure of the run: a regeneration you cannot perform silently is the
+point. Review `git diff tests/golden/envelope_keys.json` before committing —
+every key that DISAPPEARS from that diff is a public-API removal.
+
+The register's coverage is published rather than claimed:
+`test_ac19_the_register_covers_every_leaf_the_harness_can_invoke` compares it
+against `tests/registry.py::discover_verbs()`, so a register narrower than the
+live command tree is a failure and never a silent pass. A leaf the harness
+cannot invoke is reported by name, never quietly dropped from the population.
 
 ## The working-tree guard
 

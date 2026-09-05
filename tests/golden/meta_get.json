@@ -1,6 +1,8 @@
 {
   "disagreements": [],
   "dry_run": false,
+  "duration_ms": 0,
+  "exit_code": 0,
   "info": {
     "Author": "pdf-toolkit test corpus",
     "CreationDate": "D:20000101000000+00'00'",
@@ -24,6 +26,7 @@
   },
   "schema_version": 1,
   "verb": "meta get",
+  "warnings": [],
   "xmp": null,
   "xmp_raw": null
 }

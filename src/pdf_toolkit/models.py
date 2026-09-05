@@ -543,6 +543,36 @@ class MetadataReport:
     ``page_xmp_pages``, ``doc_piece_info``, ``page_piece_info_pages``,
     ``annotation_authors``, ``embedded_files``, ``trailer_id``."""
 
+    # --- PDF-39 (B-143) — the three envelope-level keys `meta get` omitted ---
+    # Appended HERE, at this class's own tail, and no other model is touched.
+    # Declared LAST with defaults because every field above is non-defaulted
+    # and a non-default field after a defaulted one is a `TypeError` at import
+    # (`ItemResult`'s own `detail` docstring already records the constraint).
+    # The defaults are the values every caller wants and `ops/metadata.py`'s
+    # `_build_report` supplies them explicitly anyway, so the report cannot
+    # acquire them by accident.
+
+    warnings: tuple[str, ...] = ()
+    """Warning strings this run produced; ``()`` when there are none, rendered
+    as ``[]``. **Never ``None`` and never omitted** — `output/__init__.py`'s
+    ``payload.get("warnings") or []`` tolerates both, and the envelope will
+    not."""
+
+    duration_ms: int = 0
+    """**`0`, chosen and reasoned rather than defaulted** (PDF-39 D2).
+    `meta get`'s whole payload is pinned by ``tests/golden/meta_get.json``
+    through ``tests/unit/test_metadata.py::test_ac18_the_meta_get_golden``;
+    a wall-clock reading here would make that golden nondeterministic on every
+    run, and D2's rule is that the golden is not the thing that gives way."""
+
+    exit_code: int = 0
+    """The code the process exits with, for the run this report describes.
+    `meta get` emits this envelope only on the path that succeeds — a failing
+    operand raises before any report is built and leaves through
+    ``render_error_json``'s ``{schema_version, error}`` shape instead — so the
+    value on every envelope that exists is ``0``. Published rather than
+    inferred, so a consumer reads the same key off all 26 leaves."""
+
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": self.schema_version,
@@ -552,4 +582,8 @@ class MetadataReport:
             "xmp_raw": self.xmp_raw,
             "disagreements": [dict(item) for item in self.disagreements],
             "residual_surfaces": dict(self.residual_surfaces),
+            # PDF-39 (B-143). ADDITIVE at schema_version 1.
+            "warnings": list(self.warnings),
+            "duration_ms": self.duration_ms,
+            "exit_code": self.exit_code,
         }

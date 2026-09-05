@@ -1,0 +1,660 @@
+{
+  "_meta": {
+    "assertion": "SUPERSET, per leaf, per arm -- never equality",
+    "generated_at_commit": "d03bee3ca226a18c42814ad15cfddb7cecdb97a5",
+    "generated_at_tag": "v0.2.0",
+    "generated_before_any_edit": true,
+    "leaves_covered": 26,
+    "leaves_discovered": 26,
+    "leaves_uncovered": [],
+    "regenerate": "PDF_TOOLKIT_ENVELOPE_REGISTER_REGENERATE=1 uv run pytest tests/test_envelope_contract.py -k register",
+    "regenerating_this_file_to_make_a_red_go_green_is_forbidden": "See TESTING.md. A rename or a removal is the ONLY thing a superset assertion can catch, and it is caught by this file being older than the change. The sanctioned ways to make it green are (a) an ADDITION, which is already a superset and needs no regeneration at all, or (b) a PM-approved schema_version increment (models.py SCHEMA_VERSION), which is not an engineer's call.",
+    "spec": "PDF-39"
+  },
+  "leaves": {
+    "compose": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "compress": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "convert": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "create": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "decrypt": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "delete": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "doctor": {
+      "json": [
+        "dry_run",
+        "ports",
+        "schema_version",
+        "strict",
+        "verb"
+      ],
+      "ndjson_line": [
+        "adapter",
+        "available",
+        "detail",
+        "dry_run",
+        "hint",
+        "kind",
+        "port",
+        "schema_version",
+        "verb",
+        "version"
+      ]
+    },
+    "encrypt": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "extract": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "info": {
+      "json": [
+        "documents",
+        "dry_run",
+        "schema_version",
+        "verb"
+      ],
+      "ndjson_line": [
+        "dry_run",
+        "encrypted",
+        "encryption_algorithm",
+        "fonts",
+        "has_forms",
+        "has_signature",
+        "linearized",
+        "metadata",
+        "ok",
+        "page_count",
+        "pages",
+        "path",
+        "pdf_version",
+        "permissions",
+        "schema_version",
+        "size_bytes",
+        "verb",
+        "xmp"
+      ]
+    },
+    "linearize": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "merge": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "meta get": {
+      "json": [
+        "disagreements",
+        "dry_run",
+        "info",
+        "path",
+        "residual_surfaces",
+        "schema_version",
+        "verb",
+        "xmp",
+        "xmp_raw"
+      ],
+      "ndjson_line": [
+        "disagreements",
+        "dry_run",
+        "info",
+        "path",
+        "residual_surfaces",
+        "schema_version",
+        "verb",
+        "xmp",
+        "xmp_raw"
+      ]
+    },
+    "meta set": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "ocr": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "permissions": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "rasterize": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "reorder": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "repair": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "rotate": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "split": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "stamp": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "tables": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "engine",
+        "exit_code",
+        "items",
+        "schema_version",
+        "strategy",
+        "tables",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bbox",
+        "col_count",
+        "dry_run",
+        "engine",
+        "index",
+        "page",
+        "path",
+        "row_count",
+        "rows",
+        "schema_version",
+        "source",
+        "strategy",
+        "verb"
+      ]
+    },
+    "text": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "engine",
+        "exit_code",
+        "items",
+        "pages",
+        "schema_version",
+        "strategy",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "char_count",
+        "dry_run",
+        "engine",
+        "page",
+        "schema_version",
+        "source",
+        "strategy",
+        "text",
+        "verb"
+      ]
+    },
+    "version": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    },
+    "watermark": {
+      "json": [
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
+        "schema_version",
+        "verb",
+        "warnings"
+      ],
+      "ndjson_line": [
+        "bytes_after",
+        "bytes_before",
+        "detail",
+        "dry_run",
+        "duration_ms",
+        "exit_code",
+        "input",
+        "message",
+        "ok",
+        "output",
+        "schema_version",
+        "verb"
+      ]
+    }
+  }
+}

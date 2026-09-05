@@ -46,6 +46,7 @@ __all__ = [
     "ENCRYPTION_ALGORITHMS",
     "PASSWORD_HINT",
     "PERMISSION_TOKENS",
+    "PERMISSION_TOKEN_MAP",
     "CompositeOutcome",
     "CompressOutcome",
     "EncryptionFacts",
@@ -405,6 +406,43 @@ PERMISSION_TOKENS: Final[tuple[str, ...]] = (
     "print",
     "print-highres",
 )
+
+#: PDF-39 member 1 (`B-066`) — the crossing between the two PUBLIC permission
+#: vocabularies. Keys are :data:`PERMISSION_TOKENS` members (the `--allow` and
+#: `permissions` spelling); values are ``DocumentInfo.permissions`` members
+#: (the spelling `info` publishes, decoded by
+#: ``adapters/pypdf_structure.py``'s ``_PERMISSION_BITS``). Only the three
+#: diverging pairs appear here; the five tokens absent from this map are
+#: spelled identically on both surfaces.
+#:
+#: **The disagreement is between two OUTPUT surfaces, not between an input and
+#: an output.** `pdftoolkit info -o json` and `pdftoolkit permissions -o json`
+#: run against the same encrypted document report the same three ISO 32000-1
+#: Table 22 bits (9, 10, 12) under different names, so a consumer diffing one
+#: against the other sees three phantom differences on every encrypted file.
+#: This map is how a consumer crosses between them, and README's published
+#: mapping table is DERIVED from it rather than transcribed beside it.
+#:
+#: **Neither side may be renamed** (X-410): both are shipped public JSON, and
+#: the comment above :data:`PERMISSION_TOKENS` is right that renaming either
+#: would break a published contract. PDF-39 ratifies that judgement and adds
+#: the step it was missing — a mapping on a surface a consumer reads.
+#:
+#: **THE `--allow` INPUT ALIAS IS DELIBERATELY NOT IMPLEMENTED, and this is
+#: the record of that ruling.** Teaching `--allow` to also accept `fill-forms`,
+#: `extract-accessibility` and `print-high-resolution` is X-410-legal and would
+#: spare a consumer the translation entirely. It is REFUSED for cycle 3 because
+#: an accepted input token is permanent from v1.0.0: it could never be
+#: withdrawn without a major bump, so it would spend an irreversible budget to
+#: close a gap a documented table closes reversibly. If a consumer ever asks
+#: for it, this map is shaped so the alias is a three-line change rather than a
+#: redesign. Until then `pdftoolkit encrypt --allow fill-forms` is a usage
+#: error (exit 2), and a test asserts that it stays one.
+PERMISSION_TOKEN_MAP: Final[dict[str, str]] = {
+    "forms": "fill-forms",
+    "accessibility": "extract-accessibility",
+    "print-highres": "print-high-resolution",
+}
 
 #: Tokens the *format* grants whatever was requested. **Measured, not assumed**
 #: (pikepdf 10.12.0 / libqpdf 12.3.2, R=4 and R=6 both): saving with every

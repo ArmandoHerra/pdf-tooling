@@ -431,7 +431,11 @@ def test_the_json_envelope_is_the_published_shape(plain_pdf: Path) -> None:
     assert payload["schema_version"] == 1
     assert payload["verb"] == "info"
     assert isinstance(payload["documents"], list)
-    assert "items" not in payload, "the streaming alias is withheld from -o json"
+    # PDF-39 D4 REVERSED the assertion that used to sit on this line
+    # (`"items" not in payload`, "the streaming alias is kept out of -o json").
+    # `documents` is unchanged and stays the published primary; `items` is an
+    # ADDITION beside it, and the two are the same list.
+    assert payload["items"] == payload["documents"]
 
 
 def test_ndjson_streams_one_full_entry_per_document(plain_pdf: Path, tmp_path: Path) -> None:

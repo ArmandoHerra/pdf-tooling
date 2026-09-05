@@ -13,11 +13,22 @@ THE ENVELOPE KEY IS NOT A FREE CHOICE
 -------------------------------------
 ``PLAN.md`` §3's own usage example is
 ``pdftoolkit doctor -o json | jq '.ports[] | select(.available == false)'``, so
-the ``-o json`` top-level key is ``ports``. The shared NDJSON and table
-renderers stream from ``payload["items"]``, which they own; rather than teach a
-renderer about ``ports``, this module supplies ``items`` as an alias **only in
-the payload handed to those two renderers**. ``-o json`` therefore carries
-``ports`` and nothing redundant, and no shared file was modified to achieve it.
+the ``-o json`` top-level key is ``ports``. It stays ``ports``, verbatim and
+first, and PDF-39's X-410 frame forbids renaming it.
+
+``items`` IS NOW SUPPLIED TO ``-o json`` TOO — A DECISION REVERSED ON THE
+RECORD (PDF-39 D4). This module used to argue that ``items`` belonged only in
+the payload handed to the NDJSON and table renderers, and that ``-o json``
+should carry *"``ports`` and nothing redundant"*. That judgement was
+reasonable and is overturned: the cost it avoided was one duplicated key; the
+cost it imposed was **three spellings of one concept across a single
+`schema_version: 1` public envelope** — ``items`` on the ``OperationResult``
+verbs, ``documents`` on ``info``, ``ports`` here — with no published mapping,
+which a consumer pointing one ``jq`` expression at two verbs discovers the
+hard way. One redundant key is cheaper than a translation table every
+consumer writes for itself. ``ports`` and ``items`` are **the same list**, and
+a test asserts the equality so the two can never drift into meaning different
+things.
 
 STRAY TEMP FILES: REPORT, NEVER SWEEP
 -------------------------------------
@@ -75,31 +86,69 @@ def build_payload(*, strict: bool, dry_run: bool, root: Path | None = None) -> d
     """
     reset_cache()
     reports = resolve_all()
+    rows = [report.to_dict() for report in reports]
+    strays = (
+        [str(path) for path in find_stray_temps(Path.cwd() if root is None else root)]
+        if strict
+        else []
+    )
+    unavailable = [row["port"] for row in rows if not row["available"]]
     payload: dict[str, Any] = {
         "verb": VERB,
         # Immediately after `verb`: the envelope reads
-        # {schema_version, verb, dry_run, strict, ports}. ADDITIVE at
-        # schema_version 1 -- a key added, never renamed or renumbered.
+        # {schema_version, verb, dry_run, strict, ports, items, warnings,
+        # duration_ms, exit_code}. ADDITIVE at schema_version 1 -- a key
+        # added, never renamed or renumbered. PDF-39 added the last four
+        # under that rule, which this comment already authorised.
         "dry_run": dry_run,
         "strict": strict,
-        "ports": [report.to_dict() for report in reports],
+        "ports": rows,
+        # PDF-39 D4: the universal collection key, the SAME list as `ports`.
+        # `ports` stays primary and first; `items` is the alias every other
+        # verb's collection already answers to.
+        "items": rows,
+        # PDF-39 D2: mirrors what this verb actually warns about, so the
+        # envelope cannot claim silence while the process printed a warning.
+        # `doctor_command` logs exactly these lines to stderr. `[]` when there
+        # are none -- never null, never omitted.
+        "warnings": [f"stray toolkit temp file: {stray}" for stray in strays],
+        # PDF-39 D2 -- `0`, chosen and reasoned rather than defaulted.
+        # `cmd_version.py`'s own `duration_ms=0` comment is the precedent and
+        # the reasoning is the same one: engine resolution is a property of
+        # the HOST, not of this run, and a real wall-clock reading would make
+        # two otherwise identical `doctor -o json` invocations differ
+        # byte-for-byte for no informational gain -- on the one verb whose
+        # published promise is that a consumer gets the same shape on every
+        # machine.
+        "duration_ms": 0,
+        # PDF-39 D2/AC6: the code the process will exit with, for the run this
+        # envelope describes -- 3 (ENGINE_MISSING) under `--strict` with any
+        # port unavailable, else 0. DERIVED HERE INDEPENDENTLY of the `Exit`
+        # `doctor_command` raises, deliberately: a payload that simply echoed
+        # the number the process was handed would be a `B-080` tautology, and
+        # the test that compares the envelope against the real process's exit
+        # status could never fail.
+        "exit_code": ENGINE_MISSING if (strict and unavailable) else OK,
     }
     if strict:
-        base = Path.cwd() if root is None else root
-        payload["stray_temp_files"] = [str(path) for path in find_stray_temps(base)]
+        payload["stray_temp_files"] = strays
     return payload
 
 
 def _render(payload: dict[str, Any], fmt: OutputFormat) -> str:
     """Render through PDF-01's renderers, unmodified.
 
-    The ``items`` alias is added for the two renderers that stream from it and
-    withheld from ``-o json``, whose top-level shape is a published contract.
+    **PDF-39 D4 removed this function's format branch, and the removal is the
+    change.** ``items`` used to be spliced in here for the two renderers that
+    stream from it, and kept out of the ``-o json`` branch; it now lives in
+    the payload itself (see :func:`build_payload`), so all three renderers
+    read the one payload and there is no longer a shape that depends on which
+    one asked.
+    The NDJSON and table paths receive exactly the list they received before —
+    ``payload["items"] is payload["ports"]`` — which is why their existing
+    tests pass untouched.
     """
-    if fmt is OutputFormat.JSON:
-        return render_payload(payload, fmt)
-    streamed = {**payload, "items": payload["ports"]}
-    return render_payload(streamed, fmt)
+    return render_payload(payload, fmt)
 
 
 @global_options(consumes=())

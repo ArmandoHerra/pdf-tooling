@@ -305,13 +305,25 @@ def test_ndjson_streams_one_row_per_port_with_no_envelope() -> None:
         assert record["verb"] == "doctor"
 
 
-def test_json_carries_no_redundant_items_alias() -> None:
-    """The alias exists for the streaming renderers and is withheld from ``-o json``.
+def test_json_carries_the_items_alias_beside_ports() -> None:
+    """PDF-39 D4 REVERSED this test's original claim, and the inversion is the
+    record of it.
 
-    ``-o json``'s top level is a published contract; duplicating the six rows
-    under a second key to satisfy a renderer would be a shape nobody asked for.
+    It used to assert ``"items" not in doctor_json()`` on the ground that
+    ``-o json``'s top level is a published contract and duplicating the six
+    rows under a second key would be a shape nobody asked for. That judgement
+    was reasonable and is overturned: the cost it avoided was one duplicated
+    key; the cost it imposed was three spellings of one concept -- ``items``,
+    ``documents`` on ``info``, ``ports`` here -- under one ``schema_version``,
+    documented on no surface a consumer reads.
+
+    ``ports`` is UNCHANGED and stays the published primary (``PLAN.md`` §3's
+    own ``jq '.ports[]'`` example pins it, and X-410 forbids renaming it);
+    ``items`` is an ADDITION beside it, and the two are the same list.
+    ``tests/test_envelope_contract.py`` owns the equality across both verbs.
     """
-    assert "items" not in doctor_json()
+    payload = doctor_json()
+    assert payload["items"] == payload["ports"]
 
 
 def test_table_output_names_the_columns_a_human_reads() -> None:
