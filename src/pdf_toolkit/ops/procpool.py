@@ -46,6 +46,22 @@ chokepoint a chance to discard its temp file before that SIGKILL lands
 (design consideration (e) — trading orphaned processes for orphaned
 ``.pdftoolkit-*`` temp files would not be a fix either).
 
+THE START METHOD IS A PRODUCT DECISION, NOT AN INTERPRETER DEFAULT
+-------------------------------------------------------------------
+**PDF-35, ruling X-401, decided 2026-09-04: ``spawn``, pinned; ``forkserver``
+excluded.** The pool below is built with an explicit ``mp_context=``; see
+:data:`_START_METHOD` for the decision, the measured evidence behind it, and
+why ``fork`` was not chosen either.
+
+**The stdlib claim above is re-verified UNDER ``spawn``, not carried over.**
+``_adjust_process_count()`` -> ``_spawn_process()`` is a property of
+``concurrent.futures.process``, not of the multiprocessing context, so it is
+still called synchronously from ``submit()`` on this product's own main
+thread under ``spawn`` -- PR_SET_PDEATHSIG's "the thread that created it"
+reasoning therefore still holds, and ``executor._processes`` is still the
+only route to worker PIDs. Confirmed by reading the installed stdlib, not
+assumed.
+
 THE GUARANTEE THIS MODULE ACTUALLY MAKES
 -----------------------------------------
 **No NEW output after the parent dies.** "No partial output" is not
@@ -104,6 +120,7 @@ closed set of codes a VERB can itself decide to exit with.
 from __future__ import annotations
 
 import contextlib
+import multiprocessing
 import os
 import signal
 import sys
@@ -114,6 +131,70 @@ from contextlib import contextmanager
 from typing import Final
 
 __all__ = ["guarded_process_pool"]
+
+#: The pool's start method is a PRODUCT DECISION (PDF-35, ruling X-401),
+#: recorded here rather than inherited from whatever the interpreter happens
+#: to default to. Decided 2026-09-04.
+#:
+#: **Why this constant exists at all.** Before PDF-35 the pool was built with
+#: no ``mp_context=``, so the start method was an inherited premise -- `fork`
+#: on CPython 3.11-3.13, and `forkserver` from 3.14, which
+#: ``pyproject.toml``'s ``requires-python = ">=3.11"`` and the CI matrix both
+#: make a SUPPORTED interpreter. A premise nobody chose cannot be defended
+#: and changes underneath the product when the interpreter moves; it did.
+#:
+#: **Why `forkserver` is excluded rather than merely not selected.** It is
+#: the defect. Under `forkserver` a worker is forked from the forkserver
+#: HELPER, so the worker's own parent is a process that outlives the CLI --
+#: and ``PR_SET_PDEATHSIG`` (see :func:`_worker_initializer`) asks the kernel
+#: to kill *this process when its parent dies*. Armed against the helper, it
+#: never fires for a SIGKILLed CLI. Measured on this product, pre-pin, at the
+#: mechanism level with the start method as the only variable: `fork` 0
+#: survivors / 0 post-death output growth, `spawn` 0 / 0, **`forkserver` 8
+#: survivors and output 21 -> 240 files after the parent was reaped** -- i.e.
+#: the job ran to completion with nothing left to have asked for it.
+#:
+#: **Why `spawn` and not `fork`.** One code path on both supported platforms
+#: (macOS has defaulted to `spawn` since 3.8, so every `macos-14` CI run has
+#: been exercising this path end to end since the verb shipped -- it is not a
+#: new path). No AF_UNIX listener exists at all, which moots `deabf608c2`
+#: mechanically rather than mitigating it: `forkserver` binds
+#: ``<TMPDIR>/pymp-XXXXXXXX/listener-XXXXXXXX``, 32 bytes past ``$TMPDIR``
+#: against a 107-character ``sun_path`` ceiling, and `spawn` binds nothing.
+#: And no fork-inheritance of an already-``FPDF_InitLibrary()``'d pdfium
+#: global. `fork` was NOT chosen: pinning it would be a commitment against
+#: CPython's direction of travel, re-examined every release.
+#:
+#: **Verified against the installed stdlib, not assumed -- re-checked under
+#: `spawn`.** The module docstring's load-bearing claim is that
+#: ``_adjust_process_count()`` -> ``_spawn_process()`` is called synchronously
+#: from ``submit()`` on the CALLING thread, which is what makes
+#: ``PR_SET_PDEATHSIG``'s "the thread that created it" reasoning hold. That
+#: is a property of ``concurrent.futures.process``, not of the context, so it
+#: is unchanged by the pin -- confirmed by reading the interpreter this
+#: product runs under. Separately: PDEATHSIG is cleared across ``execve``,
+#: and `spawn` does exec -- but the guard is armed INSIDE
+#: :func:`_worker_initializer`, i.e. AFTER the exec, so the question does not
+#: arise. Both facts are stated because both are the kind a reader will
+#: otherwise re-derive at the next incident.
+#:
+#: PRIVATE. ``__all__`` does not grow: this is a defect fix, not a new
+#: public surface.
+_START_METHOD: Final[str] = "spawn"
+
+
+def _mp_context() -> multiprocessing.context.BaseContext:
+    """The explicit ``multiprocessing`` context the render pool is built with.
+
+    An explicit ``mp_context=`` DEFEATS the ambient default, including one an
+    embedder set with ``multiprocessing.set_start_method()`` -- which is
+    precisely the property PDF-35's end-to-end arm measures, and precisely
+    why ``set_start_method()`` was rejected as the mechanism here: it is a
+    process-global mutation that would change the default for every library
+    the CLI imports rather than for this product's own pool.
+    """
+    return multiprocessing.get_context(_START_METHOD)
+
 
 #: How long a SIGTERM'd worker is given to unwind through its own
 #: `AtomicWriter.__exit__` (discarding an in-flight temp file) before it is
@@ -332,7 +413,11 @@ def guarded_process_pool(max_workers: int) -> Iterator[ProcessPoolExecutor]:
     signals guarded and others not, would be a worse, silently inconsistent
     state than none at all).
     """
-    executor = ProcessPoolExecutor(max_workers=max_workers, initializer=_worker_initializer)
+    executor = ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=_mp_context(),
+        initializer=_worker_initializer,
+    )
     previous: dict[int, object] = {}
     installed = False
 

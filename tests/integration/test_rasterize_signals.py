@@ -97,9 +97,22 @@ pytestmark = [
 _PAGE_COUNT = 32
 _DPI = "400"
 
-#: The `multiprocessing` start method this host will actually use. The product
-#: pins none (`ops/procpool.py` constructs a plain `ProcessPoolExecutor`), so the
-#: CLI subprocess resolves the same platform default this test process does.
+#: The `multiprocessing` start method THIS TEST PROCESS's host defaults to.
+#:
+#: **It describes the host and nothing else.** PDF-35 pinned the product's own
+#: pool to `spawn` (`ops/procpool.py::_START_METHOD`, ruling X-401), so the CLI
+#: subprocess no longer resolves this platform default -- an explicit
+#: `mp_context=` defeats it, which is the whole point of the pin. Before
+#: PDF-35 this constant said "the product pins none", derived the suite's
+#: expectations FROM the ambient default, and was accurate; the pin falsified
+#: it, and correcting it is PDF-35 AC6.
+#:
+#: **No expectation about the CLI may be derived from this value.** A claim
+#: about the product's start method belongs to
+#: `tests/integration/test_render_pool_start_method.py`, which asserts the
+#: product's own declaration and then proves it against the kernel. Left here
+#: only because the module docstring's start-method-agnostic reasoning still
+#: wants to be able to name what the host would have done.
 _START_METHOD: str = multiprocessing.get_start_method()
 
 #: Signal once at least this many pages already exist -- not the first one.
@@ -410,23 +423,18 @@ def test_sighup_to_parent_only_stops_new_output_and_leaves_no_survivors(
     _assert_enumerated_zero_survivors(proc, signal.SIGHUP)
 
 
-@pytest.mark.xfail(
-    _START_METHOD == "forkserver",
-    strict=True,
-    reason=(
-        "PDF-21 finding: PR_SET_PDEATHSIG does not protect a `forkserver` worker. The "
-        "kernel sends the death signal when the worker's OWN parent dies, and under "
-        "`forkserver` that parent is the forkserver helper, not the CLI process -- so a "
-        "SIGKILLed `pdftoolkit` leaves its render workers running AND STILL WRITING PAGES. "
-        "Measured on CI's `test (3.14, ubuntu-latest)` leg: output grew from 16 to 24 files "
-        "after the parent was reaped. Python 3.14 makes `forkserver` the DEFAULT on Linux, "
-        "so this is a live gap on a supported platform, not a hypothetical. Filed, not "
-        "fixed -- PDF-21 is a verification spec and `ops/procpool.py` is Scope > Out; "
-        "changing the start method or arming the guard in the forkserver is a behaviour "
-        "change to a shipped verb and belongs to its own spec. `strict=True` so the day the "
-        "mechanism is repaired this marker fails and has to be removed."
-    ),
-)
+# PDF-21 hung an `xfail(_START_METHOD == "forkserver", strict=True)` marker here,
+# recording that PR_SET_PDEATHSIG does not protect a `forkserver` worker and
+# saying, in its own reason string, *"`strict=True` so the day the mechanism is
+# repaired this marker fails and has to be removed."* PDF-35 repaired the
+# mechanism by pinning the pool to `spawn` (`ops/procpool.py::_START_METHOD`).
+#
+# **The removal was EARNED, not assumed** (PDF-35 AC5). Post-pin, on genuine
+# CPython 3.14.4 -- where the ambient default IS `forkserver`, i.e. the posture
+# the marker was written for -- this arm was observed producing
+# `[XPASS(strict)] ... 1 failed in 6.01s`. The marker failed because the test
+# passed; only then was it deleted. Re-adding it would redden the suite on any
+# such host, which is the free red control this deletion leaves behind.
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason=(

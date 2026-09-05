@@ -255,6 +255,28 @@ def assert_pure(*roots: Path | str) -> Iterator[Snapshot]:
 #: `OSError: AF_UNIX path too long`, and only on 3.14/Linux -- 3.11-3.13 default
 #: `multiprocessing` to `fork` (no socket at all) and macOS to `spawn`. Ten
 #: characters of worker suffix were the whole difference.
+#:
+#: **PDF-35 AMENDMENT (2026-09-04) -- the clause above about THIS PRODUCT is now
+#: false, and the LIMIT IS RETAINED ANYWAY.** `ops/procpool.py` pins the render
+#: pool to `spawn` (ruling X-401), and `spawn` binds no AF_UNIX socket at all,
+#: so `pdftoolkit` no longer contributes to this class: the run that failed in
+#: 33738793820 completes at the same `$TMPDIR` length today. What is retained is
+#: the MECHANISM, because the class is not this product's. It is created
+#: generally by pytest's own `popen-gwN` worker suffixes, and ANY child --
+#: a future library, an engine subprocess, a `multiprocessing` context some
+#: dependency builds for itself -- can still bind under `$TMPDIR`. Deleting a
+#: harness defence because one known cause of it evaporated is the
+#: deletion-instead-of-conditional-degradation error this product has already
+#: ruled on. `_AF_UNIX_SAFE_TMPDIR_LEN` and `_af_unix_safe_tmpdir()` are
+#: therefore UNCHANGED; only this comment's falsified claim is corrected.
+#:
+#: The arithmetic was re-derived against the installed stdlib rather than
+#: transcribed: `connection.arbitrary_address('AF_UNIX')` is
+#: `tempfile.mktemp(prefix='listener-', dir=util.get_temp_dir())` and
+#: `get_temp_dir()` is `tempfile.mkdtemp(prefix='pymp-')`, with an 8-character
+#: `_RandomNameSequence` suffix each -- 6 + 8 + 10 + 8 = **32** past `$TMPDIR`.
+#: `sun_path[108]` (`/usr/include/.../sys/un.h`) and an empirical bind probe
+#: agree that 107 is the last length that binds, so 107 - 32 = **75** stands.
 _AF_UNIX_SAFE_TMPDIR_LEN: Final[int] = 75
 
 

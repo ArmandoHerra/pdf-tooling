@@ -310,3 +310,54 @@ def test_ac12_rasterize_help_states_the_teardown_guarantee_per_platform() -> Non
         "does and does not hold on"
     )
     assert "PR_SET_PDEATHSIG" in text, "the reason for the Linux-only scope is not stated"
+
+
+def test_pdf35_rasterize_help_names_the_pinned_start_method_and_keeps_the_macos_gap() -> None:
+    """PDF-35 AC7 -- the CONTRACT half of the pin, which had no control at all.
+
+    E7, re-derived: `test_ac12_rasterize_help_states_the_teardown_guarantee_per_platform`
+    (immediately above) pins `SIGTERM`/`SIGINT`/`SIGHUP`/`POSIX`/`SIGKILL`/`Linux`/
+    `macOS`/`PR_SET_PDEATHSIG`. **Every one of those tokens survives a corrected
+    help text**, so that test stays green whether or not the help promises the
+    `forkserver` gap -- and, symmetrically, would stay green if a future edit put
+    the promise back. *A test that passes in both states of the thing it is named
+    after is not a control.* This is the control.
+
+    Three assertions, matching D6's three requirements on the corrected paragraph:
+
+    1. **The forkserver promise is GONE.** Before PDF-35 the help told the user, as
+       a shipped property, that SIGKILL coverage *"does not cover the 'forkserver'
+       start method Python 3.14 makes the Linux default"*. The pool is pinned to
+       `spawn` now, so that sentence is false in the user's favour -- which is
+       still false.
+    2. **The pinned start method is NAMED as the reason the Linux guarantee
+       holds.** A help text that merely dropped the caveat would be quieter, not
+       more honest; the user is owed the mechanism.
+    3. **The macOS gap is STILL STATED.** `prctl` is a Linux syscall and macOS
+       genuinely remains uncovered. Softening that would be an anti-gaming
+       violation, and it is asserted here rather than trusted.
+    """
+    text = _rasterize_help()
+
+    assert "forkserver" not in text, (
+        "`rasterize --help` still promises the `forkserver` gap to the user. "
+        "PDF-35 pinned the pool to `spawn` (ops/procpool.py::_START_METHOD), so "
+        "that clause is now false -- and a help text making a false promise in "
+        f"the user's favour is still a false promise. Help text:\n{text}"
+    )
+
+    assert "spawn" in text, (
+        "the help does not name the pinned start method. Dropping the forkserver "
+        "caveat without saying WHY the Linux guarantee now holds makes the text "
+        "quieter rather than more honest: the reason the SIGKILL guarantee "
+        "survives Python 3.14 is that this command pins `spawn` instead of "
+        f"inheriting the interpreter default. Help text:\n{text}"
+    )
+
+    assert "macOS" in text, (
+        "the macOS gap has been dropped from the help. PR_SET_PDEATHSIG is "
+        "`prctl`, a Linux syscall with no macOS equivalent, so a SIGKILLed parent "
+        "on macOS can still leave workers running. The pin did not close that "
+        "half, and softening the contract to look finished is exactly the "
+        f"anti-gaming violation PDF-35 D6 forbids. Help text:\n{text}"
+    )

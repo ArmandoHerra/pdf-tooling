@@ -84,13 +84,13 @@ byte-identical files in the same order (PLAN.md §12 R-08).
 Teardown is stated per platform. On any POSIX platform, SIGTERM, SIGINT or
 SIGHUP sent to this command alone tears the render pool down through one
 routine: no further page is written and no worker outlives it. SIGKILL to
-this command cannot be handled by it at all; the workers are still reaped
-on Linux under the 'fork' and 'spawn' worker start methods, where each asks
-the kernel for PR_SET_PDEATHSIG at start-up. That is a Linux-only facility,
-and it does not cover the 'forkserver' start method Python 3.14 makes the
-Linux default -- a forkserver worker's own parent is the forkserver, not
-this command. So on macOS, and on Python 3.14 for Linux, a SIGKILLed parent
-can leave its workers running: send SIGTERM instead.
+this command cannot be handled by it at all; the workers are still reaped on
+Linux, because this command pins its worker start method to 'spawn' rather
+than inheriting the interpreter default, and every spawned worker asks the
+kernel for PR_SET_PDEATHSIG at start-up. That pinning is what makes the
+guarantee hold on every supported Python, including 3.14. PR_SET_PDEATHSIG
+is a Linux-only facility, so on macOS a SIGKILLed parent can still leave its
+workers running: send SIGTERM instead.
 """
 
 
