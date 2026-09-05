@@ -51,7 +51,8 @@ from pdf_toolkit.cli.password import (
     reject_two_stdin_streams,
 )
 from pdf_toolkit.errors import PdfToolkitError, RefusedError, UsageError
-from pdf_toolkit.ops.crypto import PasswordSource, encrypt_run
+from pdf_toolkit.ops.crypto import encrypt_run
+from pdf_toolkit.ops.document_password import PasswordSource
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.ports.structure import ALWAYS_GRANTED_TOKENS, PERMISSION_TOKENS

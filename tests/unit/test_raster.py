@@ -321,7 +321,7 @@ def test_ac4_worker_arguments_and_return_value_round_trip_through_pickle(
     tmp_path: Path,
 ) -> None:
     source = _make_letter(tmp_path / "src")
-    items = [(0, str(source), 1, str(tmp_path / "out-0001.png"), 150.0, None)]
+    items = [(0, str(source), 1, str(tmp_path / "out-0001.png"), 150.0, None, None)]
     policy = make_policy()
     # Every argument `_render_chunk` receives is plain data -- no pdfium
     # object, no open file handle, no adapter reference.
@@ -393,10 +393,12 @@ def test_ac5_the_planning_handle_is_closed_before_the_executor_is_created(
             return getattr(self._inner, name)
 
         @contextlib.contextmanager
-        def open_document(self, path: object):  # type: ignore[no-untyped-def]
+        def open_document(self, path: object, *, password: object = None):  # type: ignore[no-untyped-def]
             live[0] += 1
             try:
-                with self._inner.open_document(path) as document:  # type: ignore[attr-defined]
+                with self._inner.open_document(  # type: ignore[attr-defined]
+                    path, password=password
+                ) as document:
                     yield document
             finally:
                 live[0] -= 1
@@ -479,27 +481,42 @@ def _worker_pid_probe() -> int:
 
 
 def test_ac5_rasterize_document_never_calls_render_directly() -> None:
-    """Structural proof, independent of any process/thread semantics:
-    `rasterize_document`'s own body calls `_render_chunk` only through
+    """Structural proof, independent of any process/thread semantics: the
+    parent-process call graph reaches `_render_chunk` only through
     `executor.submit(...)`, never `_render_one` or `.render_page(` bare --
     so nothing in the parent's own call stack ever renders a page, whatever
-    the multiprocessing start method turns out to be."""
+    the multiprocessing start method turns out to be.
+
+    PDF-37 split `rasterize_document`'s body in two: the password-
+    resolution loop (a `try`/`finally` around `PasswordResolver`, so
+    `resolver.clear()` runs even on a `_plan_pages` refusal) stays in
+    `rasterize_document` itself; the planning/executor loop this AC actually
+    constrains moved into `_rasterize_planned`, which `rasterize_document`
+    calls SYNCHRONOUSLY -- still on the parent's own stack, never inside a
+    worker. Both functions are walked below for the "never bare-calls a
+    renderer" half of the claim; only `_rasterize_planned` is walked for the
+    "submits `_render_chunk`, by name" half, since that is where the
+    executor now actually lives.
+    """
     import ast
     import inspect
 
-    source = inspect.getsource(raster_module.rasterize_document)
-    tree = ast.parse(source)
-    bare_calls = {
-        node.func.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-    assert "_render_one" not in bare_calls
-    assert "_render_chunk" not in bare_calls
+    for func in (raster_module.rasterize_document, raster_module._rasterize_planned):
+        tree = ast.parse(inspect.getsource(func))
+        bare_calls = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        assert "_render_one" not in bare_calls, f"{func.__qualname__} calls _render_one directly"
+        assert "_render_chunk" not in bare_calls, (
+            f"{func.__qualname__} calls _render_chunk directly, not through executor.submit"
+        )
 
+    planned_tree = ast.parse(inspect.getsource(raster_module._rasterize_planned))
     submitted = {
         node.args[0].id
-        for node in ast.walk(tree)
+        for node in ast.walk(planned_tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "submit"
@@ -528,14 +545,14 @@ def test_ac7_process_pool_and_thread_pool_produce_byte_identical_output(
     source = _make_multipage(tmp_path / "src", pages=8)
     policy = make_policy()
     work = [
-        (slot, str(source), page, str(tmp_path / f"work-{page:04}.png"), 96.0, None)
+        (slot, str(source), page, str(tmp_path / f"work-{page:04}.png"), 96.0, None, None)
         for slot, page in enumerate(range(1, 9), start=0)
     ]
 
     thread_dir = tmp_path / "via_thread"
     thread_dir.mkdir()
     thread_items = [
-        (slot, str(source), page, str(thread_dir / f"page-{page:04}.png"), 96.0, None)
+        (slot, str(source), page, str(thread_dir / f"page-{page:04}.png"), 96.0, None, None)
         for slot, page in enumerate(range(1, 9), start=0)
     ]
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -551,7 +568,7 @@ def test_ac7_process_pool_and_thread_pool_produce_byte_identical_output(
     process_dir = tmp_path / "via_process"
     process_dir.mkdir()
     process_items = [
-        (slot, str(source), page, str(process_dir / f"page-{page:04}.png"), 96.0, None)
+        (slot, str(source), page, str(process_dir / f"page-{page:04}.png"), 96.0, None, None)
         for slot, page in enumerate(range(1, 9), start=0)
     ]
     chunks = [[item] for item in process_items]
@@ -1013,7 +1030,7 @@ def test_ac16_a_render_failure_is_a_failed_item_and_exit_1_never_a_fallback(
     monkeypatch.setattr(raster_module, "require_raster", _flaky)
 
     items = [
-        (slot, str(source), page, str(out_dir / f"src-{page:04}.png"), 96.0, None)
+        (slot, str(source), page, str(out_dir / f"src-{page:04}.png"), 96.0, None, None)
         for slot, page in enumerate(range(1, 4))
     ]
     produced = [
@@ -1161,7 +1178,7 @@ def test_ac26_atomic_writer_refusing_produces_zero_files(
         raise RuntimeError("planted chokepoint failure")
 
     monkeypatch.setattr(atomic_module.AtomicWriter, "__enter__", _boom)
-    items = [(0, str(source), 1, str(out_dir / "src-0001.png"), 96.0, None)]
+    items = [(0, str(source), 1, str(out_dir / "src-0001.png"), 96.0, None, None)]
     with pytest.raises(RuntimeError):
         raster_module._render_chunk(
             items, fmt="png", quality=None, grayscale=False, policy=make_policy()

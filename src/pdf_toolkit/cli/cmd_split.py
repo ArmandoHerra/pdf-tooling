@@ -12,6 +12,7 @@ from typing import Annotated
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.split import split_document
@@ -80,6 +81,18 @@ def split_command(
     """Split one PDF into many, by chunk size, explicit ranges, page or bookmark."""
     config = get_config(ctx)
 
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once, and
+    # only if the source turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     # PLAN.md §10's own contract (mechanized generically by the CLI-contract
     # harness's C5): every verb with a path-taking argument exits 4 on a
     # nonexistent input, unconditionally -- checked here, first, so it wins
@@ -118,6 +131,7 @@ def split_command(
         name_template=config.name,
         out_dir=config.out_dir,
         policy=config.safety,
+        password=password,
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

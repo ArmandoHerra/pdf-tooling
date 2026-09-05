@@ -27,7 +27,8 @@ import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
-from pdf_toolkit.ops.crypto import PasswordSource, permissions_run
+from pdf_toolkit.ops.crypto import permissions_run
+from pdf_toolkit.ops.document_password import PasswordSource
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.paths import classify_operand
 

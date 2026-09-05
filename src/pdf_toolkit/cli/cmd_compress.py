@@ -58,6 +58,7 @@ from typing import Annotated
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.optimize import (
     DEFAULT_IMAGE_DPI,
@@ -173,6 +174,18 @@ def compress_command(
     lossy image pass."""
     config = get_config(ctx)
 
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once, and
+    # only if a source turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     # PLAN.md §10's own contract: every verb with a path-taking argument
     # exits 4 on a nonexistent input, unconditionally -- checked first, so it
     # wins over any other usage error, mirroring every other multi-input verb.
@@ -224,6 +237,7 @@ def compress_command(
         name_template=config.name,
         in_place=config.in_place,
         policy=config.safety,
+        password=password,
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

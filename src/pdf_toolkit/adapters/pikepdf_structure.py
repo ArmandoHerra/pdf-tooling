@@ -108,6 +108,18 @@ _CFM_BY_STREAM_METHOD: Final[dict[str, str]] = {
 }
 
 
+def _password_refusal(password: Secret | None, *, verb: str) -> AuthError:
+    """PDF-37 -- a message that DIFFERS, byte for byte, between "none
+    supplied" and "rejected" (AC6). pikepdf's own ``PasswordError`` does not
+    distinguish the two cases -- a missing password and a wrong one raise
+    the identical exception -- so the distinction is made HERE, from
+    whether a secret was ever offered to :meth:`Secret.reveal` above.
+    """
+    if password is None:
+        return AuthError(f"a password is required to {verb} this document; {PASSWORD_HINT}")
+    return AuthError(f"the supplied password did not unlock this document; {PASSWORD_HINT}")
+
+
 class PikepdfStructureAdapter:
     """The pikepdf-backed ``StructureEngine`` secondary."""
 
@@ -144,7 +156,7 @@ class PikepdfStructureAdapter:
             logger.debug("%s: linearization unreadable (%s)", path, error)
             return False
 
-    def compress(self, data: bytes) -> CompressOutcome:
+    def compress(self, data: bytes, *, password: Secret | None = None) -> CompressOutcome:
         """The `"object-streams"` capability (D-12.1/D-12.2).
 
         Always runs the same structural pass -- ``compress``'s bare form and
@@ -157,7 +169,9 @@ class PikepdfStructureAdapter:
         import pikepdf
 
         try:
-            with pikepdf.Pdf.open(io.BytesIO(data)) as pdf:
+            with pikepdf.Pdf.open(
+                io.BytesIO(data), password=password.reveal() if password is not None else ""
+            ) as pdf:
                 before = _structural_facts(pdf)
                 out_buffer = io.BytesIO()
                 pdf.save(
@@ -168,9 +182,7 @@ class PikepdfStructureAdapter:
                     normalize_content=False,
                 )
         except pikepdf.PasswordError as error:
-            raise AuthError(
-                f"a password is required to compress this document; {PASSWORD_HINT}"
-            ) from error
+            raise _password_refusal(password, verb="compress") from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not open PDF for compression: {error}") from error
 
@@ -187,7 +199,7 @@ class PikepdfStructureAdapter:
             raise FailureError(f"could not read back the compressed output: {error}") from error
         return CompressOutcome(output=output, before=before, after=after)
 
-    def repair(self, data: bytes) -> RepairOutcome:
+    def repair(self, data: bytes, *, password: Secret | None = None) -> RepairOutcome:
         """The `"repair"` capability (D-12.4): libqpdf's own recovery parser,
         via `pikepdf.Pdf.open(..., attempt_recovery=True)`.
 
@@ -203,11 +215,13 @@ class PikepdfStructureAdapter:
         import pikepdf
 
         try:
-            pdf = pikepdf.Pdf.open(io.BytesIO(data), attempt_recovery=True)
+            pdf = pikepdf.Pdf.open(
+                io.BytesIO(data),
+                password=password.reveal() if password is not None else "",
+                attempt_recovery=True,
+            )
         except pikepdf.PasswordError as error:
-            raise AuthError(
-                f"a password is required to repair this document; {PASSWORD_HINT}"
-            ) from error
+            raise _password_refusal(password, verb="repair") from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not recover this document: {error}") from error
 
@@ -244,7 +258,7 @@ class PikepdfStructureAdapter:
             xref_reconstructed=xref_reconstructed,
         )
 
-    def linearize(self, data: bytes) -> bytes:
+    def linearize(self, data: bytes, *, password: Secret | None = None) -> bytes:
         """The `"linearize"` capability (D-12.6).
 
         Verifies internally -- reopen the candidate, `is_linearized` true and
@@ -255,13 +269,13 @@ class PikepdfStructureAdapter:
         import pikepdf
 
         try:
-            with pikepdf.Pdf.open(io.BytesIO(data)) as pdf:
+            with pikepdf.Pdf.open(
+                io.BytesIO(data), password=password.reveal() if password is not None else ""
+            ) as pdf:
                 out_buffer = io.BytesIO()
                 pdf.save(out_buffer, linearize=True)
         except pikepdf.PasswordError as error:
-            raise AuthError(
-                f"a password is required to linearize this document; {PASSWORD_HINT}"
-            ) from error
+            raise _password_refusal(password, verb="linearize") from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not open PDF for linearization: {error}") from error
 

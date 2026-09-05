@@ -3,8 +3,8 @@
 Lives in **L1** because reading a file, an environment variable and a TTY is
 CLI work: ``ops/`` stays a pure function of its arguments (§5.2), so what
 crosses the boundary is a
-:class:`~pdf_toolkit.ops.crypto.PasswordSource` — a safe-to-log *source
-label* plus a thunk — never a value and never an environment.
+:class:`~pdf_toolkit.ops.document_password.PasswordSource` — a safe-to-log
+*source label* plus a thunk — never a value and never an environment.
 
 Resolution order, first hit wins (`PLAN.md` §5.7):
 
@@ -58,7 +58,7 @@ from typing import Final
 
 from pdf_toolkit.cli.common import not_a_readable_file
 from pdf_toolkit.errors import AuthError, UsageError
-from pdf_toolkit.ops.crypto import PasswordSource
+from pdf_toolkit.ops.document_password import PasswordSource
 from pdf_toolkit.output.logging import get_logger
 from pdf_toolkit.secret import Secret
 
@@ -90,10 +90,14 @@ _LOOSE_MODE_MASK: Final[int] = 0o077
 # refusal (in `cli/common.py`, the shared option layer every verb goes
 # through) needed the same constructor: `cli.common` importing THIS module
 # would have made `pdf_toolkit.safety.atomic.AtomicWriter` transitively
-# reachable (via this module's own `ops.crypto` import) from every verb's
-# callback module, silently reclassifying `doctor`/`info`/`version` as
-# "mutating" for `tests/registry.py`'s static AST reachability scan --
-# see `cli/common.py`'s own docstring on the function for the full account.
+# reachable (via this module's own `ops.document_password` import) from
+# every verb's callback module, silently reclassifying `doctor`/`info`/
+# `version` as "mutating" for `tests/registry.py::is_mutating`'s static AST
+# reachability scan -- see `cli/common.py`'s own docstring on the function for the full
+# account. PDF-37 hit the SAME defect via a DIFFERENT path (this module's
+# `PasswordSource` import used to resolve to `ops.crypto`, which legitimately
+# reaches `AtomicWriter`) and closed it the same way: the type now lives in
+# `ops/document_password.py`, which does not.
 
 
 def reject_two_stdin_streams(values: Sequence[str | None]) -> None:

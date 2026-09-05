@@ -94,12 +94,14 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, PdfToolkitError, RefusedError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageRange
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import parse
 from pdf_toolkit.ports.structure import OpenStructureDocument, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
 from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_toolkit.secret import Secret
 
 __all__ = [
     "DEFAULT_PAGES_NAME_TEMPLATE",
@@ -388,6 +390,7 @@ def _plan_pages(
     ordered: bool,
     angle: int | None,
     absolute: bool,
+    password: Secret | None = None,
 ) -> _PagePlan:
     """One input's page plan. Raises the §D5/§4.3 refusals; never writes."""
     selection = _resolve_selection(
@@ -413,7 +416,7 @@ def _plan_pages(
     assert angle is not None  # nosec B101 - the CLI layer requires --angle for rotate
     current: dict[int, int] = {}
     if not absolute:
-        info = require_structure().read_document_info(source, pages=True)
+        info = require_structure().read_document_info(source, pages=True, password=password)
         current = {page.number: page.rotation for page in info.pages}
     pages, stamps = plan_rotate(selection, current, angle=angle, absolute=absolute)
     return _PagePlan(pages, stamps, selection.page_count)
@@ -454,12 +457,56 @@ def _run(
     name_template: str | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
-    """Plan and (unless ``--dry-run``) perform one run, in input order.
+    """Plan and (unless ``--dry-run``) perform one run, in input order. See
+    :func:`_run_with_resolver` for the body -- split out only so the
+    resolved secret (if any) is always cleared, on every return path and
+    every raised exception alike.
+    """
+    resolver = PasswordResolver(password)
+    try:
+        return _run_with_resolver(
+            sources,
+            verb=verb,
+            pages_spec=pages_spec,
+            ordered=ordered,
+            angle=angle,
+            absolute=absolute,
+            output=output,
+            out_dir=out_dir,
+            name_template=name_template,
+            in_place=in_place,
+            policy=policy,
+            resolver=resolver,
+        )
+    finally:
+        resolver.clear()
 
-    Fails closed: every input's selection is resolved before the first byte is
-    written, so a refusal on any input aborts the run and writes nothing. A
-    partially-rewritten set of documents is a wrong result that looks right.
+
+def _run_with_resolver(
+    sources: Sequence[Path],
+    *,
+    verb: str,
+    pages_spec: str,
+    ordered: bool,
+    angle: int | None,
+    absolute: bool,
+    output: Path | None,
+    out_dir: Path | None,
+    name_template: str | None,
+    in_place: bool,
+    policy: SafetyPolicy,
+    resolver: PasswordResolver,
+) -> OperationResult:
+    """Fails closed: every input's selection is resolved before the first
+    byte is written, so a refusal on any input aborts the run and writes
+    nothing. A partially-rewritten set of documents is a wrong result that
+    looks right.
+
+    PDF-37: opening happens identically in both modes at tier 1 (only tier 3's
+    write is gated by ``--dry-run``), so the global ``--password-file``
+    resolvability tier is predicted for free.
     """
     reject_missing_sources(sources)
     if name_template is not None and out_dir is None:
@@ -487,7 +534,8 @@ def _run(
     selection_refusal: PdfToolkitError | None = None
     try:
         for item in planned:
-            with engine.open_document(item.source) as document:
+            secret = resolver.for_source(item.source)
+            with engine.open_document(item.source, password=secret) as document:
                 page_plans.append(
                     _plan_pages(
                         document,
@@ -497,6 +545,7 @@ def _run(
                         ordered=ordered,
                         angle=angle,
                         absolute=absolute,
+                        password=secret,
                     )
                 )
     except (NoInputError, RefusedError) as refusal:
@@ -570,7 +619,8 @@ def _run(
         # adapter its own reader, and `AtomicWriter` writes a temp then
         # `os.replace`s onto the target -- so `--in-place` never reads through
         # a handle whose bytes have already been swapped underneath it.
-        with engine.open_document(item.source) as document:
+        secret = resolver.for_source(item.source)
+        with engine.open_document(item.source, password=secret) as document:
             writer = engine.new_writer()
             writer.append_pages(document, page_plan.page_numbers)
             for index, degrees in page_plan.stamps.items():
@@ -615,6 +665,7 @@ def extract_run(
     out_dir: Path | None,
     name_template: str | None,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """`extract` — ORDERED (§D1). Writes the selected pages to a NEW document,
     in the order given, duplicates preserved.
@@ -635,6 +686,7 @@ def extract_run(
         name_template=name_template,
         in_place=False,
         policy=policy,
+        password=password,
     )
 
 
@@ -647,6 +699,7 @@ def delete_run(
     name_template: str | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """`delete` — SET (§D1). Writes everything *except* the selected pages;
     refuses (exit 5) to produce a zero-page document (§D5)."""
@@ -660,6 +713,7 @@ def delete_run(
         name_template=name_template,
         in_place=in_place,
         policy=policy,
+        password=password,
     )
 
 
@@ -674,6 +728,7 @@ def rotate_run(
     name_template: str | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """`rotate` — SET (§D1). Rotates the selected pages by a multiple of 90°,
     relative by default and absolute under ``--absolute`` (§D4).
@@ -694,6 +749,7 @@ def rotate_run(
         name_template=name_template,
         in_place=in_place,
         policy=policy,
+        password=password,
     )
 
 
@@ -706,6 +762,7 @@ def reorder_run(
     name_template: str | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """`reorder` — ORDERED and total (§D1/§D3). Rewrites page order from an
     explicit sequence; pages the selection does not name are **appended** in
@@ -720,4 +777,5 @@ def reorder_run(
         name_template=name_template,
         in_place=in_place,
         policy=policy,
+        password=password,
     )

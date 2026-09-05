@@ -40,6 +40,12 @@ from typing import Final
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, MetadataReport, OperationResult
+from pdf_toolkit.ops.document_password import (
+    NO_PASSWORD,
+    PasswordResolver,
+    PasswordSource,
+    predict_password_refusal,
+)
 from pdf_toolkit.ports.structure import MetadataFacts, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.paths import classify_operand, read_source_bytes
@@ -159,13 +165,19 @@ def _build_report(source: Path, facts: MetadataFacts, *, include_xmp_raw: bool) 
     )
 
 
-def meta_get_run(source: Path, *, xmp: bool) -> MetadataReport:
+def meta_get_run(
+    source: Path, *, xmp: bool, password: PasswordSource = NO_PASSWORD
+) -> MetadataReport:
     """`meta get` -- read both halves, side by side, plus D2.4's residual
     surfaces. Writes nothing; unaffected by `--dry-run` (D9) -- there is
     nothing to predict."""
     reject_missing_sources([source])
     engine = require_structure()  # X-76: by capability, never by adapter name
-    facts = engine.read_metadata(source)
+    resolver = PasswordResolver(password)
+    try:
+        facts = engine.read_metadata(source, password=resolver.for_source(source))
+    finally:
+        resolver.clear()
     return _build_report(source, facts, include_xmp_raw=xmp)
 
 
@@ -185,12 +197,19 @@ def meta_set_run(
     output: Path | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """`meta set` -- write both halves (D2.2), creating neither, preserving
     the original PdfObject type of every untouched `/Info` key (D2.3, inside
     the adapter). `--in-place`'s confirmation gate (R6/B-079) is the CLI
     layer's job (`cmd_meta_set.py`), mirroring `cmd_rotate.py`'s own call
     site -- this function is called only once the gate has already cleared.
+
+    PDF-37: unlike the read-only verbs above, ``--dry-run`` here does NOT
+    otherwise open the document at all (only the filesystem tier is
+    predicted) -- so the global ``--password-file`` resolvability tier is
+    predicted explicitly, via the same credential-free `read_encryption`
+    check `ops/crypto.py`'s own dry-run predictions already use.
     """
     reject_missing_sources([source])
     if not sets and not clear_producer and not clear_all:
@@ -203,13 +222,18 @@ def meta_set_run(
     plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
 
     if policy.dry_run:
+        refusal = plan.refusal
+        if refusal is None:
+            refusal = predict_password_refusal(source, password=password, verb=VERB_META_SET)
         detail = plan.detail()
+        if refusal is not None and plan.refusal is None:
+            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
         item = ItemResult(
             input=str(source),
             output=str(target),
-            ok=not plan.refused,
-            exit_code=plan.would_exit,
-            message=(f"planned: {VERB_META_SET}" if not plan.refused else plan.message),
+            ok=refusal is None,
+            exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+            message=(f"planned: {VERB_META_SET}" if refusal is None else refusal.message),
             bytes_before=source.stat().st_size,
             bytes_after=None,
             duration_ms=0,
@@ -229,9 +253,18 @@ def meta_set_run(
     engine = require_structure()  # X-76: by capability, never by adapter name
     clears = ["producer"] if clear_producer else []
 
-    outcome = engine.write_metadata(
-        read_source_bytes(source), sets=sets, clears=clears, clear_all=clear_all
-    )
+    resolver = PasswordResolver(password)
+    try:
+        data = read_source_bytes(source)
+        outcome = engine.write_metadata(
+            data,
+            sets=sets,
+            clears=clears,
+            clear_all=clear_all,
+            password=resolver.for_source(source),
+        )
+    finally:
+        resolver.clear()
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(outcome.output)

@@ -669,11 +669,28 @@ def _permissions_invocation(corpus: object, tmp_path: Path) -> list[str]:
 
 
 def _extract_invocation(corpus: object, tmp_path: Path) -> list[str]:
-    """`extract` (PDF-08) -- ORDERED selection, one input, `-O`."""
+    """`extract` (PDF-08) -- ORDERED selection, one input, `-O`.
+
+    PDF-37: ``--pages`` was ``"1,3"`` -- valid against the normal ten-page
+    fixture, but a pre-existing, previously-LATENT defect against
+    `tests/test_password_leaks.py`'s `_EncryptedOperandProxy`, which
+    substitutes the two-page `encrypted_aes256` fixture wherever a verb's
+    own registered invocation would have used a plaintext one. The defect
+    was masked before this spec landed: `extract` raised `AuthError`
+    (password required) before page-range validation ever ran, on EITHER
+    arm of the witness's own no-password/correct-password probe, so
+    "page 3 does not exist on a 2-page document" was never reached. Once
+    the seam this spec adds lets the CORRECT-password arm actually open the
+    document, it reaches page-range validation and reds on the pre-existing
+    mismatch (`PageRangeError`, exit 2) -- a witness-methodology defect this
+    fix surfaced, not one it introduced. ``"1,2"`` is valid on BOTH the
+    normal ten-page fixture (unchanged for every other consumer of this
+    invocation) and the two-page encrypted one.
+    """
     return [
         str(corpus.path("ten_page_text")),  # type: ignore[attr-defined]
         "--pages",
-        "1,3",
+        "1,2",
         "-O",
         str(tmp_path / "registered-invocation-extract.pdf"),
     ]

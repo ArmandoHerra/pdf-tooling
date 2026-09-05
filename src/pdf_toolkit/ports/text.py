@@ -119,7 +119,9 @@ class TextEngine(Protocol):
 
     def probe(self) -> AdapterProbe: ...
 
-    def extract_text(self, path: str, page_numbers: Sequence[int]) -> tuple[str, ...]:
+    def extract_text(
+        self, path: str, page_numbers: Sequence[int], *, password: str | None = None
+    ) -> tuple[str, ...]:
         """Every extractable character of each requested page.
 
         Args:
@@ -128,6 +130,10 @@ class TextEngine(Protocol):
                 request, and no engine object crosses this method's return.
             page_numbers: 1-based page numbers, in the order the caller wants
                 results back.
+            password: PDF-37 -- the REVEALED plaintext, or ``None``. Already
+                confirmed correct by the SAME secret unlocking the primary
+                `StructureEngine` read (`ops/document_password.py`); this
+                method never resolves a password of its own.
 
         Returns:
             One string per requested page, in the requested order. A page that
@@ -135,6 +141,8 @@ class TextEngine(Protocol):
             never a placeholder, never a fabricated line.
 
         Raises:
+            AuthError: Exit 6 — no password was supplied and one is
+                required, or the supplied password did not unlock it.
             FailureError: Exit 1 — the document could not be read. Never a
                 fallback to another engine (`PLAN.md` §7.2).
         """
@@ -152,9 +160,12 @@ class LayoutTextEngine(TextEngine, Protocol):
     """
 
     def extract_lines(
-        self, path: str, page_numbers: Sequence[int]
+        self, path: str, page_numbers: Sequence[int], *, password: str | None = None
     ) -> tuple[tuple[TextLine, ...], ...]:
         """The text lines of each requested page, in the engine's own order.
+
+        Args:
+            password: PDF-37 -- see :meth:`TextEngine.extract_text`.
 
         Returns:
             One tuple of :class:`TextLine` per requested page, in the requested
@@ -163,7 +174,12 @@ class LayoutTextEngine(TextEngine, Protocol):
         ...
 
     def extract_tables(
-        self, path: str, page_numbers: Sequence[int], *, strategy: str
+        self,
+        path: str,
+        page_numbers: Sequence[int],
+        *,
+        strategy: str,
+        password: str | None = None,
     ) -> tuple[tuple[ExtractedTable, ...], ...]:
         """The tables detected on each requested page under *strategy*.
 
@@ -175,6 +191,7 @@ class LayoutTextEngine(TextEngine, Protocol):
         Args:
             strategy: One of :data:`TABLE_STRATEGIES`. Validated by the caller;
                 an adapter may assume it is one of those two.
+            password: PDF-37 -- see :meth:`TextEngine.extract_text`.
 
         Returns:
             One tuple of :class:`ExtractedTable` per requested page, in the

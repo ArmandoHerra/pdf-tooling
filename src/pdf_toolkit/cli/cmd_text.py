@@ -29,6 +29,7 @@ from typing import Annotated, Any
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.textract import TextOutcome, extract_text_run
 from pdf_toolkit.output import OutputFormat, render_payload
@@ -167,6 +168,18 @@ def text_command(
     """Extract text from PDF pages, fast or layout-aware."""
     config = get_config(ctx)
 
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once per
+    # source, and only if that source turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     # PLAN.md §10's own contract (mechanized generically by the CLI-contract
     # harness's C5): every verb with a path-taking argument exits 4 on a
     # nonexistent input, unconditionally -- checked here, first, so it wins over
@@ -184,6 +197,7 @@ def text_command(
         out_dir=config.out_dir,
         name_template=config.name,
         policy=config.safety,
+        password=password,
     )
     _emit(
         outcome,

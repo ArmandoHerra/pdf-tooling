@@ -81,8 +81,42 @@ SENTINELS: Final[dict[str, str]] = {
 
 VERBS: Final[tuple[str, ...]] = ("encrypt", "decrypt", "permissions")
 
-#: The one file permitted to call ``Secret.reveal()`` (`PLAN.md` §5.7).
-REVEAL_ALLOWLIST: Final[frozenset[str]] = frozenset({"adapters/pikepdf_structure.py"})
+#: The files permitted to call ``Secret.reveal()`` (`PLAN.md` §5.7).
+#:
+#: PDF-37 widens this from one file to four, each for a DIFFERENT, necessary
+#: reason -- not a general loosening:
+#:
+#: * ``adapters/pypdf_structure.py`` -- the primary structure adapter gains
+#:   the password-bearing read seam (``open_document``/``read_document_info``
+#:   /``read_metadata``/``write_metadata``); this is the one other place
+#:   pypdf demands a plain ``str``, exactly like pikepdf already does.
+#: * ``ops/raster.py`` -- `rasterize`'s per-page render crosses a REAL
+#:   ``ProcessPoolExecutor`` boundary (module docstring), and a ``Secret``
+#:   refuses to pickle by design; the plaintext is revealed exactly once per
+#:   source, in the main process, immediately before building the picklable
+#:   work-item tuple, and travels no further than that.
+#: * ``ops/ocr.py`` -- `ocr`'s own per-page render calls the SAME
+#:   ``RasterEngine.render_page`` (shared with `rasterize`, so its
+#:   ``password`` parameter is uniformly a plain ``str``), sequentially, in
+#:   this process -- never a worker.
+#: * ``ops/textract.py`` -- `text`/`tables` extraction runs entirely
+#:   in-process, sequentially (module docstring: no worker pool at all), but
+#:   ``TextEngine``'s own ``extract_text``/``extract_lines``/
+#:   ``extract_tables`` (``pdfium_text``/``pdfplumber_text``) take a plain
+#:   ``str`` for the SAME reason ``RasterEngine.render_page`` does: both
+#:   operate on a bare path, never an already-open document.
+#:
+#: Each site is revealed at most once per source and the value is never
+#: bound to a name that outlives the call/tuple it was built for.
+REVEAL_ALLOWLIST: Final[frozenset[str]] = frozenset(
+    {
+        "adapters/pikepdf_structure.py",
+        "adapters/pypdf_structure.py",
+        "ops/raster.py",
+        "ops/ocr.py",
+        "ops/textract.py",
+    }
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -239,7 +273,21 @@ def test_ac1_ac18_a_password_shaped_flag_is_refused_and_never_echoed(
 def test_ac18_the_canonical_flag_still_works_on_every_verb(verb: str, bed: Bed) -> None:
     """The regression control: the removal must not take `--password-file`
     with it. A run that reaches exit 0/4/6 has PARSED the flag; only exit 2
-    would mean it was rejected as unknown."""
+    would mean it was rejected as unknown.
+
+    PDF-37 (X-417/X-435, a RULED contract change): `encrypt` is the one
+    exception, carved out explicitly rather than silently exempted.
+    `encrypt` never consumed the GLOBAL `--password-file` slot (it declares
+    its own `--owner-/--user-password-file` instead) and D2/D4's central
+    consumption check now REFUSES it there -- exit 2, but the "does not
+    accept" shape (`common.py`'s `_check_password_file_consumption`), never
+    Click's own "no such option" -- which is exactly what distinguishes
+    "rejected as unknown" (a real regression this test still catches) from
+    "recognized and refused" (this spec's own, deliberate change). `decrypt`/
+    `permissions`/`info` are UNCHANGED: `--password-file` still resolves
+    to a real plan for all three, so exit 2 there would still mean the flag
+    itself broke.
+    """
     source = bed.plain if verb in {"encrypt", "info"} else bed.encrypted["ascii"]
     args = [verb, str(source), "--password-file", str(bed.password_file["ascii"])]
     if verb in {"encrypt", "decrypt"}:
@@ -247,6 +295,16 @@ def test_ac18_the_canonical_flag_still_works_on_every_verb(verb: str, bed: Bed) 
     if verb == "encrypt":
         args += ["--owner-password-file", str(bed.password_file["ascii"])]
     result = run_cli(*args, env=_clean_env())
+    if verb == "encrypt":
+        assert result.returncode == 2, (
+            f"encrypt should REFUSE --password-file (X-417/X-435): got {result.returncode}: "
+            f"{result.stderr}"
+        )
+        assert "does not accept" in (result.stdout + result.stderr), (
+            "encrypt's refusal should name what it does not accept, not Click's "
+            f"generic unknown-option shape: {result.stdout}{result.stderr}"
+        )
+        return
     assert result.returncode != 2, f"{verb} rejected --password-file: {result.stderr}"
 
 
@@ -1190,28 +1248,24 @@ def test_ac4_the_sixth_shape_is_pinned_by_name(bed: Bed) -> None:
 # goal, and the honoured set is PROBED at runtime, never listed.
 # --------------------------------------------------------------------------- #
 
-#: Measured by this engineer at `bb9008a`, 2026-09-02, against the
-#: `encrypted_aes256` corpus fixture with the CORRECT password -- ledger
-#: `5ff60a280e`. This is a DEFECT baseline, not a contract: a verb LEAVING
-#: this set is a security regression (test below reds it); a verb JOINING it
-#: is welcome (the assertion below is `>=`, never `==`).
+#: PDF-37 -- GROWN from `{decrypt, permissions}` (the ratchet D7 requires,
+#: AC8) to the full measured honoured set, against the `encrypted_aes256`
+#: corpus fixture with the CORRECT password. This is a DEFECT baseline, not
+#: a contract: a verb LEAVING this set is a security regression (test below
+#: reds it); a verb JOINING it is welcome (the assertion below is `>=`,
+#: never `==`).
 #:
-#: **THIS DIFFERS FROM THE LEDGER ROW BY ONE VERB, MEASURED, NOT ASSUMED:**
-#: the ledger names `{decrypt, encrypt, permissions}`. Independently probing
-#: `encrypt` here against the encrypted fixture (its own operand, not
-#: `--owner-/--user-password-file`) shows it refuses with
-#: `"this document is already encrypted; run 'pdftoolkit decrypt' first"`
-#: (exit 5, RefusedError) IDENTICALLY whether `--password-file` is absent or
-#: correct -- `--password-file` never changes `encrypt`'s outcome on an
-#: already-encrypted operand, so it is classified OTHER here, not HONOURED.
-#: Reported to the project-manager; the ledger row is not edited (X-243).
-HONOURED_FLOOR: Final[frozenset[str]] = frozenset({"decrypt", "permissions"})
-
-#: Measured the same way, same date. Matches the ledger row's 18-verb list
-#: verbatim.
-IGNORED_DEFECT_BASELINE: Final[frozenset[str]] = frozenset(
+#: **`decrypt` and `permissions` may never leave this set. `encrypt` may
+#: never join it (X-417/X-424) -- it is `OTHER_OBSERVED` below, invariantly,
+#: through its own already-encrypted refusal (now exit 2 once
+#: `--password-file` is given at all -- D2/D4's central refusal check runs
+#: BEFORE `encrypt`'s own document-refusal logic ever sees the operand).**
+#: The stale ledger `5ff60a280e` `Title` cell reading "honoured by 3" is NOT
+#: evidence and this constant is not edited toward it (X-417).
+HONOURED_FLOOR: Final[frozenset[str]] = frozenset(
     {
         "compress",
+        "decrypt",
         "delete",
         "extract",
         "info",
@@ -1220,6 +1274,7 @@ IGNORED_DEFECT_BASELINE: Final[frozenset[str]] = frozenset(
         "meta get",
         "meta set",
         "ocr",
+        "permissions",
         "rasterize",
         "reorder",
         "repair",
@@ -1232,14 +1287,24 @@ IGNORED_DEFECT_BASELINE: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: PDF-37 -- EMPTIED (the goal D7 names): the eighteen-verb defect this
+#: witness existed to SEE is now extinct. `tests/test_password_file_contract.
+#: py` is the derived, product-wide proof; this frozenset staying empty is
+#: what the arm below (`test_witness_..._the_ignored_set_never_grows`)
+#: continues to protect against a REGRESSION reintroducing it. See
+#: `test_witness_5ff60a280e_the_named_populations_partition_every_verb`'s own
+#: retirement note for the arm that used to require this non-empty.
+IGNORED_DEFECT_BASELINE: Final[frozenset[str]] = frozenset()
+
 #: The residual X-243 warned the ledger's own arithmetic did not name: verbs
 #: whose outcome never depends on `--password-file` at all, for a reason
 #: OTHER than "silently ignored while otherwise needing a password". Named
 #: and counted, never dropped silently. `compose`/`convert`/`create` build
 #: their own non-PDF fixture directly and never touch the encrypted operand;
-#: `doctor`/`version` take no document operand; `encrypt` refuses an
-#: already-encrypted operand before any password is ever consulted (see
-#: `HONOURED_FLOOR`'s own comment above).
+#: `doctor`/`version` take no document operand; `encrypt` refuses
+#: `--password-file` centrally (exit 2, D2/D4) before its own document
+#: refusal is ever reached -- unchanged by PDF-37, still OTHER, never
+#: HONOURED (X-417/X-424).
 OTHER_OBSERVED: Final[frozenset[str]] = frozenset(
     {"compose", "convert", "create", "doctor", "encrypt", "version"}
 )
@@ -1478,9 +1543,15 @@ def test_witness_5ff60a280e_the_named_populations_partition_every_verb() -> None
         f"named sets do not cover the derived verb population. "
         f"missing: {sorted(set(INVOCATIONS) - union)}; extra: {sorted(union - set(INVOCATIONS))}"
     )
-    assert IGNORED_DEFECT_BASELINE, (
-        "this is the defect this witness exists to see -- it must be non-empty"
-    )
+    # RETIRED by PDF-37 (D7/AC9), with this note as the record: this arm used
+    # to assert `IGNORED_DEFECT_BASELINE` non-empty -- "this is the defect
+    # this witness exists to see" -- from landing (`5ff60a280e`, `B-168`)
+    # through PDF-37's own commit. `IGNORED_DEFECT_BASELINE` is now the empty
+    # frozenset (all eighteen verbs it named are HONOURED_FLOOR members), so
+    # the assertion would be false by construction, not a defect returning.
+    # It is retired here, not weakened or narrowed: the class this witness
+    # existed to see is gone, and this comment is the audit trail for why
+    # that assertion no longer runs.
 
 
 # --------------------------------------------------------------------------- #

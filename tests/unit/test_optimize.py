@@ -166,8 +166,8 @@ def test_ac4_a_page_count_mismatch_refuses_and_writes_nothing(
 
     real_compress = pikepdf_structure.PikepdfStructureAdapter.compress
 
-    def _tampered(self: Any, data: bytes) -> CompressOutcome:
-        outcome = real_compress(self, data)
+    def _tampered(self: Any, data: bytes, *, password: object = None) -> CompressOutcome:
+        outcome = real_compress(self, data, password=password)
         tampered_after = outcome.after.__class__(
             page_count=outcome.after.page_count - 1, images=outcome.after.images
         )
@@ -204,8 +204,8 @@ def test_ac4_a_dct_stream_mismatch_refuses_and_writes_nothing(
 
     real_compress = pikepdf_structure.PikepdfStructureAdapter.compress
 
-    def _tampered(self: Any, data: bytes) -> CompressOutcome:
-        outcome = real_compress(self, data)
+    def _tampered(self: Any, data: bytes, *, password: object = None) -> CompressOutcome:
+        outcome = real_compress(self, data, password=password)
         images = list(outcome.after.images)
         assert images, "jpeg_page must carry at least one image XObject"
         first = images[0]

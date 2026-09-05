@@ -508,16 +508,27 @@ class StructureEngine(Protocol):
         fonts: bool = ...,
         pages: bool = ...,
         linearized: bool = ...,
+        password: Secret | None = None,
     ) -> DocumentInfo: ...
 
-    def open_document(self, path: Path) -> OpenStructureDocument:
+    def open_document(self, path: Path, *, password: Secret | None = None) -> OpenStructureDocument:
         """Open *path* for structural reading -- page count and outline.
+
+        Args:
+            password: PDF-37 -- a resolved secret to try when the empty
+                password does not open the document, or ``None``. Never
+                read eagerly by this method's own callers (D3): the ops
+                layer resolves it only once ``read_encryption`` has already
+                confirmed the document is actually encrypted
+                (`ops/document_password.py`), so a plain document never
+                costs a password read at all.
 
         Raises:
             NoInputError: Exit 4 -- the path does not exist.
             FailureError: Exit 1 -- malformed, corrupt or unparseable.
-            AuthError: Exit 6 -- a user password is required and none was
-                supplied.
+            AuthError: Exit 6 -- no password was supplied and one is
+                required, OR the supplied password did not unlock the
+                document -- two distinct, byte-different messages (AC6).
         """
         ...
 
@@ -525,29 +536,39 @@ class StructureEngine(Protocol):
         """A fresh, empty :class:`StructureWriter` for one output."""
         ...
 
-    def compress(self, data: bytes) -> CompressOutcome:
+    def compress(self, data: bytes, *, password: Secret | None = None) -> CompressOutcome:
         """The `"object-streams"` capability (D-12.1/D-12.2): a structural
         recompression pass over an in-memory document — object streams
         generated, streams recompressed — returning the candidate bytes and
         both sides' :class:`StructuralFacts` for D-12.3's Layer 1 gate.
 
+        Args:
+            password: PDF-37 -- a resolved secret, or ``None``. Tried only
+                after the empty password fails, exactly like
+                :meth:`StructureEngine.open_document`.
+
         Raises:
-            AuthError: Exit 6 -- the document is password-protected.
+            AuthError: Exit 6 -- no password was supplied and one is
+                required, or the supplied password did not unlock it.
             FailureError: Exit 1 -- the engine could not process it.
         """
         ...
 
-    def repair(self, data: bytes) -> RepairOutcome:
+    def repair(self, data: bytes, *, password: Secret | None = None) -> RepairOutcome:
         """The `"repair"` capability (D-12.4): reconstruct a damaged
         cross-reference table via libqpdf's own recovery parser.
 
+        Args:
+            password: PDF-37 -- see :meth:`compress`.
+
         Raises:
-            AuthError: Exit 6 -- the document is password-protected.
+            AuthError: Exit 6 -- no password was supplied and one is
+                required, or the supplied password did not unlock it.
             FailureError: Exit 1 -- truly unrecoverable.
         """
         ...
 
-    def linearize(self, data: bytes) -> bytes:
+    def linearize(self, data: bytes, *, password: Secret | None = None) -> bytes:
         """The `"linearize"` capability (D-12.6): rewrite for byte-serving.
 
         Verified internally before returning — check 1 of D-12.6's three
@@ -555,8 +576,12 @@ class StructureEngine(Protocol):
         `check_linearization()` reports no problems) — so a failed
         verification never reaches `AtomicWriter` at all.
 
+        Args:
+            password: PDF-37 -- see :meth:`compress`.
+
         Raises:
-            AuthError: Exit 6 -- the document is password-protected.
+            AuthError: Exit 6 -- no password was supplied and one is
+                required, or the supplied password did not unlock it.
             FailureError: Exit 1 -- the engine could not process it, or the
                 internal verification failed.
         """
@@ -611,15 +636,18 @@ class StructureEngine(Protocol):
     # -- PDF-14 (`meta get`/`meta set`, `watermark`/`stamp`), appended at the
     # end of the Protocol body -------------------------------------------- #
 
-    def read_metadata(self, path: Path) -> MetadataFacts:
+    def read_metadata(self, path: Path, *, password: Secret | None = None) -> MetadataFacts:
         """The `meta get` read (D2, D2.4). Both halves, side by side, plus
         the D2.4 residual-surface facts -- never merged, never guessed.
+
+        Args:
+            password: PDF-37 -- see :meth:`open_document`.
 
         Raises:
             NoInputError: Exit 4 -- the path does not exist.
             FailureError: Exit 1 -- malformed, corrupt or unparseable.
-            AuthError: Exit 6 -- a user password is required and none was
-                supplied.
+            AuthError: Exit 6 -- no password was supplied and one is
+                required, or the supplied password did not unlock it.
         """
         ...
 
@@ -630,6 +658,7 @@ class StructureEngine(Protocol):
         sets: Mapping[str, str],
         clears: Sequence[str],
         clear_all: bool,
+        password: Secret | None = None,
     ) -> MetadataWriteOutcome:
         """The `meta set` write (D2.2/D2.3). Applies ``sets``/``clears`` (or
         clears everything, under ``clear_all``) to `/Info`, and -- only when
@@ -643,8 +672,12 @@ class StructureEngine(Protocol):
         corrupt a field (e.g. a `/Trapped` name object) the caller never
         asked to touch.
 
+        Args:
+            password: PDF-37 -- see :meth:`open_document`.
+
         Raises:
-            AuthError: Exit 6 -- the document is password-protected.
+            AuthError: Exit 6 -- no password was supplied and one is
+                required, or the supplied password did not unlock it.
             FailureError: Exit 1 -- the engine could not process it.
         """
         ...

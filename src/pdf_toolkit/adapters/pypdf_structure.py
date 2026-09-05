@@ -43,6 +43,7 @@ from pdf_toolkit.ports.structure import (
     algorithm_name,
 )
 from pdf_toolkit.safety.paths import source_read_error
+from pdf_toolkit.secret import Secret
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from pypdf import PdfReader
@@ -327,6 +328,46 @@ def _residual_surfaces(reader: PdfReader) -> dict[str, object]:
     }
 
 
+def _unlock_with_password(
+    reader: PdfReader,
+    *,
+    password: Secret | None,
+    path: str | None,
+    message_no_password: str,
+    message_wrong_password: str,
+) -> None:
+    """PDF-37 -- the empty password already failed. Try the supplied secret,
+    if any, and raise a message that DIFFERS, byte for byte, between "none
+    supplied" and "rejected" (AC6) -- the defect this spec exists to close.
+    At `d03bee3` this file's four raise sites emitted the SAME message
+    regardless of whether a password was ever given.
+
+    THIS FILE (alongside ``pikepdf_structure.py``) is the only place
+    permitted to call :meth:`Secret.reveal` -- widening
+    ``tests/test_password_leaks.py::REVEAL_ALLOWLIST`` -- because this
+    is the one place pypdf demands a plain ``str``. The value is passed
+    straight into ``reader.decrypt(...)`` and never bound to a local that
+    outlives the expression, never logged and never returned.
+
+    Never clears *password*: the ops layer that resolved it
+    (`ops/document_password.py`) may still need the same secret for a
+    second engine call (`rasterize`/`ocr`'s raster pass, `text`/`tables`'
+    own extraction engine) and owns its lifecycle end to end.
+
+    Logs the resolution SOURCE (via the caller's already-resolved
+    :class:`~pdf_toolkit.secret.Secret`, whose ``source`` is safe-to-log by
+    construction) and whether verification succeeded -- the two facts X-403
+    licenses and whose absence is the defect (AC14) -- and nothing else.
+    """
+    logger = get_logger("adapters.pypdf")
+    if password is None:
+        raise AuthError(message_no_password, path=path)
+    unlocked = bool(reader.decrypt(password.reveal()))
+    logger.debug("password resolved from %s; password_verified: %s", password.source, unlocked)
+    if not unlocked:
+        raise AuthError(message_wrong_password, path=path)
+
+
 class PypdfStructureAdapter:
     """The pypdf-backed ``StructureEngine``."""
 
@@ -349,6 +390,7 @@ class PypdfStructureAdapter:
         fonts: bool = False,
         pages: bool = False,
         linearized: bool = False,
+        password: Secret | None = None,
     ) -> DocumentInfo:
         """Assemble a :class:`DocumentInfo` for one document.
 
@@ -412,9 +454,16 @@ class PypdfStructureAdapter:
                 logger.debug("%s: decrypt('') raised %s", path, error)
                 unlocked = False
             if not unlocked:
-                raise AuthError(
-                    f"a user password is required to read this document; {PASSWORD_HINT}",
+                _unlock_with_password(
+                    reader,
+                    password=password,
                     path=str(path),
+                    message_no_password=(
+                        f"a user password is required to read this document; {PASSWORD_HINT}"
+                    ),
+                    message_wrong_password=(
+                        f"the supplied password did not unlock this document; {PASSWORD_HINT}"
+                    ),
                 )
 
         try:
@@ -463,14 +512,14 @@ class PypdfStructureAdapter:
             pages=page_details,
         )
 
-    def open_document(self, path: Path) -> PypdfOpenDocument:
+    def open_document(self, path: Path, *, password: Secret | None = None) -> PypdfOpenDocument:
         """D10's read half — see :class:`PypdfOpenDocument` for the shape.
 
         Existence and directory checks are the caller's job (they need to know
         how many operands there were, per `ops/inspect.py`'s own precedent) --
         this method's own contract starts at "the path exists and is a file."
         """
-        return PypdfOpenDocument(path)
+        return PypdfOpenDocument(path, password=password)
 
     def new_writer(self) -> PypdfStructureWriter:
         """D10's write half — see :class:`PypdfStructureWriter`."""
@@ -564,7 +613,7 @@ class PypdfStructureAdapter:
 
     # -- PDF-14 (`meta get`/`meta set`), appended at the end of the class --- #
 
-    def read_metadata(self, path: Path) -> MetadataFacts:
+    def read_metadata(self, path: Path, *, password: Secret | None = None) -> MetadataFacts:
         """The `meta get` read (D2, D2.4)."""
         from pypdf import PdfReader
         from pypdf.errors import PdfReadError
@@ -596,10 +645,18 @@ class PypdfStructureAdapter:
                 logger.debug("%s: decrypt('') raised %s", path, error)
                 unlocked = False
             if not unlocked:
-                raise AuthError(
-                    "a user password is required to read this document's metadata; "
-                    f"{PASSWORD_HINT}",
+                _unlock_with_password(
+                    reader,
+                    password=password,
                     path=str(path),
+                    message_no_password=(
+                        "a user password is required to read this document's metadata; "
+                        f"{PASSWORD_HINT}"
+                    ),
+                    message_wrong_password=(
+                        "the supplied password did not unlock this document's metadata; "
+                        f"{PASSWORD_HINT}"
+                    ),
                 )
 
         try:
@@ -620,6 +677,7 @@ class PypdfStructureAdapter:
         sets: Mapping[str, str],
         clears: Sequence[str],
         clear_all: bool,
+        password: Secret | None = None,
     ) -> MetadataWriteOutcome:
         """The `meta set` write (D2.2/D2.3)."""
         from pypdf import PdfReader, PdfWriter
@@ -639,9 +697,18 @@ class PypdfStructureAdapter:
             except Exception:
                 unlocked = False
             if not unlocked:
-                raise AuthError(
-                    "a user password is required to write this document's metadata; "
-                    f"{PASSWORD_HINT}"
+                _unlock_with_password(
+                    reader,
+                    password=password,
+                    path=None,
+                    message_no_password=(
+                        "a user password is required to write this document's metadata; "
+                        f"{PASSWORD_HINT}"
+                    ),
+                    message_wrong_password=(
+                        "the supplied password did not unlock this document's metadata; "
+                        f"{PASSWORD_HINT}"
+                    ),
                 )
 
         # `clone_from=reader` -- not `writer.append(reader)` -- is what makes
@@ -796,8 +863,9 @@ class PypdfOpenDocument:
     rather than left to pypdf's own lifecycle, which does not expose one.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, password: Secret | None = None) -> None:
         self._path = path
+        self._password = password
         self._handle: BinaryIO | None = None
         self._reader: PdfReader | None = None
 
@@ -834,11 +902,21 @@ class PypdfOpenDocument:
             # property happened to touch `.pages` first.
             len(reader.pages)
         except FileNotDecryptedError as error:
-            handle.close()
-            raise AuthError(
-                f"a password is required to open this document; {PASSWORD_HINT}",
-                path=str(self._path),
-            ) from error
+            try:
+                _unlock_with_password(
+                    reader,
+                    password=self._password,
+                    path=str(self._path),
+                    message_no_password=(
+                        f"a password is required to open this document; {PASSWORD_HINT}"
+                    ),
+                    message_wrong_password=(
+                        f"the supplied password did not unlock this document; {PASSWORD_HINT}"
+                    ),
+                )
+            except AuthError as unlock_error:
+                handle.close()
+                raise unlock_error from error
         except PdfReadError as error:
             handle.close()
             raise FailureError(f"could not read PDF: {error}", path=str(self._path)) from error

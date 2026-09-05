@@ -20,10 +20,11 @@ crosses this method's return, only plain strings.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Final
+from typing import Any, Final
 
 from pdf_toolkit.adapters import AdapterProbe, package_probe
-from pdf_toolkit.errors import FailureError
+from pdf_toolkit.errors import AuthError, FailureError
+from pdf_toolkit.ports.structure import PASSWORD_HINT
 
 __all__ = ["ADAPTER", "CAPABILITY_SUMMARY", "PdfiumTextAdapter"]
 
@@ -35,6 +36,30 @@ _CAPABILITIES: Final[frozenset[str]] = frozenset({"text", "fast-text"})
 
 #: Rendered into ``TextEngine``'s ``detail``.
 CAPABILITY_SUMMARY: Final[str] = "fast text extraction, no layout analysis"
+
+
+def _open(path: str, *, password: str | None) -> Any:
+    """PDF-37 -- open *path*, converting pdfium's own undifferentiated
+    ``PdfiumError`` into a byte-different :class:`AuthError` for "none
+    supplied" versus "rejected" (AC6), exactly like ``pdfium_raster``'s own
+    :meth:`~pdf_toolkit.adapters.pdfium_raster.PdfiumRasterAdapter.render_page`.
+    A non-password failure (a genuinely corrupt file) is left as
+    :class:`FailureError`, unchanged.
+    """
+    import pypdfium2 as pdfium  # type: ignore[import-untyped]
+
+    try:
+        return pdfium.PdfDocument(path, password=password)
+    except pdfium.PdfiumError as error:
+        if "password" not in str(error).lower():
+            raise FailureError(f"{path}: could not be opened: {error}", path=path) from error
+        if password is None:
+            raise AuthError(
+                f"a password is required to read this document; {PASSWORD_HINT}", path=path
+            ) from error
+        raise AuthError(
+            f"the supplied password did not unlock this document; {PASSWORD_HINT}", path=path
+        ) from error
 
 
 class PdfiumTextAdapter:
@@ -52,7 +77,9 @@ class PdfiumTextAdapter:
     def probe(self) -> AdapterProbe:
         return package_probe(_MODULE, _DISTRIBUTION)
 
-    def extract_text(self, path: str, page_numbers: Sequence[int]) -> tuple[str, ...]:
+    def extract_text(
+        self, path: str, page_numbers: Sequence[int], *, password: str | None = None
+    ) -> tuple[str, ...]:
         """See the Protocol docstring in ``ports/text.py``.
 
         The engine import is function-local (``adapters/__init__``'s rule 1):
@@ -65,9 +92,14 @@ class PdfiumTextAdapter:
         non-empty, so fabricating anything here would destroy another verb's
         proof.
         """
-        import pypdfium2 as pdfium  # type: ignore[import-untyped]
+        # No `# type: ignore[import-untyped]` here: `_open` above already
+        # imports this same stub-less module once in this file, and mypy
+        # does not re-emit the missing-stub diagnostic for a second
+        # function-local import of it -- confirmed by `mypy --strict`
+        # itself flagging THIS ignore as unused once `_open` existed.
+        import pypdfium2 as pdfium
 
-        document = pdfium.PdfDocument(path)
+        document = _open(path, password=password)
         try:
             texts: list[str] = []
             for page_number in page_numbers:

@@ -74,7 +74,7 @@ stays here.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -88,6 +88,7 @@ from pdf_toolkit.errors import (
 )
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.document_password import PasswordSource, unresolvable_password_error
 from pdf_toolkit.ports.structure import (
     ALWAYS_GRANTED_TOKENS,
     PERMISSION_TOKENS,
@@ -139,63 +140,21 @@ _NOT_ENCRYPTED: Final[str] = "document is not encrypted; nothing to decrypt"
 
 # --------------------------------------------------------------------------- #
 # The password seam
+#
+# PDF-37: `PasswordSource` (and its own `_unresolvable`) moved OUT of this
+# module to `ops/document_password.py`, imported above. This module keeps
+# `AtomicWriter`/`safety.atomic` reachable -- correctly: `encrypt`/`decrypt`/
+# `permissions` DO write. But eighteen OTHER, report-only verbs now build a
+# `PasswordSource` too (`ops/pages.py`, `ops/inspect.py`, ...), and several
+# of them (`info`, `meta get`) must NOT become reachable to `AtomicWriter` by
+# transitively importing INTO this module for the type alone
+# (`tests/registry.py::is_mutating`'s `reaches_atomic_writer`-backed static
+# walk would reclassify them -- measured, not assumed: this is the exact defect
+# `not_a_readable_file`'s own docstring already named and avoided once, for
+# `cli/common.py`, hit again here via a different import path). Moving the
+# type the OTHER way -- this module now depends on the shared one, never the
+# reverse -- is what breaks that path.
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True, slots=True)
-class PasswordSource:
-    """One password slot, as the CLI layer *planned* it — never as it read it.
-
-    Attributes:
-        slot: ``"owner"`` | ``"user"`` | ``"password"``. Names the plan key
-            this slot renders under, so a caller never has to build one.
-        source: The safe-to-log label — ``"file:/home/u/pw.txt"``,
-            ``"stdin"``, ``"env:PDF_TOOLKIT_PASSWORD"``, ``"prompt"`` — or
-            ``None`` when *nothing* could supply a password. ``None`` is
-            decided from existence alone: no file was read, no variable's
-            value was read, nothing was prompted.
-        read: The thunk that actually resolves the value. Called **only** on a
-            real run, **only** after the filesystem tier has been planned, and
-            never under ``--dry-run``.
-    """
-
-    slot: str
-    source: str | None
-    read: Callable[[], Secret] | None = None
-
-    @property
-    def resolvable(self) -> bool:
-        return self.source is not None
-
-    def resolve(self) -> Secret:
-        """Read the value. Callers reach this only after ``_plan`` cleared the
-        resolvability tier, so a ``None`` thunk here is a broken invariant --
-        raised as the honest exit-6 rather than asserted away (``assert`` is
-        stripped under ``-O`` and `bandit` B101 flags it for exactly that
-        reason)."""
-        if self.read is None:
-            raise _unresolvable(self.slot)
-        return self.read()
-
-    @property
-    def key(self) -> str:
-        """The plan/result key this slot's label is rendered under.
-
-        ``owner`` -> ``owner_password_source``, ``user`` ->
-        ``user_password_source``, and the single-slot ``password`` ->
-        ``password_source`` rather than the stuttering
-        ``password_password_source``.
-        """
-        return "password_source" if self.slot == "password" else f"{self.slot}_password_source"
-
-
-def _unresolvable(slot: str) -> AuthError:
-    return AuthError(
-        f"no {slot} password available: pass --{slot}-password-file PATH "
-        f"(or '-' to read one line from stdin), set the matching environment "
-        f"variable, or run on a terminal to be prompted",
-        redacted=True,
-    )
 
 
 def _password_detail(sources: Sequence[PasswordSource], *, verified: bool) -> dict[str, object]:
@@ -295,7 +254,7 @@ def _plan(
         return _Prediction(refusal=document_refusal)
     for source in passwords:
         if not source.resolvable:
-            return _Prediction(refusal=_unresolvable(source.slot))
+            return _Prediction(refusal=unresolvable_password_error(source.slot))
     return _Prediction(refusal=None)
 
 

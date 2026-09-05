@@ -53,6 +53,7 @@ from typing import Annotated
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.pages import extract_run, reject_missing_sources
 from pdf_toolkit.output import emit_result
@@ -101,6 +102,18 @@ def extract_command(
     """Write selected pages to a new PDF, in the order given."""
     config = get_config(ctx)
 
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once, and
+    # only if a source turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     # `PLAN.md` §10's own contract: every verb with a path-taking argument
     # exits 4 on a nonexistent input, unconditionally -- checked FIRST, so it
     # wins over any other usage error, mirroring every other multi-input verb.
@@ -123,6 +136,7 @@ def extract_command(
         out_dir=config.out_dir,
         name_template=config.name,
         policy=config.safety,
+        password=password,
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

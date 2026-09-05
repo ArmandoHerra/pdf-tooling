@@ -44,15 +44,22 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
-from pdf_toolkit.errors import AuthError, FailureError, NoInputError, UsageError
+from pdf_toolkit.errors import AuthError, FailureError, NoInputError, PdfToolkitError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageRange
+from pdf_toolkit.ops.document_password import (
+    NO_PASSWORD,
+    PasswordResolver,
+    PasswordSource,
+    predict_password_refusal,
+)
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.compose import require_compose
 from pdf_toolkit.ports.structure import require_composite, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, PlannedOutputs, plan_filesystem
 from pdf_toolkit.safety.paths import classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_toolkit.secret import Secret
 
 __all__ = [
     "DEFAULT_COLOR",
@@ -135,15 +142,29 @@ def _resolve_target(source: Path, *, output: Path | None, in_place: bool, verb: 
 
 
 def _dry_run_result(
-    verb: str, *, source: Path, target: Path, plan: PlannedOutputs
+    verb: str,
+    *,
+    source: Path,
+    target: Path,
+    plan: PlannedOutputs,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
+    """PDF-37: neither `watermark` nor `stamp` otherwise opens the document
+    under ``--dry-run``, so the global ``--password-file`` resolvability
+    tier is predicted here explicitly, in the SAME tier as the filesystem
+    refusal (never the correctness tier, X-89)."""
+    refusal: PdfToolkitError | None = plan.refusal
+    if refusal is None:
+        refusal = predict_password_refusal(source, password=password, verb=verb)
     detail = plan.detail()
+    if refusal is not None and plan.refusal is None:
+        detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
     item = ItemResult(
         input=str(source),
         output=str(target),
-        ok=not plan.refused,
-        exit_code=plan.would_exit,
-        message=(f"planned: {verb}" if not plan.refused else plan.message),
+        ok=refusal is None,
+        exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+        message=(f"planned: {verb}" if refusal is None else refusal.message),
         bytes_before=source.stat().st_size,
         bytes_after=None,
         duration_ms=0,
@@ -177,6 +198,7 @@ def watermark_run(
     output: Path | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Composite a generated text layer onto the selected pages (Design D3).
 
@@ -191,90 +213,97 @@ def watermark_run(
     target = _resolve_target(source, output=output, in_place=in_place, verb=VERB_WATERMARK)
     plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
     if policy.dry_run:
-        return _dry_run_result(VERB_WATERMARK, source=source, target=target, plan=plan)
+        return _dry_run_result(
+            VERB_WATERMARK, source=source, target=target, plan=plan, password=password
+        )
 
     started = time.monotonic()
     bytes_before = source.stat().st_size
     structure_engine = require_composite()  # X-76: "composite" (pypdf only)
     compose_engine = require_compose(capability="text-layer")
+    resolver = PasswordResolver(password)
 
-    with structure_engine.open_document(source) as document:
-        page_count = document.page_count
-        selection = _resolve_pages(pages_spec, page_count)
-        if selection.is_empty:
-            raise NoInputError(
-                f"{source}: --pages {(pages_spec or ALL_PAGES_TOKEN)!r} resolved to zero pages; "
-                f"nothing to {VERB_WATERMARK}",
-                path=str(source),
-            )
-        selected = sorted(selection.as_set())
-
-        # Per-page geometry comes from the EXISTING `read_document_info(...,
-        # pages=True)` path -- `rotate`'s own precedent (`ops/pages.py`):
-        # never a new port method for a fact an existing one already reports.
-        info = structure_engine.read_document_info(source, pages=True)
-        geometry_by_page = {page.number: (page.width_pt, page.height_pt) for page in info.pages}
-
-        pages_by_geometry: dict[tuple[float, float], list[int]] = {}
-        for number in selected:
-            pages_by_geometry.setdefault(geometry_by_page[number], []).append(number)
-
-        # Design D3.1 -- the writer is created and the FULL page range
-        # appended BEFORE any compositing, the reverse of this module's own
-        # ordering before `PDF-23`: `composite_layer` now operates on
-        # `writer`'s own already-appended pages, never the reader's.
-        writer = structure_engine.new_writer()
-        writer.append_pages(document, list(range(1, page_count + 1)))
-
-        layer_cache: dict[tuple[float, float], bytes] = {}
-        composited: list[int] = []
-        copied: list[int] = []
-        blank: list[int] = []
-        for geometry, numbers in pages_by_geometry.items():
-            if geometry not in layer_cache:
-                buffer = io.BytesIO()
-                compose_engine.render_text_layer(
-                    text,
-                    page_size=geometry,
-                    font=WATERMARK_FONT,
-                    font_size=font_size,
-                    color=color,
-                    opacity=opacity,
-                    rotate_deg=rotate_deg,
-                    out=buffer,
+    try:
+        secret = resolver.for_source(source)
+        with structure_engine.open_document(source, password=secret) as document:
+            page_count = document.page_count
+            selection = _resolve_pages(pages_spec, page_count)
+            if selection.is_empty:
+                raise NoInputError(
+                    f"{source}: --pages {(pages_spec or ALL_PAGES_TOKEN)!r} resolved to zero "
+                    f"pages; nothing to {VERB_WATERMARK}",
+                    path=str(source),
                 )
-                layer_cache[geometry] = buffer.getvalue()
-            outcome = structure_engine.composite_layer(
-                writer, layer=layer_cache[geometry], pages=numbers, position=position
-            )
-            composited.extend(outcome.pages_composited)
-            copied.extend(outcome.pages_copied)
-            blank.extend(outcome.blank_pages)
+            selected = sorted(selection.as_set())
 
-        with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
-            writer.write(atomic.stream)
+            # Per-page geometry comes from the EXISTING `read_document_info(...,
+            # pages=True)` path -- `rotate`'s own precedent (`ops/pages.py`):
+            # never a new port method for a fact an existing one already reports.
+            info = structure_engine.read_document_info(source, pages=True, password=secret)
+            geometry_by_page = {page.number: (page.width_pt, page.height_pt) for page in info.pages}
 
-    bytes_after = target.stat().st_size
-    duration_ms = int((time.monotonic() - started) * 1000)
-    item = ItemResult(
-        input=str(source),
-        output=str(target),
-        ok=True,
-        exit_code=0,
-        message=f"watermarked {len(composited)} page(s)",
-        bytes_before=bytes_before,
-        bytes_after=bytes_after,
-        duration_ms=duration_ms,
-        detail={"pages_composited": sorted(composited), "pages_copied": sorted(copied)},
-    )
-    return OperationResult(
-        schema_version=_SCHEMA_VERSION,
-        verb=VERB_WATERMARK,
-        dry_run=False,
-        items=(item,),
-        warnings=_blank_warning(tuple(blank)),
-        duration_ms=0,
-    )
+            pages_by_geometry: dict[tuple[float, float], list[int]] = {}
+            for number in selected:
+                pages_by_geometry.setdefault(geometry_by_page[number], []).append(number)
+
+            # Design D3.1 -- the writer is created and the FULL page range
+            # appended BEFORE any compositing, the reverse of this module's own
+            # ordering before `PDF-23`: `composite_layer` now operates on
+            # `writer`'s own already-appended pages, never the reader's.
+            writer = structure_engine.new_writer()
+            writer.append_pages(document, list(range(1, page_count + 1)))
+
+            layer_cache: dict[tuple[float, float], bytes] = {}
+            composited: list[int] = []
+            copied: list[int] = []
+            blank: list[int] = []
+            for geometry, numbers in pages_by_geometry.items():
+                if geometry not in layer_cache:
+                    buffer = io.BytesIO()
+                    compose_engine.render_text_layer(
+                        text,
+                        page_size=geometry,
+                        font=WATERMARK_FONT,
+                        font_size=font_size,
+                        color=color,
+                        opacity=opacity,
+                        rotate_deg=rotate_deg,
+                        out=buffer,
+                    )
+                    layer_cache[geometry] = buffer.getvalue()
+                outcome = structure_engine.composite_layer(
+                    writer, layer=layer_cache[geometry], pages=numbers, position=position
+                )
+                composited.extend(outcome.pages_composited)
+                copied.extend(outcome.pages_copied)
+                blank.extend(outcome.blank_pages)
+
+            with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
+                writer.write(atomic.stream)
+
+        bytes_after = target.stat().st_size
+        duration_ms = int((time.monotonic() - started) * 1000)
+        item = ItemResult(
+            input=str(source),
+            output=str(target),
+            ok=True,
+            exit_code=0,
+            message=f"watermarked {len(composited)} page(s)",
+            bytes_before=bytes_before,
+            bytes_after=bytes_after,
+            duration_ms=duration_ms,
+            detail={"pages_composited": sorted(composited), "pages_copied": sorted(copied)},
+        )
+        return OperationResult(
+            schema_version=_SCHEMA_VERSION,
+            verb=VERB_WATERMARK,
+            dry_run=False,
+            items=(item,),
+            warnings=_blank_warning(tuple(blank)),
+            duration_ms=0,
+        )
+    finally:
+        resolver.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -290,18 +319,24 @@ def _validate_from_path(from_path: Path) -> None:
     )
 
 
-def _extract_stamp_layer(from_path: Path, from_page: int) -> bytes:
+def _extract_stamp_layer(
+    from_path: Path, from_page: int, *, password: Secret | None = None
+) -> bytes:
     """Design §D4.5 -- resolve `--from`/`--from-page` into a one-page PDF,
     BEFORE the target document is ever opened, so a bad `--from` refuses
     without touching the target at all. Reuses the EXISTING D10 primitive
     (`open_document` + `new_writer` + `append_pages` + `write`) rather than
     a new adapter method -- extracting one page IS what that primitive
     already does.
+
+    PDF-37: ``--from`` is checked against the SAME global secret as
+    ``source`` -- one shared ``--password-file`` flag, reused wherever it is
+    needed within one invocation.
     """
     _validate_from_path(from_path)
     engine = require_structure()  # X-76: unqualified -- pypdf is primary
     try:
-        with engine.open_document(from_path) as from_document:
+        with engine.open_document(from_path, password=password) as from_document:
             from_page_count = from_document.page_count
             if not (1 <= from_page <= from_page_count):
                 raise UsageError(
@@ -336,6 +371,7 @@ def stamp_run(
     output: Path | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Composite an existing PDF page (`--from`/`--from-page`) onto the
     selected pages of *source* (Design D4.5)."""
@@ -343,57 +379,66 @@ def stamp_run(
     target = _resolve_target(source, output=output, in_place=in_place, verb=VERB_STAMP)
     plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
     if policy.dry_run:
-        return _dry_run_result(VERB_STAMP, source=source, target=target, plan=plan)
+        return _dry_run_result(
+            VERB_STAMP, source=source, target=target, plan=plan, password=password
+        )
 
     started = time.monotonic()
     bytes_before = source.stat().st_size
+    resolver = PasswordResolver(password)
 
-    layer_bytes = _extract_stamp_layer(from_path, from_page)
-
-    structure_engine = require_composite()  # X-76: "composite" (pypdf only)
-    with structure_engine.open_document(source) as document:
-        page_count = document.page_count
-        selection = _resolve_pages(pages_spec, page_count)
-        if selection.is_empty:
-            raise NoInputError(
-                f"{source}: --pages {(pages_spec or ALL_PAGES_TOKEN)!r} resolved to zero pages; "
-                f"nothing to {VERB_STAMP}",
-                path=str(source),
-            )
-        selected = sorted(selection.as_set())
-
-        # Design D3.1 -- writer created, full range appended, BEFORE compositing.
-        writer = structure_engine.new_writer()
-        writer.append_pages(document, list(range(1, page_count + 1)))
-
-        outcome = structure_engine.composite_layer(
-            writer, layer=layer_bytes, pages=selected, position=position
+    try:
+        layer_bytes = _extract_stamp_layer(
+            from_path, from_page, password=resolver.for_source(from_path)
         )
 
-        with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
-            writer.write(atomic.stream)
+        structure_engine = require_composite()  # X-76: "composite" (pypdf only)
+        secret = resolver.for_source(source)
+        with structure_engine.open_document(source, password=secret) as document:
+            page_count = document.page_count
+            selection = _resolve_pages(pages_spec, page_count)
+            if selection.is_empty:
+                raise NoInputError(
+                    f"{source}: --pages {(pages_spec or ALL_PAGES_TOKEN)!r} resolved to zero "
+                    f"pages; nothing to {VERB_STAMP}",
+                    path=str(source),
+                )
+            selected = sorted(selection.as_set())
 
-    bytes_after = target.stat().st_size
-    duration_ms = int((time.monotonic() - started) * 1000)
-    item = ItemResult(
-        input=str(source),
-        output=str(target),
-        ok=True,
-        exit_code=0,
-        message=f"stamped {len(outcome.pages_composited)} page(s)",
-        bytes_before=bytes_before,
-        bytes_after=bytes_after,
-        duration_ms=duration_ms,
-        detail={
-            "pages_composited": sorted(outcome.pages_composited),
-            "pages_copied": sorted(outcome.pages_copied),
-        },
-    )
-    return OperationResult(
-        schema_version=_SCHEMA_VERSION,
-        verb=VERB_STAMP,
-        dry_run=False,
-        items=(item,),
-        warnings=_blank_warning(outcome.blank_pages),
-        duration_ms=0,
-    )
+            # Design D3.1 -- writer created, full range appended, BEFORE compositing.
+            writer = structure_engine.new_writer()
+            writer.append_pages(document, list(range(1, page_count + 1)))
+
+            outcome = structure_engine.composite_layer(
+                writer, layer=layer_bytes, pages=selected, position=position
+            )
+
+            with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
+                writer.write(atomic.stream)
+
+        bytes_after = target.stat().st_size
+        duration_ms = int((time.monotonic() - started) * 1000)
+        item = ItemResult(
+            input=str(source),
+            output=str(target),
+            ok=True,
+            exit_code=0,
+            message=f"stamped {len(outcome.pages_composited)} page(s)",
+            bytes_before=bytes_before,
+            bytes_after=bytes_after,
+            duration_ms=duration_ms,
+            detail={
+                "pages_composited": sorted(outcome.pages_composited),
+                "pages_copied": sorted(outcome.pages_copied),
+            },
+        )
+        return OperationResult(
+            schema_version=_SCHEMA_VERSION,
+            verb=VERB_STAMP,
+            dry_run=False,
+            items=(item,),
+            warnings=_blank_warning(outcome.blank_pages),
+            duration_ms=0,
+        )
+    finally:
+        resolver.clear()

@@ -29,6 +29,7 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import PageRangeError, parse
 from pdf_toolkit.ports.structure import OpenStructureDocument, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
@@ -164,12 +165,17 @@ def split_document(
     name_template: str | None,
     out_dir: Path,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Split *source* into ``out_dir``, by *mode* (Design §D4, §D8).
 
     ``items`` carries **one row per output part** (D8): ``input`` is
     *source* on every row, ``output`` the part path, ``message`` the
     resolved extent ("pages 1-10").
+
+    PDF-37: opening happens identically in both modes (only the write loop
+    is gated by ``--dry-run``), so the global ``--password-file``
+    resolvability tier is predicted for free.
     """
     classify_operand(source)
 
@@ -179,116 +185,120 @@ def split_document(
         raise UsageError("'{page}' is only available with --each-page")
 
     engine = require_structure()
-    with engine.open_document(source) as document:
-        page_count = document.page_count
-        parts = _resolve_parts(
-            mode, document, source, page_count=page_count, every=every, ranges=ranges
-        )
-
-        nonzero = [part for part in parts if part.page_numbers]
-        if not nonzero:
-            raise NoInputError(
-                f"{source}: every part resolved to zero pages; nothing to write",
-                path=str(source),
+    resolver = PasswordResolver(password)
+    try:
+        with engine.open_document(source, password=resolver.for_source(source)) as document:
+            page_count = document.page_count
+            parts = _resolve_parts(
+                mode, document, source, page_count=page_count, every=every, ranges=ranges
             )
 
-        stem = source.stem
-        ext = source.suffix.lstrip(".") or "pdf"
-        rendered: list[tuple[_Part, Path]] = []
-        for part in nonzero:
-            target = render_name(
-                template,
-                out_dir=out_dir,
-                stem=stem,
-                ext=ext,
-                index=part.index,
-                page=part.page_numbers[0] if "page" in fields else None,
-                range_text=_extent_text(part.page_numbers),
-            )
-            rendered.append((part, target))
-
-        targets = [target for _part, target in rendered]
-        # D4: collision is checked identically in both real and dry-run modes
-        # -- it is data-independent (planned targets against each other), and
-        # AC10 explicitly requires the same refusal under --dry-run.
-        check_output_collisions(targets)
-
-        source_size = source.stat().st_size
-
-        # B-054: the filesystem tier (--out-dir creation, writability, every
-        # target's no-clobber) runs ONCE, unconditionally, in BOTH modes -- a
-        # real run raises exactly as before (see the block below); a dry run
-        # captures the first refusal instead (X-67, extended to a
-        # multi-target --out-dir run).
-        plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
-
-        if policy.dry_run:
-            # A run-level refusal (an unwritable --out-dir) is not
-            # attributable to one part, and this is not a loss of precision:
-            # split's own plan-then-write design (D4) means a planning
-            # failure writes NOTHING -- not one part -- so applying the same
-            # prediction to every item states exactly what the real run would
-            # have done, mirroring merge's/compose's own single-target
-            # convention of one refusal covering every item in the run.
-            detail: dict[str, object] = {"would_exit": plan.would_exit}
-            if plan.refusal is not None:
-                detail["would_refuse"] = plan.would_refuse
-            items = tuple(
-                ItemResult(
-                    input=str(source),
-                    output=str(target),
-                    ok=plan.refusal is None,
-                    exit_code=plan.would_exit,
-                    message=(
-                        f"pages {_extent_text(part.page_numbers)}"
-                        if plan.refusal is None
-                        else plan.refusal.message
-                    ),
-                    bytes_before=source_size,
-                    bytes_after=None,
-                    duration_ms=0,
-                    detail=detail,
+            nonzero = [part for part in parts if part.page_numbers]
+            if not nonzero:
+                raise NoInputError(
+                    f"{source}: every part resolved to zero pages; nothing to write",
+                    path=str(source),
                 )
-                for part, target in rendered
-            )
+
+            stem = source.stem
+            ext = source.suffix.lstrip(".") or "pdf"
+            rendered: list[tuple[_Part, Path]] = []
+            for part in nonzero:
+                target = render_name(
+                    template,
+                    out_dir=out_dir,
+                    stem=stem,
+                    ext=ext,
+                    index=part.index,
+                    page=part.page_numbers[0] if "page" in fields else None,
+                    range_text=_extent_text(part.page_numbers),
+                )
+                rendered.append((part, target))
+
+            targets = [target for _part, target in rendered]
+            # D4: collision is checked identically in both real and dry-run modes
+            # -- it is data-independent (planned targets against each other), and
+            # AC10 explicitly requires the same refusal under --dry-run.
+            check_output_collisions(targets)
+
+            source_size = source.stat().st_size
+
+            # B-054: the filesystem tier (--out-dir creation, writability, every
+            # target's no-clobber) runs ONCE, unconditionally, in BOTH modes -- a
+            # real run raises exactly as before (see the block below); a dry run
+            # captures the first refusal instead (X-67, extended to a
+            # multi-target --out-dir run).
+            plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
+
+            if policy.dry_run:
+                # A run-level refusal (an unwritable --out-dir) is not
+                # attributable to one part, and this is not a loss of precision:
+                # split's own plan-then-write design (D4) means a planning
+                # failure writes NOTHING -- not one part -- so applying the same
+                # prediction to every item states exactly what the real run would
+                # have done, mirroring merge's/compose's own single-target
+                # convention of one refusal covering every item in the run.
+                detail: dict[str, object] = {"would_exit": plan.would_exit}
+                if plan.refusal is not None:
+                    detail["would_refuse"] = plan.would_refuse
+                items = tuple(
+                    ItemResult(
+                        input=str(source),
+                        output=str(target),
+                        ok=plan.refusal is None,
+                        exit_code=plan.would_exit,
+                        message=(
+                            f"pages {_extent_text(part.page_numbers)}"
+                            if plan.refusal is None
+                            else plan.refusal.message
+                        ),
+                        bytes_before=source_size,
+                        bytes_after=None,
+                        duration_ms=0,
+                        detail=detail,
+                    )
+                    for part, target in rendered
+                )
+                return OperationResult(
+                    schema_version=_SCHEMA_VERSION,
+                    verb=VERB,
+                    dry_run=True,
+                    items=items,
+                    warnings=(),
+                    duration_ms=0,
+                )
+
+            # Real run: plan_output_set already created --out-dir
+            # (chokepoint-confined) and pre-flight checked every target for
+            # no-clobber/writability -- BEFORE the first AtomicWriter opens, so a
+            # planning failure writes nothing. It raised already if refused (the
+            # `except PdfToolkitError: ... raise` inside plan_output_set, since
+            # policy.dry_run is False here), so plan.refusal is always None below.
+            written_items: list[ItemResult] = []
+            for part, target in rendered:
+                writer = engine.new_writer()
+                writer.append_pages(document, part.page_numbers)
+                with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
+                    writer.write(atomic.stream)
+                written_items.append(
+                    ItemResult(
+                        input=str(source),
+                        output=str(target),
+                        ok=True,
+                        exit_code=0,
+                        message=f"pages {_extent_text(part.page_numbers)}",
+                        bytes_before=source_size,
+                        bytes_after=target.stat().st_size,
+                        duration_ms=0,
+                    )
+                )
             return OperationResult(
                 schema_version=_SCHEMA_VERSION,
                 verb=VERB,
-                dry_run=True,
-                items=items,
+                dry_run=False,
+                items=tuple(written_items),
                 warnings=(),
                 duration_ms=0,
             )
-
-        # Real run: plan_output_set already created --out-dir
-        # (chokepoint-confined) and pre-flight checked every target for
-        # no-clobber/writability -- BEFORE the first AtomicWriter opens, so a
-        # planning failure writes nothing. It raised already if refused (the
-        # `except PdfToolkitError: ... raise` inside plan_output_set, since
-        # policy.dry_run is False here), so plan.refusal is always None below.
-        written_items: list[ItemResult] = []
-        for part, target in rendered:
-            writer = engine.new_writer()
-            writer.append_pages(document, part.page_numbers)
-            with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
-                writer.write(atomic.stream)
-            written_items.append(
-                ItemResult(
-                    input=str(source),
-                    output=str(target),
-                    ok=True,
-                    exit_code=0,
-                    message=f"pages {_extent_text(part.page_numbers)}",
-                    bytes_before=source_size,
-                    bytes_after=target.stat().st_size,
-                    duration_ms=0,
-                )
-            )
-        return OperationResult(
-            schema_version=_SCHEMA_VERSION,
-            verb=VERB,
-            dry_run=False,
-            items=tuple(written_items),
-            warnings=(),
-            duration_ms=0,
-        )
+    finally:
+        resolver.clear()

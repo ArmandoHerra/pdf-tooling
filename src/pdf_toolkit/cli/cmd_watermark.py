@@ -22,6 +22,7 @@ from typing import Annotated
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.overlay import (
     DEFAULT_COLOR,
@@ -128,6 +129,19 @@ def watermark_command(
 ) -> None:
     """Overlay or underlay a generated text layer across the selected pages."""
     config = get_config(ctx)
+
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once, and
+    # only if the source turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     _reject_missing_sources([source])
 
     if text is None:
@@ -164,6 +178,7 @@ def watermark_command(
         output=config.output,
         in_place=config.in_place,
         policy=config.safety,
+        password=password,
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

@@ -72,6 +72,7 @@ from typing import Final
 from pdf_toolkit.errors import EngineMissingError, NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageInfo, PageRange
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.ocr import OcrEngine, require_ocr
 from pdf_toolkit.ports.raster import require_raster
@@ -80,6 +81,7 @@ from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
 from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_toolkit.secret import Secret
 
 __all__ = [
     "DEFAULT_DPI",
@@ -214,11 +216,15 @@ def _page_needs_engine(page: PageInfo, *, skip_text_pages: bool) -> bool:
 
 
 def _selected_pages(
-    structure_engine: StructureEngine, source: Path, pages_spec: str | None
+    structure_engine: StructureEngine,
+    source: Path,
+    pages_spec: str | None,
+    *,
+    password: Secret | None = None,
 ) -> tuple[PageInfo, ...]:
     """Every SELECTED page's own :class:`PageInfo`, in ascending page order
     (set semantics -- PLAN.md §4.3)."""
-    info = structure_engine.read_document_info(source, pages=True)
+    info = structure_engine.read_document_info(source, pages=True, password=password)
     selection = _resolve_pages(pages_spec, info.page_count)
     if selection.is_empty:
         raise NoInputError(
@@ -249,6 +255,7 @@ def ocr_run(
     name_template: str | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """OCR every source, one output per input, in input order.
 
@@ -256,6 +263,11 @@ def ocr_run(
     engine/``--lang`` availability check -- when the selection needs it at
     all -- is the SAME read-only resolution ``doctor`` performs (``--version``
     / ``--list-langs``), never the operational ``textonly_pdf=1`` call.
+
+    PDF-37: ``pages_by_source`` below already opens every source
+    unconditionally, in both modes, so the global ``--password-file``
+    resolvability tier is predicted for free -- resolved at most once per
+    source (`ops/document_password.PasswordResolver`).
     """
     _validate_sources(sources)
     if name_template is not None and out_dir is None:
@@ -277,8 +289,15 @@ def ocr_run(
     plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
 
     structure_engine = require_structure()
+    resolver = PasswordResolver(password)
+    secret_by_source: dict[Path, Secret | None] = {
+        item.source: resolver.for_source(item.source) for item in planned
+    }
     pages_by_source: dict[Path, tuple[PageInfo, ...]] = {
-        item.source: _selected_pages(structure_engine, item.source, pages_spec) for item in planned
+        item.source: _selected_pages(
+            structure_engine, item.source, pages_spec, password=secret_by_source[item.source]
+        )
+        for item in planned
     }
 
     # The lazy engine/`--lang` check (module docstring): computed identically
@@ -329,8 +348,14 @@ def ocr_run(
             started = time.monotonic()
             bytes_before = item.source.stat().st_size
             pages = pages_by_source[item.source]
+            secret = secret_by_source[item.source]
+            # PDF-37: revealed HERE, in this process, exactly once per
+            # source -- `render_page` needs a plain string (see
+            # `ops/raster.py`'s `_WorkItem` docstring for why), and OCR's
+            # own per-page loop never crosses a process boundary.
+            plaintext_password = secret.reveal() if secret is not None else None
 
-            with structure_engine.open_document(item.source) as document:
+            with structure_engine.open_document(item.source, password=secret) as document:
                 page_count = document.page_count
                 # Design D3.3 -- writer created, full range appended, BEFORE
                 # the per-page compositing loop -- the reverse of this
@@ -357,6 +382,7 @@ def ocr_run(
                         dpi=float(dpi),
                         width_px=None,
                         grayscale=False,
+                        password=plaintext_password,
                     )
                     try:
                         layer_bytes = ocr_adapter.text_layer(
@@ -406,6 +432,7 @@ def ocr_run(
     finally:
         if scratch is not None:
             scratch.__exit__(None, None, None)
+        resolver.clear()
 
     return OperationResult(
         schema_version=_SCHEMA_VERSION,

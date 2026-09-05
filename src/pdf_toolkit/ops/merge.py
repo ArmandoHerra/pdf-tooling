@@ -27,6 +27,7 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, is_valid_spec, parse
 from pdf_toolkit.ports.structure import (
     OpenStructureDocument,
@@ -158,6 +159,7 @@ def merge_documents(
     output: Path,
     bookmarks: str,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Merge *inputs* into *output* (Design §D1, §D8).
 
@@ -165,73 +167,87 @@ def merge_documents(
     is written (D1). ``items`` carries **one row per input argument**, in
     argv order, ``output`` set to the merged target on every row (D8) — E8's
     resolution for merge's N:1 shape, without touching ``models.py``.
+
+    PDF-37: opening happens identically in both modes (only the write at the
+    bottom is gated by ``--dry-run``), so the global ``--password-file``
+    resolvability tier is predicted for free -- no separate dry-run branch
+    is needed here at all.
     """
     engine = require_structure()
+    resolver = PasswordResolver(password)
 
-    with ExitStack() as stack:
-        opened: list[OpenStructureDocument] = []
-        indices_per_input: list[tuple[int, ...]] = []
-        for merge_input in inputs:
-            document = stack.enter_context(engine.open_document(merge_input.path))
-            page_range = parse(
-                merge_input.selection or ALL_PAGES_TOKEN, document.page_count, ordered=True
-            )
-            if page_range.is_empty:
-                raise NoInputError(
-                    f"{merge_input.raw}: selection matched no pages",
-                    path=str(merge_input.path),
+    try:
+        with ExitStack() as stack:
+            opened: list[OpenStructureDocument] = []
+            indices_per_input: list[tuple[int, ...]] = []
+            for merge_input in inputs:
+                secret = resolver.for_source(merge_input.path)
+                document = stack.enter_context(
+                    engine.open_document(merge_input.path, password=secret)
                 )
-            opened.append(document)
-            indices_per_input.append(page_range.indices)
+                page_range = parse(
+                    merge_input.selection or ALL_PAGES_TOKEN, document.page_count, ordered=True
+                )
+                if page_range.is_empty:
+                    raise NoInputError(
+                        f"{merge_input.raw}: selection matched no pages",
+                        path=str(merge_input.path),
+                    )
+                opened.append(document)
+                indices_per_input.append(page_range.indices)
 
-        writer = engine.new_writer()
-        first_dest_page: list[int] = []
-        dest_maps: list[dict[int, int]] = []
-        dest_cursor = 1
-        for document, indices in zip(opened, indices_per_input, strict=True):
-            first_dest_page.append(dest_cursor)
-            writer.append_pages(document, indices)
-            local_map: dict[int, int] = {}
-            for source_page in indices:
-                local_map.setdefault(source_page, dest_cursor)
-                dest_cursor += 1
-            dest_maps.append(local_map)
+            writer = engine.new_writer()
+            first_dest_page: list[int] = []
+            dest_maps: list[dict[int, int]] = []
+            dest_cursor = 1
+            for document, indices in zip(opened, indices_per_input, strict=True):
+                first_dest_page.append(dest_cursor)
+                writer.append_pages(document, indices)
+                local_map: dict[int, int] = {}
+                for source_page in indices:
+                    local_map.setdefault(source_page, dest_cursor)
+                    dest_cursor += 1
+                dest_maps.append(local_map)
 
-        _apply_bookmarks(
-            writer,
-            bookmarks,
-            inputs=inputs,
-            documents=tuple(opened),
-            first_dest_page=tuple(first_dest_page),
-            dest_maps=tuple(dest_maps),
-        )
+            _apply_bookmarks(
+                writer,
+                bookmarks,
+                inputs=inputs,
+                documents=tuple(opened),
+                first_dest_page=tuple(first_dest_page),
+                dest_maps=tuple(dest_maps),
+            )
 
-        refusal = None
-        with AtomicWriter(output, policy=policy, kind="pdf") as atomic:
-            if atomic.is_dry_run:
-                refusal = atomic.planned_refusal
-            else:
-                writer.write(atomic.stream)
+            refusal = None
+            with AtomicWriter(output, policy=policy, kind="pdf") as atomic:
+                if atomic.is_dry_run:
+                    refusal = atomic.planned_refusal
+                else:
+                    writer.write(atomic.stream)
 
-        merged_size = output.stat().st_size if output.exists() else None
-        items = tuple(
-            ItemResult(
-                input=merge_input.raw,
-                output=str(output),
-                ok=refusal is None,
-                exit_code=0 if refusal is None else refusal.exit_code,
-                message=(f"{len(indices)} pages selected" if refusal is None else refusal.message),
-                bytes_before=merge_input.path.stat().st_size,
-                bytes_after=merged_size,
+            merged_size = output.stat().st_size if output.exists() else None
+            items = tuple(
+                ItemResult(
+                    input=merge_input.raw,
+                    output=str(output),
+                    ok=refusal is None,
+                    exit_code=0 if refusal is None else refusal.exit_code,
+                    message=(
+                        f"{len(indices)} pages selected" if refusal is None else refusal.message
+                    ),
+                    bytes_before=merge_input.path.stat().st_size,
+                    bytes_after=merged_size,
+                    duration_ms=0,
+                )
+                for merge_input, indices in zip(inputs, indices_per_input, strict=True)
+            )
+            return OperationResult(
+                schema_version=_SCHEMA_VERSION,
+                verb=VERB,
+                dry_run=policy.dry_run,
+                items=items,
+                warnings=(),
                 duration_ms=0,
             )
-            for merge_input, indices in zip(inputs, indices_per_input, strict=True)
-        )
-        return OperationResult(
-            schema_version=_SCHEMA_VERSION,
-            verb=VERB,
-            dry_run=policy.dry_run,
-            items=items,
-            warnings=(),
-            duration_ms=0,
-        )
+    finally:
+        resolver.clear()

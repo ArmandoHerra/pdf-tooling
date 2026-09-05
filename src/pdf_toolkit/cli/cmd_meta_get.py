@@ -32,6 +32,8 @@ from typing import Annotated, Any
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordSource
 from pdf_toolkit.ops.metadata import meta_get_run
 from pdf_toolkit.output import OutputFormat, render_payload
 from pdf_toolkit.safety.paths import classify_operand
@@ -62,10 +64,12 @@ REPORTS, NEVER WRITES: this verb writes no files, so -O/--output,
 """
 
 
-def build_payload(source: Path, *, xmp: bool, dry_run: bool) -> dict[str, Any]:
+def build_payload(
+    source: Path, *, xmp: bool, dry_run: bool, password: PasswordSource = NO_PASSWORD
+) -> dict[str, Any]:
     """The canonical `-o json` payload -- the report's own `to_dict()`, plus
     `verb`/`dry_run` alongside it (mirrors `cmd_info.py::build_payload`)."""
-    report = meta_get_run(source, xmp=xmp)
+    report = meta_get_run(source, xmp=xmp, password=password)
     return {"verb": VERB, "dry_run": dry_run, **report.to_dict()}
 
 
@@ -132,9 +136,22 @@ def meta_get_command(
 ) -> None:
     """Read a document's information dictionary and its XMP packet, side by side."""
     config = get_config(ctx)
+
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once, and
+    # only if the source turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     _reject_missing_sources([source])
 
-    payload = build_payload(source, xmp=xmp, dry_run=config.dry_run)
+    payload = build_payload(source, xmp=xmp, dry_run=config.dry_run, password=password)
     text = _render(payload, config.output_format)
     if text:
         typer.echo(text)

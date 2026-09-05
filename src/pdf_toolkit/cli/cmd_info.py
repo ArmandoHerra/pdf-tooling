@@ -57,6 +57,8 @@ import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.exit_codes import FAILURE, OK
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordSource
 from pdf_toolkit.ops.inspect import InspectionOutcome, inspect_paths, validate_operands
 from pdf_toolkit.output import OutputFormat, render_payload
 
@@ -102,10 +104,11 @@ def build_payload(
     fonts: bool,
     pages_detail: bool,
     dry_run: bool,
+    password: PasswordSource = NO_PASSWORD,
 ) -> tuple[dict[str, Any], tuple[InspectionOutcome, ...]]:
     """The canonical payload plus the outcomes the exit code is derived from."""
     validate_operands(paths)
-    outcomes = inspect_paths(paths, fonts=fonts, pages=pages_detail)
+    outcomes = inspect_paths(paths, fonts=fonts, pages=pages_detail, password=password)
     payload: dict[str, Any] = {
         "verb": VERB,
         "dry_run": dry_run,
@@ -163,11 +166,25 @@ def info_command(
     --out-dir, --name, --in-place, -f/--force and -y/--yes each exit 2.
     """
     config = get_config(ctx)
+
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once, and
+    # only for an input that turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     payload, outcomes = build_payload(
         tuple(paths),
         fonts=fonts,
         pages_detail=pages_detail,
         dry_run=config.dry_run,
+        password=password,
     )
     text = _render(payload, config.output_format)
     if text:

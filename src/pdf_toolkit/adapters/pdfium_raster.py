@@ -86,8 +86,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final
 
 from pdf_toolkit.adapters import AdapterProbe, package_probe
-from pdf_toolkit.errors import FailureError
+from pdf_toolkit.errors import AuthError, FailureError
 from pdf_toolkit.ports.raster import RenderedPage
+from pdf_toolkit.ports.structure import PASSWORD_HINT
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from PIL.Image import Image
@@ -137,16 +138,44 @@ class PdfiumRasterAdapter:
         dpi: float | None,
         width_px: int | None,
         grayscale: bool,
+        password: str | None = None,
     ) -> RenderedPage:
         """Render one page. See the Protocol docstring in ``ports/raster.py``.
 
         The engine import is function-local (``adapters/__init__``'s rule 1):
         probing must never pay pdfium's import cost, and this method is the
         first thing in the product that actually does.
+
+        Args:
+            password: PDF-37 -- the REVEALED plaintext, or ``None``. Plain
+                ``str``, not :class:`~pdf_toolkit.secret.Secret`: a
+                ``Secret`` refuses to pickle (`secret.py`'s own
+                ``__reduce__``) and `path` above is already documented as
+                "plain text ... the caller may run this from a worker" for
+                the identical reason (`rasterize`'s ``ProcessPoolExecutor``,
+                Design §D5.3/§D5.5). The caller
+                (`ops/document_password.py`) reveals it exactly once, only
+                after confirming the document is actually encrypted, and
+                only when the SAME secret already unlocked the primary
+                `StructureEngine` read -- this method never resolves a
+                password of its own.
         """
         import pypdfium2 as pdfium  # type: ignore[import-untyped]
 
-        document = pdfium.PdfDocument(path)
+        try:
+            document = pdfium.PdfDocument(path, password=password)
+        except pdfium.PdfiumError as error:
+            if "password" not in str(error).lower():
+                raise FailureError(f"{path}: could not be opened: {error}", path=path) from error
+            if password is None:
+                raise AuthError(
+                    f"a password is required to rasterize this document; {PASSWORD_HINT}",
+                    path=path,
+                ) from error
+            raise AuthError(
+                f"the supplied password did not unlock this document; {PASSWORD_HINT}",
+                path=path,
+            ) from error
         try:
             try:
                 page = document.get_page(page_number - 1)

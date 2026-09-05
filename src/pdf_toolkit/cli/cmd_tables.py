@@ -30,6 +30,7 @@ from typing import Annotated, Any
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.textract import TableOutcome, extract_tables_run
 from pdf_toolkit.output import OutputFormat, render_payload
@@ -223,6 +224,18 @@ def tables_command(
     """Extract tables from PDF pages -- a documented heuristic, never a claim."""
     config = get_config(ctx)
 
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything (D3);
+    # `ops/document_password.PasswordResolver` reads it at most once per
+    # source, and only if that source turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     # See `cmd_text.py` for why this check is duplicated here and in the op
     # layer: PLAN.md §10's exit-4 contract must win over every other usage
     # error, and every other call path into the op needs it too.
@@ -238,6 +251,7 @@ def tables_command(
         out_dir=config.out_dir,
         name_template=config.name,
         policy=config.safety,
+        password=password,
     )
     _emit(
         outcome,

@@ -67,6 +67,7 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageText, TableGrid, TextBlock
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.structure import require_structure
 from pdf_toolkit.ports.text import (
@@ -81,6 +82,7 @@ from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name, used_fields
 from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_toolkit.secret import Secret
 
 __all__ = [
     "DEFAULT_TABLE_NAME_TEMPLATE",
@@ -266,7 +268,9 @@ def _validate_sources(sources: Sequence[Path]) -> None:
         classify_operand(source)
 
 
-def _select_pages(source: Path, pages_spec: str | None) -> tuple[int, ...]:
+def _select_pages(
+    source: Path, pages_spec: str | None, *, password: Secret | None = None
+) -> tuple[int, ...]:
     """The selection for one source: a sorted, deduplicated **set**.
 
     `PLAN.md` §4.3 names `text` and `tables` among the set-semantics verbs, so
@@ -278,7 +282,7 @@ def _select_pages(source: Path, pages_spec: str | None) -> tuple[int, ...]:
     two apart is the whole point of this verb's exit-code map.
     """
     engine = require_structure()
-    with engine.open_document(source) as document:
+    with engine.open_document(source, password=password) as document:
         page_count = document.page_count
 
     spec = pages_spec if pages_spec is not None else ALL_PAGES_TOKEN
@@ -348,7 +352,19 @@ def _extract_pages(
     selections: dict[Path, tuple[int, ...]],
     *,
     layout: bool,
+    plaintext_by_source: dict[Path, str | None] | None = None,
 ) -> tuple[tuple[PageText, ...], EngineDeclaration]:
+    """PDF-37: ``plaintext_by_source`` -- the REVEALED plaintext, or ``None``
+    per source. Revealed once, upstream, by the caller
+    (`extract_text_run`/`extract_tables_run`), only after `read_encryption`
+    confirmed that source is actually encrypted
+    (`ops/document_password.PasswordResolver`); this module never resolves a
+    password of its own and never touches `Secret`. Both `pdfium_text` and
+    `pdfplumber_text` already run entirely in-process, sequentially (module
+    docstring), so a plain string never needs to cross a process boundary
+    here the way `rasterize`'s does.
+    """
+    passwords = plaintext_by_source or {}
     pages: list[PageText] = []
     if layout:
         layout_engine = require_layout_text()
@@ -357,7 +373,9 @@ def _extract_pages(
         )
         for source in sources:
             numbers = selections[source]
-            per_page_lines = layout_engine.extract_lines(str(source), numbers)
+            per_page_lines = layout_engine.extract_lines(
+                str(source), numbers, password=passwords.get(source)
+            )
             for page_number, lines in zip(numbers, per_page_lines, strict=True):
                 blocks = _blocks_from(lines)
                 text = "\n".join(block.text for block in blocks)
@@ -378,9 +396,8 @@ def _extract_pages(
     )
     for source in sources:
         numbers = selections[source]
-        for page_number, raw in zip(
-            numbers, fast_engine.extract_text(str(source), numbers), strict=True
-        ):
+        extracted = fast_engine.extract_text(str(source), numbers, password=passwords.get(source))
+        for page_number, raw in zip(numbers, extracted, strict=True):
             text = normalize_page_text(raw)
             pages.append(
                 PageText(
@@ -464,17 +481,39 @@ def extract_text_run(
     out_dir: Path | None,
     name_template: str | None,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> TextOutcome:
     """Extract text from every selected page of every source, in input order.
 
     ``items`` carries one row per planned artifact when a destination was
     given, and one row per input when the text is going to stdout.
+
+    PDF-37: extraction (below) runs identically in both modes -- neither
+    `text` nor `tables` defers it under ``--dry-run`` (the empty-page
+    warnings need the real result either way) -- so the global
+    ``--password-file`` resolvability AND correctness tiers both surface
+    identically in both modes, via the same `PasswordResolver` `merge`/
+    `split`/`pages` already use.
     """
     _validate_sources(sources)
     _require_out_dir_for_template(name_template, out_dir)
 
-    selections = {source: _select_pages(source, pages_spec) for source in sources}
-    pages, declaration = _extract_pages(sources, selections, layout=layout)
+    resolver = PasswordResolver(password)
+    try:
+        secret_by_source = {source: resolver.for_source(source) for source in sources}
+        selections = {
+            source: _select_pages(source, pages_spec, password=secret_by_source[source])
+            for source in sources
+        }
+        plaintext_by_source = {
+            source: (secret.reveal() if secret is not None else None)
+            for source, secret in secret_by_source.items()
+        }
+        pages, declaration = _extract_pages(
+            sources, selections, layout=layout, plaintext_by_source=plaintext_by_source
+        )
+    finally:
+        resolver.clear()
     strategy = "layout" if layout else "fast"
 
     warnings = tuple(_empty_page_warning(page) for page in pages if page.char_count == 0)
@@ -615,7 +654,11 @@ def _detect_tables(
     selections: dict[Path, tuple[int, ...]],
     *,
     strategy: str,
+    plaintext_by_source: dict[Path, str | None] | None = None,
 ) -> tuple[list[tuple[Path, int, int, ExtractedTable]], EngineDeclaration, tuple[str, ...]]:
+    """PDF-37: ``plaintext_by_source`` -- see :func:`_extract_pages`'s own
+    docstring; the same revealed-once, in-process convention."""
+    passwords = plaintext_by_source or {}
     engine = require_tables()
     declaration = EngineDeclaration(adapter=engine.adapter_name, version=engine.probe().version)
 
@@ -623,7 +666,9 @@ def _detect_tables(
     warnings: list[str] = []
     for source in sources:
         numbers = selections[source]
-        per_page = engine.extract_tables(str(source), numbers, strategy=strategy)
+        per_page = engine.extract_tables(
+            str(source), numbers, strategy=strategy, password=passwords.get(source)
+        )
         for page_number, detected in zip(numbers, per_page, strict=True):
             if not detected:
                 warnings.append(_no_tables_warning(source, page_number, strategy))
@@ -644,12 +689,16 @@ def extract_tables_run(
     out_dir: Path | None,
     name_template: str | None,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> TableOutcome:
     """Detect tables on every selected page of every source, in input order.
 
     ``fmt`` is ``None`` when ``--format`` was not given, which is how a
     destination-less ``--format`` earns its warning (AC12) without the CLI
     having to reach into the framework for a parameter source.
+
+    PDF-37: see :func:`extract_text_run`'s own docstring -- detection runs
+    identically in both modes here too.
     """
     if strategy not in TABLE_STRATEGIES:  # pragma: no cover - the CLI's choice type refuses first
         raise UsageError(
@@ -661,8 +710,22 @@ def extract_tables_run(
     has_destination = output is not None or out_dir is not None
     resolved_fmt = fmt if fmt is not None else TABLE_FORMATS[0]
 
-    selections = {source: _select_pages(source, pages_spec) for source in sources}
-    found, declaration, warnings_list = _detect_tables(sources, selections, strategy=strategy)
+    resolver = PasswordResolver(password)
+    try:
+        secret_by_source = {source: resolver.for_source(source) for source in sources}
+        selections = {
+            source: _select_pages(source, pages_spec, password=secret_by_source[source])
+            for source in sources
+        }
+        plaintext_by_source = {
+            source: (secret.reveal() if secret is not None else None)
+            for source, secret in secret_by_source.items()
+        }
+        found, declaration, warnings_list = _detect_tables(
+            sources, selections, strategy=strategy, plaintext_by_source=plaintext_by_source
+        )
+    finally:
+        resolver.clear()
 
     warnings = list(warnings_list)
     if fmt is not None and not has_destination:

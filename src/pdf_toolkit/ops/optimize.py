@@ -61,9 +61,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from pdf_toolkit.errors import FailureError, NoInputError, UsageError
+from pdf_toolkit.errors import FailureError, NoInputError, PdfToolkitError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.document_password import (
+    NO_PASSWORD,
+    PasswordResolver,
+    PasswordSource,
+    predict_password_refusal,
+)
 from pdf_toolkit.ops.pagerange import parse
 from pdf_toolkit.ports.structure import (
     StructuralFacts,
@@ -74,6 +80,7 @@ from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
 from pdf_toolkit.safety.paths import check_output_collisions, classify_operand, read_source_bytes
 from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_toolkit.secret import Secret
 
 __all__ = [
     "DEFAULT_COMPRESS_NAME_TEMPLATE",
@@ -171,7 +178,9 @@ def _resolve_compress_targets(
     ]
 
 
-def _select_pages_set(source: Path, pages_spec: str | None) -> frozenset[int] | None:
+def _select_pages_set(
+    source: Path, pages_spec: str | None, *, password: Secret | None = None
+) -> frozenset[int] | None:
     """The scope for the image pass: ``None`` means "every page" (`PLAN.md`
     §4.3's set semantics), a set otherwise. Computed only when an image pass
     is active — the page count read is the one cost `--images keep` never
@@ -179,7 +188,7 @@ def _select_pages_set(source: Path, pages_spec: str | None) -> frozenset[int] | 
     if pages_spec is None:
         return None
     engine = require_structure()
-    with engine.open_document(source) as document:
+    with engine.open_document(source, password=password) as document:
         page_count = document.page_count
     selection = parse(pages_spec, page_count, ordered=False)
     if selection.is_empty:
@@ -218,6 +227,7 @@ def _compress_one(
     image_dpi: float,
     image_quality: int,
     pages_spec: str | None,
+    password: Secret | None = None,
 ) -> tuple[bytes, dict[str, object]]:
     """One input's full pipeline (D-12.2): optional image pre-pass, then the
     pikepdf structural pass, then (only under ``--lossless``) D-12.3's Layer
@@ -227,7 +237,7 @@ def _compress_one(
     detail: dict[str, object] = {}
 
     if images != "keep":
-        pages = _select_pages_set(source, pages_spec)
+        pages = _select_pages_set(source, pages_spec, password=password)
         pass_engine = require_image_pass()
         pass_outcome = pass_engine.downsample_images(
             data, mode=images, pages=pages, dpi=image_dpi, quality=image_quality
@@ -237,7 +247,7 @@ def _compress_one(
         detail["images_skipped"] = pass_outcome.images_skipped
 
     engine = require_structure(capability="object-streams")
-    outcome = engine.compress(data)
+    outcome = engine.compress(data, password=password)
 
     if lossless:
         failure = _lossless_failure(outcome.before, outcome.after)
@@ -247,6 +257,21 @@ def _compress_one(
             )
 
     return outcome.output, detail
+
+
+def _first_password_refusal(
+    sources: Sequence[Path], *, password: PasswordSource, verb: str
+) -> PdfToolkitError | None:
+    """The FIRST source (in argv order) that needs the global slot and
+    cannot get it, or ``None``. Mirrors the filesystem tier's own "one
+    refusal covers every item" convention for a multi-source dry-run
+    (`compress`/`repair`/`linearize`, whose dry-run does not otherwise open
+    any document at all)."""
+    for source in sources:
+        refusal = predict_password_refusal(source, password=password, verb=verb)
+        if refusal is not None:
+            return refusal
+    return None
 
 
 def compress_run(
@@ -262,12 +287,16 @@ def compress_run(
     name_template: str | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Compress every source, one output per input, in input order.
 
     Under ``--dry-run`` no engine runs at all (mirroring `rasterize`/
     `compose`/`create`): the filesystem tier alone is predicted, through
-    :func:`~pdf_toolkit.safety.atomic.plan_filesystem`.
+    :func:`~pdf_toolkit.safety.atomic.plan_filesystem`. PDF-37 adds the
+    global ``--password-file`` resolvability tier alongside it, via the same
+    credential-free `read_encryption` check `ops/crypto.py`'s own dry-run
+    predictions already use -- never the correctness tier (X-89).
     """
     _validate_sources(sources)
     if name_template is not None and out_dir is None:
@@ -284,14 +313,19 @@ def compress_run(
     plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
 
     if policy.dry_run:
+        refusal = plan.refusal
+        if refusal is None:
+            refusal = _first_password_refusal(sources, password=password, verb=VERB_COMPRESS)
         detail = plan.detail()
+        if refusal is not None and plan.refusal is None:
+            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
         items = tuple(
             ItemResult(
                 input=str(item.source),
                 output=str(item.target),
-                ok=not plan.refused,
-                exit_code=plan.would_exit,
-                message=("planned: compress" if not plan.refused else plan.message),
+                ok=refusal is None,
+                exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+                message=("planned: compress" if refusal is None else refusal.message),
                 bytes_before=item.source.stat().st_size,
                 bytes_after=None,
                 duration_ms=0,
@@ -308,8 +342,39 @@ def compress_run(
             duration_ms=0,
         )
 
+    resolver = PasswordResolver(password)
     warnings: list[str] = []
     written: list[ItemResult] = []
+    try:
+        return _compress_write_all(
+            planned,
+            lossless=lossless,
+            images=images,
+            image_dpi=image_dpi,
+            image_quality=image_quality,
+            pages_spec=pages_spec,
+            policy=policy,
+            resolver=resolver,
+            warnings=warnings,
+            written=written,
+        )
+    finally:
+        resolver.clear()
+
+
+def _compress_write_all(
+    planned: list[_CompressTarget],
+    *,
+    lossless: bool,
+    images: str,
+    image_dpi: float,
+    image_quality: int,
+    pages_spec: str | None,
+    policy: SafetyPolicy,
+    resolver: PasswordResolver,
+    warnings: list[str],
+    written: list[ItemResult],
+) -> OperationResult:
     for item in planned:
         started = time.monotonic()
         bytes_before = item.source.stat().st_size
@@ -320,6 +385,7 @@ def compress_run(
             image_dpi=image_dpi,
             image_quality=image_quality,
             pages_spec=pages_spec,
+            password=resolver.for_source(item.source),
         )
         with AtomicWriter(item.target, policy=policy, kind="pdf") as writer:
             writer.stream.write(output_bytes)
@@ -391,6 +457,7 @@ def repair_run(
     in_place: bool,
     report: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Recover *source* via libqpdf's own recovery parser (D-12.4).
 
@@ -399,6 +466,10 @@ def repair_run(
     ``OperationResult.warnings`` and the one-line message are populated
     either way, because *whether nothing was wrong* is the honest baseline
     this verb reports, not an opt-in extra.
+
+    PDF-37: ``--dry-run`` does not otherwise open the document at all, so the
+    global ``--password-file`` resolvability tier is predicted explicitly
+    (never the correctness tier, X-89).
     """
     _validate_sources([source])
     target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_REPAIR)
@@ -406,13 +477,18 @@ def repair_run(
     plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
 
     if policy.dry_run:
+        refusal = plan.refusal
+        if refusal is None:
+            refusal = predict_password_refusal(source, password=password, verb=VERB_REPAIR)
         detail = plan.detail()
+        if refusal is not None and plan.refusal is None:
+            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
         item = ItemResult(
             input=str(source),
             output=str(target),
-            ok=not plan.refused,
-            exit_code=plan.would_exit,
-            message=("planned: repair" if not plan.refused else plan.message),
+            ok=refusal is None,
+            exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+            message=("planned: repair" if refusal is None else refusal.message),
             bytes_before=source.stat().st_size,
             bytes_after=None,
             duration_ms=0,
@@ -430,7 +506,11 @@ def repair_run(
     started = time.monotonic()
     bytes_before = source.stat().st_size
     engine = require_structure(capability="repair")
-    outcome = engine.repair(read_source_bytes(source))
+    resolver = PasswordResolver(password)
+    try:
+        outcome = engine.repair(read_source_bytes(source), password=resolver.for_source(source))
+    finally:
+        resolver.clear()
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(outcome.output)
@@ -479,12 +559,17 @@ def linearize_run(
     output: Path | None,
     in_place: bool,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Rewrite *source* for byte-serving (D-12.6).
 
     Verified structurally inside the adapter before this function ever sees
     the candidate bytes -- a failed verification raises there, so nothing
     reaches ``AtomicWriter`` and the target stays untouched.
+
+    PDF-37: ``--dry-run`` does not otherwise open the document at all, so the
+    global ``--password-file`` resolvability tier is predicted explicitly
+    (never the correctness tier, X-89).
     """
     _validate_sources([source])
     target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_LINEARIZE)
@@ -492,13 +577,18 @@ def linearize_run(
     plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
 
     if policy.dry_run:
+        refusal = plan.refusal
+        if refusal is None:
+            refusal = predict_password_refusal(source, password=password, verb=VERB_LINEARIZE)
         detail = plan.detail()
+        if refusal is not None and plan.refusal is None:
+            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
         item = ItemResult(
             input=str(source),
             output=str(target),
-            ok=not plan.refused,
-            exit_code=plan.would_exit,
-            message=("planned: linearize" if not plan.refused else plan.message),
+            ok=refusal is None,
+            exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+            message=("planned: linearize" if refusal is None else refusal.message),
             bytes_before=source.stat().st_size,
             bytes_after=None,
             duration_ms=0,
@@ -516,7 +606,13 @@ def linearize_run(
     started = time.monotonic()
     bytes_before = source.stat().st_size
     engine = require_structure(capability="linearize")
-    output_bytes = engine.linearize(read_source_bytes(source))
+    resolver = PasswordResolver(password)
+    try:
+        output_bytes = engine.linearize(
+            read_source_bytes(source), password=resolver.for_source(source)
+        )
+    finally:
+        resolver.clear()
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(output_bytes)

@@ -41,8 +41,10 @@ from typing import Any
 
 from pdf_toolkit.errors import PdfToolkitError, UsageError
 from pdf_toolkit.models import DocumentInfo
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ports.structure import require_linearization, require_structure
 from pdf_toolkit.safety.paths import classify_operand
+from pdf_toolkit.secret import Secret
 
 __all__ = ["InspectionOutcome", "inspect_document", "inspect_paths", "validate_operands"]
 
@@ -103,7 +105,9 @@ def validate_operands(paths: tuple[Path, ...]) -> None:
             )
 
 
-def inspect_document(path: Path, *, fonts: bool = False, pages: bool = False) -> DocumentInfo:
+def inspect_document(
+    path: Path, *, fonts: bool = False, pages: bool = False, password: Secret | None = None
+) -> DocumentInfo:
     """Report on one document.
 
     ``linearized`` comes from whichever adapter declares the ``linearized``
@@ -112,11 +116,19 @@ def inspect_document(path: Path, *, fonts: bool = False, pages: bool = False) ->
     than a ``false`` this product cannot stand behind: ``DocumentInfo``'s field
     is a ``bool``, so "we could not tell" has no honest encoding in it.
 
+    Args:
+        password: PDF-37 -- a resolved secret, tried when the empty password
+            does not open the document, or ``None``. Resolved by the caller
+            (`inspect_paths`) only once ``read_encryption`` has already
+            confirmed the input is actually encrypted
+            (`ops/document_password.py`).
+
     Raises:
         NoInputError: Exit 4 — the path does not exist.
         UsageError: Exit 2 — the path is a directory, or not a regular file.
         SourceUnreadableError: Exit 1 — the path exists and cannot be read.
-        AuthError: Exit 6 — a user password is required and none was supplied.
+        AuthError: Exit 6 — no password was supplied and one is required, or
+            the supplied password did not unlock the document.
         FailureError: Exit 1 — malformed, corrupt or unparseable.
         EngineMissingError: Exit 3 — a required engine is unavailable.
 
@@ -134,7 +146,9 @@ def inspect_document(path: Path, *, fonts: bool = False, pages: bool = False) ->
 
     linearized = require_linearization().is_linearized(path)
     engine = require_structure()
-    return engine.read_document_info(path, fonts=fonts, pages=pages, linearized=linearized)
+    return engine.read_document_info(
+        path, fonts=fonts, pages=pages, linearized=linearized, password=password
+    )
 
 
 def inspect_paths(
@@ -142,6 +156,7 @@ def inspect_paths(
     *,
     fonts: bool = False,
     pages: bool = False,
+    password: PasswordSource = NO_PASSWORD,
 ) -> tuple[InspectionOutcome, ...]:
     """Report on every input, in input order, without abandoning the batch.
 
@@ -153,13 +168,22 @@ def inspect_paths(
     Only :class:`PdfToolkitError` is caught. Anything else is a bug and is
     allowed to reach the top level as a traceback, which is a signal rather
     than a UX.
+
+    PDF-37: the global ``--password-file`` slot is resolved at most once
+    across the whole batch, and only for an input that turns out to be
+    encrypted (`ops/document_password.PasswordResolver`).
     """
+    resolver = PasswordResolver(password)
     outcomes: list[InspectionOutcome] = []
-    for path in paths:
-        try:
-            info = inspect_document(path, fonts=fonts, pages=pages)
-        except PdfToolkitError as error:
-            outcomes.append(InspectionOutcome(path=str(path), info=None, error=error))
-        else:
-            outcomes.append(InspectionOutcome(path=str(path), info=info, error=None))
+    try:
+        for path in paths:
+            try:
+                secret = resolver.for_source(path) if path.is_file() else None
+                info = inspect_document(path, fonts=fonts, pages=pages, password=secret)
+            except PdfToolkitError as error:
+                outcomes.append(InspectionOutcome(path=str(path), info=None, error=error))
+            else:
+                outcomes.append(InspectionOutcome(path=str(path), info=info, error=None))
+    finally:
+        resolver.clear()
     return tuple(outcomes)

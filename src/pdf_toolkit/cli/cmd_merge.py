@@ -12,6 +12,7 @@ from typing import Annotated
 import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
+from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.ops.merge import merge_documents, resolve_merge_inputs
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
@@ -86,6 +87,19 @@ def merge_command(
     if config.output is None:
         raise UsageError("merge requires -O/--output")
 
+    # PDF-37: the GLOBAL slot. `plan_password` never reads anything -- it
+    # answers "could a password be produced, and from where" from existence
+    # alone (D3); `ops/document_password.PasswordResolver` reads it at most
+    # once, and only if some input turns out to be encrypted.
+    password = plan_password(
+        slot="password",
+        flag="--password-file",
+        value=config.password_file,
+        env_names=(ENV_PASSWORD,),
+        prompt="Password: ",
+        allow_empty=True,
+    )
+
     merge_inputs = resolve_merge_inputs(tuple(inputs))
 
     if config.force and target_exists(config.output):
@@ -105,6 +119,7 @@ def merge_command(
         output=config.output,
         bookmarks=bookmarks.value,
         policy=config.safety,
+        password=password,
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

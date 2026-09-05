@@ -68,6 +68,7 @@ from typing import IO, TYPE_CHECKING, Final
 from pdf_toolkit.errors import EngineMissingError, NoInputError, PdfToolkitError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ops.procpool import guarded_process_pool
 from pdf_toolkit.ports import BROKEN_INSTALL_HINT
@@ -77,6 +78,7 @@ from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
 from pdf_toolkit.safety.naming import render_name
 from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
 from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_toolkit.secret import Secret
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from PIL.Image import Image
@@ -100,7 +102,16 @@ _WEBP_METHOD: Final[int] = 6
 #: One flat work item, exactly what crosses into a worker: a path (never a
 #: document), a page number, a target path, and the render parameters for
 #: that one page. Every field is plain, picklable data (AC4/AC7).
-_WorkItem = tuple[int, str, int, str, float | None, int | None]
+#:
+#: PDF-37's ``password`` slot is the REVEALED plaintext (``str | None``),
+#: never a :class:`~pdf_toolkit.secret.Secret` -- a ``Secret`` refuses to
+#: pickle by design (its own ``__reduce__``), and this tuple crosses a real
+#: ``ProcessPoolExecutor`` boundary. Revealed exactly once per source, in
+#: THIS process, only after `read_encryption` has confirmed the source is
+#: actually encrypted (`ops/document_password.PasswordResolver`) -- so a
+#: plain document never pays this cost and the plaintext is never bound to a
+#: name that outlives the tuple it travels in.
+_WorkItem = tuple[int, str, int, str, float | None, int | None, str | None]
 
 
 def _ensure_format_supported(fmt: str) -> None:
@@ -124,13 +135,15 @@ def _dry_run_message(page_number: int, fmt: str, dpi: float | None, width_px: in
     return f"page {page_number}: planned {fmt} @ {dpi:g} dpi"
 
 
-def _plan_pages(source: Path, pages_spec: str | None) -> tuple[int, ...]:
+def _plan_pages(
+    source: Path, pages_spec: str | None, *, password: Secret | None = None
+) -> tuple[int, ...]:
     """The selection for one source: a sorted, deduplicated SET (PLAN §4.3 —
     `rasterize` is a set-semantics verb). ``page_count`` is read from a
     short-lived ``StructureEngine`` handle, closed before this function
     returns and well before any worker starts (Design §D5.3, AC5)."""
     engine = require_structure()
-    with engine.open_document(source) as document:
+    with engine.open_document(source, password=password) as document:
         page_count = document.page_count
 
     spec = pages_spec if pages_spec is not None else ALL_PAGES_TOKEN
@@ -202,11 +215,18 @@ def _render_one(
     quality: int | None,
     grayscale: bool,
     policy: SafetyPolicy,
+    password: str | None = None,
 ) -> ItemResult:
     """Render, encode and write exactly one page. Everything a worker does
     for one work item, in one call — nothing opened here escapes it
     (Design §D5.3): the adapter opens and closes its own document, and only
-    this function's plain ``ItemResult`` return crosses back out."""
+    this function's plain ``ItemResult`` return crosses back out.
+
+    Args:
+        password: PDF-37 -- the REVEALED plaintext, or ``None``. See
+            :data:`_WorkItem`'s own docstring for why this is a plain
+            string rather than a :class:`~pdf_toolkit.secret.Secret`.
+    """
     started = time.monotonic()
     source_path = Path(source)
     target_path = Path(target)
@@ -215,7 +235,7 @@ def _render_one(
     try:
         adapter = require_raster(capability="render")
         rendered = adapter.render_page(
-            source, page_number, dpi=dpi, width_px=width_px, grayscale=grayscale
+            source, page_number, dpi=dpi, width_px=width_px, grayscale=grayscale, password=password
         )
     except PdfToolkitError as error:
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -279,9 +299,10 @@ def _render_chunk(
                 quality=quality,
                 grayscale=grayscale,
                 policy=policy,
+                password=password,
             ),
         )
-        for slot, source, page_number, target, dpi, width_px in items
+        for slot, source, page_number, target, dpi, width_px, password in items
     ]
 
 
@@ -297,6 +318,7 @@ def rasterize_document(
     name_template: str | None,
     out_dir: Path,
     policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
     """Rasterize every selected page of every source into ``out_dir``.
 
@@ -304,6 +326,11 @@ def rasterize_document(
     ``input`` is the source PDF, ``output`` the image path, ``message`` the
     measured render facts in the pinned shape
     ``"page {page}: {width}x{height} {ext} @ {dpi_effective:g} dpi"``.
+
+    PDF-37: the global ``--password-file`` slot is resolved at most once per
+    source (`ops/document_password.PasswordResolver`), during the SAME
+    ``_plan_pages`` open every source already pays for page count -- so the
+    resolvability tier is predicted for free, in both modes.
     """
     for source in sources:
         classify_operand(source)
@@ -314,11 +341,46 @@ def rasterize_document(
 
     template = name_template if name_template is not None else DEFAULT_NAME_TEMPLATE
 
+    resolver = PasswordResolver(password)
+    secret_by_source: dict[Path, Secret | None] = {}
     planned: list[tuple[Path, int]] = []
-    for source in sources:
-        for page_number in _plan_pages(source, pages_spec):
-            planned.append((source, page_number))
+    try:
+        for source in sources:
+            secret = resolver.for_source(source)
+            secret_by_source[source] = secret
+            for page_number in _plan_pages(source, pages_spec, password=secret):
+                planned.append((source, page_number))
+        return _rasterize_planned(
+            sources,
+            planned,
+            secret_by_source=secret_by_source,
+            fmt=fmt,
+            dpi=dpi,
+            width_px=width_px,
+            quality=quality,
+            grayscale=grayscale,
+            template=template,
+            out_dir=out_dir,
+            policy=policy,
+        )
+    finally:
+        resolver.clear()
 
+
+def _rasterize_planned(
+    sources: list[Path],
+    planned: list[tuple[Path, int]],
+    *,
+    secret_by_source: dict[Path, Secret | None],
+    fmt: str,
+    dpi: float | None,
+    width_px: int | None,
+    quality: int | None,
+    grayscale: bool,
+    template: str,
+    out_dir: Path,
+    policy: SafetyPolicy,
+) -> OperationResult:
     rendered: list[tuple[Path, int, Path]] = []
     for index, (source, page_number) in enumerate(planned, start=1):
         target = render_name(
@@ -389,8 +451,20 @@ def rasterize_document(
     # writes nothing. It raised already if refused (the
     # `except PdfToolkitError: ... raise` inside plan_output_set, since
     # policy.dry_run is False here), so plan.refusal is always None below.
+    # PDF-37: revealed HERE, in the main process, exactly once per source --
+    # never inside a worker, and never kept around longer than building this
+    # one picklable tuple (see `_WorkItem`'s own docstring for why a `Secret`
+    # itself cannot make this trip).
     work: list[_WorkItem] = [
-        (slot, str(source), page_number, str(target), dpi, width_px)
+        (
+            slot,
+            str(source),
+            page_number,
+            str(target),
+            dpi,
+            width_px,
+            secret.reveal() if (secret := secret_by_source.get(source)) is not None else None,
+        )
         for slot, (source, page_number, target) in enumerate(rendered)
     ]
     chunks = _chunk(work, policy.threads)

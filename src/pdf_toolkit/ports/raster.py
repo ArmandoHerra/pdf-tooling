@@ -68,6 +68,7 @@ class RasterEngine(Protocol):
         dpi: float | None,
         width_px: int | None,
         grayscale: bool,
+        password: str | None = None,
     ) -> RenderedPage:
         """Render one page to in-memory pixels.
 
@@ -81,8 +82,16 @@ class RasterEngine(Protocol):
             width_px: Target pixel width; height follows the page's own
                 (post-rotation) aspect ratio.
             grayscale: Single-channel (``"L"``) output.
+            password: PDF-37 -- the REVEALED plaintext, or ``None``. A plain
+                ``str`` rather than a
+                :class:`~pdf_toolkit.secret.Secret`, for the SAME reason
+                ``path`` above is plain text: this call may cross a
+                ``ProcessPoolExecutor`` worker boundary, and a ``Secret``
+                refuses to pickle by design.
 
         Raises:
+            AuthError: Exit 6 — no password was supplied and one is
+                required, or the supplied password did not unlock it.
             FailureError: Exit 1 — pypdfium2 could not render the page. Never
                 a fallback to another engine (PLAN §7.2 / Design §D8).
         """

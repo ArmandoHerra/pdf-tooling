@@ -14,7 +14,9 @@ That is what keeps the two spellings identical instead of merely similar.
 
 from __future__ import annotations
 
+import ast
 import functools
+import importlib
 import inspect
 import os
 import sys
@@ -47,6 +49,7 @@ __all__ = [
     "get_config",
     "given_global_flags",
     "global_options",
+    "honours_password_file",
     "not_a_readable_file",
     "operand_argument",
     "password_flag_refusal",
@@ -753,6 +756,7 @@ def validate_config(
     *,
     verb: str | None = None,
     consumes: tuple[str, ...] | None = None,
+    module: str | None = None,
 ) -> None:
     """Reject invalid flag combinations. Every failure here is exit 2.
 
@@ -766,6 +770,8 @@ def validate_config(
     the check entirely, which is what the root callback (ungoverned; it is not
     a verb) and direct unit-test construction both want. A real verb always
     passes both, via :func:`global_options`'s ``consumes=`` requirement.
+    ``module`` is PDF-37's own addition, alongside them — the verb's own
+    callback module, read by :func:`_check_password_file_consumption` below.
 
     **Ordering is pinned** (§D12), because two shipped tests depend on it:
 
@@ -782,9 +788,15 @@ def validate_config(
         DIFFERENT dimension from 2 (a conflict BETWEEN two flags a verb
         legitimately declares consuming, not an undeclared flag), so it runs
         only once 2 has already confirmed every given flag is declared.
+    2c. PDF-37's own ``--password-file`` consumption check — the SAME tier,
+        for the SAME reason as 2/2a: it must run BEFORE
+        :func:`_validate_password_file`'s shape check (tier 3) below, so a
+        verb that will never read the path is never asked to confirm it is
+        readable (D2.4) — a verb that cannot honour the flag must not
+        disclose whether an unrelated path even exists.
     3. ``SafetyPolicy.validate()``, the name-template shape check, the
        password-file shape check, ``--threads``, ``--quiet``/``--verbose`` —
-       unchanged, just now reached after 1, 2, 2a and 2b.
+       unchanged, just now reached after 1, 2, 2a, 2b and 2c.
 
     All tiers exit 2, so no exit code changes anywhere — only which message
     is emitted.
@@ -796,6 +808,7 @@ def validate_config(
         _check_output_flag_consumption(config, verb=verb or "this command", consumes=consumes)
         _check_safety_flag_consumption(config, verb=verb or "this command", consumes=consumes)
         _check_in_place_output_conflict(config, verb=verb or "this command", consumes=consumes)
+        _check_password_file_consumption(config, verb=verb or "this command", module=module)
 
     # Delegated, not duplicated: ``SafetyPolicy`` owns this rule, so the CLI and
     # any other construction of a policy cannot drift apart. Still exit 2 —
@@ -948,6 +961,232 @@ def _check_in_place_output_conflict(
         f"{verb}: --in-place is mutually exclusive with {flags_text} "
         "(--in-place would mutate the input and the destination would never be written)"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-37 D2/D4 -- the third central consumption check, `_check_output_flag_
+# consumption`'s and `_check_safety_flag_consumption`'s sibling, for the
+# GLOBAL `--password-file` flag.
+# --------------------------------------------------------------------------- #
+
+#: The one shared module every verb that honours the global slot reaches,
+#: directly or transitively (`ops/document_password.py`'s own docstring: the
+#: seam every one of the eighteen newly-honouring verbs calls). Named here,
+#: not spelled at the call site, so the classification signal below has one
+#: definition.
+_PASSWORD_SEAM_MODULE: Final[str] = "pdf_toolkit.ops.document_password"
+
+#: The NAMES imported from :data:`_PASSWORD_SEAM_MODULE` that actually mean
+#: "this module consumes the global slot" -- as opposed to merely naming its
+#: TYPE. `ops/crypto.py` imports `PasswordSource`/`unresolvable_password_error`
+#: from the seam module too, but for a reason that predates and is orthogonal
+#: to this spec: `encrypt`/`decrypt`/`permissions`'s own pre-existing,
+#: unrelated two-slot (owner/user) password machinery, which never touches
+#: `PasswordResolver`. Counting a bare `PasswordSource` import as "reaches the
+#: seam" made `cmd_encrypt.py` -> `ops.crypto` -> `ops.document_password`
+#: (two hops, well within the bound below) misclassify `encrypt` as
+#: HONOURED — measured, not assumed: `test_ac1_the_structural_predicate_
+#: agrees_with_the_behavioural_probe` reddened on exactly this the first
+#: time `ops/crypto.py` needed the moved type. Only the two names the
+#: eighteen newly-honouring verbs' `PasswordResolver`/`predict_password_
+#: refusal` calls actually need are load-bearing for this classification.
+_PASSWORD_SEAM_CONSUMER_NAMES: Final[frozenset[str]] = frozenset(
+    {"PasswordResolver", "predict_password_refusal"}
+)
+
+#: The literal flag value that marks a `plan_password(...)` call as planning
+#: the GLOBAL slot rather than a per-role one (`encrypt`'s own
+#: `--owner-password-file`/`--user-password-file`, X-417).
+_GLOBAL_PASSWORD_FLAG_LITERAL: Final[str] = "--password-file"
+
+#: Bounded transitive-import depth for the reachability half of the
+#: classification below -- mirrors `tests/registry.py::reaches_atomic_writer`'s
+#: own `_MAX_IMPORT_HOPS`, the same style for the same reason (this product's
+#: one bounded-hop AST-walking convention).
+_MAX_PASSWORD_IMPORT_HOPS: Final[int] = 4
+
+
+def _module_source(dotted: str) -> str | None:
+    """*dotted*'s own source text, read PORTABLY -- via ``sys.modules``/
+    ``inspect.getsourcefile`` rather than a repo-relative ``src/`` path
+    (`tests/registry.py::_dotted_to_path` is dev-repo-only by
+    design; this one runs inside the shipped, installed CLI on every real
+    invocation, so it must work for a ``pip``/``uv tool``-installed
+    distribution too). ``None`` for anything that cannot be resolved or
+    read -- the caller treats that as "cannot classify, refuse."
+    """
+    module = sys.modules.get(dotted)
+    if module is None:
+        try:
+            module = importlib.import_module(dotted)
+        except ImportError:
+            return None
+    try:
+        source_file = inspect.getsourcefile(module)
+    except TypeError:
+        # C extension/builtin, no Python source -- see
+        # test_module_source_returns_none_when_getsourcefile_raises_type_error.
+        return None
+    if not source_file:
+        return None
+    try:
+        return Path(source_file).read_text()
+    except OSError:
+        # Vanished after import -- see
+        # test_module_source_returns_none_when_the_source_file_is_unreadable.
+        return None
+
+
+def _password_signals(source: str) -> tuple[set[str], bool, bool]:
+    """One module's own ``pdf_toolkit.*`` imports; whether it reaches
+    :data:`_PASSWORD_SEAM_MODULE` **by importing one of its consumer names**
+    (:data:`_PASSWORD_SEAM_CONSUMER_NAMES`); and whether it directly plans
+    the GLOBAL slot (``plan_password(flag="--password-file", ...)``,
+    `decrypt`'s and `permissions`'s own existing, unchanged shape).
+
+    Pure AST inspection, never an ``eval``/``exec`` and never a real import
+    beyond what :func:`_module_source` already required -- the same style
+    `tests/registry.py::is_mutating`'s own walk uses, for the same reason: a
+    derived signal, not a hand-typed one.
+    """
+    tree = ast.parse(source)
+    imported: set[str] = set()
+    reaches_seam = False
+    declares_global_slot = False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith("pdf_toolkit")
+        ):
+            imported.add(node.module)
+            if node.module == _PASSWORD_SEAM_MODULE and any(
+                alias.name in _PASSWORD_SEAM_CONSUMER_NAMES for alias in node.names
+            ):
+                reaches_seam = True
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("pdf_toolkit"):
+                    imported.add(alias.name)
+                    # A bare `import pdf_toolkit.ops.document_password` names
+                    # no specific attribute at the import site, so it cannot
+                    # be told apart from a type-only use the way the
+                    # `ImportFrom` branch above can -- treated as reaching
+                    # the seam, matching this walk's own "cannot classify,
+                    # refuse [to the permissive branch]" posture elsewhere.
+                    # No module in this codebase uses this form today
+                    # (confirmed by grep at PDF-37 landing); if one ever
+                    # does, this is the conservative direction to be wrong
+                    # in -- a false HONOURED costs an unused password
+                    # resolution attempt, never a silent refusal.
+                    if alias.name == _PASSWORD_SEAM_MODULE:
+                        reaches_seam = True
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name == "plan_password":
+                for keyword in node.keywords:
+                    if (
+                        keyword.arg == "flag"
+                        and isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value == _GLOBAL_PASSWORD_FLAG_LITERAL
+                    ):
+                        declares_global_slot = True
+    return imported, reaches_seam, declares_global_slot
+
+
+@functools.cache
+def honours_password_file(entry_module: str) -> bool:
+    """PDF-37 D4 -- derived, not declared (AC2): whether *entry_module* (a
+    verb's own callback module) honours the GLOBAL ``--password-file`` slot.
+
+    True in exactly two ways, mirroring the two SHAPES this product already
+    ships for password consumption (E4):
+
+    1. *entry_module* directly plans the global slot -- ``decrypt``'s and
+       ``permissions``'s own existing ``plan_password(flag="--password-
+       file", ...)`` call, unchanged. Checked only at the ENTRY module
+       (never transitively): the literal is a fact about THIS module's own
+       source, not about anything it imports.
+    2. *entry_module*'s transitive ``pdf_toolkit.*`` import graph reaches
+       :data:`_PASSWORD_SEAM_MODULE` -- the shared seam every one of the
+       eighteen newly-honouring verbs calls (`ops/document_password.py`).
+
+    No literal verb NAME anywhere in this function or its helpers (AC2): the
+    decision is built entirely from flag-value and module-name facts, the
+    same class of signal ``OUTPUT_FLAGS``/``SAFETY_FLAGS`` already use.
+    ``encrypt`` reaches neither test -- its own two ``plan_password`` calls
+    name ``--owner-password-file``/``--user-password-file`` (X-417), and it
+    never imports the shared seam -- so it classifies REFUSED automatically,
+    with zero author action, exactly like a verb added tomorrow that follows
+    either of the two shipped shapes above.
+
+    Cached (``lru_cache``): this walks source text, and the CLI has already
+    imported every ``cmd_*.py`` module by the time any verb's body runs
+    (``cli/main.py`` registers all of them eagerly), so the cost is paid at
+    most once per module per process.
+    """
+    _, reaches_seam, declares_global_slot = _entry_signals(entry_module)
+    if declares_global_slot or reaches_seam:
+        return True
+    return _reaches_seam_transitively(entry_module)
+
+
+def _entry_signals(entry_module: str) -> tuple[set[str], bool, bool]:
+    source = _module_source(entry_module)
+    if source is None:
+        return set(), False, False
+    return _password_signals(source)
+
+
+def _reaches_seam_transitively(
+    entry_module: str, *, max_hops: int = _MAX_PASSWORD_IMPORT_HOPS
+) -> bool:
+    seen: set[str] = set()
+    frontier = [entry_module]
+    for _ in range(max_hops):
+        next_frontier: list[str] = []
+        for dotted in frontier:
+            if dotted in seen:
+                continue
+            seen.add(dotted)
+            source = _module_source(dotted)
+            if source is None:
+                continue
+            imported, reaches_seam, _ = _password_signals(source)
+            if reaches_seam:
+                return True
+            next_frontier.extend(sorted(imported))
+        frontier = next_frontier
+        if not frontier:
+            break
+    return False
+
+
+def _check_password_file_consumption(
+    config: GlobalConfig, *, verb: str, module: str | None
+) -> None:
+    """PDF-37 D2 -- the third central consumption check, sibling to
+    :func:`_check_output_flag_consumption` and
+    :func:`_check_safety_flag_consumption` above, in the SAME B-115 shape.
+
+    A global flag a verb cannot honour is a usage error, exit 2, never
+    silently ignored -- the exact rule that shipped twice already
+    (`54500b06e5`, `996f9eb6bc`) and this spec's whole reason for existing.
+    Runs in the SAME tier as those two (§D12, `validate_config`'s own
+    docstring), during flag resolution, before any plan is built, so
+    ``dry == real == 2`` is structural (OR-7), and BEFORE
+    :func:`_validate_password_file`'s shape check -- a verb that will never
+    read the path must not disclose whether it exists (D2.4).
+
+    Never echoes the operand: the refusal names the flag, never the value,
+    for the same reason :func:`password_flag_refusal` above states it.
+    """
+    if config.password_file is None:
+        return
+    if module is not None and honours_password_file(module):
+        return
+    raise UsageError(f"{verb} does not accept --password-file (this verb cannot use a password)")
 
 
 def _validate_name_template(template: str) -> None:
@@ -1105,7 +1344,9 @@ def _verb_name(ctx: typer.Context) -> str:
     return " ".join(reversed(parts))
 
 
-def _verb_handler(ctx: typer.Context, values: dict[str, Any], *, consumes: tuple[str, ...]) -> None:
+def _verb_handler(
+    ctx: typer.Context, values: dict[str, Any], *, consumes: tuple[str, ...], module: str | None
+) -> None:
     parent_state = getattr(ctx.parent, "obj", None) if ctx.parent is not None else None
     merged: dict[str, Any] = {}
     for spec in GLOBAL_PARAMS:
@@ -1115,7 +1356,7 @@ def _verb_handler(ctx: typer.Context, values: dict[str, Any], *, consumes: tuple
         else:
             merged[spec.name] = parent_state.raw[spec.name]
     config = _apply(ctx, merged)
-    validate_config(config, verb=_verb_name(ctx), consumes=consumes)
+    validate_config(config, verb=_verb_name(ctx), consumes=consumes, module=module)
 
 
 def _attach(
@@ -1198,10 +1439,11 @@ def global_options(
         # granularity `tests/registry.py::discover_verbs()` already resolves a
         # verb to (`_module_dotted_name`), and each `cli/cmd_*.py` module
         # declares exactly one command, so this can never collide.
-        _CONSUMES_BY_MODULE[func.__module__] = consumes
+        module = func.__module__
+        _CONSUMES_BY_MODULE[module] = consumes
 
         def handler(ctx: typer.Context, values: dict[str, Any]) -> None:
-            _verb_handler(ctx, values, consumes=consumes)
+            _verb_handler(ctx, values, consumes=consumes, module=module)
 
         return _attach(func, handler)
 
