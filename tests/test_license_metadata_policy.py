@@ -495,7 +495,23 @@ def test_ac12_pin_allowlist_raw_key_subscript_defect(monkeypatch: pytest.MonkeyP
         {"pdfminer-six": "normalizes equal to the row name, not literally equal (E6)"},
     )
     result = _drive_cmd_check(monkeypatch, [offender])
-    assert result == 1, "unreachable under the current defect — the KeyError fires first"
+    # This arm asserts the CORRECT behaviour, never the defective one, and that is
+    # precisely what lets the pin fire. Today :344 raises KeyError before this line
+    # is reached, so the arm xfails and the pin holds. The day :344 subscripts by
+    # the MATCHED key, the offender is allowlisted, `cmd_check` returns 0, this
+    # assertion PASSES, and the strict xfail turns the suite red — the retirement
+    # signal this pin's own reason string promises.
+    #
+    # Asserting the DEFECTIVE outcome (`result == 1`) instead would xfail in BOTH
+    # states — KeyError today, AssertionError after the fix — so the promised
+    # signal could never fire and this pin would be an unfailable criterion.
+    # Verified both directions against a mutated scratch copy before landing.
+    assert result == 0, (
+        "expected the allowlisted offender to be suppressed (cmd_check returns 0) once "
+        "scripts/licenses.py:344 subscripts ALLOWLIST by the MATCHED key rather than the raw "
+        "row name; reaching this assertion at all means the KeyError at :344 is gone and the "
+        "B-245 pin should be retired"
+    )
 
 
 # --------------------------------------------------------------------------- #
