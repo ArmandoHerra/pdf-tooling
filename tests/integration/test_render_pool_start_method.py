@@ -510,7 +510,11 @@ def _make_source(directory: Path, *, pages: int) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "start-method-source.pdf"
     made = canvas.Canvas(str(path), pagesize=letter, invariant=1)
-    made.setProducer("pdf-toolkit test corpus")
+    # The CURRENT display name. The sibling fixture in `test_rasterize_signals.py`
+    # still says the superseded one, and that occurrence is deliberately FROZEN by
+    # `test_brand_surfaces.py`'s class H -- copying it into a NEW file would have
+    # grown a frozen census, which is what that guard exists to catch. It did.
+    made.setProducer("pdf-tooling test corpus")
     made.setCreator("tests/integration/test_render_pool_start_method.py")
     for number in range(1, pages + 1):
         made.drawString(72, 700, f"src page {number}")
