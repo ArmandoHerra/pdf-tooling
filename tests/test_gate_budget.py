@@ -1550,15 +1550,26 @@ LOAD_SENSING_CASES: Final = (
     ("gw3", False),  # the worker ID VALUE rather than a key
 )
 
-#: Strings Section 6 legitimately contains and which the matcher must NOT flag.
-#: A matcher that forbade these would make the section unable to run its own
-#: probe, so the next engineer would revert it and the hole would reopen.
+#: Strings Section 6 legitimately contains and which the matcher must NOT flag,
+#: including two ordinary ENVIRONMENT KEYS -- the proposition is *branching on
+#: worker identity or host load*, not *touching the environment*, and the
+#: difference has to be asserted rather than asserted-about. A matcher that
+#: forbade these would make the section unable to run its own probe, so the next
+#: engineer would revert it and the hole would reopen.
+#:
+#: `COVERAGE_PROCESS_START` would be the most on-the-nose env-key sample here
+#: and is deliberately NOT used: `tests/test_coverage_policy.py` pins that
+#: literal as an `ast.Constant` ANYWHERE under `tests/` to count the modules
+#: that scrub the coverage environment, so quoting it as sample data makes this
+#: file read as a second scrub site and reddens a shipped control. Observed, in
+#: this spec's own `make ci`. The guard is right and the sample was wrong.
 LOAD_SENSING_NON_CASES: Final = (
     "imported package",
     "--help",
     "importtime",
     "pdf_toolkit",
-    "COVERAGE_PROCESS_START",
+    "PYTHONPATH",
+    "PDF_TOOLKIT_SAMPLES_DIR",
     "no console script at {path}; run `uv sync`.",
 )
 
