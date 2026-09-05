@@ -1228,6 +1228,25 @@ def test_help_stays_within_the_startup_budget() -> None:
     re-measured deliberately, on a verified-quiet host, by
     `scripts/measure_gate.py --target help-startup --baseline` (`make
     gate-timing`), and the distribution is recorded beside STARTUP_BUDGET_MS.
+
+    **PDF-42 -- what carries the LATENCY half now, and why this test still
+    abstains.** Section 6 as PDF-29 shipped it was blind to latency by
+    construction: a module-scope `time.sleep(0.5)` in `cli/common.py` moved
+    `pdftoolkit --help` from 227.0 ms to 728.7 ms while the import census stayed
+    at 282 -- a delta of exactly 0 -- and every Section 6 node id reported
+    passed. Section 6 now also spends the two timing columns `-X importtime`
+    was already handing it and throwing away, and
+    `test_no_single_module_costs_more_than_the_self_time_ceiling` is the
+    assertion that plant fails.
+
+    That control is in Section 6 precisely so it does NOT have to abstain, and
+    `tests/test_gate_budget.py::test_the_section_six_roster_actually_ran_under_-
+    the_default_parallelism` proves it RAN -- from a JUnit receipt of a real
+    `-n auto` subprocess, not from an argument. **This test's abstention stays.**
+    A wall-clock assertion inside a suite that saturates its own box is a
+    contradiction rather than a tuning problem, and the answer to a control that
+    abstains under the default condition is a control that does not have to --
+    not un-skipping this one.
     """
     import time
 

@@ -90,6 +90,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Final, NamedTuple
 
@@ -2368,11 +2369,23 @@ def test_benign_section_5_mentions_are_never_flagged() -> None:
 #
 # WHAT THE PIN RECORDS TODAY, and it is not a flattering picture -- the numbers
 # below are a MEASUREMENT of the product as it is, not an endorsement of it:
-#   * `pdf_toolkit.cli.common` imports **PIL** eagerly, which drags in
-#     `defusedxml`. Pillow is deliberately NOT an engine module
-#     (`test_pillow_is_deliberately_not_an_engine_module`), so nothing shipped
-#     before this section could see it.
-#   * `pdf_toolkit.ops.textract` imports **email** eagerly.
+#   * **PIL** is eager, dragging in `defusedxml`. Pillow is deliberately NOT an
+#     engine module (`test_pillow_is_deliberately_not_an_engine_module`), so
+#     nothing shipped before this section could see it. The single module-scope
+#     `PIL` import site under `src/` is **`pdf_toolkit/ops/compose.py:90`**,
+#     reached from `--help` via `cli.main` -> `cli.cmd_compose` -> `ops.compose`.
+#     That site is DERIVED, not transcribed, by
+#     `test_pil_has_exactly_one_module_scope_import_site_under_src` below --
+#     PDF-42 found this line previously blamed `cli.common`, which contains no
+#     `PIL` token at all and never did (`git log -S PIL -- .../cli/common.py` is
+#     empty). A comment is one more hand-maintained claim; this one is now a
+#     test.
+#   * **email** is eager, but NOT via `pdf_toolkit.ops.textract` -- that module
+#     contains no `email` token at any indentation, and never did. Measured with
+#     `python -X importtime`, `email` and `email.message` arrive under
+#     `importlib.metadata` (through `importlib.metadata._adapters`), which
+#     `pdf_toolkit.cli.cmd_version` imports. The cause is named here only
+#     because it was measured; the previous attribution was not.
 #   * `concurrent.futures` pulls in **multiprocessing**, which pulls in
 #     **socket**.
 # 280 modules are imported to print a help screen, over and above what a bare
@@ -2383,13 +2396,34 @@ def test_benign_section_5_mentions_are_never_flagged() -> None:
 # --------------------------------------------------------------------------- #
 
 
+class ModuleImport(NamedTuple):
+    """One `-X importtime` row: the module, its OWN import cost, and its subtree's.
+
+    `self_us` is the column this section's latency half is built on. A
+    module-scope `time.sleep(0.5)` lands ~500,000 us in the sleeping module's
+    SELF column and leaves every other module's alone, which is precisely the
+    signature an import-NAME census cannot see: the set does not change.
+    """
+
+    name: str
+    self_us: int
+    cumulative_us: int
+
+
 class HelpImports(NamedTuple):
-    """One `pdftoolkit --help` run's import census."""
+    """One `pdftoolkit --help` run's import census -- the names AND the times."""
 
     returncode: int
     total: int
     top_level: frozenset[str]
     non_stdlib: frozenset[str]
+    #: Attributable module -> its own import cost in microseconds. Same key set
+    #: as the count above, computed from the same baseline-subtracted rows, so
+    #: the timing half can never disagree with the counting half about which
+    #: modules it is describing.
+    self_us_by_module: Mapping[str, int]
+    #: Sum of the above. The second net, for a regression spread thinly.
+    total_self_us: int
 
 
 #: The console script under test. Deliberately the venv's own, by path: the
@@ -2416,7 +2450,7 @@ HELP_IMPORT_ALLOWLIST: Final = frozenset(
         "typer",
         "annotated_doc",  # typer's own
         "shellingham",  # typer's own
-        "PIL",  # FINDING: eager, via pdf_toolkit.cli.common
+        "PIL",  # FINDING: eager, via pdf_toolkit.ops.compose (measured)
         "defusedxml",  # FINDING: eager, dragged in by PIL
         "org",  # 3.11 only: xml.sax probing for Jython
         "sitecustomize",  # venv plumbing, not a product import
@@ -2440,8 +2474,142 @@ HELP_IMPORT_ALLOWLIST: Final = frozenset(
 HELP_MODULE_CEILING: Final = 320
 
 
-def _importtime_census(argv: list[str], env: dict[str, str]) -> tuple[int, list[str]]:
-    """(exit code, every module name `-X importtime` reported for *argv*)."""
+# --------------------------------------------------------------------------- #
+# PDF-42 -- the TIME half, beside the import-SET half above
+#
+# The two constants below are CEILINGS on the `-X importtime` self-time columns
+# that `_importtime_census` already collects. They are here because the set-half
+# above is blind to latency BY CONSTRUCTION, and that blindness was measured
+# rather than argued: a module-scope `time.sleep(0.5)` in
+# `src/pdf_toolkit/cli/common.py` moves `pdftoolkit --help` from 227.0 ms to
+# 728.7 ms (min-of-5, quiet host) while the attributable module count stays at
+# **282 -- a delta of exactly 0** -- and every assertion above stays green.
+#
+# BOTH ARE CEILINGS AND NEITHER IS A FLOOR, for the same reason
+# `HELP_MODULE_CEILING` is: the baseline subtraction can only LOWER an
+# attributable figure, so a low reading can never produce a false red, and that
+# is the direction that matters across eight matrix legs.
+#
+# A WIDENED CEILING IS NEVER AN ACCEPTABLE RESPONSE TO A RED. If a future eager
+# import pushes either statistic up, the admissible responses are to make the
+# import lazy or to widen the constant WITH A FRESH MEASURED DISTRIBUTION
+# RECORDED BESIDE IT -- the identical rule the allowlist above already imposes,
+# for the identical reason: widening a pin without a measurement is how the
+# wall-clock budget this section replaced came to be defended by nothing.
+# `tests/test_gate_budget.py::test_the_pdf42_ceilings_carry_their_measurement`
+# enforces exactly that, and it is not a formality.
+# --------------------------------------------------------------------------- #
+
+#: No single attributable module's import SELF time may exceed this.
+#:
+#: STATISTIC: max over modules of per-module self time, from `-X importtime`,
+#:   baseline-subtracted, one `pdftoolkit --help` run.
+#: DATE: 2026-09-05
+#: COMMIT: b175d10 (measured on the working tree at that commit)
+#: HOST: station-01, 8 logical CPUs, Linux. Verified quiet at the campaign's
+#:   start by `scripts/measure_gate.py`'s own definition (loadavg 1.50 against
+#:   the 2.00 ceiling, no foreign process >=25% CPU alive >=10 s). Later runs in
+#:   the campaign start under load DECAYING FROM THIS SUITE'S OWN PREVIOUS RUN,
+#:   which is self-inflicted and is the shipped condition, not foreign traffic.
+#: INTERPRETER: CPython 3.12.13 (the venv resolves to this; there is no
+#:   .python-version in the repository)
+#: ENGINES: all six present -- pypdf 6.16.2 / pypdfium2 5.13.0 / reportlab
+#:   5.0.1 / pdfplumber 0.11.10 / tesseract 5.5.0 / soffice 26.2.5.2
+#:
+#: N = 12 per arm. Figures in microseconds.
+#:   serial (`-p no:xdist`):  min 8821  median 9579  p95 13712  max 14003  spread 5182
+#:   `-n auto` (the DEFAULT): min 11733 median 26730 p95 48292  max 60255  spread 48522
+#: A second N=12 campaign taken while a FOREIGN pytest suite saturated the box
+#: (loadavg 10-16) read `-n auto` p95 48292 -> 62544, max 60255 -> 75291. Both
+#: campaigns are on the record because the second is the pessimistic one and the
+#: ceiling has to survive it.
+#:
+#: FACTOR: 5.18x the `-n auto` p95 (48292), rounded up to a round number. That
+#: leaves 4.15x over the quiet-arm max and 3.32x over the loaded-arm max.
+#: SEPARATION: the `time.sleep(0.5)` plant lands 504504 us in
+#: `pdf_toolkit.cli.common`'s self column (3300 us unplanted), which EXCEEDS
+#: this ceiling by 2.02x. The plant is caught with two clear factors on either
+#: side, which is the whole reason this statistic and not the total below.
+MODULE_SELF_US_CEILING: Final = 250_000
+
+#: The sum of all attributable modules' self times.
+#:
+#: **READ THE SEPARATION LINE BEFORE TRUSTING THIS ONE.** This is a coarse
+#: ratchet against gross growth and it CANNOT see the 0.5 s plant. That is a
+#: measured result, not a conservative guess, and it is recorded here rather
+#: than being quietly implied by a comfortable-looking number.
+#:
+#: STATISTIC: sum over attributable modules of per-module self time.
+#: DATE: 2026-09-05
+#: COMMIT: b175d10
+#: HOST: station-01, 8 logical CPUs, Linux -- same campaign, same quietness
+#:   verification, as MODULE_SELF_US_CEILING above.
+#: INTERPRETER: CPython 3.12.13
+#: ENGINES: all six present (as above)
+#:
+#: N = 12 per arm. Figures in microseconds.
+#:   serial (`-p no:xdist`):  min 147692 median 164082 p95 210276 max 220790 spread 73098
+#:   `-n auto` (the DEFAULT): min 255771 median 439248 p95 496622 max 554617 spread 298846
+#:   `-n auto`, FOREIGN-LOADED: p95 779998, max 949030, spread 630803
+#:
+#: FACTOR: 2.56x the foreign-loaded `-n auto` p95 (779998), rounded to a round
+#: number; 4.03x the quiet `-n auto` p95. The loaded arm governs here because
+#: this statistic's dispersion is dominated by contention.
+#: SEPARATION: NONE, AND THIS IS THE FINDING. The plant's total is 759422 us on
+#: a quiet host; ordinary `-n auto` contention on a shared host was OBSERVED at
+#: 949030 us with no plant at all. **Ordinary noise exceeds the planted signal**,
+#: so no single ceiling separates them and this assertion cannot be the one that
+#: catches a startup regression. It is kept as the second net it can honestly
+#: be -- a regression that adds more than ~1.4 s of import self time spread
+#: thinly across many modules, which `MODULE_SELF_US_CEILING` would miss. PDF-42
+#: filed the measurement to the PM rather than tightening this into a flake.
+TOTAL_IMPORT_US_CEILING: Final = 2_000_000
+
+
+#: `-X importtime` writes `import time: self [us] | cumulative | imported package`
+#: and then one row per module in the same three columns. Until PDF-42 this
+#: parser kept `fields[2]` and threw the two timing columns away -- the
+#: measurement was already on the wire, already paid for by a subprocess that
+#: runs on every leg of every CI job, and discarded three lines later.
+IMPORTTIME_PREFIX: Final = "import time:"
+IMPORTTIME_HEADER_NAME: Final = "imported package"
+
+
+def parse_importtime_row(line: str) -> ModuleImport | None:
+    """One `-X importtime` row, or `None` for the header and for shapes that are
+    not rows at all.
+
+    A row that reaches the three-column shape and whose timing columns do NOT
+    parse as integers **raises, naming the line**. Degrading a malformed field
+    to `0` is the tempting alternative and it is forbidden here: a census of
+    zeroes passes every ceiling below and still exits 0 -- a silent wrong answer
+    wearing a success code, which is the exact failure class Section 6 exists to
+    end. If CPython changes this format, this section must go RED and be
+    re-read, not quietly start measuring nothing.
+    """
+    fields = line.split("|")
+    if len(fields) != 3:
+        return None
+    name = fields[2].strip()
+    if name == IMPORTTIME_HEADER_NAME:
+        return None
+    raw_self = fields[0].split(":", 1)[-1].strip()
+    raw_cumulative = fields[1].strip()
+    try:
+        return ModuleImport(name, int(raw_self), int(raw_cumulative))
+    except ValueError as exc:  # pragma: no cover - exercised via the red control
+        raise AssertionError(
+            f"`-X importtime` row has a non-numeric timing column: {line!r}. "
+            "The census refuses to read this as 0: a zeroed census passes every ceiling "
+            "in this section and still exits 0. If CPython's importtime format changed, "
+            "fix this parser -- do not let the instrument report success on data it "
+            "could not read."
+        ) from exc
+
+
+def _importtime_census(argv: list[str], env: dict[str, str]) -> tuple[int, list[ModuleImport]]:
+    """(exit code, every module `-X importtime` reported for *argv*, WITH both
+    of its timing columns)."""
     result = subprocess.run(  # noqa: S603 - this interpreter, a literal argv
         [sys.executable, "-X", "importtime", *argv],
         capture_output=True,
@@ -2450,17 +2618,13 @@ def _importtime_census(argv: list[str], env: dict[str, str]) -> tuple[int, list[
         cwd=REPO_ROOT,
         env=env,
     )
-    modules: list[str] = []
+    modules: list[ModuleImport] = []
     for line in result.stderr.splitlines():
-        if not line.startswith("import time:"):
+        if not line.startswith(IMPORTTIME_PREFIX):
             continue
-        fields = line.split("|")
-        if len(fields) != 3:
-            continue
-        name = fields[2].strip()
-        if name == "imported package":
-            continue
-        modules.append(name)
+        row = parse_importtime_row(line)
+        if row is not None:
+            modules.append(row)
     return result.returncode, modules
 
 
@@ -2497,14 +2661,27 @@ def probe_help_imports(entry: Path | None = None) -> HelpImports:
     returncode, measured = _importtime_census(
         [str(entry if entry is not None else VENV_CONSOLE_SCRIPT), "--help"], env
     )
-    attributable = [name for name in measured if name not in set(floor)]
-    top_level = frozenset(name.split(".")[0] for name in attributable)
+    floor_names = {row.name for row in floor}
+    attributable = [row for row in measured if row.name not in floor_names]
+    top_level = frozenset(row.name.split(".")[0] for row in attributable)
     non_stdlib = frozenset(
         name
         for name in top_level
         if name not in sys.stdlib_module_names and not name.startswith("_")
     )
-    return HelpImports(returncode, len(attributable), top_level, non_stdlib)
+    # Summed rather than assigned, so a module reported twice cannot silently
+    # drop out of the mapping and make the key set disagree with the count.
+    self_us_by_module: dict[str, int] = {}
+    for row in attributable:
+        self_us_by_module[row.name] = self_us_by_module.get(row.name, 0) + row.self_us
+    return HelpImports(
+        returncode,
+        len(attributable),
+        top_level,
+        non_stdlib,
+        self_us_by_module,
+        sum(self_us_by_module.values()),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -2637,17 +2814,26 @@ def test_the_census_sees_imports_made_inside_product_modules(
 ) -> None:
     """The half the entry-point plant cannot show, asserted directly.
 
-    `PIL` is imported by `pdf_toolkit.cli.common` -- three levels inside the
+    `PIL` is imported by `pdf_toolkit.ops.compose` -- three levels inside the
     product, by nothing any test writes. Its presence in the census is the proof
     that this section sees eager imports made INSIDE product modules and not
     merely ones written at the entry point.
+
+    **The module named above was corrected by PDF-42.** This docstring and the
+    failure message below said `pdf_toolkit.cli.common`, which has never
+    contained a `PIL` token. The assertion was always right; only its
+    explanation was wrong, and a wrong explanation costs something precisely
+    here: the message tells a future reader which file to look at, and it was
+    telling them to look at a file with nothing in it.
     """
     assert "PIL" in help_imports.non_stdlib, (
-        "PIL is no longer in the census. If `pdf_toolkit.cli.common` stopped importing it "
-        "eagerly that is GOOD NEWS and this assertion should be re-pointed at whatever "
-        "product-internal eager import remains -- but it must be re-pointed, not deleted, "
-        "or the planted-entry control below is the only proof this section has and it "
-        "proves the weaker half."
+        "PIL is no longer in the census. If `pdf_toolkit/ops/compose.py:90` stopped "
+        "importing it eagerly that is GOOD NEWS and this assertion should be re-pointed at "
+        "whatever product-internal eager import remains -- but it must be re-pointed, not "
+        "deleted, or the planted-entry control below is the only proof this section has "
+        "and it proves the weaker half. "
+        "(`test_pil_has_exactly_one_module_scope_import_site_under_src` derives the site, "
+        "so it will tell you where to point rather than leaving you to grep.)"
     )
 
 
@@ -2696,3 +2882,228 @@ def test_the_pin_is_a_superset_check_and_a_missing_import_is_not_a_red(
     # `absent` is deliberately not asserted empty -- this line documents that,
     # and pins that the allowlist is not merely a restatement of the census.
     assert absent <= HELP_IMPORT_ALLOWLIST
+
+
+# --------------------------------------------------------------------------- #
+# PDF-42 -- the assertions the timing columns buy, and the reds that prove them
+# --------------------------------------------------------------------------- #
+
+
+def test_no_single_module_costs_more_than_the_self_time_ceiling(
+    help_imports: HelpImports,
+) -> None:
+    """The assertion the headline plant fails, and the reason it is per-module.
+
+    A `time.sleep(0.5)` concentrates its entire cost in ONE module's self
+    column; contention inflates all 282 roughly together. That asymmetry is what
+    makes a per-module ceiling able to separate a real regression from a busy
+    box, and it is why the TOTAL below cannot (see its comment block -- ordinary
+    `-n auto` noise was measured LARGER than the planted signal).
+    """
+    over = sorted(
+        (name, cost)
+        for name, cost in help_imports.self_us_by_module.items()
+        if cost > MODULE_SELF_US_CEILING
+    )
+    assert over == [], (
+        f"module(s) over the {MODULE_SELF_US_CEILING} us per-module import self-time "
+        f"ceiling: {over}. Startup latency in a Python CLI is dominated by module import, "
+        "and this is a module that got dramatically more expensive to import -- a sleep, a "
+        "network call, a heavy computation or a big eager subsystem at module scope. Find "
+        f"it with `python -X importtime {VENV_CONSOLE_SCRIPT} --help`. Either move the cost "
+        "out of module scope, or widen MODULE_SELF_US_CEILING **with a fresh measured "
+        "distribution recorded beside it** -- widening a pin without a measurement is how "
+        "the wall-clock budget this section replaced came to be defended by nothing."
+    )
+
+
+def test_total_import_self_time_stays_under_the_ceiling(help_imports: HelpImports) -> None:
+    """The coarse second net: a regression spread thinly across many modules.
+
+    Its sensitivity is bounded by contention and the constant's own comment
+    block says so with the numbers. It is NOT the control that catches the 0.5 s
+    plant -- `test_no_single_module_costs_more_than_the_self_time_ceiling` is.
+    """
+    assert help_imports.total_self_us <= TOTAL_IMPORT_US_CEILING, (
+        f"`pdftoolkit --help` spends {help_imports.total_self_us} us of import self time, "
+        f"over the {TOTAL_IMPORT_US_CEILING} us ceiling. This is a COARSE net: if it is red "
+        "the growth is large. Check the per-module view first "
+        f"(`python -X importtime {VENV_CONSOLE_SCRIPT} --help`)."
+    )
+
+
+def test_the_timing_census_is_not_vacuous(help_imports: HelpImports) -> None:
+    """AC5. A ceiling over an empty or zeroed mapping passes forever.
+
+    `expertise/product.yaml`: *a uniform negative across a population expected
+    to be split is the signature of a dead instrument.* The two ceilings above
+    are one-sided, so a census of zeroes satisfies both while measuring nothing
+    -- which is the precise shape of silent wrong answer this section exists to
+    prevent, and the reason `parse_importtime_row` raises rather than
+    defaulting.
+    """
+    assert help_imports.self_us_by_module, "the per-module timing mapping is empty"
+    assert help_imports.total_self_us > 0, (
+        f"total import self time is {help_imports.total_self_us}; the timing columns "
+        "parsed to nothing, so both ceilings above are passing over no data at all"
+    )
+    timed_top_level = {name.split(".")[0] for name in help_imports.self_us_by_module}
+    assert timed_top_level == help_imports.top_level, (
+        "the timing mapping and the name census describe DIFFERENT module sets; one of them "
+        f"is measuring a different program. Timing-only: "
+        f"{sorted(timed_top_level - help_imports.top_level)}; "
+        f"names-only: {sorted(help_imports.top_level - timed_top_level)}"
+    )
+    assert sum(help_imports.self_us_by_module.values()) == help_imports.total_self_us
+
+    # `total` counts `-X importtime` ROWS; the mapping is keyed by module NAME, and
+    # CPython emits repeat rows. Measured at b175d10: 282 rows over 273 distinct
+    # names -- `nt` appears SIX times and `_winapi` twice (Windows-only modules
+    # CPython probes for and fails to import, logging each attempt), and
+    # `pdf_toolkit.safety.policy`, `typer._click.exceptions` and `_elementtree`
+    # each appear twice (re-entered while already in `sys.modules`, so the second
+    # row is nearly free). So the mapping is expected to be SMALLER, never larger,
+    # and the repeated rows are SUMMED into their module's entry rather than
+    # overwriting it -- overwriting would silently drop cost on the floor.
+    #
+    # This also means `HELP_MODULE_CEILING`'s "280 modules" has always been a row
+    # count rather than a distinct-module count. PDF-42 records that and changes
+    # neither: the ceiling is out of this spec's scope and the row count is a
+    # perfectly good proxy for the thing it pins.
+    assert len(help_imports.self_us_by_module) <= help_imports.total, (
+        f"the timing mapping describes {len(help_imports.self_us_by_module)} modules from "
+        f"{help_imports.total} importtime rows. More names than rows is impossible; the "
+        "parser or the subtraction is wrong."
+    )
+
+
+def test_a_malformed_timing_column_raises_rather_than_reading_as_zero() -> None:
+    """AC4's RED. The parser is fed a row whose self field is not a number.
+
+    A parser that degraded to 0 would produce a census of zeroes that passes
+    every ceiling in this section and still exits 0. That is a wrong answer
+    wearing a success code, and it is strictly worse than a crash.
+    """
+    good = parse_importtime_row("import time:       744 |        744 |   _io")
+    assert good == ModuleImport("_io", 744, 744)
+
+    with pytest.raises(AssertionError, match="non-numeric timing column"):
+        parse_importtime_row("import time:       n/a |        744 |   _io")
+    with pytest.raises(AssertionError, match="non-numeric timing column"):
+        parse_importtime_row("import time:       744 |        n/a |   _io")
+
+    # The header row and non-rows are None, not errors.
+    assert parse_importtime_row("import time: self [us] | cumulative | imported package") is None
+    assert parse_importtime_row("import time: nonsense without pipes") is None
+
+
+def test_the_ceilings_are_one_sided_and_an_improvement_is_never_a_red() -> None:
+    """AC6. Making an import lazier reduces both statistics and must redden
+    nothing.
+
+    Same asymmetry, and same reason, as
+    `test_the_pin_is_a_superset_check_and_a_missing_import_is_not_a_red`: a pin
+    that reddened on an improvement would be widened or deleted by the first
+    person to improve startup latency.
+    """
+    halved = {"pdf_toolkit.models": 10_000, "typing": 5_000}
+    assert max(halved.values()) <= MODULE_SELF_US_CEILING
+    assert sum(halved.values()) <= TOTAL_IMPORT_US_CEILING
+
+    # ...and the same shape with one module raised past the ceiling DOES redden.
+    raised = {**halved, "pdf_toolkit.cli.common": MODULE_SELF_US_CEILING + 1}
+    over = [name for name, cost in raised.items() if cost > MODULE_SELF_US_CEILING]
+    assert over == ["pdf_toolkit.cli.common"], (
+        "the per-module ceiling did not notice a module raised one microsecond past it"
+    )
+
+
+#: The single module-scope `PIL` import site under `src/`, DERIVED below rather
+#: than transcribed. PDF-42 found the previous attribution (`cli/common.py`)
+#: false, and false in a place that cost something: it was in the failure
+#: message that tells a future reader which file to go and look at.
+PIL_IMPORT_SITE: Final = "pdf_toolkit/ops/compose.py"
+
+
+def module_scope_pil_import_sites() -> list[str]:
+    """Every module-scope `import PIL` / `from PIL import ...` under `src/`.
+
+    Module scope only: an import inside `if TYPE_CHECKING:` or inside a function
+    body is not in `tree.body` and costs nothing at runtime, which is exactly
+    the distinction that made the old attribution look plausible -- there are
+    nine `PIL` references under `src/` and eight of them are free.
+    """
+    sites: list[str] = []
+    for path in iter_python_files(SRC):
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:  # pragma: no cover - a broken source file is Section 1's problem
+            continue
+        for node in tree.body:
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            if any(name == "PIL" or name.startswith("PIL.") for name in names):
+                sites.append(f"{path.relative_to(SRC).as_posix()}:{node.lineno}")
+    return sorted(sites)
+
+
+def test_pil_has_exactly_one_module_scope_import_site_under_src() -> None:
+    """AC16. The corrected attribution is DERIVED, because a comment is one more
+    hand-maintained claim.
+
+    `PDF-30`'s closure rule: *a claim about this repository is derived, gated, or
+    absent.* The claim "PIL is eager via <module>" was none of those for the
+    whole life of Section 6, and it was wrong the entire time -- not rotted,
+    wrong when written (`git log -S PIL -- src/pdf_toolkit/cli/common.py` is
+    empty). Deriving it means the next person to make `PIL` lazy is sent to the
+    right file by a test rather than to the wrong one by a comment.
+    """
+    sites = module_scope_pil_import_sites()
+    assert len(sites) == 1, (
+        f"expected exactly one module-scope PIL import under src/, found {sites}. If a "
+        "second one was added, the census above will already have been unaffected (PIL was "
+        "already eager) -- but the attribution in this section's header and in "
+        "`test_the_census_sees_imports_made_inside_product_modules`'s failure message now "
+        "names only one of them, so update both or make the new one lazy."
+    )
+    assert sites[0].startswith(PIL_IMPORT_SITE), (
+        f"the single module-scope PIL import moved to {sites[0]}; this section's header, "
+        "its allowlist comment and the failure message of "
+        "`test_the_census_sees_imports_made_inside_product_modules` all name "
+        f"{PIL_IMPORT_SITE} and must be re-pointed together."
+    )
+
+
+def test_a_second_module_scope_pil_import_is_detected(tmp_path: Path) -> None:
+    """AC16's RED, against a scratch copy -- the working tree is never mutated
+    to observe a red (HC-4)."""
+    scratch = tmp_path / "planted_module.py"
+    scratch.write_text("from PIL import Image\n\n\ndef f() -> None:\n    pass\n")
+    tree = ast.parse(scratch.read_text())
+    found = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("PIL")
+    ]
+    assert found, "the derivation's own shape does not see a plain `from PIL import Image`"
+
+    # And the shapes that must NOT count, so the derivation is not merely greedy.
+    guarded = ast.parse(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from PIL import Image\n"
+        "def g():\n"
+        "    from PIL import ImageDraw\n"
+    )
+    module_scope = [
+        node
+        for node in guarded.body
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("PIL")
+    ]
+    assert module_scope == [], (
+        "a TYPE_CHECKING-guarded or function-local PIL import counted as module scope; the "
+        "derivation would then report sites that cost nothing at runtime"
+    )
