@@ -46,7 +46,7 @@ from typing import Any, Final
 
 import pytest
 
-from registry import out_dir_batch_verbs, run_cli
+from registry import operand_metavars, out_dir_batch_verbs, run_cli
 
 # --------------------------------------------------------------------------- #
 # The derived population, resolved ONCE at import so a parametrize set that
@@ -118,14 +118,38 @@ def _skip_unless_engine_available(verb: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _good_pdf(root: Path, name: str) -> Path:
-    """A real multi-page PDF, built through the product's own ``create`` verb.
+#: Each verb's declared operand ``metavar``, read off the live command tree.
+#: ``convert`` declares ``FILE...`` and every other batch verb ``PDF...``.
+_METAVARS: Final[dict[str, str | None]] = operand_metavars()
 
-    Built by the tool rather than by an engine import, so this file stays
-    inside the same port discipline the product enforces on itself.
+
+def _takes_pdf_operand(verb: str) -> bool:
+    """Whether *verb*'s operand is a PDF, DERIVED from its declared ``metavar``.
+
+    ``convert`` is an office-document converter — `tests/registry.py`'s own
+    ``_convert_invocation`` records that *its own operand is never a PDF* — so
+    handing it a PDF tests LibreOffice's PDF **import** filter rather than this
+    spec's continuation property. That filter needs Java and is absent on a
+    stock CI runner, where every input then fails and the arm can no longer see
+    the difference between the good inputs and the bad one. Derived from the
+    live declaration rather than from a verb name, so a verb that changes its
+    operand kind gets the right fixture with no author action.
+    """
+    metavar = _METAVARS.get(verb) or ""
+    return "PDF" in metavar.upper()
+
+
+def _good_operand(root: Path, name: str, verb: str) -> Path:
+    """An input *verb* can genuinely process: a real PDF, or an office document.
+
+    The PDF is built through the product's own ``create`` verb rather than by
+    an engine import, so this file stays inside the same port discipline the
+    product enforces on itself.
     """
     source = root / f"{name}.txt"
     source.write_text("".join(f"line {i} alpha beta gamma delta\n" for i in range(160)))
+    if not _takes_pdf_operand(verb):
+        return source
     target = root / f"{name}.pdf"
     result = run_cli("create", str(source), "-O", str(target), "-o", "json")
     assert result.returncode == 0, f"fixture build failed: {result.stdout}{result.stderr}"
@@ -133,26 +157,31 @@ def _good_pdf(root: Path, name: str) -> Path:
     return target
 
 
-def _corrupt_pdf(root: Path, name: str) -> Path:
+def _corrupt_operand(root: Path, name: str, verb: str) -> Path:
     """A file that classifies clean and fails when an engine opens it.
 
-    This is the kind that reaches the EXECUTION seam: it is perfectly readable,
-    so operand classification passes it, and it blows up after an earlier input
-    has already committed its artifact.
+    The kind that reaches the EXECUTION seam: perfectly readable, so operand
+    classification passes it, and it blows up after an earlier input has
+    already committed its artifact. Shaped for the verb's own operand kind — a
+    PDF header over a garbage body, or an office container over one.
     """
-    target = root / f"{name}.pdf"
-    target.write_bytes(b"%PDF-1.4\nthis is not a pdf body at all\n")
+    if _takes_pdf_operand(verb):
+        target = root / f"{name}.pdf"
+        target.write_bytes(b"%PDF-1.4\nthis is not a pdf body at all\n")
+        return target
+    target = root / f"{name}.docx"
+    target.write_bytes(b"PK\x03\x04 this is not an office document at all\n")
     return target
 
 
-def _unreadable_pdf(root: Path, name: str) -> Path:
+def _unreadable_operand(root: Path, name: str, verb: str) -> Path:
     """An existing, mode-000 file — the kind that reaches the CLASSIFICATION seam.
 
     A different seam from the corrupt kind, in a different file, and the
     execution seam is never even reached. A fix that handles one kind is not a
     fix, which is why both arms exist as separate criteria.
     """
-    target = _good_pdf(root, name)
+    target = _good_operand(root, name, verb)
     target.chmod(0o000)
     return target
 
@@ -224,15 +253,15 @@ def _drive(
     return result.returncode, payload, result.stderr
 
 
-def _build_batch(root: Path, kind: str, restore: list[Path]) -> list[Path]:
+def _build_batch(root: Path, kind: str, restore: list[Path], verb: str) -> list[Path]:
     """``[good, bad, good]`` — D9: the bad input in POSITION 2, always."""
-    first = _good_pdf(root, "a")
+    first = _good_operand(root, "a", verb)
     if kind == "corrupt":
-        bad = _corrupt_pdf(root, "b")
+        bad = _corrupt_operand(root, "b", verb)
     else:
-        bad = _unreadable_pdf(root, "b")
+        bad = _unreadable_operand(root, "b", verb)
         restore.append(bad)
-    last = _good_pdf(root, "c")
+    last = _good_operand(root, "c", verb)
     return [first, bad, last]
 
 
@@ -365,7 +394,7 @@ def test_ac3_corrupt_input_in_the_middle_is_recorded_and_the_batch_continues(
 ) -> None:
     """The corrupt kind — reaches the EXECUTION seam, after an artifact is committed."""
     _skip_unless_engine_available(verb)
-    operands = _build_batch(tmp_path, "corrupt", restore_modes)
+    operands = _build_batch(tmp_path, "corrupt", restore_modes, verb)
     out_dir = tmp_path / "out"
     exit_code, payload, _ = _drive(verb, operands, out_dir)
     _assert_payload_agrees_with_disk(verb, "corrupt", operands, out_dir, exit_code, payload)
@@ -385,7 +414,7 @@ def test_ac4_unreadable_input_in_the_middle_is_recorded_and_the_batch_continues(
     if os.geteuid() == 0:
         pytest.skip("running as root: mode 000 does not deny reads, so this arm cannot be built")
     _skip_unless_engine_available(verb)
-    operands = _build_batch(tmp_path, "unreadable", restore_modes)
+    operands = _build_batch(tmp_path, "unreadable", restore_modes, verb)
     out_dir = tmp_path / "out"
     exit_code, payload, _ = _drive(verb, operands, out_dir)
     _assert_payload_agrees_with_disk(verb, "unreadable", operands, out_dir, exit_code, payload)
@@ -415,7 +444,7 @@ def test_ac3_ac4_the_good_inputs_still_produce_their_artifacts(
     # The control: the same batch, all three inputs good.
     control_root = tmp_path / "control"
     control_root.mkdir()
-    control_operands = [_good_pdf(control_root, name) for name in ("a", "b", "c")]
+    control_operands = [_good_operand(control_root, name, verb) for name in ("a", "b", "c")]
     control_out = control_root / "out"
     control_code, _control_payload, _ = _drive(verb, control_operands, control_out)
     assert control_code == 0, f"{verb}: the all-good control did not exit 0 ({control_code})"
@@ -428,7 +457,7 @@ def test_ac3_ac4_the_good_inputs_still_produce_their_artifacts(
 
     failure_root = tmp_path / "failure"
     failure_root.mkdir()
-    operands = _build_batch(failure_root, kind, restore_modes)
+    operands = _build_batch(failure_root, kind, restore_modes, verb)
     out_dir = failure_root / "out"
     _drive(verb, operands, out_dir)
     produced = _walk(out_dir)
@@ -459,7 +488,7 @@ def test_ac5_items_are_in_command_line_order_under_threads(
     position here -- and would do it only on the pooled verbs.
     """
     _skip_unless_engine_available(verb)
-    operands = _build_batch(tmp_path, "corrupt", restore_modes)
+    operands = _build_batch(tmp_path, "corrupt", restore_modes, verb)
     out_dir = tmp_path / "out"
     _, payload, _ = _drive(verb, operands, out_dir, threads=4)
     _key, rows = _collection(payload)
@@ -485,9 +514,9 @@ def test_ac8_a_nonexistent_input_still_exits_4_before_any_work(verb: str, tmp_pa
     guard would let the batch continue and exit 1, and would redden ``C5``.
     """
     _skip_unless_engine_available(verb)
-    first = _good_pdf(tmp_path, "a")
+    first = _good_operand(tmp_path, "a", verb)
     missing = tmp_path / "does-not-exist.pdf"
-    last = _good_pdf(tmp_path, "c")
+    last = _good_operand(tmp_path, "c", verb)
     out_dir = tmp_path / "out"
     exit_code, payload, _ = _drive(verb, [first, missing, last], out_dir)
     assert exit_code == 4, f"{verb}: nonexistent input in the middle exited {exit_code}, not 4"
@@ -507,10 +536,10 @@ def test_ac8_a_directory_operand_still_exits_2_before_any_work(verb: str, tmp_pa
     rejecting the twelfth.
     """
     _skip_unless_engine_available(verb)
-    first = _good_pdf(tmp_path, "a")
+    first = _good_operand(tmp_path, "a", verb)
     directory = tmp_path / "a-directory"
     directory.mkdir()
-    last = _good_pdf(tmp_path, "c")
+    last = _good_operand(tmp_path, "c", verb)
     out_dir = tmp_path / "out"
     exit_code, payload, _ = _drive(verb, [first, directory, last], out_dir)
     assert exit_code == 2, f"{verb}: directory operand in the middle exited {exit_code}, not 2"
@@ -556,7 +585,7 @@ def test_ac9_a_single_unreadable_input_keeps_the_error_envelope(
     if os.geteuid() == 0:
         pytest.skip("running as root: mode 000 does not deny reads, so this arm cannot be built")
     _skip_unless_engine_available(verb)
-    only = _unreadable_pdf(tmp_path, "only")
+    only = _unreadable_operand(tmp_path, "only", verb)
     restore_modes.append(only)
     out_dir = tmp_path / "out"
     exit_code, payload, _ = _drive(verb, [only], out_dir)
@@ -616,9 +645,9 @@ def test_ac7_run_scoped_engine_missing_still_aborts_with_the_error_envelope(
     survives when the engines are installed — would count it and fail. An arm
     that can build its own precondition should build it.
     """
-    first = _good_pdf(tmp_path, "a")
-    second = _good_pdf(tmp_path, "b")
-    third = _good_pdf(tmp_path, "c")
+    first = _good_operand(tmp_path, "a", "convert")
+    second = _good_operand(tmp_path, "b", "convert")
+    third = _good_operand(tmp_path, "c", "convert")
     out_dir = tmp_path / "out"
     env = dict(os.environ)
     env["PATH"] = _path_without({"soffice", "libreoffice"}, tmp_path)
@@ -671,12 +700,12 @@ def test_ac10_unreadable_arm_dry_run_mirrors_the_real_run(
 
     real_root = tmp_path / "real"
     real_root.mkdir()
-    real_operands = _build_batch(real_root, "unreadable", restore_modes)
+    real_operands = _build_batch(real_root, "unreadable", restore_modes, verb)
     real_code, real_payload, _ = _drive(verb, real_operands, real_root / "out")
 
     dry_root = tmp_path / "dry"
     dry_root.mkdir()
-    dry_operands = _build_batch(dry_root, "unreadable", restore_modes)
+    dry_operands = _build_batch(dry_root, "unreadable", restore_modes, verb)
     dry_code, dry_payload, _ = _drive(verb, dry_operands, dry_root / "out", dry_run=True)
 
     assert dry_code == real_code, (

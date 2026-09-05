@@ -1,0 +1,34 @@
+# gitleaks false positives, ignored BY FINGERPRINT and never by rule or by path.
+#
+# A fingerprint is `<commit>:<file>:<rule>:<line>`, so every entry below stops
+# exactly one finding in one already-published commit. It does NOT disable the
+# rule, does NOT exempt the file, and does NOT exempt the pattern: the same
+# shape appearing in any new commit produces a different fingerprint and still
+# fails the gate. That narrowness is the whole reason this file is acceptable
+# at all — a `[allowlist] paths` entry would have bought the same green while
+# making the scanner blind to a real key in the same file forever.
+#
+# THE RULE FOR ADDING A LINE HERE: the finding must be demonstrably not a
+# secret, the demonstration must be written beside it, and the WORKING TREE
+# must already be fixed so no new commit can reproduce it. An entry here is a
+# statement about immutable history, never a way to keep writing the shape.
+#
+# ---------------------------------------------------------------------------
+# PDF-40. Rule `generic-api-key`, matching the string `verb=VERB_COMPRESS`
+# (measured entropy 3.84) inside a multi-line call in `compress`'s dry-run
+# password-refusal prediction:
+#
+#     predict_password_refusal(item.source, password=password, verb=VERB_COMPRESS)
+#
+# The extracted "secret" is a Python keyword argument whose value is
+# `VERB_COMPRESS` — a module-level `Final[str] = "compress"` declared in the
+# same file and exported in its `__all__`. The heuristic fired on the credential
+# keyword sitting on the same source line as an upper-case constant, which is a
+# shape worth being suspicious of; there is no credential here.
+#
+# The working tree no longer produces it: that call now places one keyword per
+# line, with the reason recorded in a comment at the call site so a later
+# reformat does not silently reintroduce it. Only the published commit still
+# carries the line, and rewriting published history to erase a false positive
+# would cost more than it buys.
+f9c898f6ec01595add627ea7d97d7f0ca6e7ab2b:src/pdf_toolkit/ops/optimize.py:generic-api-key:327

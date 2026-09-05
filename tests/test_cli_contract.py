@@ -2930,7 +2930,7 @@ def test_c21_out_dir_batch_payload_agrees_with_the_filesystem(verb: str, tmp_pat
 
     _skip_unless_engine_available(verb)
     restore: list[Path] = []
-    operands = _build_batch(tmp_path, "corrupt", restore)
+    operands = _build_batch(tmp_path, "corrupt", restore, verb)
     out_dir = tmp_path / "out"
     exit_code, payload, _ = _drive(verb, operands, out_dir)
 

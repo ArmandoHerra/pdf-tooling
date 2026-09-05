@@ -93,6 +93,8 @@ __all__ = [
     "derive_password_file_pairs",
     "discover_groups",
     "discover_verbs",
+    "operand_metavar",
+    "operand_metavars",
     "out_dir_batch_verbs",
     "expectation",
     "output_formats",
@@ -280,6 +282,42 @@ def _takes_input_paths(cmd: object) -> bool:
         and getattr(getattr(param, "type", None), "name", None) == "path"
         for param in cmd.params  # type: ignore[attr-defined]
     )
+
+
+def operand_metavar(cmd: object) -> str | None:
+    """The ``metavar`` the live command declares for its path operand.
+
+    ``convert`` declares ``FILE...`` where every other batch verb declares
+    ``PDF...``, because — as `tests/registry.py::_convert_invocation` already
+    records — *its own operand is never a PDF*. Reading the live declaration is
+    what lets a caller build the right KIND of operand for a verb without a
+    hand-maintained exception list, and without discovering the difference only
+    on a host whose LibreOffice lacks the PDF import filter.
+    """
+    for param in cmd.params:  # type: ignore[attr-defined]
+        if (
+            getattr(param, "param_type_name", None) == "argument"
+            and getattr(getattr(param, "type", None), "name", None) == "path"
+        ):
+            return getattr(param, "metavar", None)
+    return None
+
+
+def operand_metavars(root: object | None = None) -> dict[str, str | None]:
+    """Every leaf verb's declared operand ``metavar``, keyed by VERB name."""
+    group = root if root is not None else typer.main.get_command(app)
+    found: dict[str, str | None] = {}
+
+    def _walk(cmd: object, path: tuple[str, ...]) -> None:
+        commands = getattr(cmd, "commands", None)
+        if commands is not None:
+            for name in sorted(commands):
+                _walk(commands[name], (*path, name))
+            return
+        found[" ".join(path)] = operand_metavar(cmd)
+
+    _walk(group, ())
+    return found
 
 
 def _has_variadic_operand(cmd: object) -> bool:
