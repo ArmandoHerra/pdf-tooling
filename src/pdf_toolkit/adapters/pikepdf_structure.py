@@ -175,8 +175,16 @@ class PikepdfStructureAdapter:
             raise FailureError(f"could not open PDF for compression: {error}") from error
 
         output = out_buffer.getvalue()
-        with pikepdf.Pdf.open(io.BytesIO(output)) as candidate:
-            after = _structural_facts(candidate)
+        try:
+            with pikepdf.Pdf.open(io.BytesIO(output)) as candidate:
+                after = _structural_facts(candidate)
+        except pikepdf.PdfError as error:
+            # PDF-36 / `6f5911ef9d`. This re-open sat OUTSIDE the belt three
+            # lines above, so libqpdf's error escaped to `cli/main.py`'s bug
+            # path and printed 3644 bytes of traceback. The message names the
+            # OUTPUT deliberately: reusing "could not open PDF for compression"
+            # would send a user to the wrong file.
+            raise FailureError(f"could not read back the compressed output: {error}") from error
         return CompressOutcome(output=output, before=before, after=after)
 
     def repair(self, data: bytes) -> RepairOutcome:
@@ -214,9 +222,17 @@ class PikepdfStructureAdapter:
             pdf.close()
 
         output = out_buffer.getvalue()
-        with pikepdf.Pdf.open(io.BytesIO(output)) as saved:
-            page_count_after = len(saved.pages)
-            object_count_after = len(saved.objects)
+        try:
+            with pikepdf.Pdf.open(io.BytesIO(output)) as saved:
+                page_count_after = len(saved.pages)
+                object_count_after = len(saved.objects)
+        except pikepdf.PdfError as error:
+            # PDF-36. Structurally identical to `compress`'s `6f5911ef9d` site
+            # and belted by DERIVATION, not because a fixture proved it
+            # reachable -- `repair testdata/malformed.pdf` exits 0, so this arm
+            # is UNPROVEN, never claimed either way. A site belted by
+            # derivation is correct whether or not it is reachable today.
+            raise FailureError(f"could not read back the repaired output: {error}") from error
 
         return RepairOutcome(
             output=output,
@@ -251,12 +267,18 @@ class PikepdfStructureAdapter:
 
         output = out_buffer.getvalue()
         verified = False
-        with pikepdf.Pdf.open(io.BytesIO(output)) as candidate:
-            if candidate.is_linearized:
-                try:
-                    verified = bool(candidate.check_linearization(io.StringIO()))
-                except RuntimeError:
-                    verified = False
+        try:
+            with pikepdf.Pdf.open(io.BytesIO(output)) as candidate:
+                if candidate.is_linearized:
+                    try:
+                        verified = bool(candidate.check_linearization(io.StringIO()))
+                    except RuntimeError:
+                        verified = False
+        except pikepdf.PdfError as error:
+            # PDF-36. The third instance of the same shape. UNPROVEN like
+            # `repair`'s: `linearize testdata/malformed.pdf` exits 1 through
+            # the `verified` check below, never through this re-open.
+            raise FailureError(f"could not read back the linearized output: {error}") from error
         if not verified:
             raise FailureError("linearization did not verify: the saved output is not linearized")
         return output
@@ -365,10 +387,22 @@ class PikepdfStructureAdapter:
         """
         import pikepdf
 
-        permissions = pikepdf.Permissions(
-            **{field: (token in allow) for token, field in _PERMISSION_FIELDS.items()}
-        )
         try:
+            # PDF-36 -- THE FOURTH UNBELTED SITE, which the spec predicted
+            # three of. The engine-boundary walk
+            # (`tests/test_engine_boundary.py::test_ac2_the_engine_boundary_has_zero_residue`)
+            # derived its population FROM THE MODULE rather than from the three
+            # line numbers a human had read, and reported a residue of 4: this
+            # `pikepdf.Permissions(...)` construction sat one line above the
+            # `try` that belts everything else in this method. It is closed by
+            # MOVING IT INSIDE the belt -- never by narrowing the walk to stop
+            # seeing it, which is the anti-gaming rule this product's spec
+            # states in as many words. No behaviour changes: a `Permissions`
+            # construction raises `TypeError` on a bad field, not `PdfError`,
+            # and a `TypeError` still propagates exactly as it did before.
+            permissions = pikepdf.Permissions(
+                **{field: (token in allow) for token, field in _PERMISSION_FIELDS.items()}
+            )
             with pikepdf.Pdf.open(io.BytesIO(data)) as pdf:
                 out_buffer = io.BytesIO()
                 pdf.save(

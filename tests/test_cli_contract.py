@@ -184,6 +184,47 @@ def _unreadable_shapes() -> tuple[tuple[str, bool], ...]:
 #: that only escapes under `-o ndjson --quiet` is still a traceback.
 UNREADABLE_SHAPES = _unreadable_shapes()
 
+
+def _engine_visible_shapes() -> tuple[tuple[str, bool], ...]:
+    """PDF-36 -- the subset of `UNREADABLE_SHAPES` that renders `kind` and `code`.
+
+    `E3`'s first census was WRONG in a way that generalizes: passing `--pages 1`
+    to `compress` returned `{"kind": "usage", "code": 2}` -- exit 2, never
+    reaching the engine -- so the drive reported `permissions` as the ONLY
+    leaking verb when four verbs leak. **A drive whose cells are usage errors
+    measures the parser, not the engine.**
+
+    `C20` therefore asserts that a cell REACHED ITS ENGINE before it draws any
+    conclusion from that cell's message, and `kind`/`code` are only legible in
+    a structured shape -- `render_error_table` prints a bare `error: <message>`
+    line and carries neither. This is that subset, filtered from the live
+    `output_formats()` rather than listed, so a fourth structured renderer
+    joins it with no action from its author.
+    """
+    from registry import output_formats
+
+    return tuple(
+        (fmt.value, quiet)
+        for fmt in output_formats()
+        for quiet in (False, True)
+        if fmt.value != "table"
+    )
+
+
+#: The shapes whose envelope names its own `kind` and `code` (`C20`).
+ENGINE_VISIBLE_SHAPES = _engine_visible_shapes()
+
+#: The verbs measured to leak a heap address at `ae723bc`, driven against a
+#: garbage fixture. **The ledger row `5bd9143f61` names TWO** (`compress` and
+#: `repair`); the drive found FOUR. Both the inherited value and the measured
+#: one are recorded (`X-411`), and the measured one is `C20`'s positive control.
+LEAKING_VERBS_AT_AE723BC: Final[tuple[str, ...]] = (
+    "compress",
+    "linearize",
+    "permissions",
+    "repair",
+)
+
 #: AC9 / §D7 -- the SINGLE-COMBINED-ARTIFACT class, DERIVED from each verb's own
 #: OR-3 declaration rather than hand-written: N inputs -> 1 file is exactly
 #: "declares `--output` and does not declare `--out-dir`". These verbs must NOT
@@ -1324,7 +1365,7 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "OPERAND_VERBS",
         OPERAND_VERBS,
-        "C18",
+        "C18,C19,C20",
         1,
         "PDF-26's own population, and it is DERIVED here rather than read off "
         "`TAKES_INPUT_PATHS` because that predicate excludes `merge` -- the one verb the "
@@ -1354,12 +1395,37 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "UNREADABLE_SHAPES",
         UNREADABLE_SHAPES,
-        "C18",
+        "C18,C19,C20",
         1,
         "AC15's {table,json,ndjson} x {default,--quiet} matrix, built from the live "
         "`output_formats()` rather than a literal. Empty collapses C18 to zero cases "
         "even with a full OPERAND_VERBS -- a stacked parametrize is vacuous if EITHER "
-        "dimension empties, and only one of the two was a population before this row",
+        "dimension empties, and only one of the two was a population before this row. "
+        "PDF-36 gave it two more consumers: emptying it now silently retires the "
+        "traceback census AND the heap-address guard alongside C18",
+    ),
+    Population(
+        "ENGINE_VISIBLE_SHAPES",
+        ENGINE_VISIBLE_SHAPES,
+        "C20",
+        1,
+        "PDF-36 AC4 -- the shapes whose envelope names its own `kind` and `code`, so a "
+        "cell can PROVE it reached its engine before its message is used as evidence. "
+        "Zero does not make C20 collect no cases; it makes C20 stop DISCRIMINATING, "
+        "which is worse: the arm would still run, still pass, and no longer be able to "
+        "tell an engine failure from a usage error. `E3`'s first census made exactly "
+        "that mistake and reported one leaking verb where four leak",
+    ),
+    Population(
+        "LEAKING_VERBS_AT_AE723BC",
+        LEAKING_VERBS_AT_AE723BC,
+        "C20 (positive control)",
+        1,
+        "PDF-36 AC4's positive control. Every assertion C20 makes is an ABSENCE, and an "
+        "absence is exactly what a drive reports once it stops reaching the code under "
+        "test -- three operand verbs already exit 0 on garbage bytes. Zero here retires "
+        "the only arm that proves C20 can still SEE the defect it was built for, while "
+        "leaving all 144 of its cells green",
     ),
 )
 
@@ -2131,6 +2197,335 @@ def test_c18_the_dry_run_out_dir_clause_is_not_vacuous(corpus, tmp_path: Path) -
         "no member of OPERAND_VERBS names an --out-dir in its INVOCATIONS row, so AC11's "
         "'a non-existent --out-dir is not created' clause never executes"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-36 -- TWO LEDGER ROWS, AND THE LEDGER FORBIDS MERGING THEM.
+#
+# `6f5911ef9d`: `compress testdata/malformed.pdf` exited 1 with 0 B of stdout
+# and 3644 B of raw traceback.  `5bd9143f61`: four verbs rendered a live heap
+# address into the message a user reads.  `5bd9143f61`'s own row states why
+# they cannot be one item -- *"fixing `6f5911ef9d` will likely create MORE of
+# this by routing more engine exceptions into the envelope"* -- so fixing the
+# first alone converts a traceback into a POLLUTED MESSAGE: a smaller defect,
+# not a fixed one.
+#
+# The two arms are deliberately NON-SUBSTITUTABLE, and that is structural
+# rather than a matter of prose:
+#
+#   ................  C19 (the traceback)      C20 (the heap address)
+#   fixture           testdata/malformed.pdf   a garbage PDF built in-test
+#   file fixed in     adapters/pikepdf_...py   errors.py, one chokepoint
+#   observable        no traceback on stderr   no `0x[0-9a-f]{6,}` in the message
+#
+# Reverting either fix leaves the other arm GREEN. That is asserted by driving
+# it in both directions, not by arguing it.
+#
+# NEITHER ARM IS WRITTEN ON THE EXIT CODE. It was 1 before both fixes and is 1
+# after them, so an exit-code control is green BECAUSE OF the defect, on every
+# cell -- `X-206` measured exactly that control passing on 10 of 11 verbs of a
+# deliberately broken binary.
+# --------------------------------------------------------------------------- #
+
+#: `5bd9143f61`'s observable. SIX-plus LOWERCASE hex digits, which is narrow
+#: enough to leave the repository's existing benign matches alone -- byte
+#: literals (`0xC0`, `0x01`) are two digits or uppercase, and dimension strings
+#: (`2550x3300`, `210x297mm`) are not `0x`-prefixed hex at all -- and wide
+#: enough that no real CPython address escapes it.
+_HEAP_ADDRESS = re.compile(r"0x[0-9a-f]{6,}")
+
+#: Two lines of bytes that are not a PDF. Deliberately NOT the committed
+#: `testdata/malformed.pdf`: that file is recoverable enough that `repair`
+#: exits 0 on it, and `C20` needs every verb to fail *inside its engine*.
+_GARBAGE_PDF = b"%PDF-1.7\nthis is not a pdf at all\n"
+
+
+def _substitute_malformed_operand(
+    verb, args: list[str], tmp_path: Path, payload: bytes, tag: str
+) -> list[str]:
+    """*args* with its input operand replaced by a READABLE but broken copy.
+
+    The counterpart of `_substitute_unreadable_operand`, and deliberately its
+    sibling rather than a parameter of it: `C18` measures a mode-`000` operand
+    (the file system refuses) while these two measure a *readable* one whose
+    CONTENT the engine refuses. Different seam, different failure, same argv
+    surgery.
+
+    The suffix is preserved for the same reason `C18` preserves it -- a verb
+    that dispatches on extension should still take this path -- and the
+    anti-lapse `pytest.fail` is copied rather than softened: a row that stops
+    placing its operand first must fail HERE, by name, instead of quietly
+    dropping out of coverage.
+    """
+    if not args:
+        pytest.fail(
+            f"{verb.name}: its INVOCATIONS row builds an empty argv tail, so there is no "
+            "operand to make malformed -- an operand verb must name one"
+        )
+    operand = Path(args[0])
+    if not operand.is_file():
+        pytest.fail(
+            f"{verb.name}: its INVOCATIONS row does not begin with an existing file "
+            f"({args[0]!r}), so a VALID-but-malformed operand cannot be built from it"
+        )
+    suffix = operand.suffix or ".bin"
+    broken = tmp_path / f"{tag}-{verb.name.replace(' ', '-')}{suffix}"
+    broken.write_bytes(payload)
+    return [str(broken), *args[1:]]
+
+
+# C19 -- a READABLE but malformed operand never reaches the user as a
+# traceback, over `OPERAND_VERBS x UNREADABLE_SHAPES`. `6f5911ef9d`.
+@pytest.mark.parametrize("verb", OPERAND_VERBS, ids=_ids(OPERAND_VERBS))
+@pytest.mark.parametrize(
+    ("fmt", "quiet"),
+    UNREADABLE_SHAPES,
+    ids=[f"{fmt}{'-quiet' if quiet else ''}" for fmt, quiet in UNREADABLE_SHAPES],
+)
+def test_c19_a_malformed_operand_never_tracebacks(
+    verb, fmt: str, quiet: bool, corpus, tmp_path: Path
+) -> None:
+    """AC3 -- PDF-36 half one, over the whole surface rather than one verb.
+
+    *Red at `ae723bc`, before any code changed*: an equivalent 15-verb x
+    3-shape drive against `testdata/malformed.pdf` was **3 of 45 cells red, all
+    `compress`** -- `adapters/pikepdf_structure.py:178` re-opened its own saved
+    output OUTSIDE the `try` its function closes three lines above, so
+    libqpdf's `PdfError` escaped to `cli/main.py`'s bug path.
+
+    **The fix is at the engine boundary and never at the terminal seam.**
+    `cli/main.py:10-13` ships the policy that an unexpected exception prints a
+    traceback and exits 1 -- *"a signal, not a UX"* -- and that policy is
+    correct and stays. A `pikepdf.PdfError` from opening a malformed document
+    is not a bug; it is the foreseeable failure of a documented capability.
+    `tests/test_usage_envelope.py` pins the surviving bug signal.
+
+    NO CELL SKIPS. A traceback is never an acceptable answer, whatever the
+    verb's operand was going to be, so this arm needs no engine-reaching
+    precondition -- unlike `C20`, which draws conclusions from a MESSAGE and
+    therefore has to know the message came from an engine.
+    """
+    _skip_unless_engine_available(INVOCATIONS.get(verb.name))
+
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    malformed = (Path(__file__).resolve().parents[1] / "testdata" / "malformed.pdf").read_bytes()
+    args = _substitute_malformed_operand(verb, args, tmp_path, malformed, "c19")
+    extra = ["--quiet"] if quiet else []
+
+    result = run_cli(verb.name, *args, "-o", fmt, *extra, cwd=tmp_path)
+    both = result.stdout + result.stderr
+
+    assert _TRACEBACK not in both, (
+        f"{verb.name} -o {fmt}{' --quiet' if quiet else ''}: a raw traceback reached the "
+        f"user from a READABLE but malformed operand. That is `6f5911ef9d` -- an engine "
+        f"exception escaping its adapter, not a bug in this tool. Belt it at the engine "
+        f"boundary; a catch-all at `cli/main.py` would destroy the bug signal instead "
+        f"(exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r})"
+    )
+
+
+def _error_envelopes(stdout: str) -> list[dict]:
+    """Every error envelope in a structured payload, wherever it is carried.
+
+    There are two carriers and a cell cannot know in advance which one it will
+    get: the `_terminate()` envelope is top-level (`text`, `compress`), while a
+    per-item verb nests one per document (`info -o json` puts it under
+    `documents[]`, `info -o ndjson` puts it top-level beside `ok`). Reaching
+    for `payload["error"]` measured only the first carrier and raised
+    `KeyError` on the second -- a guard that crashes on a legitimate shape is
+    not measuring that shape.
+
+    Recursive rather than a two-case lookup so that a THIRD carrier, added by
+    some later verb, is read rather than silently missed.
+    """
+    envelopes: list[dict] = []
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict):
+            candidate = node.get("error")
+            if isinstance(candidate, dict) and "code" in candidate and "kind" in candidate:
+                envelopes.append(candidate)
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            _walk(json.loads(line))
+        except json.JSONDecodeError:  # not a structured line; the caller asserts shape
+            continue
+    return envelopes
+
+
+# C20 -- no rendered envelope message carries a live heap address, over
+# `OPERAND_VERBS x UNREADABLE_SHAPES` against a garbage fixture. `5bd9143f61`.
+@pytest.mark.parametrize("verb", OPERAND_VERBS, ids=_ids(OPERAND_VERBS))
+@pytest.mark.parametrize(
+    ("fmt", "quiet"),
+    UNREADABLE_SHAPES,
+    ids=[f"{fmt}{'-quiet' if quiet else ''}" for fmt, quiet in UNREADABLE_SHAPES],
+)
+def test_c20_no_rendered_message_carries_a_heap_address(
+    verb, fmt: str, quiet: bool, corpus, tmp_path: Path
+) -> None:
+    """AC4 -- PDF-36 half two. A STANDING TEST, not a one-off observation.
+
+    *Red at `ae723bc`*: an equivalent 16-verb x 3-shape drive against a garbage
+    fixture was **12 of 48 cells red across FOUR verbs** -- `compress`,
+    `repair`, `linearize` and `permissions`. **The ledger row names only two**
+    (`compress` and `repair`), so the measured population is wider than the
+    inherited one, which is why this is derived and driven rather than
+    enumerated.
+
+    Two sites in the same family (`encrypt`, `decrypt`) were never reached by
+    any fixture and are UNPROVEN rather than clean. They are inside this
+    guard's population by DERIVATION -- if either ever leaks, this reddens --
+    which is the whole reason the fix went to one renderer-side chokepoint
+    instead of to six adapter-local call sites that a seventh would undo.
+
+    The four `pdfium` sites and `pypdf_structure.py`'s fourteen are likewise
+    INSIDE this population and deliberately UNEDITED: covered by the guard,
+    not by a point-fix pass.
+    """
+    _skip_unless_engine_available(INVOCATIONS.get(verb.name))
+
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    args = _substitute_malformed_operand(verb, args, tmp_path, _GARBAGE_PDF, "c20")
+    extra = ["--quiet"] if quiet else []
+
+    result = run_cli(verb.name, *args, "-o", fmt, *extra, cwd=tmp_path)
+    both = result.stdout + result.stderr
+    detail = f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+
+    # (1) THE CELL MUST HAVE REACHED ITS ENGINE, AND IT ASSERTS SO RATHER THAN
+    #     SKIPPING. `E3`'s first census reported ONE leaking verb instead of
+    #     four because its cells were USAGE errors: passing `--pages 1` to
+    #     `compress` returns `{"kind": "usage", "code": 2}` and never opens the
+    #     document at all. **A drive whose cells are usage errors measures the
+    #     parser.** Exit 2 is therefore the one outcome this arm refuses.
+    #
+    #     Exit 0 is a DIFFERENT thing and is legitimate: `convert`, `compose`
+    #     and `create` take a `.txt`/image operand, for which two lines of
+    #     garbage are a perfectly VALID input. Those cells reached their engine
+    #     and it accepted the bytes -- there is simply no error message to draw
+    #     a conclusion from, and the address assertion below still applies to
+    #     the success payload. They are classified here, never skipped: a skip
+    #     would land in `scripts/assert_skips.py`'s unclassified remainder,
+    #     and a skipped cell is not a pass.
+    #
+    #     Exit 2 is the outcome `E3` warns about and it is NOT assumed absent:
+    #     `compose` returns `{"kind": "usage", "code": 2}` with *"this is a
+    #     PDF, not an image; combining PDFs is what 'merge' does"*, because a
+    #     `%PDF` magic number in an image slot is refused by the parser BY
+    #     DESIGN. That is correct behaviour, not a defect, and it is CLASSIFIED
+    #     here rather than exempted: a usage message must not carry a heap
+    #     address either, so assertion (2) below still binds on it -- it simply
+    #     cannot be used as evidence ABOUT AN ENGINE.
+    #
+    #     What is asserted is that the cell's classification is COHERENT: the
+    #     exit code is one this tool documents, and the envelope's `kind`
+    #     agrees with its `code`. A cell whose envelope disagreed with its exit
+    #     status could not be reasoned about at all.
+    assert result.returncode in (0, 1, 2), (
+        f"{verb.name} -o {fmt}: exit {result.returncode} on a READABLE operand -- not a "
+        f"documented outcome for one. Anything else is a crash wearing an exit code "
+        f"-- {detail}"
+    )
+    if (fmt, quiet) in ENGINE_VISIBLE_SHAPES and result.returncode != 0:
+        envelopes = _error_envelopes(result.stdout)
+        assert envelopes, (
+            f"{verb.name} -o {fmt}: exit {result.returncode} and NO error envelope "
+            f"anywhere in the structured payload, so this cell reports a failure the "
+            f"machine-readable output does not admit to -- {detail}"
+        )
+        assert result.returncode in {envelope["code"] for envelope in envelopes}, (
+            f"{verb.name} -o {fmt}: the process exited {result.returncode} and no "
+            f"envelope claims that code ({sorted({e['code'] for e in envelopes})}). "
+            f"`PLAN.md` §5.6's per-item code is the half a single integer cannot carry, "
+            f"and the two have to agree somewhere -- {detail}"
+        )
+        for envelope in envelopes:
+            assert (envelope["kind"] == "failure") == (envelope["code"] == 1), (
+                f"{verb.name} -o {fmt}: kind {envelope['kind']!r} does not agree with "
+                f"code {envelope['code']}, so this cell cannot prove whether its message "
+                f"came from an engine or from the argument parser -- {detail}"
+            )
+
+    # (2) ONLY THEN is the message it produced worth an assertion.
+    leaked = _HEAP_ADDRESS.search(both)
+    assert leaked is None, (
+        f"{verb.name} -o {fmt}{' --quiet' if quiet else ''}: the message a user reads "
+        f"carries a live heap address ({leaked.group(0) if leaked else ''}). It is "
+        f"per-process noise -- it changes every run, so it cannot be quoted in the docs "
+        f"under PDF-30's closure rule and cannot be diffed between two runs. "
+        f"`adapters/pikepdf_structure.py:61-66` already wrote this argument for warnings "
+        f"and never applied it to the error path -- {detail}"
+    )
+
+
+def test_c20_the_engine_visible_shapes_are_a_proper_subset(corpus, tmp_path: Path) -> None:
+    """C20's engine-reaching clause is conditional, so something must prove
+    the condition is both reachable AND not universal.
+
+    Without this, `ENGINE_VISIBLE_SHAPES` could silently become empty (the
+    `kind`/`code` assertion then never runs and `C20` degrades to the exit-code
+    check alone) or become everything (the assertion then runs against
+    `render_error_table`'s output, which carries neither field, and would fail
+    for a reason that has nothing to do with either ledger row).
+    """
+    assert ENGINE_VISIBLE_SHAPES, (
+        "ENGINE_VISIBLE_SHAPES is empty, so C20's `kind`/`code` clause never executes "
+        "and the arm can no longer tell an engine failure from a usage error"
+    )
+    assert set(ENGINE_VISIBLE_SHAPES) < set(UNREADABLE_SHAPES), (
+        "ENGINE_VISIBLE_SHAPES must be a PROPER subset of UNREADABLE_SHAPES -- the table "
+        "renderer emits a bare `error: <message>` line and carries no `kind` or `code`"
+    )
+    assert all(fmt != "table" for fmt, _ in ENGINE_VISIBLE_SHAPES)
+
+
+@pytest.mark.parametrize("name", LEAKING_VERBS_AT_AE723BC)
+def test_c20_the_four_measured_verbs_still_reach_their_engine(
+    name: str, corpus, tmp_path: Path
+) -> None:
+    """`C20`'s positive control: the arm must still be able to SEE the defect.
+
+    Every assertion in `C20` is an absence -- no heap address -- and an absence
+    is exactly what a drive reports when it stopped reaching the code under
+    test. Three of `OPERAND_VERBS` legitimately exit 0 on garbage bytes
+    (`convert`, `compose`, `create` take a `.txt`/image operand), and if the
+    other twenty-one ever joined them, `C20` would pass on every cell while
+    measuring nothing at all.
+
+    So the four verbs the defect was MEASURED on are pinned by name: each must
+    still fail *inside its engine* against a garbage PDF. If one legitimately
+    stops doing so, this fails loudly and is re-derived deliberately -- which
+    is the point, and is what `test_every_population_is_non_empty` does for the
+    populations one level up.
+    """
+    verbs = {verb.name: verb for verb in OPERAND_VERBS}
+    assert name in verbs, (
+        f"{name} was an operand verb when PDF-36 measured this defect and is not one now. "
+        f"Re-derive this control against the live tree rather than deleting the row"
+    )
+    _skip_unless_engine_available(INVOCATIONS.get(name))
+
+    args = INVOCATIONS[name].build(corpus, tmp_path)
+    args = _substitute_malformed_operand(verbs[name], args, tmp_path, _GARBAGE_PDF, "c20-control")
+    result = run_cli(name, *args, "-o", "json", cwd=tmp_path)
+
+    assert result.returncode == 1, (
+        f"{name}: a garbage PDF no longer reaches a failing engine (exit "
+        f"{result.returncode}), so C20's cells for this verb assert an absence over a "
+        f"path that no longer runs -- {result.stdout!r} {result.stderr!r}"
+    )
+    payload = json.loads(result.stdout)["error"]
+    assert payload["kind"] == "failure" and payload["code"] == 1
+    assert payload["message"], f"{name}: an exit-1 envelope with an EMPTY message"
 
 
 # --------------------------------------------------------------------------- #

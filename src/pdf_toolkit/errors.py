@@ -10,7 +10,8 @@ it is part of the same public contract as the exit code itself.
 
 from __future__ import annotations
 
-from typing import ClassVar
+import re
+from typing import ClassVar, Final
 
 from pdf_toolkit.cli.exit_codes import (
     AUTH,
@@ -40,7 +41,54 @@ __all__ = [
     "SourceUnreadableError",
     "TargetExistsError",
     "UsageError",
+    "normalize_object_reprs",
 ]
+
+#: PDF-36 half two — the CPython default repr, whose address half is
+#: per-process noise: ``<_io.BytesIO object at 0x7bb18cbcbe70>``,
+#: ``<function f at 0x...>``. Engines interpolate these into their own
+#: exception text (libqpdf prefixes every ``Pdf.open`` failure with the stream
+#: repr), and ``{error}`` then carries them into a message a user reads.
+#:
+#: NOT ``adapters.pikepdf_structure._WARNING_PREFIX_RE``, whose idiom this
+#: borrows but whose CONSTANT cannot be reused: that one is ``^``-anchored
+#: because it strips a whole *leading* prefix from ``Pdf.get_warnings()``
+#: output, and by the time a repr reaches this module it is mid-string inside
+#: a composed sentence. Anchoring here would silently match nothing.
+_OBJECT_REPR_RE: Final = re.compile(r"<([^<>]*?) at 0x[0-9A-Fa-f]+>")
+
+
+def normalize_object_reprs(message: str) -> str:
+    """Collapse ``<X at 0xADDR>`` to ``<X>`` — the address, and only the address.
+
+    `5bd9143f61`: four verbs rendered a live heap address into the message a
+    user reads. `adapters/pikepdf_structure.py:61-66` had ALREADY written the
+    argument for stripping it — *"the address is per-process noise, never a
+    fact about the document"* — and then applied it to warnings only, leaving
+    six sibling ``{error}`` interpolations on the error path uncleaned. This is
+    the `B-101` → `B-106` shape: a proposition fixed on one carrier and left
+    standing on its siblings.
+
+    **Why it is not cosmetic.** `PDF-30`'s closure rule is that a documented
+    figure must be *derived*, *gated by a run*, or *absent*. A message carrying
+    ``0x70f73b1c7ec0`` can be none of the three: it cannot be quoted in
+    `README.md` under that rule and it cannot be diffed between two runs,
+    because it changes every process. These are the same message::
+
+        ... stream <_io.BytesIO object at 0x7bb18cbcbe70>: unable to find trailer ...
+        ... stream <_io.BytesIO object at 0x70c30c7cbf10>: unable to find trailer ...
+
+    **The engine's own sentence survives byte-identical.** ``unable to find
+    trailer dictionary while recovering damaged file`` is libqpdf's useful
+    half and this function must never touch it — rewriting engine diagnostic
+    wording is an explicit non-goal.
+
+    **Non-suppression is a rule, not an accident.** Input matching no repr
+    passes through UNCHANGED. A sanitizer that silently empties a message it
+    did not recognise is a wrong answer carrying a success exit code, and it is
+    pinned by a test that makes the empty-on-no-match variant fail.
+    """
+    return _OBJECT_REPR_RE.sub(r"<\1>", message)
 
 
 class PdfToolkitError(Exception):
@@ -89,6 +137,19 @@ class PdfToolkitError(Exception):
         A caller that passes no ``path`` at all -- the convention every
         never-echo constructor in this codebase already follows -- is
         unaffected: ``path`` stays ``None``, exactly as before.
+
+        **PDF-36 extends this seam rather than inventing one.** ``message`` is
+        normalized through :func:`normalize_object_reprs` HERE, for the same
+        reason ``redacted`` is honoured here (`B-068`): thirty ``{error}``
+        interpolations live under ``src/`` and sanitizing at the call sites is
+        a thirty-site pass that a thirty-first reintroduces. This method is the
+        only thing every renderer consumes, so one change covers ``-o table``,
+        ``-o json`` and ``-o ndjson`` uniformly *and* covers every call site
+        that does not exist yet.
+
+        The KEY SET IS UNCHANGED -- ``{code, kind, message, path}``, and
+        ``schema_version`` stays 1 (`X-410`'s pre-`v1.0.0` freeze). What
+        changed is the CONTENT of one string, never the shape around it.
         """
         path: object = self.path
         if self.redacted and path is not None:
@@ -96,7 +157,7 @@ class PdfToolkitError(Exception):
         return {
             "code": self.exit_code,
             "kind": self.kind,
-            "message": self.message,
+            "message": normalize_object_reprs(self.message),
             "path": path,
         }
 

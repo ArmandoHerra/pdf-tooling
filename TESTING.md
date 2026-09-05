@@ -61,8 +61,10 @@ contract.
 `tests/registry.py::discover_verbs()` walks the **live** Typer command tree
 with no skip list, no filter and no hard-coded verb name — a new verb is
 covered automatically the next time the suite runs. `tests/test_cli_contract.py`
-parameterizes eighteen checks (`--help`, exit codes, dry-run purity,
-no-clobber, JSON-on-a-pipe, bulk non-TTY posture) over that discovery.
+parameterizes twenty checks (`--help`, exit codes, dry-run purity,
+no-clobber, JSON-on-a-pipe, bulk non-TTY posture, plus PDF-36's pair of
+non-substitutable arms — no traceback from a malformed operand, no heap
+address in a rendered message) over that discovery.
 
 **The registration contract.** A verb that needs a specific argv shape (e.g.
 `rotate --angle`) registers a `tests/registry.py::Invocation` — the harness
