@@ -67,6 +67,7 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageText, TableGrid, TextBlock
+from pdf_toolkit.ops.batch import BatchLedger, preflight_operands
 from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.structure import require_structure
@@ -80,7 +81,7 @@ from pdf_toolkit.ports.text import (
 )
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name, used_fields
-from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.secret import Secret
 
@@ -263,9 +264,30 @@ def text_artifact_bytes(texts: Sequence[str]) -> bytes:
 # --------------------------------------------------------------------------- #
 
 
+def _select_one(
+    source: Path,
+    pages_spec: str | None,
+    resolver: PasswordResolver,
+    secret_by_source: dict[Path, Secret | None],
+) -> tuple[int, ...]:
+    """One source's page selection, resolving its secret on the way.
+
+    The unit both `text` and `tables` run behind the per-item guard: it opens
+    the document, so it is where a corrupt or unreadable input fails, and the
+    secret it resolves is recorded for the extraction pass that follows.
+    """
+    secret = resolver.for_source(source)
+    secret_by_source[source] = secret
+    return _select_pages(source, pages_spec, password=secret)
+
+
 def _validate_sources(sources: Sequence[Path]) -> None:
-    for source in sources:
-        classify_operand(source)
+    """Run-scoped rungs only; the unreadable rung is the per-item guard's.
+
+    Both verbs this module serves (`text`, `tables`) are `--out-dir` batches,
+    so there is no single-operand caller here whose exit code this could move.
+    """
+    preflight_operands(sources)
 
 
 def _select_pages(
@@ -498,19 +520,30 @@ def extract_text_run(
     _validate_sources(sources)
     _require_out_dir_for_template(name_template, out_dir)
 
+    ledger = BatchLedger(sources)
     resolver = PasswordResolver(password)
     try:
-        secret_by_source = {source: resolver.for_source(source) for source in sources}
-        selections = {
-            source: _select_pages(source, pages_spec, password=secret_by_source[source])
-            for source in sources
-        }
+        # `_select_pages` opens the document, so a corrupt or unreadable input
+        # fails HERE and must cost only itself. The survivors alone go on to
+        # extraction; the failures already carry their rows in the ledger.
+        secret_by_source: dict[Path, Secret | None] = {}
+        selections = {}
+        for source in sources:
+            selected = ledger.guard(
+                source,
+                lambda source=source: _select_one(  # type: ignore[misc]
+                    source, pages_spec, resolver, secret_by_source
+                ),
+            )
+            if selected is not None:
+                selections[source] = selected
+        live = [source for source in sources if source in selections]
         plaintext_by_source = {
             source: (secret.reveal() if secret is not None else None)
             for source, secret in secret_by_source.items()
         }
         pages, declaration = _extract_pages(
-            sources, selections, layout=layout, plaintext_by_source=plaintext_by_source
+            live, selections, layout=layout, plaintext_by_source=plaintext_by_source
         )
     finally:
         resolver.clear()
@@ -520,7 +553,7 @@ def extract_text_run(
     by_source_page = {(page.source, page.page): page for page in pages}
 
     planned = _plan_text_targets(
-        sources, selections, output=output, out_dir=out_dir, name_template=name_template
+        live, selections, output=output, out_dir=out_dir, name_template=name_template
     )
     targets = [item.target for item in planned]
     # Data-independent (planned targets against each other), so it is checked
@@ -550,14 +583,14 @@ def extract_text_run(
                 duration_ms=0,
                 detail=plan.detail() if policy.dry_run else None,
             )
-            for source in sources
+            for source in live
         )
         return TextOutcome(
             result=OperationResult(
                 schema_version=_SCHEMA_VERSION,
                 verb=VERB_TEXT,
                 dry_run=policy.dry_run,
-                items=items,
+                items=ledger.assemble(list(items)),
                 warnings=warnings,
                 duration_ms=0,
             ),
@@ -593,7 +626,7 @@ def extract_text_run(
                 schema_version=_SCHEMA_VERSION,
                 verb=VERB_TEXT,
                 dry_run=True,
-                items=items,
+                items=ledger.assemble(list(items)),
                 warnings=warnings,
                 duration_ms=0,
             ),
@@ -626,7 +659,7 @@ def extract_text_run(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_TEXT,
             dry_run=False,
-            items=tuple(written),
+            items=ledger.assemble(written),
             warnings=warnings,
             duration_ms=0,
         ),
@@ -710,19 +743,27 @@ def extract_tables_run(
     has_destination = output is not None or out_dir is not None
     resolved_fmt = fmt if fmt is not None else TABLE_FORMATS[0]
 
+    ledger = BatchLedger(sources)
     resolver = PasswordResolver(password)
     try:
-        secret_by_source = {source: resolver.for_source(source) for source in sources}
-        selections = {
-            source: _select_pages(source, pages_spec, password=secret_by_source[source])
-            for source in sources
-        }
+        secret_by_source: dict[Path, Secret | None] = {}
+        selections = {}
+        for source in sources:
+            selected = ledger.guard(
+                source,
+                lambda source=source: _select_one(  # type: ignore[misc]
+                    source, pages_spec, resolver, secret_by_source
+                ),
+            )
+            if selected is not None:
+                selections[source] = selected
+        live = [source for source in sources if source in selections]
         plaintext_by_source = {
             source: (secret.reveal() if secret is not None else None)
             for source, secret in secret_by_source.items()
         }
         found, declaration, warnings_list = _detect_tables(
-            sources, selections, strategy=strategy, plaintext_by_source=plaintext_by_source
+            live, selections, strategy=strategy, plaintext_by_source=plaintext_by_source
         )
     finally:
         resolver.clear()
@@ -796,14 +837,14 @@ def extract_tables_run(
                 duration_ms=0,
                 detail=plan.detail() if policy.dry_run else None,
             )
-            for source in sources
+            for source in live
         )
         return TableOutcome(
             result=OperationResult(
                 schema_version=_SCHEMA_VERSION,
                 verb=VERB_TABLES,
                 dry_run=policy.dry_run,
-                items=items,
+                items=ledger.assemble(list(items)),
                 warnings=tuple(warnings),
                 duration_ms=0,
             ),
@@ -837,7 +878,7 @@ def extract_tables_run(
                 schema_version=_SCHEMA_VERSION,
                 verb=VERB_TABLES,
                 dry_run=True,
-                items=items,
+                items=ledger.assemble(list(items)),
                 warnings=tuple(warnings),
                 duration_ms=0,
             ),
@@ -871,7 +912,7 @@ def extract_tables_run(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_TABLES,
             dry_run=False,
-            items=tuple(written),
+            items=ledger.assemble(written),
             warnings=tuple(warnings),
             duration_ms=0,
         ),

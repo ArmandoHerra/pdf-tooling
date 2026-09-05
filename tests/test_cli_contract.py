@@ -69,6 +69,7 @@ from registry import (
     REPO_ROOT,
     discover_groups,
     discover_verbs,
+    out_dir_batch_verbs,
     run_cli,
 )
 
@@ -76,6 +77,12 @@ pytestmark = pytest.mark.e2e
 
 VERBS = discover_verbs()
 GROUPS = discover_groups()
+#: PDF-40 -- the `--out-dir` batch class: every verb whose batch can carry a bad
+#: input IN THE MIDDLE. Derived in `registry.out_dir_batch_verbs()` from the
+#: `--out-dir` consumer set, each operand's arity, and the live VERB name (never
+#: the module basename -- `cli/cmd_office.py` registers `convert`). `split` is
+#: the one consumer excluded, BY ARITY rather than by a literal.
+OUT_DIR_BATCH = out_dir_batch_verbs()
 MUTATING = tuple(verb for verb in VERBS if verb.is_mutating)
 #: AC21 (PDF-20) — the population C9 and C10 measure. **Every verb, not just the
 #: mutating ones.** `CLAUDE.md` rule 2 and `README.md`'s own claim state
@@ -1215,6 +1222,16 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "C1,C2,C3,C7,C8,C14",
         1,
         "the root population; zero makes six checks collect zero cases at once",
+    ),
+    Population(
+        "OUT_DIR_BATCH",
+        OUT_DIR_BATCH,
+        "C21",
+        1,
+        "PDF-40's class. NECESSARY BUT NOT SUFFICIENT as an emptiness pin: C21's real "
+        "guarantee is `out_dir_batch_verbs()`'s three-step derivation -- consumer set, "
+        "operand arity, VERB name -- and in particular that a verb keyed on its module "
+        "basename would enter as `office` rather than `convert`",
     ),
     Population(
         "GROUPS",
@@ -2870,3 +2887,76 @@ def test_ac10_or3_still_refuses_output_at_a_verb_that_does_not_consume_it(
         f"exit={result.returncode} {result.stdout}{result.stderr}"
     )
     assert not (tmp_path / "or3-not-consumed.out").exists()
+
+
+# C21 -- a `--out-dir` batch payload never denies an artifact that is on disk,
+# over the DERIVED `OUT_DIR_BATCH` population. `345a73e0e2`.
+@pytest.mark.parametrize("verb", OUT_DIR_BATCH)
+def test_c21_out_dir_batch_payload_agrees_with_the_filesystem(verb: str, tmp_path: Path) -> None:
+    """PDF-40 -- the payload and the filesystem stop disagreeing.
+
+    *Red at `e72f7fe`, before any code changed*: driven over all ten verbs with a
+    corrupt input in position 2, EVERY one emitted `{"schema_version": 1,
+    "error": {..., "path": null}}` -- **no collection key at all** -- while
+    `compress` and `convert` left an artifact on disk. So the input that
+    SUCCEEDED was unreported, the input that FAILED was unnamed, and the batch
+    aborted, contradicting `PLAN.md` §5.4's Failure policy on a surface
+    `README.md` declares public API.
+
+    **The bad input is in the MIDDLE.** A first-position failure cannot
+    distinguish *abort* from *continue*, so a position-1 row would be unfailable
+    for the property this row exists to pin.
+
+    **The filesystem listing is taken independently**, by `os.walk` in the
+    harness, never from the tool's own stdout: a payload can be internally
+    perfect -- right count, right names, right order, right codes -- and still be
+    a lie. This row therefore checks BOTH directions, because running only "every
+    item names a real file" reproduces the blind spot that let the defect ship
+    (the pre-fix payload had no items at all, and so satisfied it trivially).
+
+    The per-verb detail, both failure kinds, ordering under `--threads`, the
+    run/item boundary and the `--dry-run` mirror live in
+    `tests/test_batch_continuation.py`; this row is the anti-regression sweep, so
+    a verb that loses its continuation reddens HERE, naming itself, without
+    anyone writing a per-verb assertion.
+    """
+    from test_batch_continuation import (
+        _build_batch,
+        _collection,
+        _drive,
+        _skip_unless_engine_available,
+        _walk,
+    )
+
+    _skip_unless_engine_available(verb)
+    restore: list[Path] = []
+    operands = _build_batch(tmp_path, "corrupt", restore)
+    out_dir = tmp_path / "out"
+    exit_code, payload, _ = _drive(verb, operands, out_dir)
+
+    key, rows = _collection(payload)
+    assert [row["input"] for row in rows] == [str(p) for p in operands], (
+        f"{verb}: payload['{key}'] must name every operand exactly once, in input order"
+    )
+    on_disk = _walk(out_dir)
+    claimed = [row["output"] for row in rows if row["ok"] and row["output"]]
+    for artifact in on_disk:
+        assert sum(1 for c in claimed if Path(c) == artifact) == 1, (
+            f"{verb}: {artifact} is on disk but no single ok item names it"
+        )
+    for candidate in claimed:
+        assert Path(candidate).exists(), f"{verb}: item names {candidate!r}, not on disk"
+    failed = [row for row in rows if not row["ok"]]
+    assert len(failed) == 1 and failed[0]["input"] == str(operands[1])
+    assert failed[0]["exit_code"] != 0 and failed[0]["message"]
+    assert exit_code == 1, f"{verb}: expected exit 1, got {exit_code}"
+
+
+def test_c21_population_is_non_empty() -> None:
+    """C21 cannot pass by iterating over nothing.
+
+    This product has already shipped a silently empty parametrize set, which is
+    why every derived population carries this pin rather than trusting the
+    derivation to stay non-empty on its own.
+    """
+    assert OUT_DIR_BATCH, "the --out-dir batch population derived empty; C21 collected zero cases"

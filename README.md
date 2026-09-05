@@ -123,6 +123,14 @@ Every `-o json` envelope that carries a collection of rows carries them under `i
 
 Every `-o json` envelope also carries `exit_code`, `warnings` and `duration_ms`, on every verb. `warnings` is a list and is `[]` when empty — never `null`, never absent. `exit_code` is the code the process exits with for the run the envelope describes, and `duration_ms` is `0` on the verbs whose output must be reproducible byte-for-byte.
 
+### A batch reports every input, and never denies a file it wrote
+
+A multi-input run writing into `--out-dir` records **every input by name, in command-line order**, in the payload's collection — the inputs that succeeded and the input that failed alike. A failing input is recorded, the run continues, and the run exits `1` at the end; each row carries its own `ok`, `exit_code` and `message`. A row that succeeded names its artifact in `output`, and that path is on disk.
+
+**This is a behaviour change on a failure path, inside the pre-`1.0.0` window.** A multi-input `--out-dir` failure used to emit the error envelope — `{"schema_version": 1, "error": {…, "path": null}}`, with no collection at all — in place of the operation envelope, so the input that succeeded went unreported and the input that failed went unnamed even while its sibling's artifact sat on disk. A script that parsed such a failure by reading `payload["error"]` now finds `payload["items"]` instead. **`schema_version` stays `1`**: no key is renamed, removed, retyped or repurposed, and the error envelope itself is unchanged.
+
+Failures that are properties of the invocation rather than of an input stay run-scoped and keep the error envelope: a usage error, a directory where a file was expected, a nonexistent input, a missing engine, and the refusals the safety gate raises. A missing engine fails identically for every input, so it stays a single accurate diagnosis carrying its own exit code rather than becoming a row per input that also changes what the process exits with. A single-input run likewise reports that item's own code, which is what keeps the per-input codes distinguishable at all.
+
 ### `schema_version` is `1`, and this is what would move it
 
 `schema_version` is `1` and stays `1` for as long as the envelope changes only by **addition**. Adding a key never moves it; nor does adding a verb, an item field, or an output format. It increments on the first change a consumer that reads keys by name cannot survive, which is exactly this list:

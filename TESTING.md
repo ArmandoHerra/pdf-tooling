@@ -61,10 +61,35 @@ contract.
 `tests/registry.py::discover_verbs()` walks the **live** Typer command tree
 with no skip list, no filter and no hard-coded verb name — a new verb is
 covered automatically the next time the suite runs. `tests/test_cli_contract.py`
-parameterizes twenty checks (`--help`, exit codes, dry-run purity,
-no-clobber, JSON-on-a-pipe, bulk non-TTY posture, plus PDF-36's pair of
+parameterizes 21 checks (`--help`, exit codes, dry-run purity,
+no-clobber, JSON-on-a-pipe, bulk non-TTY posture, PDF-36's pair of
 non-substitutable arms — no traceback from a malformed operand, no heap
-address in a rendered message) over that discovery.
+address in a rendered message — and PDF-40's batch-continuation sweep) over
+that discovery.
+
+**The batch continuation contract.** A `--out-dir` batch records a failing input
+and carries on, so `tests/test_batch_continuation.py` drives every verb in the
+derived population with the bad input **in the middle** — a leading bad input
+cannot tell *abort* apart from *continue*, and an arm that only ever places the
+bad input at the head is unfailable for the property. Both failure kinds are
+mandatory because they fail at different seams: a **corrupt** file classifies clean and fails when an
+engine opens it, while an **unreadable** file (mode `000`) fails at
+classification, before any target is planned. An arm driving only the corrupt
+kind has measured half the property and would pass a fix that left the
+unreadable half untouched.
+
+The payload is compared against a filesystem listing the harness takes for
+itself, with `os.walk`, in **both** directions: every artifact on disk is named
+by an `ok` row, and every `ok` row names a path that exists. Checking only the
+second direction reproduces the blind spot that let the defect ship — a payload
+carrying no rows at all satisfies it trivially. To drive either kind by hand,
+sandwich a bad input between good ones and pass them all with `--out-dir`;
+`chmod 000` makes the unreadable kind, and any file with a `%PDF` header over a
+garbage body makes the corrupt kind. The population comes
+from `tests/registry.py::out_dir_batch_verbs()` and is derived from the live
+command tree — the `--out-dir` consumers, each operand's arity, and the verb
+name the command registers rather than its module basename — so it is never
+transcribed and a verb cannot quietly leave it.
 
 **The registration contract.** A verb that needs a specific argv shape (e.g.
 `rotate --angle`) registers a `tests/registry.py::Invocation` — the harness

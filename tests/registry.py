@@ -93,6 +93,7 @@ __all__ = [
     "derive_password_file_pairs",
     "discover_groups",
     "discover_verbs",
+    "out_dir_batch_verbs",
     "expectation",
     "output_formats",
     "output_shape_states",
@@ -131,6 +132,19 @@ class VerbSpec:
     consumes, read off the live command's own callback module via
     ``cli.common.consumed_output_flags``. Defaulted so a `VerbSpec` built by
     hand (a unit test's own throwaway) does not have to name it."""
+
+    variadic_operands: bool = False
+    """Whether this verb's path-taking operand accepts MORE THAN ONE input.
+
+    Read off the live command object's own ``nargs`` (``-1`` variadic, ``1``
+    single), never off the source text. The annotation beside
+    ``operand_argument()`` is the authoring surface (``Annotated[list[Path],
+    ...]`` vs ``Annotated[Path, ...]``); ``nargs`` is what the framework
+    resolved it to, and it is the thing a batch's behaviour actually turns on.
+
+    This is what excludes ``split`` from the ``--out-dir`` batch population
+    BY DERIVATION rather than by a literal: a future ``split`` that grew a
+    variadic operand would enter the population with zero author action."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +282,19 @@ def _takes_input_paths(cmd: object) -> bool:
     )
 
 
+def _has_variadic_operand(cmd: object) -> bool:
+    """``nargs == -1`` on a path-typed argument — i.e. a batch can be built.
+
+    Same duck-typed shape as :func:`_takes_input_paths`, one field further in.
+    """
+    return any(
+        getattr(param, "param_type_name", None) == "argument"
+        and getattr(getattr(param, "type", None), "name", None) == "path"
+        and getattr(param, "nargs", 1) == -1
+        for param in cmd.params  # type: ignore[attr-defined]
+    )
+
+
 def _is_page_addressing(cmd: object) -> bool:
     return any(
         getattr(param, "param_type_name", None) == "option"
@@ -314,11 +341,39 @@ def discover_verbs(root: object | None = None) -> tuple[VerbSpec, ...]:
                 is_page_addressing=_is_page_addressing(cmd),
                 is_mutating=mutating,
                 consumes=consumes,
+                variadic_operands=_has_variadic_operand(cmd),
             )
         )
 
     _walk(group, ())
     return tuple(found)
+
+
+def out_dir_batch_verbs(root: object | None = None) -> tuple[str, ...]:
+    """Every verb whose ``--out-dir`` run can carry a bad input IN THE MIDDLE.
+
+    Derived, in the three mechanical steps a transcribed list cannot reproduce:
+
+    1. the ``--out-dir`` consumer set, off each command's own ``consumes``
+       declaration (never a grep — two module docstrings mention ``--out-dir``
+       beside a literal ``consumes=()`` and would join a text census);
+    2. operand arity, off the live command's ``nargs``, which is what excludes
+       the single-operand consumer;
+    3. **the VERB name, off the live command tree** — never the module
+       basename. ``cli/cmd_office.py`` registers ``convert``, so a population
+       keyed on the module is a different population from the one a user
+       types and the payload's own ``verb`` field carries.
+
+    Step 3 is the one a re-derivation is most likely to skip, and skipping it
+    reports ``convert`` missing while inventing ``office``.
+    """
+    return tuple(
+        sorted(
+            verb.name
+            for verb in discover_verbs(root)
+            if not verb.is_group and "--out-dir" in verb.consumes and verb.variadic_operands
+        )
+    )
 
 
 def discover_groups(root: object | None = None) -> tuple[tuple[str, ...], ...]:

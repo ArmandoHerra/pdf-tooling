@@ -30,10 +30,10 @@ import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
+from pdf_toolkit.ops.batch import preflight_operands
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.textract import TextOutcome, extract_text_run
 from pdf_toolkit.output import OutputFormat, render_payload
-from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["build_payload", "text_command"]
 
@@ -186,8 +186,7 @@ def text_command(
     # any other usage error. `ops/textract.py` repeats the check for every OTHER
     # call path into it; the duplication is deliberate defense in depth, the
     # same posture `AtomicWriter`'s own no-clobber re-check already takes.
-    for source in sources:
-        classify_operand(source)
+    preflight_operands(sources)
 
     outcome = extract_text_run(
         sources,

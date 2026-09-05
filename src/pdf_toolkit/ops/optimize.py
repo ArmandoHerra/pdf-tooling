@@ -61,9 +61,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from pdf_toolkit.errors import FailureError, NoInputError, PdfToolkitError, UsageError
+from pdf_toolkit.errors import FailureError, NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.batch import BatchLedger, preflight_operands
 from pdf_toolkit.ops.document_password import (
     NO_PASSWORD,
     PasswordResolver,
@@ -121,6 +122,14 @@ _NAME_WITHOUT_OUT_DIR: Final[str] = (
 
 
 def _validate_sources(sources: Sequence[Path]) -> None:
+    """The full operand ladder, pre-flight — for the SINGLE-target verbs only.
+
+    ``repair`` and ``linearize`` take one operand, so there is no other input
+    for an unreadable one to cost and their exit codes stay exactly where they
+    were. ``compress`` is a batch and calls
+    :func:`~pdf_toolkit.ops.batch.preflight_operands` instead, which defers the
+    unreadable rung to the per-item guard.
+    """
     for source in sources:
         classify_operand(source)
 
@@ -259,21 +268,6 @@ def _compress_one(
     return outcome.output, detail
 
 
-def _first_password_refusal(
-    sources: Sequence[Path], *, password: PasswordSource, verb: str
-) -> PdfToolkitError | None:
-    """The FIRST source (in argv order) that needs the global slot and
-    cannot get it, or ``None``. Mirrors the filesystem tier's own "one
-    refusal covers every item" convention for a multi-source dry-run
-    (`compress`/`repair`/`linearize`, whose dry-run does not otherwise open
-    any document at all)."""
-    for source in sources:
-        refusal = predict_password_refusal(source, password=password, verb=verb)
-        if refusal is not None:
-            return refusal
-    return None
-
-
 def compress_run(
     sources: Sequence[Path],
     *,
@@ -298,9 +292,11 @@ def compress_run(
     credential-free `read_encryption` check `ops/crypto.py`'s own dry-run
     predictions already use -- never the correctness tier (X-89).
     """
-    _validate_sources(sources)
+    preflight_operands(sources)
     if name_template is not None and out_dir is None:
         raise UsageError(_NAME_WITHOUT_OUT_DIR)
+
+    ledger = BatchLedger(sources)
 
     planned = _resolve_compress_targets(
         sources, output=output, out_dir=out_dir, name_template=name_template, in_place=in_place
@@ -315,29 +311,54 @@ def compress_run(
     if policy.dry_run:
         refusal = plan.refusal
         if refusal is None:
-            refusal = _first_password_refusal(sources, password=password, verb=VERB_COMPRESS)
+            # Each source's own probe, INSIDE its own guard. The credential-free
+            # `read_encryption` this prediction runs is a document read, so it
+            # raises on a corrupt or unreadable input exactly as the real run's
+            # engine does. Run batch-wide (as it was) one bad input aborts the
+            # whole preview -- the same defect on the preview side, and it would
+            # leave the unreadable arm's dry run disagreeing with its own real
+            # run on both OR-7 observables. Charged to the source it is about,
+            # never to the first source in argv order.
+            refusal = None
+            for item in planned:
+                predicted_refusal = ledger.guard(
+                    item.source,
+                    lambda item=item: predict_password_refusal(  # type: ignore[misc]
+                        item.source, password=password, verb=VERB_COMPRESS
+                    ),
+                )
+                if predicted_refusal is not None:
+                    refusal = predicted_refusal
+                    break
         detail = plan.detail()
         if refusal is not None and plan.refusal is None:
             detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
-        items = tuple(
-            ItemResult(
-                input=str(item.source),
-                output=str(item.target),
-                ok=refusal is None,
-                exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
-                message=("planned: compress" if refusal is None else refusal.message),
-                bytes_before=item.source.stat().st_size,
-                bytes_after=None,
-                duration_ms=0,
-                detail=detail,
+        # The dry run classifies every operand through the SAME guard the real
+        # run uses (OR-7 / X-185): an unreadable input predicts its own exit
+        # code AND its own envelope shape, rather than the preview claiming a
+        # clean batch the real run then fails.
+        predicted = [
+            ledger.guard(
+                item.source,
+                lambda item=item: ItemResult(  # type: ignore[misc]
+                    input=str(item.source),
+                    output=str(item.target),
+                    ok=refusal is None,
+                    exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+                    message=("planned: compress" if refusal is None else refusal.message),
+                    bytes_before=item.source.stat().st_size,
+                    bytes_after=None,
+                    duration_ms=0,
+                    detail=detail,
+                ),
             )
             for item in planned
-        )
+        ]
         return OperationResult(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_COMPRESS,
             dry_run=True,
-            items=items,
+            items=ledger.assemble([item for item in predicted if item is not None]),
             warnings=(),
             duration_ms=0,
         )
@@ -357,6 +378,7 @@ def compress_run(
             resolver=resolver,
             warnings=warnings,
             written=written,
+            ledger=ledger,
         )
     finally:
         resolver.clear()
@@ -374,8 +396,9 @@ def _compress_write_all(
     resolver: PasswordResolver,
     warnings: list[str],
     written: list[ItemResult],
+    ledger: BatchLedger,
 ) -> OperationResult:
-    for item in planned:
+    def _compress_item(item: _CompressTarget) -> ItemResult:
         started = time.monotonic()
         bytes_before = item.source.stat().st_size
         output_bytes, item_detail = _compress_one(
@@ -401,25 +424,31 @@ def _compress_write_all(
 
         ratio = ((bytes_before - bytes_after) / bytes_before * 100) if bytes_before else 0.0
         duration_ms = int((time.monotonic() - started) * 1000)
-        written.append(
-            ItemResult(
-                input=str(item.source),
-                output=str(item.target),
-                ok=True,
-                exit_code=0,
-                message=f"{bytes_before} -> {bytes_after} bytes ({ratio:+.1f}%)",
-                bytes_before=bytes_before,
-                bytes_after=bytes_after,
-                duration_ms=duration_ms,
-                detail=item_detail or None,
-            )
+        return ItemResult(
+            input=str(item.source),
+            output=str(item.target),
+            ok=True,
+            exit_code=0,
+            message=f"{bytes_before} -> {bytes_after} bytes ({ratio:+.1f}%)",
+            bytes_before=bytes_before,
+            bytes_after=bytes_after,
+            duration_ms=duration_ms,
+            detail=item_detail or None,
         )
+
+    for item in planned:
+        # §5.4: a failing input is RECORDED and the run continues. The batch
+        # this loop belongs to is the one that used to abandon `written` --
+        # already describing a file on disk -- when an input raised.
+        result = ledger.guard(item.source, lambda item=item: _compress_item(item))  # type: ignore[misc]
+        if result is not None:
+            written.append(result)
 
     return OperationResult(
         schema_version=_SCHEMA_VERSION,
         verb=VERB_COMPRESS,
         dry_run=False,
-        items=tuple(written),
+        items=ledger.assemble(written),
         warnings=tuple(warnings),
         duration_ms=0,
     )

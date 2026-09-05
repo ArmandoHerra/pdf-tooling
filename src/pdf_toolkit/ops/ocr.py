@@ -72,6 +72,7 @@ from typing import Final
 from pdf_toolkit.errors import EngineMissingError, NoInputError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageInfo, PageRange
+from pdf_toolkit.ops.batch import BatchLedger, preflight_operands
 from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ports.ocr import OcrEngine, require_ocr
@@ -79,7 +80,7 @@ from pdf_toolkit.ports.raster import require_raster
 from pdf_toolkit.ports.structure import StructureEngine, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.secret import Secret
 
@@ -125,11 +126,6 @@ _NAME_WITHOUT_OUT_DIR: Final[str] = (
 # Shared validation and target resolution -- `ops/optimize.py::compress_run`'s
 # own donor shape (D11.1: "follow the landed compress precedent exactly").
 # --------------------------------------------------------------------------- #
-
-
-def _validate_sources(sources: Sequence[Path]) -> None:
-    for source in sources:
-        classify_operand(source)
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,9 +265,11 @@ def ocr_run(
     resolvability tier is predicted for free -- resolved at most once per
     source (`ops/document_password.PasswordResolver`).
     """
-    _validate_sources(sources)
+    preflight_operands(sources)
     if name_template is not None and out_dir is None:
         raise UsageError(_NAME_WITHOUT_OUT_DIR)
+
+    ledger = BatchLedger(sources)
 
     planned = _resolve_ocr_targets(
         sources, output=output, out_dir=out_dir, name_template=name_template, in_place=in_place
@@ -290,15 +288,24 @@ def ocr_run(
 
     structure_engine = require_structure()
     resolver = PasswordResolver(password)
-    secret_by_source: dict[Path, Secret | None] = {
-        item.source: resolver.for_source(item.source) for item in planned
-    }
-    pages_by_source: dict[Path, tuple[PageInfo, ...]] = {
-        item.source: _selected_pages(
-            structure_engine, item.source, pages_spec, password=secret_by_source[item.source]
+    # `_selected_pages` OPENS the document, so a corrupt or unreadable input
+    # fails here -- and must cost only itself. Guarded per source, which is
+    # also what lets the write loop below skip it without re-running it.
+    secret_by_source: dict[Path, Secret | None] = {}
+    pages_by_source: dict[Path, tuple[PageInfo, ...]] = {}
+
+    def _select_one(source: Path) -> tuple[PageInfo, ...]:
+        secret = resolver.for_source(source)
+        secret_by_source[source] = secret
+        return _selected_pages(structure_engine, source, pages_spec, password=secret)
+
+    for planned_item in planned:
+        selected = ledger.guard(
+            planned_item.source,
+            lambda source=planned_item.source: _select_one(source),  # type: ignore[misc]
         )
-        for item in planned
-    }
+        if selected is not None:
+            pages_by_source[planned_item.source] = selected
 
     # The lazy engine/`--lang` check (module docstring): computed identically
     # in both modes, so `dry == real` on this row holds by construction.
@@ -314,7 +321,10 @@ def ocr_run(
 
     if policy.dry_run:
         detail = plan.detail()
-        items = tuple(
+        # A source that failed page selection above already carries its own row
+        # in the ledger, so the preview reports it exactly as the real run does
+        # -- same exit code, same collection key, same order (OR-7 / X-185).
+        items = [
             ItemResult(
                 input=str(item.source),
                 output=str(item.target),
@@ -327,12 +337,13 @@ def ocr_run(
                 detail=detail,
             )
             for item in planned
-        )
+            if not ledger.failed(item.source)
+        ]
         return OperationResult(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_OCR,
             dry_run=True,
-            items=items,
+            items=ledger.assemble(items),
             warnings=(),
             duration_ms=0,
         )
@@ -343,92 +354,101 @@ def ocr_run(
     written: list[ItemResult] = []
     scratch = ScratchDir() if needs_engine else None
     scratch_root: Path | None = scratch.__enter__() if scratch is not None else None
+
+    def _ocr_one(item: _OcrTarget) -> ItemResult:
+        started = time.monotonic()
+        bytes_before = item.source.stat().st_size
+        pages = pages_by_source[item.source]
+        secret = secret_by_source[item.source]
+        # PDF-37: revealed HERE, in this process, exactly once per
+        # source -- `render_page` needs a plain string (see
+        # `ops/raster.py`'s `_WorkItem` docstring for why), and OCR's
+        # own per-page loop never crosses a process boundary.
+        plaintext_password = secret.reveal() if secret is not None else None
+
+        with structure_engine.open_document(item.source, password=secret) as document:
+            page_count = document.page_count
+            # Design D3.3 -- writer created, full range appended, BEFORE
+            # the per-page compositing loop -- the reverse of this
+            # module's own ordering before `PDF-23`. The reader
+            # (`document`) stays open for the rest of this block: the
+            # writer's own cloned pages must not be resolved after it
+            # closes.
+            writer = structure_engine.new_writer()
+            writer.append_pages(document, list(range(1, page_count + 1)))
+
+            ocrd: list[int] = []
+            skipped: list[int] = []
+            copied: list[int] = []
+            for page in pages:
+                if skip_text_pages and page.has_text:
+                    skipped.append(page.number)
+                    continue
+                # nosec B101 - narrowed by `needs_engine` above (module docstring): any
+                # page reaching this branch already satisfies `_page_needs_engine`.
+                assert ocr_adapter is not None and scratch_root is not None  # nosec B101
+                rendered = raster_engine.render_page(
+                    str(item.source),
+                    page.number,
+                    dpi=float(dpi),
+                    width_px=None,
+                    grayscale=False,
+                    password=plaintext_password,
+                )
+                try:
+                    layer_bytes = ocr_adapter.text_layer(
+                        rendered.image,
+                        lang=lang,
+                        psm=psm,
+                        dpi=rendered.dpi_effective,
+                        page_width_pt=page.width_pt,
+                        page_height_pt=page.height_pt,
+                        rotation=page.rotation,
+                        timeout=DEFAULT_TIMEOUT_S,
+                        scratch_dir=scratch_root,
+                    )
+                finally:
+                    # Design §D2: one page of pixels held at a time.
+                    rendered.image.close()
+                outcome = structure_engine.composite_layer(
+                    writer, layer=layer_bytes, pages=[page.number], position="overlay"
+                )
+                ocrd.extend(outcome.pages_composited)
+                copied.extend(outcome.pages_copied)
+
+            with AtomicWriter(item.target, policy=policy, kind="pdf") as atomic:
+                writer.write(atomic.stream)
+
+        bytes_after = item.target.stat().st_size
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return ItemResult(
+            input=str(item.source),
+            output=str(item.target),
+            ok=True,
+            exit_code=0,
+            message=(f"ocr'd {len(ocrd)} page(s), skipped {len(skipped)} already-text page(s)"),
+            bytes_before=bytes_before,
+            bytes_after=bytes_after,
+            duration_ms=duration_ms,
+            detail={
+                "pages_ocrd": sorted(ocrd),
+                "pages_skipped": sorted(skipped),
+                "pages_copied": sorted(copied),
+            },
+        )
+
     try:
         for item in planned:
-            started = time.monotonic()
-            bytes_before = item.source.stat().st_size
-            pages = pages_by_source[item.source]
-            secret = secret_by_source[item.source]
-            # PDF-37: revealed HERE, in this process, exactly once per
-            # source -- `render_page` needs a plain string (see
-            # `ops/raster.py`'s `_WorkItem` docstring for why), and OCR's
-            # own per-page loop never crosses a process boundary.
-            plaintext_password = secret.reveal() if secret is not None else None
-
-            with structure_engine.open_document(item.source, password=secret) as document:
-                page_count = document.page_count
-                # Design D3.3 -- writer created, full range appended, BEFORE
-                # the per-page compositing loop -- the reverse of this
-                # module's own ordering before `PDF-23`. The reader
-                # (`document`) stays open for the rest of this block: the
-                # writer's own cloned pages must not be resolved after it
-                # closes.
-                writer = structure_engine.new_writer()
-                writer.append_pages(document, list(range(1, page_count + 1)))
-
-                ocrd: list[int] = []
-                skipped: list[int] = []
-                copied: list[int] = []
-                for page in pages:
-                    if skip_text_pages and page.has_text:
-                        skipped.append(page.number)
-                        continue
-                    # nosec B101 - narrowed by `needs_engine` above (module docstring): any
-                    # page reaching this branch already satisfies `_page_needs_engine`.
-                    assert ocr_adapter is not None and scratch_root is not None  # nosec B101
-                    rendered = raster_engine.render_page(
-                        str(item.source),
-                        page.number,
-                        dpi=float(dpi),
-                        width_px=None,
-                        grayscale=False,
-                        password=plaintext_password,
-                    )
-                    try:
-                        layer_bytes = ocr_adapter.text_layer(
-                            rendered.image,
-                            lang=lang,
-                            psm=psm,
-                            dpi=rendered.dpi_effective,
-                            page_width_pt=page.width_pt,
-                            page_height_pt=page.height_pt,
-                            rotation=page.rotation,
-                            timeout=DEFAULT_TIMEOUT_S,
-                            scratch_dir=scratch_root,
-                        )
-                    finally:
-                        # Design §D2: one page of pixels held at a time.
-                        rendered.image.close()
-                    outcome = structure_engine.composite_layer(
-                        writer, layer=layer_bytes, pages=[page.number], position="overlay"
-                    )
-                    ocrd.extend(outcome.pages_composited)
-                    copied.extend(outcome.pages_copied)
-
-                with AtomicWriter(item.target, policy=policy, kind="pdf") as atomic:
-                    writer.write(atomic.stream)
-
-            bytes_after = item.target.stat().st_size
-            duration_ms = int((time.monotonic() - started) * 1000)
-            written.append(
-                ItemResult(
-                    input=str(item.source),
-                    output=str(item.target),
-                    ok=True,
-                    exit_code=0,
-                    message=(
-                        f"ocr'd {len(ocrd)} page(s), skipped {len(skipped)} already-text page(s)"
-                    ),
-                    bytes_before=bytes_before,
-                    bytes_after=bytes_after,
-                    duration_ms=duration_ms,
-                    detail={
-                        "pages_ocrd": sorted(ocrd),
-                        "pages_skipped": sorted(skipped),
-                        "pages_copied": sorted(copied),
-                    },
-                )
+            if item.source not in pages_by_source:
+                # Already recorded as failed while its pages were selected; the
+                # ledger carries its row and the work is not attempted twice.
+                continue
+            result = ledger.guard(
+                item.source,
+                lambda item=item: _ocr_one(item),  # type: ignore[misc]
             )
+            if result is not None:
+                written.append(result)
     finally:
         if scratch is not None:
             scratch.__exit__(None, None, None)
@@ -438,7 +458,7 @@ def ocr_run(
         schema_version=_SCHEMA_VERSION,
         verb=VERB_OCR,
         dry_run=False,
-        items=tuple(written),
+        items=ledger.assemble(written),
         warnings=tuple(warnings),
         duration_ms=0,
     )

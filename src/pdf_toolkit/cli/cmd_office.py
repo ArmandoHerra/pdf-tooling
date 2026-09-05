@@ -40,6 +40,7 @@ import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.errors import UsageError
+from pdf_toolkit.ops.batch import preflight_operands
 from pdf_toolkit.ops.office import (
     DEFAULT_TIMEOUT_S,
     convert_run,
@@ -48,7 +49,6 @@ from pdf_toolkit.ops.office import (
 )
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
-from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["convert_command"]
 
@@ -88,8 +88,14 @@ document 'in place' into a PDF is meaningless) and exits 2. Exactly one of
 
 
 def _reject_missing_sources(sources: list[Path]) -> None:
-    for source in sources:
-        classify_operand(source, directory_message="expected a file, not a directory")
+    """The CLI-layer pre-flight, run-scoped rungs only.
+
+    This loop runs BEFORE `ops/` is entered at all, so leaving the full ladder
+    here would abort the batch on an unreadable input no matter what the ops
+    layer does -- the half-applied fix that presents as flakiness rather than
+    as failure. The unreadable rung is deferred to the per-item guard.
+    """
+    preflight_operands(sources, directory_message="expected a file, not a directory")
 
 
 @global_options(consumes=("--output", "--out-dir", "--name"))

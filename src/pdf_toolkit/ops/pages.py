@@ -94,12 +94,13 @@ from typing import Final
 from pdf_toolkit.errors import NoInputError, PdfToolkitError, RefusedError, UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult, PageRange
+from pdf_toolkit.ops.batch import BatchLedger, preflight_operands
 from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import parse
 from pdf_toolkit.ports.structure import OpenStructureDocument, require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.secret import Secret
 
@@ -156,9 +157,17 @@ def reject_missing_sources(sources: Sequence[Path]) -> None:
     argument exits **4** on a nonexistent input, unconditionally, and that
     wins over any other usage error. The four cmd modules call this first,
     before their own destination and `--pages` checks.
+
+    **It is also this batch class's CLI-layer seam.** `delete`/`extract`/
+    `reorder`/`rotate` carry no `classify_operand` call of their own in
+    `cli/`; they reach one through THIS function, which those four cmd modules
+    import. So a census keyed on `classify_operand(` in `cli/cmd_*.py` finds
+    six of the ten and misses these four -- the pre-flight is here, one import
+    hop away. Deferring the unreadable rung here therefore closes both the CLI
+    seam and the ops seam for all four at once, which is why they need no edit
+    in `cli/`.
     """
-    for source in sources:
-        classify_operand(source)
+    preflight_operands(sources)
 
 
 # --------------------------------------------------------------------------- #
@@ -509,6 +518,7 @@ def _run_with_resolver(
     resolvability tier is predicted for free.
     """
     reject_missing_sources(sources)
+    ledger = BatchLedger(sources)
     if name_template is not None and out_dir is None:
         raise UsageError(_NAME_WITHOUT_OUT_DIR)
 
@@ -530,24 +540,33 @@ def _run_with_resolver(
     # Tier 1 -- the selection. Runs in both modes; a real run raises, a dry run
     # captures the first refusal (X-67), so `delete --pages all --dry-run`
     # PREDICTS §D5's zero-page refusal instead of discovering it later.
-    page_plans: list[_PagePlan] = []
+    # Tier 1 runs behind the per-item guard, so a corrupt or unreadable input
+    # costs THAT input its selection and nothing else. The refusal classes
+    # below stay run-scoped: `fails closed` is about refusals -- a partially
+    # rewritten set of documents is a wrong result that looks right -- and a
+    # per-input verdict is a different thing from a whole-run refusal.
+    page_plans: dict[str, _PagePlan] = {}
     selection_refusal: PdfToolkitError | None = None
+
+    def _plan_one(item: _Target) -> _PagePlan:
+        secret = resolver.for_source(item.source)
+        with engine.open_document(item.source, password=secret) as document:
+            return _plan_pages(
+                document,
+                item.source,
+                verb=verb,
+                pages_spec=pages_spec,
+                ordered=ordered,
+                angle=angle,
+                absolute=absolute,
+                password=secret,
+            )
+
     try:
         for item in planned:
-            secret = resolver.for_source(item.source)
-            with engine.open_document(item.source, password=secret) as document:
-                page_plans.append(
-                    _plan_pages(
-                        document,
-                        item.source,
-                        verb=verb,
-                        pages_spec=pages_spec,
-                        ordered=ordered,
-                        angle=angle,
-                        absolute=absolute,
-                        password=secret,
-                    )
-                )
+            plan_for_item = ledger.guard(item.source, lambda item=item: _plan_one(item))  # type: ignore[misc]
+            if plan_for_item is not None:
+                page_plans[str(item.source)] = plan_for_item
     except (NoInputError, RefusedError) as refusal:
         if not policy.dry_run:
             raise
@@ -562,19 +581,22 @@ def _run_with_resolver(
             schema_version=_SCHEMA_VERSION,
             verb=verb,
             dry_run=True,
-            items=tuple(
-                ItemResult(
-                    input=str(item.source),
-                    output=str(item.target),
-                    ok=False,
-                    exit_code=selection_refusal.exit_code,
-                    message=selection_refusal.message,
-                    bytes_before=item.source.stat().st_size,
-                    bytes_after=None,
-                    duration_ms=0,
-                    detail=detail,
-                )
-                for item in planned
+            items=ledger.assemble(
+                [
+                    ItemResult(
+                        input=str(item.source),
+                        output=str(item.target),
+                        ok=False,
+                        exit_code=selection_refusal.exit_code,
+                        message=selection_refusal.message,
+                        bytes_before=item.source.stat().st_size,
+                        bytes_after=None,
+                        duration_ms=0,
+                        detail=detail,
+                    )
+                    for item in planned
+                    if not ledger.failed(item.source)
+                ]
             ),
             warnings=(),
             duration_ms=0,
@@ -589,30 +611,33 @@ def _run_with_resolver(
             schema_version=_SCHEMA_VERSION,
             verb=verb,
             dry_run=True,
-            items=tuple(
-                ItemResult(
-                    input=str(item.source),
-                    output=str(item.target),
-                    ok=not plan.refused,
-                    exit_code=plan.would_exit,
-                    message=(
-                        f"planned: {verb} -> {len(page_plan.page_numbers)} page(s)"
-                        if not plan.refused
-                        else plan.message
-                    ),
-                    bytes_before=item.source.stat().st_size,
-                    bytes_after=None,
-                    duration_ms=0,
-                    detail={**fs_detail, **_item_detail(page_plan)},
-                )
-                for item, page_plan in zip(planned, page_plans, strict=True)
+            items=ledger.assemble(
+                [
+                    ItemResult(
+                        input=str(item.source),
+                        output=str(item.target),
+                        ok=not plan.refused,
+                        exit_code=plan.would_exit,
+                        message=(
+                            f"planned: {verb} -> {len(page_plans[str(item.source)].page_numbers)}"
+                            " page(s)"
+                            if not plan.refused
+                            else plan.message
+                        ),
+                        bytes_before=item.source.stat().st_size,
+                        bytes_after=None,
+                        duration_ms=0,
+                        detail={**fs_detail, **_item_detail(page_plans[str(item.source)])},
+                    )
+                    for item in planned
+                    if not ledger.failed(item.source)
+                ]
             ),
             warnings=(),
             duration_ms=0,
         )
 
-    written: list[ItemResult] = []
-    for item, page_plan in zip(planned, page_plans, strict=True):
+    def _write_one(item: _Target, page_plan: _PagePlan) -> ItemResult:
         started = time.monotonic()
         bytes_before = item.source.stat().st_size
         # The document stays open across the write: `append_pages` hands the
@@ -627,25 +652,36 @@ def _run_with_resolver(
                 writer.set_rotation(index, degrees)
             with AtomicWriter(item.target, policy=policy, kind="pdf") as atomic:
                 writer.write(atomic.stream)
-        written.append(
-            ItemResult(
-                input=str(item.source),
-                output=str(item.target),
-                ok=True,
-                exit_code=0,
-                message=(f"{page_plan.page_count_before} -> {len(page_plan.page_numbers)} page(s)"),
-                bytes_before=bytes_before,
-                bytes_after=item.target.stat().st_size,
-                duration_ms=int((time.monotonic() - started) * 1000),
-                detail=_item_detail(page_plan),
-            )
+        return ItemResult(
+            input=str(item.source),
+            output=str(item.target),
+            ok=True,
+            exit_code=0,
+            message=(f"{page_plan.page_count_before} -> {len(page_plan.page_numbers)} page(s)"),
+            bytes_before=bytes_before,
+            bytes_after=item.target.stat().st_size,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            detail=_item_detail(page_plan),
         )
+
+    written: list[ItemResult] = []
+    for item in planned:
+        page_plan = page_plans.get(str(item.source))
+        if page_plan is None:
+            # Already recorded as failed at tier 1; the ledger carries its row.
+            continue
+        result = ledger.guard(
+            item.source,
+            lambda item=item, page_plan=page_plan: _write_one(item, page_plan),  # type: ignore[misc]
+        )
+        if result is not None:
+            written.append(result)
 
     return OperationResult(
         schema_version=_SCHEMA_VERSION,
         verb=verb,
         dry_run=False,
-        items=tuple(written),
+        items=ledger.assemble(written),
         warnings=(),
         duration_ms=0,
     )

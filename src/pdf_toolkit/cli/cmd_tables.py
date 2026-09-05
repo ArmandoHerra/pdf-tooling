@@ -31,10 +31,10 @@ import typer
 
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
+from pdf_toolkit.ops.batch import preflight_operands
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.textract import TableOutcome, extract_tables_run
 from pdf_toolkit.output import OutputFormat, render_payload
-from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["TableFormat", "TableStrategy", "build_payload", "tables_command"]
 
@@ -239,8 +239,7 @@ def tables_command(
     # See `cmd_text.py` for why this check is duplicated here and in the op
     # layer: PLAN.md §10's exit-4 contract must win over every other usage
     # error, and every other call path into the op needs it too.
-    for source in sources:
-        classify_operand(source)
+    preflight_operands(sources)
 
     outcome = extract_tables_run(
         sources,

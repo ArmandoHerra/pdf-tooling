@@ -42,10 +42,11 @@ from typing import Final
 from pdf_toolkit.errors import UsageError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.batch import BatchLedger, preflight_operands
 from pdf_toolkit.ports.office import office_binary_present, require_office
 from pdf_toolkit.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -82,11 +83,6 @@ def validate_filter(filter_name: str | None) -> None:
             f"--filter {filter_name!r} is not a valid LibreOffice filter name "
             f"(expected letters, digits and underscores only)"
         )
-
-
-def _validate_sources(sources: Sequence[Path]) -> None:
-    for source in sources:
-        classify_operand(source, directory_message="expected a file, not a directory")
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,9 +155,11 @@ def convert_run(
     real run does, so ``convert --dry-run && convert`` short-circuits instead
     of green-lighting a run that then fails.
     """
-    _validate_sources(sources)
+    preflight_operands(sources, directory_message="expected a file, not a directory")
     if name_template is not None and out_dir is None:
         raise UsageError(_NAME_WITHOUT_OUT_DIR)
+
+    ledger = BatchLedger(sources)
 
     planned = resolve_convert_targets(
         sources, output=output, out_dir=out_dir, name_template=name_template
@@ -205,33 +203,39 @@ def convert_run(
             # chokepoint, never a second, drifting copy of that message.
             require_office()
         detail = plan.detail()
-        items = tuple(
-            ItemResult(
-                input=str(item.source),
-                output=str(item.target),
-                ok=not plan.refused,
-                exit_code=plan.would_exit,
-                message=("planned: convert" if not plan.refused else plan.message),
-                bytes_before=item.source.stat().st_size,
-                bytes_after=None,
-                duration_ms=0,
-                detail=detail,
+        # OR-7 / X-185: the preview classifies every operand through the same
+        # guard the real run uses, so an unreadable input predicts its own exit
+        # code AND its own envelope shape instead of a clean batch.
+        predicted = [
+            ledger.guard(
+                item.source,
+                lambda item=item: ItemResult(  # type: ignore[misc]
+                    input=str(item.source),
+                    output=str(item.target),
+                    ok=not plan.refused,
+                    exit_code=plan.would_exit,
+                    message=("planned: convert" if not plan.refused else plan.message),
+                    bytes_before=item.source.stat().st_size,
+                    bytes_after=None,
+                    duration_ms=0,
+                    detail=detail,
+                ),
+                directory_message="expected a file, not a directory",
             )
             for item in planned
-        )
+        ]
         return OperationResult(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_CONVERT,
             dry_run=True,
-            items=items,
+            items=ledger.assemble([item for item in predicted if item is not None]),
             warnings=(),
             duration_ms=0,
         )
 
     engine = require_office()
 
-    written: list[ItemResult] = []
-    for item in planned:
+    def _convert_one(item: _ConvertTarget) -> ItemResult:
         started = time.monotonic()
         bytes_before = item.source.stat().st_size
         with ScratchDir() as scratch_root:
@@ -246,25 +250,33 @@ def convert_run(
                 atomic.stream.write(output_bytes)
         bytes_after = item.target.stat().st_size
         duration_ms = int((time.monotonic() - started) * 1000)
-        written.append(
-            ItemResult(
-                input=str(item.source),
-                output=str(item.target),
-                ok=True,
-                exit_code=0,
-                message=f"converted ({bytes_before} -> {bytes_after} bytes)",
-                bytes_before=bytes_before,
-                bytes_after=bytes_after,
-                duration_ms=duration_ms,
-                detail={"filter": filter_name} if filter_name else None,
-            )
+        return ItemResult(
+            input=str(item.source),
+            output=str(item.target),
+            ok=True,
+            exit_code=0,
+            message=f"converted ({bytes_before} -> {bytes_after} bytes)",
+            bytes_before=bytes_before,
+            bytes_after=bytes_after,
+            duration_ms=duration_ms,
+            detail={"filter": filter_name} if filter_name else None,
         )
+
+    written: list[ItemResult] = []
+    for item in planned:
+        result = ledger.guard(
+            item.source,
+            lambda item=item: _convert_one(item),  # type: ignore[misc]
+            directory_message="expected a file, not a directory",
+        )
+        if result is not None:
+            written.append(result)
 
     return OperationResult(
         schema_version=_SCHEMA_VERSION,
         verb=VERB_CONVERT,
         dry_run=False,
-        items=tuple(written),
+        items=ledger.assemble(written),
         warnings=(),
         duration_ms=0,
     )

@@ -68,6 +68,7 @@ from typing import IO, TYPE_CHECKING, Final
 from pdf_toolkit.errors import EngineMissingError, NoInputError, PdfToolkitError
 from pdf_toolkit.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_toolkit.models import ItemResult, OperationResult
+from pdf_toolkit.ops.batch import BatchLedger, preflight_operands
 from pdf_toolkit.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_toolkit.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_toolkit.ops.procpool import guarded_process_pool
@@ -76,7 +77,7 @@ from pdf_toolkit.ports.raster import require_raster
 from pdf_toolkit.ports.structure import require_structure
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_output_set
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions, classify_operand
+from pdf_toolkit.safety.paths import check_output_collisions
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.secret import Secret
 
@@ -332,8 +333,8 @@ def rasterize_document(
     ``_plan_pages`` open every source already pays for page count -- so the
     resolvability tier is predicted for free, in both modes.
     """
-    for source in sources:
-        classify_operand(source)
+    preflight_operands(sources)
+    ledger = BatchLedger(sources)
 
     # Exit 3 up front, before any planning work — Design §D7.
     require_raster(capability="render")
@@ -344,15 +345,27 @@ def rasterize_document(
     resolver = PasswordResolver(password)
     secret_by_source: dict[Path, Secret | None] = {}
     planned: list[tuple[Path, int]] = []
+
+    def _plan_one(source: Path) -> list[int]:
+        secret = resolver.for_source(source)
+        secret_by_source[source] = secret
+        return list(_plan_pages(source, pages_spec, password=secret))
+
     try:
         for source in sources:
-            secret = resolver.for_source(source)
-            secret_by_source[source] = secret
-            for page_number in _plan_pages(source, pages_spec, password=secret):
+            # `_plan_pages` opens the document: a corrupt or unreadable source
+            # fails HERE, before a single page is rendered, and must cost only
+            # its own pages.
+            page_numbers = ledger.guard(
+                source,
+                lambda source=source: _plan_one(source),  # type: ignore[misc]
+            )
+            for page_number in page_numbers or ():
                 planned.append((source, page_number))
         return _rasterize_planned(
             sources,
             planned,
+            ledger=ledger,
             secret_by_source=secret_by_source,
             fmt=fmt,
             dpi=dpi,
@@ -371,6 +384,7 @@ def _rasterize_planned(
     sources: list[Path],
     planned: list[tuple[Path, int]],
     *,
+    ledger: BatchLedger,
     secret_by_source: dict[Path, Secret | None],
     fmt: str,
     dpi: float | None,
@@ -440,7 +454,7 @@ def _rasterize_planned(
             schema_version=_SCHEMA_VERSION,
             verb=VERB,
             dry_run=True,
-            items=items,
+            items=ledger.assemble(list(items)),
             warnings=(),
             duration_ms=0,
         )
@@ -496,12 +510,15 @@ def _rasterize_planned(
                 for slot, item in future.result():
                     collected[slot] = item
 
-    items = tuple(collected[slot] for slot in range(len(work)))
+    # Slot order is per-PAGE; `assemble` re-imposes per-SOURCE input order
+    # around it and splices in any source that failed planning, so a failed
+    # source appears exactly once, in its own command-line position.
+    rendered_items = [collected[slot] for slot in range(len(work))]
     return OperationResult(
         schema_version=_SCHEMA_VERSION,
         verb=VERB,
         dry_run=False,
-        items=items,
+        items=ledger.assemble(rendered_items),
         warnings=(),
         duration_ms=0,
     )

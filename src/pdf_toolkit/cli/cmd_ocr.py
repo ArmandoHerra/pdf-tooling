@@ -40,6 +40,7 @@ import typer
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import UsageError
+from pdf_toolkit.ops.batch import preflight_operands
 from pdf_toolkit.ops.ocr import (
     DEFAULT_DPI,
     DEFAULT_LANG,
@@ -50,7 +51,6 @@ from pdf_toolkit.ops.ocr import (
 )
 from pdf_toolkit.output import emit_result
 from pdf_toolkit.safety.confirm import require_confirmation
-from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["ocr_command"]
 
@@ -86,8 +86,14 @@ def _validate_psm(psm: int) -> None:
 
 
 def _reject_missing_sources(sources: list[Path]) -> None:
-    for source in sources:
-        classify_operand(source)
+    """The CLI-layer pre-flight, run-scoped rungs only.
+
+    This loop runs BEFORE `ops/` is entered at all, so leaving the full ladder
+    here would abort the batch on an unreadable input no matter what the ops
+    layer does -- the half-applied fix that presents as flakiness rather than
+    as failure. The unreadable rung is deferred to the per-item guard.
+    """
+    preflight_operands(sources)
 
 
 _HELP = """Add an invisible text layer to scanned pages. Pixels are never

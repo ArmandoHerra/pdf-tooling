@@ -22,10 +22,10 @@ import typer
 from pdf_toolkit.cli.common import get_config, global_options, operand_argument
 from pdf_toolkit.cli.password import ENV_PASSWORD, plan_password
 from pdf_toolkit.errors import UsageError
+from pdf_toolkit.ops.batch import preflight_operands
 from pdf_toolkit.ops.pagerange import GRAMMAR_HELP
 from pdf_toolkit.ops.raster import rasterize_document
 from pdf_toolkit.output import emit_result
-from pdf_toolkit.safety.paths import classify_operand
 
 __all__ = ["RasterFormat", "rasterize_command"]
 
@@ -157,8 +157,7 @@ def rasterize_command(
     # `ops/raster.py::rasterize_document` repeats this check for every OTHER
     # call path into that function; the duplication is deliberate defense in
     # depth, the same posture `AtomicWriter`'s own no-clobber re-check takes.
-    for source in sources:
-        classify_operand(source)
+    preflight_operands(sources)
 
     if dpi is not None and width is not None:
         raise UsageError("--dpi and --width are mutually exclusive")
