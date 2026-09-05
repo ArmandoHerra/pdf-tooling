@@ -1729,3 +1729,89 @@ def test_removing_one_alternative_from_the_matcher_reddens_its_case(dropped: str
         f"dropping {dropped!r} still leaves {sample!r} caught, so that alternative is dead "
         "weight and the matcher is not the proposition it claims to be."
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-42 -- AC7: the two ceilings carry their own derivation, or they redden
+#
+# `MODULE_SELF_US_CEILING` and `TOTAL_IMPORT_US_CEILING` are ceilings on a
+# measured quantity, which makes them exactly the kind of constant that gets
+# quietly widened the first time it is inconvenient. `STARTUP_BUDGET_MS` already
+# has this guard (`test_a_moved_startup_budget_carries_its_measurement`) and the
+# reasoning transfers without modification: widening a pin without a measurement
+# is how the wall-clock budget Section 6 replaced came to be defended by nothing.
+# --------------------------------------------------------------------------- #
+
+#: The two PDF-42 ceilings, in the file that defines them.
+PDF42_CEILINGS: Final = ("MODULE_SELF_US_CEILING", "TOTAL_IMPORT_US_CEILING")
+
+#: Beyond EVIDENCE_TOKENS/DISTRIBUTION_TOKENS: D2 requires the multiplier to be
+#: written down and the plant separation to be stated, because "p95 times a
+#: factor" is only checkable if the factor is on the page.
+PDF42_DERIVATION_TOKENS: Final = ("FACTOR", "SEPARATION", "-n auto", "serial")
+
+
+def ceiling_block(text: str, name: str) -> tuple[int, str]:
+    """(the constant, the comment block immediately above it).
+
+    Deliberately a second parser rather than a generalisation of
+    `budget_block()`: that one is `PDF-29`'s, is pinned to a float and to one
+    name, and widening it to serve two owners is how a guard acquires a second
+    stakeholder and stops being changed when either needs it to change.
+    """
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(rf"^{name}\s*(?::\s*[\w\[\], ]+\s*)?=\s*([\d_]+)\s*$", line)
+        if not match:
+            continue
+        start = index
+        while start > 0 and lines[start - 1].startswith("#"):
+            start -= 1
+        return int(match.group(1).replace("_", "")), "\n".join(lines[start:index])
+    raise AssertionError(f"{name} is not defined in {IMPORT_BOUNDARIES.name}")
+
+
+@pytest.mark.parametrize("name", PDF42_CEILINGS)
+def test_the_pdf42_ceilings_carry_their_measurement(name: str) -> None:
+    """AC7. Each ceiling has a parseable adjacent block naming date, commit,
+    host, interpreter, engine presence, both arms' distributions, its factor and
+    its separation from the plant."""
+    value, block = ceiling_block(IMPORT_BOUNDARIES.read_text(), name)
+    assert value > 0, f"{name} is not a positive ceiling"
+
+    missing = [token for token in EVIDENCE_TOKENS if token not in block]
+    assert missing == [], f"{name} = {value} but its block omits {missing}"
+    absent = [token for token in DISTRIBUTION_TOKENS if token not in block]
+    assert absent == [], f"{name} = {value} but its block omits the distribution field(s) {absent}"
+    unstated = [token for token in PDF42_DERIVATION_TOKENS if token not in block]
+    assert unstated == [], (
+        f"{name} = {value} but its block omits {unstated}. A ceiling set to 'the p95 times a "
+        "factor' is only checkable by a reader if BOTH arms and the factor are on the page; "
+        "without them the number is indistinguishable from one that was picked."
+    )
+
+
+@pytest.mark.parametrize("stripped", EVIDENCE_TOKENS + DISTRIBUTION_TOKENS)
+def test_a_ceiling_whose_block_loses_a_field_reddens(tmp_path: Path, stripped: str) -> None:
+    """AC7's RED, one case per required field, against a scratch copy.
+
+    A guard over a comment block is worth exactly as much as the proof that it
+    notices a missing line, and "it would notice" is the kind of claim this file
+    exists to stop accepting.
+    """
+    original = IMPORT_BOUNDARIES.read_text()
+    _, block = ceiling_block(original, "MODULE_SELF_US_CEILING")
+    assert stripped in block, (
+        f"{stripped!r} is not in the live block, so removing it proves nothing"
+    )
+
+    kept = [line for line in block.splitlines() if stripped not in line]
+    scratch = tmp_path / "planted.py"
+    scratch.write_text("\n".join(kept) + "\nMODULE_SELF_US_CEILING: Final = 250_000\n")
+
+    _, damaged = ceiling_block(scratch.read_text(), "MODULE_SELF_US_CEILING")
+    required = EVIDENCE_TOKENS + DISTRIBUTION_TOKENS + PDF42_DERIVATION_TOKENS
+    assert [token for token in required if token not in damaged], (
+        f"stripping every line mentioning {stripped!r} left a block the guard still accepts; "
+        "the guard is not reading what it claims to read"
+    )
