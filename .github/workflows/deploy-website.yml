@@ -10,9 +10,20 @@ name: Deploy Website
   workflow_dispatch:
 
 permissions:
+  # PDF-45 (audit PDFCI-001). The `pages` and `id-token` WRITE scopes used to
+  # sit in this block. A workflow-level `permissions:` applies to EVERY job, so the
+  # grant reached `build` -- which runs `npm ci` and `npm run build` over a
+  # ~405-package resolved closure inside one Node process -- and, since PDF-34
+  # D7 added the `gate` job below, reached ci.yml's eleven jobs as well, all of
+  # them written and reviewed under ci.yml's own `permissions: contents: read`.
+  #
+  # A job-level block REPLACES this default entirely rather than adding to it,
+  # so every job below now declares exactly the authority it needs and nothing
+  # inherits a write scope. Do NOT re-hoist either scope here to fix a failing
+  # deploy: tests/test_workflow_supply_chain.py asserts the grant population
+  # over ALL jobs is exactly {deploy}, and it is deliberately two-sided so that
+  # deleting the grant outright cannot satisfy it either.
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -53,6 +64,12 @@ jobs:
     name: Build
     needs: gate
     runs-on: ubuntu-latest
+    # PDF-45. Declared explicitly, not inherited: inheritance is precisely the
+    # failure mode being repaired, and a reader must be able to see this job's
+    # authority without scrolling to the top of the file. Matches release.yml's
+    # convention of a job-level block immediately above `steps:`.
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -87,6 +104,13 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    # PDF-45. The ONLY job that holds either write scope. A job-level block
+    # replaces the workflow default outright, so this job also holds
+    # `contents: none` -- actions/deploy-pages does not check out the
+    # repository, so that is expected to be sufficient.
+    permissions:
+      pages: write
+      id-token: write
     steps:
       - name: Deploy to GitHub Pages
         id: deployment

@@ -53,6 +53,24 @@ env:
   UV_LOCKED: "1"
   # Pinned so a gitleaks release cannot change what this gate means overnight.
   GITLEAKS_VERSION: "8.30.1"
+  # PDF-45 (audit PDFCI-003). ...and pinned by CONTENT, because a version pin
+  # does NOT bind a mutable release asset: the tag, the URL and
+  # GITLEAKS_VERSION above can all stay fixed while the bytes behind them
+  # change, which is exactly the thing the line above claims to prevent.
+  #
+  # PROVENANCE: transcribed from gitleaks' own published release checksums,
+  # asset `gitleaks_8.30.1_checksums.txt` of release v8.30.1, read 2026-09-06
+  # from github.com/gitleaks/gitleaks/releases/download/v8.30.1/ -- the
+  # `gitleaks_8.30.1_linux_x64.tar.gz` row, which is the asset the step below
+  # builds its URL for.
+  #
+  # NEVER regenerate this by hashing the tarball the workflow just downloaded:
+  # an expected value derived from the artefact it checks is a tautology and
+  # the control can never fail. The checksums file is deliberately NOT fetched
+  # at run time either -- verifying a download against a checksums file served
+  # by the same release verifies nothing, because one compromise serves both.
+  # A bump must move GITLEAKS_VERSION and this value TOGETHER.
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 
 # PDF-29 -- `timeout-minutes` on EVERY job, derived rather than picked.
 #
@@ -310,6 +328,7 @@ jobs:
           set -euo pipefail
           url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           curl -fsSL "$url" -o /tmp/gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
