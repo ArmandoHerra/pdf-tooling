@@ -1,0 +1,696 @@
+"""``compress`` + ``repair`` + ``linearize`` — pure plan/result functions over
+``StructureEngine`` (PDF-12).
+
+Framework-free per L2: no typer/click import (PDF-06's AST test enforces it),
+and **no engine library import either** — every byte crosses the port
+boundary through ``ports/structure.py``'s plain dataclasses
+(``CompressOutcome``/``RepairOutcome``/``ImagePassOutcome``), never a
+``pikepdf`` or ``pypdf`` object. That is what keeps the licence question
+answerable by reading six port files, and it is the one discipline this
+module is most tempted to break: **the conventional one-call PDF compressor
+is AGPL-3.0+ and excluded by `PLAN.md` §7.2 (see §12 R-01/R-02)** —
+`pikepdf`/libqpdf object streams plus an opt-in Pillow image pass is the
+replacement, not a workaround.
+
+Three verbs, four rules `PLAN.md` §12 R-02 already decided:
+
+1. **`compress` reports a measurement, not a claim.** ``bytes_before`` /
+   ``bytes_after`` are populated for every item (both already exist on
+   ``ItemResult`` — no model change, no ``SCHEMA_VERSION`` bump); the ratio
+   is derived in the *message*, never stored as a new field, so it is a
+   rendering concern rather than a schema one. A run whose output did not
+   shrink still exits **0**, with the negative-or-zero percentage printed as
+   such and a stderr warning — hiding a failed compression is the same
+   dishonesty class as claiming a saving that did not occur.
+2. **`--lossless` is a guarantee, not a promise.** D-12.3's Layer 1 runtime
+   gate lives HERE, before ``AtomicWriter`` ever opens: two
+   :class:`~pdf_tooling.ports.structure.StructuralFacts` (plain data the
+   adapter computed) are compared, and a mismatch means nothing is written
+   and the run fails honestly, exit 1, naming the failed check.
+3. **The image pass is opt-in, never implied.** ``--images`` defaults to
+   ``keep``; combining it with ``--lossless`` is a usage error (exit 2), not
+   a silently-honoured "lossless but also lossy" invocation.
+4. **`repair` and `linearize` are verified, never merely claimed.** `repair`
+   reports exactly what libqpdf's recovery pass found, including reporting
+   *nothing* when nothing was wrong; `linearize`'s runtime check happens
+   inside the adapter (D-12.6 check 1) before this module ever reaches
+   ``AtomicWriter``.
+
+**The filesystem tier runs in both modes (B-054, extending X-67), through
+the ONE shared planner (PDF-18).**
+:func:`~pdf_tooling.safety.atomic.plan_filesystem` is the ONE call all three
+verbs share. `compress` carries both destination shapes (``-O``,
+``--out-dir``, ``--name``, ``--in-place``); `repair`/`linearize` carry only
+the single-target shape (``out_dir`` is always ``None`` for them), which the
+shared planner's own guard already handles without a second code path.
+
+**Nothing here writes.** Every byte reaches disk through
+``safety.AtomicWriter``; `compress --out-dir` creates its directory only via
+``safety.atomic.plan_output_set`` (which ``plan_filesystem`` wraps).
+Structural work (the image pass, the pikepdf pass, the recovery/linearize
+pass) is skipped entirely under ``--dry-run`` — the same posture
+`rasterize`/`compose`/`create` already take — so a dry run never opens
+`pikepdf` or `pypdf` at all.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Final
+
+from pdf_tooling.errors import FailureError, NoInputError, UsageError
+from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
+from pdf_tooling.models import ItemResult, OperationResult
+from pdf_tooling.ops.batch import BatchLedger, preflight_operands
+from pdf_tooling.ops.document_password import (
+    NO_PASSWORD,
+    PasswordResolver,
+    PasswordSource,
+    predict_password_refusal,
+)
+from pdf_tooling.ops.pagerange import parse
+from pdf_tooling.ports.structure import (
+    StructuralFacts,
+    require_image_pass,
+    require_structure,
+)
+from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.naming import render_name
+from pdf_tooling.safety.paths import (
+    check_output_collisions,
+    classify_operand,
+    metadata_probe_error,
+    read_source_bytes,
+)
+from pdf_tooling.safety.policy import SafetyPolicy
+from pdf_tooling.secret import Secret
+
+__all__ = [
+    "DEFAULT_COMPRESS_NAME_TEMPLATE",
+    "DEFAULT_IMAGE_DPI",
+    "DEFAULT_IMAGE_QUALITY",
+    "IMAGE_MODES",
+    "VERB_COMPRESS",
+    "VERB_LINEARIZE",
+    "VERB_REPAIR",
+    "compress_run",
+    "linearize_run",
+    "repair_run",
+]
+
+VERB_COMPRESS: Final[str] = "compress"
+VERB_REPAIR: Final[str] = "repair"
+VERB_LINEARIZE: Final[str] = "linearize"
+
+#: `compress --images` (D-12.2). ``keep`` is the default and does nothing.
+IMAGE_MODES: Final[tuple[str, ...]] = ("keep", "downsample", "recompress")
+
+DEFAULT_IMAGE_DPI: Final[float] = 150.0
+DEFAULT_IMAGE_QUALITY: Final[int] = 80
+
+#: `compress --out-dir`'s default filename template -- one output per input,
+#: same stem, mirroring `text`'s own `DEFAULT_TEXT_NAME_TEMPLATE` shape.
+DEFAULT_COMPRESS_NAME_TEMPLATE: Final[str] = "{stem}.{ext}"
+
+_NAME_WITHOUT_OUT_DIR: Final[str] = (
+    "--name templates a filename inside --out-dir; pass --out-dir, "
+    "-O to name one file, or --in-place to overwrite the input"
+)
+
+
+# --------------------------------------------------------------------------- #
+# Shared validation
+# --------------------------------------------------------------------------- #
+
+
+def _validate_sources(sources: Sequence[Path]) -> None:
+    """The full operand ladder, pre-flight — for the SINGLE-target verbs only.
+
+    ``repair`` and ``linearize`` take one operand, so there is no other input
+    for an unreadable one to cost and their exit codes stay exactly where they
+    were. ``compress`` is a batch and calls
+    :func:`~pdf_tooling.ops.batch.preflight_operands` instead, which defers the
+    unreadable rung to the per-item guard.
+    """
+    for source in sources:
+        classify_operand(source)
+
+
+# --------------------------------------------------------------------------- #
+# Shared filesystem-tier planning — PDF-18 Design D1's ONE planner. `compress`
+# is the first of these three verbs to carry **both** destination shapes:
+# :func:`~pdf_tooling.safety.atomic.plan_filesystem` owns the `--out-dir` tier
+# and the per-destination (`-O`/`--in-place`) tier a single target has
+# instead, in the same call, in both modes. For `repair`/`linearize`,
+# `out_dir` is always `None`, so the same call routes them through the writer
+# tier on every call — the same code path `compress -O`/`--in-place` takes.
+# --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# `compress`
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class _CompressTarget:
+    source: Path
+    target: Path
+
+
+def _resolve_compress_targets(
+    sources: Sequence[Path],
+    *,
+    output: Path | None,
+    out_dir: Path | None,
+    name_template: str | None,
+    in_place: bool,
+) -> list[_CompressTarget]:
+    """Every source's own destination, computed before anything runs.
+
+    ``compress a.pdf b.pdf -O one.pdf`` (two inputs, one ``-O`` target) is an
+    **arity** error, not an output-flag-consumption error (D-12.0a) — the
+    CLI layer refuses it before this function is ever reached, so ``output``
+    here is only ever paired with exactly one source.
+    """
+    if in_place:
+        return [_CompressTarget(source=source, target=source) for source in sources]
+    if output is not None:
+        return [_CompressTarget(source=sources[0], target=output)]
+    if out_dir is None:  # pragma: no cover - the CLI layer requires a destination first
+        raise UsageError("compress requires --output, --out-dir, or --in-place")
+    template = name_template if name_template is not None else DEFAULT_COMPRESS_NAME_TEMPLATE
+    return [
+        _CompressTarget(
+            source=source,
+            target=render_name(template, out_dir=out_dir, stem=source.stem, ext="pdf", index=index),
+        )
+        for index, source in enumerate(sources, start=1)
+    ]
+
+
+def _select_pages_set(
+    source: Path, pages_spec: str | None, *, password: Secret | None = None
+) -> frozenset[int] | None:
+    """The scope for the image pass: ``None`` means "every page" (`PLAN.md`
+    §4.3's set semantics), a set otherwise. Computed only when an image pass
+    is active — the page count read is the one cost `--images keep` never
+    pays."""
+    if pages_spec is None:
+        return None
+    engine = require_structure()
+    with engine.open_document(source, password=password) as document:
+        page_count = document.page_count
+    selection = parse(pages_spec, page_count, ordered=False)
+    if selection.is_empty:
+        raise NoInputError(
+            f"{source}: --pages {pages_spec!r} resolved to zero pages; nothing to compress",
+            path=str(source),
+        )
+    return frozenset(selection.indices)
+
+
+def _lossless_failure(before: StructuralFacts, after: StructuralFacts) -> str | None:
+    """D-12.3 Layer 1 — the runtime gate, over plain facts only.
+
+    Three checks, cheap and decode-free: page count, image XObject count,
+    and every image's own tuple (which folds in the ``/DCTDecode`` raw-byte
+    identity check via ``dct_sha256``). Returns the name of the first failed
+    check, or ``None`` when the guarantee holds. This is a runtime
+    invariant, not a proof of text identity — the test-level proof (D-12.3
+    Layer 2) extracts text with ``pypdfium2`` directly, outside this module.
+    """
+    if before.page_count != after.page_count:
+        return f"page count changed ({before.page_count} -> {after.page_count})"
+    if len(before.images) != len(after.images):
+        return f"image XObject count changed ({len(before.images)} -> {len(after.images)})"
+    for index, (earlier, later) in enumerate(zip(before.images, after.images, strict=True)):
+        if earlier != later:
+            return f"image {index} changed structurally (filter/dimensions/colour or DCT bytes)"
+    return None
+
+
+def _compress_one(
+    source: Path,
+    *,
+    lossless: bool,
+    images: str,
+    image_dpi: float,
+    image_quality: int,
+    pages_spec: str | None,
+    password: Secret | None = None,
+) -> tuple[bytes, dict[str, object]]:
+    """One input's full pipeline (D-12.2): optional image pre-pass, then the
+    pikepdf structural pass, then (only under ``--lossless``) D-12.3's Layer
+    1 gate. Raises before returning on any failure — the caller never opens
+    ``AtomicWriter`` for a failed item, so nothing is written (D-12.3)."""
+    data = read_source_bytes(source)
+    detail: dict[str, object] = {}
+
+    if images != "keep":
+        pages = _select_pages_set(source, pages_spec, password=password)
+        pass_engine = require_image_pass()
+        pass_outcome = pass_engine.downsample_images(
+            data, mode=images, pages=pages, dpi=image_dpi, quality=image_quality
+        )
+        data = pass_outcome.output
+        detail["images_transformed"] = pass_outcome.images_transformed
+        detail["images_skipped"] = pass_outcome.images_skipped
+
+    engine = require_structure(capability="object-streams")
+    outcome = engine.compress(data, password=password)
+
+    if lossless:
+        failure = _lossless_failure(outcome.before, outcome.after)
+        if failure is not None:
+            raise FailureError(
+                f"--lossless guarantee violated: {failure}; nothing written", path=str(source)
+            )
+
+    return outcome.output, detail
+
+
+def compress_run(
+    sources: Sequence[Path],
+    *,
+    lossless: bool,
+    images: str,
+    image_dpi: float,
+    image_quality: int,
+    pages_spec: str | None,
+    output: Path | None,
+    out_dir: Path | None,
+    name_template: str | None,
+    in_place: bool,
+    policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
+) -> OperationResult:
+    """Compress every source, one output per input, in input order.
+
+    Under ``--dry-run`` no engine runs at all (mirroring `rasterize`/
+    `compose`/`create`): the filesystem tier alone is predicted, through
+    :func:`~pdf_tooling.safety.atomic.plan_filesystem`. PDF-37 adds the
+    global ``--password-file`` resolvability tier alongside it, via the same
+    credential-free `read_encryption` check `ops/crypto.py`'s own dry-run
+    predictions already use -- never the correctness tier (X-89).
+    """
+    preflight_operands(sources)
+    if name_template is not None and out_dir is None:
+        raise UsageError(_NAME_WITHOUT_OUT_DIR)
+
+    ledger = BatchLedger(sources)
+
+    planned = _resolve_compress_targets(
+        sources, output=output, out_dir=out_dir, name_template=name_template, in_place=in_place
+    )
+    targets = [item.target for item in planned]
+    # Data-independent (planned targets against each other) -- checked
+    # identically in both modes, mirroring `split`'s own AC10 convention.
+    check_output_collisions(targets)
+
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+
+    if policy.dry_run:
+        refusal = plan.refusal
+        if refusal is None:
+            # Each source's own probe, INSIDE its own guard. The credential-free
+            # `read_encryption` this prediction runs is a document read, so it
+            # raises on a corrupt or unreadable input exactly as the real run's
+            # engine does. Run batch-wide (as it was) one bad input aborts the
+            # whole preview -- the same defect on the preview side, and it would
+            # leave the unreadable arm's dry run disagreeing with its own real
+            # run on both OR-7 observables. Charged to the source it is about,
+            # never to the first source in argv order.
+            refusal = None
+            for item in planned:
+                predicted_refusal = ledger.guard(
+                    item.source,
+                    # One keyword per line here is deliberate and is NOT a style
+                    # preference: the credential keyword followed on the SAME
+                    # line by another keyword whose value is an upper-case
+                    # constant is the shape this repository's secret scanner
+                    # reads as a generic API key, and it is right to be
+                    # suspicious of it. Splitting the arguments is the cheap
+                    # side of that trade -- the alternative is an allowlist
+                    # entry, which buys the same green by making the gate
+                    # blinder.
+                    lambda item=item: predict_password_refusal(  # type: ignore[misc]
+                        item.source,
+                        verb=VERB_COMPRESS,
+                        password=password,
+                    ),
+                )
+                if predicted_refusal is not None:
+                    refusal = predicted_refusal
+                    break
+        detail = plan.detail()
+        if refusal is not None and plan.refusal is None:
+            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        # The dry run classifies every operand through the SAME guard the real
+        # run uses (OR-7 / X-185): an unreadable input predicts its own exit
+        # code AND its own envelope shape, rather than the preview claiming a
+        # clean batch the real run then fails.
+        predicted = [
+            ledger.guard(
+                item.source,
+                lambda item=item: ItemResult(  # type: ignore[misc]
+                    input=str(item.source),
+                    output=str(item.target),
+                    ok=refusal is None,
+                    exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+                    message=("planned: compress" if refusal is None else refusal.message),
+                    bytes_before=item.source.stat().st_size,
+                    bytes_after=None,
+                    duration_ms=0,
+                    detail=detail,
+                ),
+            )
+            for item in planned
+        ]
+        return OperationResult(
+            schema_version=_SCHEMA_VERSION,
+            verb=VERB_COMPRESS,
+            dry_run=True,
+            items=ledger.assemble([item for item in predicted if item is not None]),
+            warnings=(),
+            duration_ms=0,
+        )
+
+    resolver = PasswordResolver(password)
+    warnings: list[str] = []
+    written: list[ItemResult] = []
+    try:
+        return _compress_write_all(
+            planned,
+            lossless=lossless,
+            images=images,
+            image_dpi=image_dpi,
+            image_quality=image_quality,
+            pages_spec=pages_spec,
+            policy=policy,
+            resolver=resolver,
+            warnings=warnings,
+            written=written,
+            ledger=ledger,
+        )
+    finally:
+        resolver.clear()
+
+
+def _compress_write_all(
+    planned: list[_CompressTarget],
+    *,
+    lossless: bool,
+    images: str,
+    image_dpi: float,
+    image_quality: int,
+    pages_spec: str | None,
+    policy: SafetyPolicy,
+    resolver: PasswordResolver,
+    warnings: list[str],
+    written: list[ItemResult],
+    ledger: BatchLedger,
+) -> OperationResult:
+    def _compress_item(item: _CompressTarget) -> ItemResult:
+        started = time.monotonic()
+        # A METADATA seam, belted as one (`PDF-43` D7). The operand was
+        # classified moments ago; between that verdict and this probe it can be
+        # deleted, and an unbelted `stat()` answered that with a
+        # `FileNotFoundError` traceback. `metadata_probe_error` answers with the
+        # SAME class and wording `classify_operand`'s own rung 1 raises for the
+        # same condition, so the seam and the classifier that governs it agree.
+        #
+        # This is NOT counted against §D3, whose class is a READ-seam class and
+        # is left exactly as wide as it was.
+        try:
+            bytes_before = item.source.stat().st_size
+        except OSError as error:
+            raise metadata_probe_error(item.source, error) from error
+        output_bytes, item_detail = _compress_one(
+            item.source,
+            lossless=lossless,
+            images=images,
+            image_dpi=image_dpi,
+            image_quality=image_quality,
+            pages_spec=pages_spec,
+            password=resolver.for_source(item.source),
+        )
+        with AtomicWriter(item.target, policy=policy, kind="pdf") as writer:
+            writer.stream.write(output_bytes)
+        bytes_after = item.target.stat().st_size
+
+        if bytes_after >= bytes_before:
+            warnings.append(
+                f"{item.source}: did not shrink ({bytes_before} -> {bytes_after} bytes)"
+            )
+        skipped = item_detail.get("images_skipped")
+        if isinstance(skipped, int) and skipped > 0:
+            warnings.append(f"{item.source}: {skipped} image(s) skipped (not safely re-encodable)")
+
+        ratio = ((bytes_before - bytes_after) / bytes_before * 100) if bytes_before else 0.0
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return ItemResult(
+            input=str(item.source),
+            output=str(item.target),
+            ok=True,
+            exit_code=0,
+            message=f"{bytes_before} -> {bytes_after} bytes ({ratio:+.1f}%)",
+            bytes_before=bytes_before,
+            bytes_after=bytes_after,
+            duration_ms=duration_ms,
+            detail=item_detail or None,
+        )
+
+    for item in planned:
+        # §5.4: a failing input is RECORDED and the run continues. The batch
+        # this loop belongs to is the one that used to abandon `written` --
+        # already describing a file on disk -- when an input raised.
+        result = ledger.guard(item.source, lambda item=item: _compress_item(item))  # type: ignore[misc]
+        if result is not None:
+            written.append(result)
+
+    return OperationResult(
+        schema_version=_SCHEMA_VERSION,
+        verb=VERB_COMPRESS,
+        dry_run=False,
+        items=ledger.assemble(written),
+        warnings=tuple(warnings),
+        duration_ms=0,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Single-target resolution — shared by `repair` and `linearize`, neither of
+# which carries `--out-dir`/`--name` (D-12.0a).
+# --------------------------------------------------------------------------- #
+
+
+def _resolve_single_target(source: Path, *, output: Path | None, in_place: bool, verb: str) -> Path:
+    if in_place:
+        return source
+    if output is not None:
+        return output
+    raise UsageError(f"{verb} requires -O/--output or --in-place")
+
+
+# --------------------------------------------------------------------------- #
+# `repair`
+# --------------------------------------------------------------------------- #
+
+
+def _repair_message(warnings: tuple[str, ...]) -> str:
+    if not warnings:
+        return "no damage detected"
+    return f"recovered from {len(warnings)} finding(s)"
+
+
+def repair_run(
+    source: Path,
+    *,
+    output: Path | None,
+    in_place: bool,
+    report: bool,
+    policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
+) -> OperationResult:
+    """Recover *source* via libqpdf's own recovery parser (D-12.4).
+
+    ``--report`` widens ``ItemResult.detail`` with the structural delta
+    (object/page counts, whether an xref reconstruction occurred);
+    ``OperationResult.warnings`` and the one-line message are populated
+    either way, because *whether nothing was wrong* is the honest baseline
+    this verb reports, not an opt-in extra.
+
+    PDF-37: ``--dry-run`` does not otherwise open the document at all, so the
+    global ``--password-file`` resolvability tier is predicted explicitly
+    (never the correctness tier, X-89).
+    """
+    _validate_sources([source])
+    target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_REPAIR)
+
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+
+    if policy.dry_run:
+        refusal = plan.refusal
+        if refusal is None:
+            refusal = predict_password_refusal(source, password=password, verb=VERB_REPAIR)
+        detail = plan.detail()
+        if refusal is not None and plan.refusal is None:
+            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        item = ItemResult(
+            input=str(source),
+            output=str(target),
+            ok=refusal is None,
+            exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+            message=("planned: repair" if refusal is None else refusal.message),
+            bytes_before=source.stat().st_size,
+            bytes_after=None,
+            duration_ms=0,
+            detail=detail,
+        )
+        return OperationResult(
+            schema_version=_SCHEMA_VERSION,
+            verb=VERB_REPAIR,
+            dry_run=True,
+            items=(item,),
+            warnings=(),
+            duration_ms=0,
+        )
+
+    started = time.monotonic()
+    bytes_before = source.stat().st_size
+    engine = require_structure(capability="repair")
+    resolver = PasswordResolver(password)
+    try:
+        outcome = engine.repair(read_source_bytes(source), password=resolver.for_source(source))
+    finally:
+        resolver.clear()
+
+    with AtomicWriter(target, policy=policy, kind="pdf") as writer:
+        writer.stream.write(outcome.output)
+    bytes_after = target.stat().st_size
+    duration_ms = int((time.monotonic() - started) * 1000)
+
+    report_detail: dict[str, object] | None = None
+    if report:
+        report_detail = {
+            "page_count_before": outcome.page_count_before,
+            "page_count_after": outcome.page_count_after,
+            "object_count_before": outcome.object_count_before,
+            "object_count_after": outcome.object_count_after,
+            "xref_reconstructed": outcome.xref_reconstructed,
+        }
+
+    item = ItemResult(
+        input=str(source),
+        output=str(target),
+        ok=True,
+        exit_code=0,
+        message=_repair_message(outcome.warnings),
+        bytes_before=bytes_before,
+        bytes_after=bytes_after,
+        duration_ms=duration_ms,
+        detail=report_detail,
+    )
+    return OperationResult(
+        schema_version=_SCHEMA_VERSION,
+        verb=VERB_REPAIR,
+        dry_run=False,
+        items=(item,),
+        warnings=outcome.warnings,
+        duration_ms=0,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# `linearize`
+# --------------------------------------------------------------------------- #
+
+
+def linearize_run(
+    source: Path,
+    *,
+    output: Path | None,
+    in_place: bool,
+    policy: SafetyPolicy,
+    password: PasswordSource = NO_PASSWORD,
+) -> OperationResult:
+    """Rewrite *source* for byte-serving (D-12.6).
+
+    Verified structurally inside the adapter before this function ever sees
+    the candidate bytes -- a failed verification raises there, so nothing
+    reaches ``AtomicWriter`` and the target stays untouched.
+
+    PDF-37: ``--dry-run`` does not otherwise open the document at all, so the
+    global ``--password-file`` resolvability tier is predicted explicitly
+    (never the correctness tier, X-89).
+    """
+    _validate_sources([source])
+    target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_LINEARIZE)
+
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+
+    if policy.dry_run:
+        refusal = plan.refusal
+        if refusal is None:
+            refusal = predict_password_refusal(source, password=password, verb=VERB_LINEARIZE)
+        detail = plan.detail()
+        if refusal is not None and plan.refusal is None:
+            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        item = ItemResult(
+            input=str(source),
+            output=str(target),
+            ok=refusal is None,
+            exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+            message=("planned: linearize" if refusal is None else refusal.message),
+            bytes_before=source.stat().st_size,
+            bytes_after=None,
+            duration_ms=0,
+            detail=detail,
+        )
+        return OperationResult(
+            schema_version=_SCHEMA_VERSION,
+            verb=VERB_LINEARIZE,
+            dry_run=True,
+            items=(item,),
+            warnings=(),
+            duration_ms=0,
+        )
+
+    started = time.monotonic()
+    bytes_before = source.stat().st_size
+    engine = require_structure(capability="linearize")
+    resolver = PasswordResolver(password)
+    try:
+        output_bytes = engine.linearize(
+            read_source_bytes(source), password=resolver.for_source(source)
+        )
+    finally:
+        resolver.clear()
+
+    with AtomicWriter(target, policy=policy, kind="pdf") as writer:
+        writer.stream.write(output_bytes)
+    bytes_after = target.stat().st_size
+    duration_ms = int((time.monotonic() - started) * 1000)
+
+    item = ItemResult(
+        input=str(source),
+        output=str(target),
+        ok=True,
+        exit_code=0,
+        message="linearized",
+        bytes_before=bytes_before,
+        bytes_after=bytes_after,
+        duration_ms=duration_ms,
+    )
+    return OperationResult(
+        schema_version=_SCHEMA_VERSION,
+        verb=VERB_LINEARIZE,
+        dry_run=False,
+        items=(item,),
+        warnings=(),
+        duration_ms=0,
+    )

@@ -295,7 +295,7 @@ def test_a_refused_run_leaves_the_tree_untouched(tmp_path: Path) -> None:
 
 
 def test_the_fault_hook_is_inert_with_no_environment_set(tmp_path: Path) -> None:
-    from pdf_toolkit.safety._faults import ENV_POINT, ENV_RENDEZVOUS, FAULT_POINTS, checkpoint
+    from pdf_tooling.safety._faults import ENV_POINT, ENV_RENDEZVOUS, FAULT_POINTS, checkpoint
 
     assert ENV_POINT not in os.environ
     assert ENV_RENDEZVOUS not in os.environ
@@ -310,7 +310,7 @@ def test_the_fault_hook_is_inert_with_no_environment_set(tmp_path: Path) -> None
 
 
 def test_a_non_matching_fault_point_changes_nothing(tmp_path: Path) -> None:
-    from pdf_toolkit.safety._faults import ENV_POINT, checkpoint
+    from pdf_tooling.safety._faults import ENV_POINT, checkpoint
 
     workspace = tmp_path / "work"
     workspace.mkdir()

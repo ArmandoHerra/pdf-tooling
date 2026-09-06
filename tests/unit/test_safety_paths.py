@@ -21,10 +21,10 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit import errors
-from pdf_toolkit.cli import exit_codes
-from pdf_toolkit.cli.exit_codes import FAILURE, REFUSED
-from pdf_toolkit.safety import (
+from pdf_tooling import errors
+from pdf_tooling.cli import exit_codes
+from pdf_tooling.cli.exit_codes import FAILURE, REFUSED
+from pdf_tooling.safety import (
     canonical,
     check_output_collisions,
     ensure_destination_writable,
@@ -33,7 +33,7 @@ from pdf_toolkit.safety import (
     identity_key,
     same_destination,
 )
-from pdf_toolkit.safety.paths import (
+from pdf_tooling.safety.paths import (
     DEFAULT_DIRECTORY_MESSAGE,
     MISSING_MESSAGE,
     UNREADABLE_MESSAGE,

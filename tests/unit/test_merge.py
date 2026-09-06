@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit import errors
-from pdf_toolkit.ops import merge as merge_ops
-from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_tooling import errors
+from pdf_tooling.ops import merge as merge_ops
+from pdf_tooling.safety.policy import SafetyPolicy
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -45,7 +45,7 @@ def make_policy(**overrides: object) -> SafetyPolicy:
 
 
 def test_ops_merge_does_not_reimplement_the_grammar() -> None:
-    module_path = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit" / "ops" / "merge.py"
+    module_path = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling" / "ops" / "merge.py"
     text = module_path.read_text()
     assert "re.compile" not in text
     for literal in ("even", "odd", "first", "last", "all"):
@@ -55,7 +55,7 @@ def test_ops_merge_does_not_reimplement_the_grammar() -> None:
     imported = {
         alias.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "pdf_toolkit.ops.pagerange"
+        if isinstance(node, ast.ImportFrom) and node.module == "pdf_tooling.ops.pagerange"
         for alias in node.names
     }
     assert {"is_valid_spec", "parse"} <= imported
@@ -205,7 +205,7 @@ def test_merge_out_of_range_token_surfaces_pagerange_exit_2(tmp_path: Path) -> N
 
 
 def test_merge_two_inputs_sums_page_counts_and_orders_text(tmp_path: Path) -> None:
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     first = _make_source(tmp_path / "a", pages=3)
     second_dir = tmp_path / "b"

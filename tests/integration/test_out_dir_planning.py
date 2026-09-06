@@ -42,7 +42,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from dryreal import dry_and_real, prediction, real_envelope  # noqa: E402
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot  # noqa: E402
-from pdf_toolkit.ports.office import office_binary_present  # noqa: E402
+from pdf_tooling.ports.office import office_binary_present  # noqa: E402
 from registry import OUTPUT_FLAG_INVOCATIONS, discover_verbs, run_cli  # noqa: E402
 
 # --------------------------------------------------------------------------- #

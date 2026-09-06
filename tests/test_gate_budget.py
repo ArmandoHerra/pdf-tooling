@@ -131,7 +131,7 @@ def a_valid_record() -> dict[str, Any]:
         "target": "ci",
         "variant": "default",
         "interpreter": {"version": "3.12.13", "executable": "/x/.venv/bin/python3"},
-        "binary": "/x/.venv/bin/pdftoolkit",
+        "binary": "/x/.venv/bin/pdftooling",
         "binary_arm": "venv-sibling",
         "cache_state": "warm",
         "engines": {"tesseract": "/usr/bin/tesseract", "soffice": "/usr/bin/soffice"},
@@ -480,7 +480,7 @@ def test_a_raised_constant_with_no_evidence_block_reddens(tmp_path: Path) -> Non
 # in Section 6 at all -- which is the rule being enforced.
 # --------------------------------------------------------------------------- #
 
-SECTION_SIX_BANNER: Final = "Section 6 -- what `pdftoolkit --help` IMPORTS"
+SECTION_SIX_BANNER: Final = "Section 6 -- what `pdftooling --help` IMPORTS"
 
 #: Section 6's three claim-bearing assertions, kept as an explicit FLOOR.
 #:
@@ -1313,7 +1313,7 @@ def scratch_import_boundaries(tmp_path: Path, text: str) -> Path:
     `REPO_ROOT`, so Section 6 measures a real build rather than skipping.
 
     The file computes `REPO_ROOT = Path(__file__).resolve().parent.parent` and
-    Section 6 censuses `REPO_ROOT/.venv/bin/pdftoolkit`. A copy dropped straight
+    Section 6 censuses `REPO_ROOT/.venv/bin/pdftooling`. A copy dropped straight
     into `tmp_path` would look for a build that is not there and take the
     sanctioned build-absent skip -- which would redden the receipt for a reason
     that has nothing to do with the planted defect, i.e. it would "pass" whether
@@ -1344,7 +1344,7 @@ def skip_without_a_build() -> None:
     precondition, skip with a reason, never pass. This is NOT an abstention on
     load or on worker identity, and it deliberately does not consult either.
     """
-    console_script = REPO_ROOT / ".venv" / "bin" / "pdftoolkit"
+    console_script = REPO_ROOT / ".venv" / "bin" / "pdftooling"
     if not console_script.exists():
         pytest.skip(f"no console script at {console_script}; run `uv sync`.")
 
@@ -1567,7 +1567,7 @@ LOAD_SENSING_NON_CASES: Final = (
     "imported package",
     "--help",
     "importtime",
-    "pdf_toolkit",
+    "pdf_tooling",
     "PYTHONPATH",
     "PDF_TOOLKIT_SAMPLES_DIR",
     "no console script at {path}; run `uv sync`.",

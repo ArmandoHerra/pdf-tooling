@@ -19,7 +19,7 @@ Do not restate status here. This file carries exactly one phase line, and that l
 ## Layout
 
 ```
-src/pdf_toolkit/
+src/pdf_tooling/
 ├── cli/       L1  the ONLY layer that may import the CLI framework
 ├── ops/       L2  framework-free verbs, pure over ports
 ├── safety/    L3  the single write chokepoint
@@ -53,4 +53,4 @@ make ci        # the full local gate -- a SUBSET of CI, run with the same comman
 
 `make ci` does not predict CI — see `.github/gate-parity.toml` and the epilogue `make ci` prints on every run for exactly what CI additionally gates. No target in it degrades to a weaker substitute or exits 0 when its check did not run.
 
-`uv run pdftoolkit --help` is the authoritative list of what exists. If a verb is not printed there, it has not been built yet — do not write documentation, tests or website copy that claims otherwise.
+`uv run pdftooling --help` is the authoritative list of what exists. If a verb is not printed there, it has not been built yet — do not write documentation, tests or website copy that claims otherwise.

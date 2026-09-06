@@ -65,7 +65,7 @@ from registry import (  # noqa: E402
 )
 
 REPO_ROOT: Final[Path] = TESTS_DIR.parent
-SRC: Final[Path] = REPO_ROOT / "src" / "pdf_toolkit"
+SRC: Final[Path] = REPO_ROOT / "src" / "pdf_tooling"
 
 #: Fixed so a grep can be written once and re-run by anyone.
 PW_SENTINEL: Final[str] = "Sentinel-PW-7f3a91c4e85b4d02"
@@ -147,8 +147,8 @@ class Bed:
 
 @pytest.fixture(scope="module")
 def bed(tmp_path_factory: pytest.TempPathFactory, corpus: Any) -> Bed:
-    from pdf_toolkit.ports.structure import require_encryption
-    from pdf_toolkit.secret import Secret
+    from pdf_tooling.ports.structure import require_encryption
+    from pdf_tooling.secret import Secret
 
     root = tmp_path_factory.mktemp("password-leaks")
     plain = root / "plain.pdf"
@@ -341,7 +341,7 @@ def test_ac18_the_refused_spellings_are_not_in_the_global_block() -> None:
     """Structural half: ``GLOBAL_OPTIONS`` is what the §4.2 verb-block-vs-root
     diff test iterates, and it must not grow. ``OUTPUT_FLAGS`` must not either
     (PDF-07's Scope > Out)."""
-    from pdf_toolkit.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS, REFUSED_PASSWORD_FLAGS
+    from pdf_tooling.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS, REFUSED_PASSWORD_FLAGS
 
     assert set(REFUSED_PASSWORD_FLAGS) & set(GLOBAL_OPTIONS) == set()
     assert "--password-file" in GLOBAL_OPTIONS
@@ -525,8 +525,8 @@ def test_ac6_a_forced_traceback_carries_no_password(
     """
     from typer.testing import CliRunner
 
-    from pdf_toolkit.adapters.pikepdf_structure import PikepdfStructureAdapter
-    from pdf_toolkit.cli.main import app
+    from pdf_tooling.adapters.pikepdf_structure import PikepdfStructureAdapter
+    from pdf_tooling.cli.main import app
 
     def boom(self: Any, data: bytes, *, owner: Any, user: Any, allow: Any, legacy: bool) -> bytes:
         raise RuntimeError("injected")
@@ -590,7 +590,7 @@ def test_ac6_a_raw_str_password_WOULD_surface_in_the_locals_form() -> None:
     interpreter. A plain ``str`` in the same position leaks; a ``Secret``
     does not.
     """
-    from pdf_toolkit.secret import Secret
+    from pdf_tooling.secret import Secret
 
     leaked = _locals_form(PW_SENTINEL)
     assert PW_SENTINEL in leaked, (
@@ -813,7 +813,7 @@ def test_ac12_the_json_payload_carries_advisory_as_data_and_not_as_prose(bed: Be
 #        src/ is touched by this spec).
 # --------------------------------------------------------------------------- #
 
-from pdf_toolkit.output import OutputFormat  # noqa: E402
+from pdf_tooling.output import OutputFormat  # noqa: E402
 
 PDF22_SUBPROCESS_CASE_CAP: Final[int] = 96
 """X-157 (decision.md D3) -- a stated, SELF-ENFORCING cardinality cap on
@@ -1090,9 +1090,9 @@ def test_ac5_tier_c_the_full_cross_never_renders_either_sentinel() -> None:
     just report "1 failed"."""
     import json as _json
 
-    from pdf_toolkit.errors import PdfToolkitError
-    from pdf_toolkit.output.json import render_error_json
-    from pdf_toolkit.output.table import render_error_table
+    from pdf_tooling.errors import PdfToolkitError
+    from pdf_tooling.output.json import render_error_json
+    from pdf_tooling.output.table import render_error_table
 
     failures: list[str] = []
     for pair, shape, verbosity, tty_state, label in _tier_c_cases():
@@ -1142,8 +1142,8 @@ def test_r3_emit_error_never_bypasses_to_dicts_redaction_on_the_table_branch() -
     import io
     from contextlib import redirect_stderr, redirect_stdout
 
-    from pdf_toolkit.errors import PdfToolkitError
-    from pdf_toolkit.output import emit_error
+    from pdf_tooling.errors import PdfToolkitError
+    from pdf_tooling.output import emit_error
 
     error = PdfToolkitError(
         "a synthetic refusal for R3's own red control",
@@ -1339,7 +1339,7 @@ def _strip_password_file_flags(argv: list[str]) -> list[str]:
     (`decrypt`'s row supplies a *valid* `--password-file` by construction;
     without stripping it first, a "no password" probe would silently run
     with a correct one already present)."""
-    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+    from pdf_tooling.cli.common import PASSWORD_FILE_FLAGS
 
     out: list[str] = []
     index = 0
@@ -1570,7 +1570,7 @@ def test_b068_password_file_flag_registry_matches_reachable_verbs() -> None:
     therefore without a Tier-A non-echo proof) fails the suite instead of
     shipping quietly, and a stale flag in the derived population without a
     matching registry member fails just as loudly."""
-    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+    from pdf_tooling.cli.common import PASSWORD_FILE_FLAGS
 
     assert set(PASSWORD_FILE_FLAGS) == {flag for flag, _verb in _PASSWORD_FILE_PAIRS}
 
@@ -1581,7 +1581,7 @@ def test_b068_rendered_help_names_no_password_flag_outside_the_registry(verb: st
     """Unchanged from B-068: guards against a NEW password-bearing flag
     landing without a completeness-registry entry (and therefore without
     the non-echo proof Tier A now provides for it)."""
-    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+    from pdf_tooling.cli.common import PASSWORD_FILE_FLAGS
 
     result = run_cli(verb, "--help")
     assert result.returncode == 0

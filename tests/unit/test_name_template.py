@@ -18,8 +18,8 @@ from pathlib import Path
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from pdf_toolkit.errors import OutputEscapesDirError
-from pdf_toolkit.safety.naming import render_name, used_fields
+from pdf_tooling.errors import OutputEscapesDirError
+from pdf_tooling.safety.naming import render_name, used_fields
 
 #: AC8's own named seed values, always included alongside hypothesis-generated
 #: ordinary text — the property must hold on the adversarial values named in

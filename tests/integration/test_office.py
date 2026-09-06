@@ -17,10 +17,10 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.adapters import subprocess_util  # noqa: E402
-from pdf_toolkit.errors import FailureError  # noqa: E402
-from pdf_toolkit.ops.office import convert_run  # noqa: E402
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.adapters import subprocess_util  # noqa: E402
+from pdf_tooling.errors import FailureError  # noqa: E402
+from pdf_tooling.ops.office import convert_run  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 from registry import run_cli  # noqa: E402
 
 
@@ -73,7 +73,7 @@ def _odt_fixture(tmp_path: Path, name: str, paragraph: str, *, repeat: int = 1) 
 # normalisation.
 # --------------------------------------------------------------------------- #
 
-_KNOWN_SENTENCE: Final[str] = "The quick brown fox jumps over the lazy pdftoolkit."
+_KNOWN_SENTENCE: Final[str] = "The quick brown fox jumps over the lazy pdftooling."
 
 
 def _normalize(text: str) -> str:
@@ -82,7 +82,7 @@ def _normalize(text: str) -> str:
 
 @pytest.mark.requires("soffice")
 def test_ac10_generated_arm_round_trips_the_known_sentence(tmp_path: Path) -> None:
-    from pdf_toolkit.ports.text import require_text
+    from pdf_tooling.ports.text import require_text
 
     source = _odt_fixture(tmp_path, "known.odt", _KNOWN_SENTENCE)
     output = tmp_path / "known.pdf"
@@ -112,7 +112,7 @@ def test_ac10_generated_arm_round_trips_the_known_sentence(tmp_path: Path) -> No
 @pytest.mark.requires("soffice")
 def test_ac11_filter_appears_in_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
-    from pdf_toolkit.adapters import subprocess_util
+    from pdf_tooling.adapters import subprocess_util
 
     real_run = subprocess_util.run
 
@@ -157,7 +157,7 @@ def test_ac14_isolated_profile_per_invocation_and_concurrent_runs(
     import re
     import threading
 
-    from pdf_toolkit.adapters import subprocess_util
+    from pdf_tooling.adapters import subprocess_util
 
     profile_dirs: list[str] = []
     lock = threading.Lock()

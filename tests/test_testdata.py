@@ -35,13 +35,13 @@ def console_script() -> list[str]:
     """
     import shutil
 
-    sibling = Path(sys.executable).parent / "pdftoolkit"
+    sibling = Path(sys.executable).parent / "pdftooling"
     if sibling.exists():
         return [str(sibling)]
-    found = shutil.which("pdftoolkit")
+    found = shutil.which("pdftooling")
     if found:
         return [found]
-    return [sys.executable, "-m", "pdf_toolkit"]
+    return [sys.executable, "-m", "pdf_tooling"]
 
 
 # --------------------------------------------------------------------------- #
@@ -92,7 +92,7 @@ def test_property_3_info_exits_1_on_the_malformed_fixture() -> None:
         cwd=REPO_ROOT,
     )
     assert result.returncode == 1, (
-        f"pdftoolkit info exited {result.returncode}, not 1, on the malformed fixture\n"
+        f"pdftooling info exited {result.returncode}, not 1, on the malformed fixture\n"
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
 

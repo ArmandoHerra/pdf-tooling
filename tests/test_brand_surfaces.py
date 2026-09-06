@@ -119,27 +119,40 @@ LICENCE_ADJACENT: Final[frozenset[str]] = frozenset(
 
 #: Class C -- non-website brand text.
 NON_WEBSITE_BRAND: Final[frozenset[str]] = frozenset(
-    {"README.md", "CLAUDE.md", "src/pdf_toolkit/__init__.py"}
+    {"README.md", "CLAUDE.md", "src/pdf_tooling/__init__.py"}
 )
 
 
 def _is_console_script_alias(path: str, _line: int, text: str) -> bool:
-    """Class E. The alias is PUBLISHED and pinned; dropping it is a breaking
-    change, not a rename (`tests/test_cli_spine.py`). Six occurrences."""
-    if path == "pyproject.toml":
-        return "pdf_toolkit.cli.main:main" in text
-    if path == "src/pdf_toolkit/cli/main.py":
-        return True
-    if path == "src/pdf_toolkit/__init__.py":
-        return "console scripts are" in text
-    if path == "README.md":
-        return "Console scripts" in text or "Both console scripts" in text
-    return False
+    """Class E. PDF-48. The alias is PUBLISHED, pinned, and DEPRECATED behind
+    a `v1.0.0` window -- dropping it before then is a breaking change, not a
+    rename (`tests/test_cli_spine.py`).
+
+    Post-PDF-48 every remaining hyphenated-needle occurrence in these four
+    sites is about the alias, its deprecation window, or (`pyproject.toml`)
+    its shim target -- the old "This is not pdftk" section that used to
+    carry README occurrences with OTHER dispositions is gone (D4), and
+    `README.md`'s `## Naming` section is now the needle's only home there.
+    Content-sniffing sub-checks (`"pdf_tooling.cli.main:main" in text`,
+    `"console scripts are" in text`, `"Console scripts" in text`) are RETIRED:
+    E2 showed each one breaks the moment the row it was written against
+    changes shape, so path membership alone is the rule now."""
+    return path in {
+        "pyproject.toml",
+        "src/pdf_tooling/cli/main.py",
+        "src/pdf_tooling/__init__.py",
+        "README.md",
+    }
 
 
 def _is_readme_contract_prose(path: str, _line: int, text: str) -> bool:
-    """Class F. `README.md:29` -- "Why the distribution is not `<needle>`."
-    Swept, it becomes a heading that contradicts the line four rows above it."""
+    """Class F. RETIRED by PDF-48, not deleted. `README.md:29`'s old "Why the
+    distribution is not `<needle>`" paragraph is GONE (D5 superseded it), so
+    this rule can never match again -- and even if the exact phrase somehow
+    reappeared, `_is_console_script_alias`'s now-unconditional `README.md`
+    membership is checked first and would classify it E, not F. Kept (not
+    removed) so the class's retirement is a value change (1 -> 0), not a
+    silent disappearance of a row from the table."""
     return path == "README.md" and "Why the distribution is not" in text
 
 
@@ -161,19 +174,55 @@ RULES: Final[tuple[tuple[str, Rule], ...]] = (
     ("C", lambda p, _l, _t: p in NON_WEBSITE_BRAND),
 )
 
-#: The post-`PDF-33` expectation, per class and NEVER as a repo-wide total.
+#: The post-`PDF-48` expectation, per class and NEVER as a repo-wide total.
 #: `PDF-31`'s AC6 said "the class is 0" of a raw grep total and was ruled
 #: UNMEETABLE at execution: landed history, required supersession quotes and
 #: frozen names all contain the string, so no total can reach zero.
 #: `G` is a FLOOR because every future entry naming the old name adds to it.
+#:
+#: PDF-48 AC3 -- every changed value below is DERIVED, not pasted, and each
+#: derivation is recorded here so a later reader re-derives rather than
+#: inherits. NEVER spell the hyphenated old-style spelling literally in this
+#: derivation block -- doing so would add to class H itself, which is
+#: exactly the self-match hazard the module docstring already warns about;
+#: describe it ("the old hyphenated alias") instead.
+#:
+#: `E` 6 -> 7. `_is_console_script_alias` widened from four content-sniffing
+#: sub-checks (each one broken by the package move, E2) to unconditional path
+#: membership over the same four sites. The four sites now carry SEVEN
+#: needle occurrences, not six: `README.md:22,24,30,40` (the Naming section's
+#: Aliases row plus the "why the names differ" / "the deprecation window" /
+#: release-history paragraphs -- one more line than pre-PDF-48's two
+#: paragraphs), `pyproject.toml:65` (the deprecated-alias script key, a NEW
+#: line D2 adds), `src/pdf_tooling/__init__.py:5`, and
+#: `src/pdf_tooling/cli/main.py:77`.
+#:
+#: `F` 1 -> 0, RETIRED. The paragraph `_is_readme_contract_prose` matched
+#: (the old "Why the distribution is not `<the old hyphenated alias>`"
+#: heading) no longer exists -- D5 superseded the whole Naming section's
+#: prose. The class is not deleted from this table (a class disappearing
+#: from the table would look like an omission); it is pinned at its new,
+#: honest value.
+#:
+#: `H` 47 -> 43. FOUR fewer needle occurrences under `tests/`, all four in
+#: `tests/test_cli_spine.py`, all four because the CANONICAL alias is now the
+#: NEW hyphenated spelling, not the old one (D1): the old declaration-arm's
+#: failure message named the old alias by name (-1, message text rewritten);
+#: the arm pinning the alias's own path construction had the old alias
+#: spelled in both its pinned check string and the line it searches for, and
+#: both now read the new spelling (-2); the entry-point-parity arm asserted
+#: `scripts[...]` keyed on the old alias and now keys on the new one (-1).
+#: None of these four is the corpus/golden literal population (AC26) or a
+#: frozen `tests/acceptance/` audit line -- those are untouched and still
+#: contribute their share of the 43.
 EXPECTED_EXACT: Final[dict[str, int]] = {
     "A": 0,  # website brand text ......... all 17 moved
     "B": 0,  # website asset paths ........ all 3 moved with the rename
-    "C": 0,  # non-website brand text ..... all 4 moved
+    "C": 0,  # non-website brand text ..... 0, unchanged (shadowed by E's broader rule now)
     "D": 0,  # licence-adjacent ........... all 7 moved
-    "E": 6,  # console-script alias ....... FROZEN, published
-    "F": 1,  # README contract prose ...... FROZEN, rewriting it is nonsense
-    "H": 47,  # tests/ ..................... FROZEN, not one byte
+    "E": 7,  # console-script alias ....... deprecated, v1.0.0 removal (D1); was 6, see derivation
+    "F": 0,  # README contract prose ...... RETIRED -- the paragraph it matched is gone (D5)
+    "H": 43,  # tests/ .................... FROZEN pop. minus 4 alias-identity edits, see derivation
     "I": 12,  # perf/ ...................... FROZEN, recorded measurements
 }
 EXPECTED_FLOOR: Final[dict[str, int]] = {"G": 15}
@@ -317,7 +366,7 @@ def test_the_broken_install_hint_names_the_real_distribution() -> None:
     never read the product's value at all. Driving the plant reddened none of
     the three.
     """
-    from pdf_toolkit.ports import BROKEN_INSTALL_HINT
+    from pdf_tooling.ports import BROKEN_INSTALL_HINT
 
     declared = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["name"]
     assert BROKEN_INSTALL_HINT.split()[-1] == declared, (

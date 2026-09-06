@@ -45,10 +45,10 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from pdf_toolkit.cli.main import build_rerun_hint
-from pdf_toolkit.errors import PdfToolkitError
-from pdf_toolkit.output import OutputFormat, emit_error
-from pdf_toolkit.safety import (
+from pdf_tooling.cli.main import build_rerun_hint
+from pdf_tooling.errors import PdfToolkitError
+from pdf_tooling.output import OutputFormat, emit_error
+from pdf_tooling.safety import (
     AtomicWriter,
     SafetyPolicy,
     check_output_collisions,

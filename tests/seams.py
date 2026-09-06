@@ -125,20 +125,20 @@ RACE_DIRECTORY: Final = "directory"
 #: is not derived (see the module docstring).
 FIRST_ORDINAL: Final = 1
 
-_PRODUCT_PACKAGE: Final = "pdf_toolkit"
+_PRODUCT_PACKAGE: Final = "pdf_tooling"
 _PRODUCT_MARKER: Final = os.sep + _PRODUCT_PACKAGE + os.sep
 _TRACEBACK_MARKER: Final = "Traceback (most recent call last)"
 
 #: What the child runs. The product's real entry point, so the drive measures the
 #: product's real behaviour under real kernel enforcement -- only the MOMENT the
 #: operand becomes unreadable is synthetic.
-CHILD_PROGRAM: Final = "from pdf_toolkit.cli.main import main; main()"
+CHILD_PROGRAM: Final = "from pdf_tooling.cli.main import main; main()"
 
 
 def _display_path(filename: str) -> str:
     """A stable, short name for *filename* in a seam record.
 
-    Product frames keep their ``pdf_toolkit/...`` prefix because the population
+    Product frames keep their ``pdf_tooling/...`` prefix because the population
     ledger keys on them; third-party frames are shown from ``site-packages/``
     onward, which is what makes ``reportlab/lib/utils.py`` legible as *the
     opener* rather than as an absolute path nobody can diff.
@@ -221,10 +221,10 @@ class _Observer:
     def _frames(self) -> tuple[str, str]:
         """``(originating frame, first-party frame)`` for the open in flight.
 
-        The *originating* frame is the innermost frame outside ``pdf_toolkit``
+        The *originating* frame is the innermost frame outside ``pdf_tooling``
         and outside this harness -- it is what names ``reportlab`` as the opener
         rather than ``ops/compose.py``, and it is the whole of how blindness (a)
-        is closed. The *first-party* frame is the innermost ``pdf_toolkit/**``
+        is closed. The *first-party* frame is the innermost ``pdf_tooling/**``
         frame: the seam's own ``file:line``, which the population ledger keys on.
         """
         origin = ""
@@ -552,7 +552,7 @@ ENGINE_REGISTER: Final[tuple[EngineEntry, ...]] = VISIBLE_ENGINES + INVISIBLE_EN
 # ASSUMED. The inherited justification was "adapters/ cannot import safety/, so
 # an adapter CANNOT raise a coded error for a read it did not perform". That
 # premise is FALSE at this commit and the measurement is
-# `git grep -nE 'from pdf_toolkit\.safety' -- src/pdf_toolkit/adapters`, which
+# `git grep -nE 'from pdf_tooling\.safety' -- src/pdf_tooling/adapters`, which
 # returns TWO rows: `pypdf_structure.py` and `pdfplumber_text.py` both import
 # `source_read_error` and both use it. Adapters demonstrably CAN belt.
 #
@@ -566,7 +566,7 @@ ENGINE_REGISTER: Final[tuple[EngineEntry, ...]] = VISIBLE_ENGINES + INVISIBLE_EN
 # described it.
 # --------------------------------------------------------------------------- #
 
-SAFETY_IMPORT_MARKER: Final = "pdf_toolkit.safety"
+SAFETY_IMPORT_MARKER: Final = "pdf_tooling.safety"
 
 
 @dataclass(frozen=True)
@@ -924,8 +924,8 @@ def residue(
         # Reach is asserted at SEAM level, never at module level: a module the
         # drive entered is not a module every seam in it ran.
         # `StaticSite.module` is already relative to `src/`, so it is ALREADY
-        # `pdf_toolkit/...` -- exactly the shape `_display_path` emits for a
-        # first-party frame. Re-prefixing it produced `pdf_toolkit/pdf_toolkit/`
+        # `pdf_tooling/...` -- exactly the shape `_display_path` emits for a
+        # first-party frame. Re-prefixing it produced `pdf_tooling/pdf_tooling/`
         # and a residue of 47/47, i.e. an instrument reporting that its own
         # drive reached nothing. Keyed identity is asserted by a test.
         if site.key in reached:

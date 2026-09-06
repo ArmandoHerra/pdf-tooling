@@ -109,27 +109,27 @@ def pytest_configure(config: pytest.Config) -> None:
     if hasattr(config, "workerinput"):
         return
     root = _samples_root()
-    config._pdftoolkit_samples_root = root  # type: ignore[attr-defined]
-    config._pdftoolkit_samples_before = build_manifest(root) if root is not None else None  # type: ignore[attr-defined]
+    config._pdftooling_samples_root = root  # type: ignore[attr-defined]
+    config._pdftooling_samples_before = build_manifest(root) if root is not None else None  # type: ignore[attr-defined]
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
     if hasattr(config, "workerinput"):
         return
-    root: Path | None = getattr(config, "_pdftoolkit_samples_root", None)
-    before: dict[str, ManifestEntry] | None = getattr(config, "_pdftoolkit_samples_before", None)
+    root: Path | None = getattr(config, "_pdftooling_samples_root", None)
+    before: dict[str, ManifestEntry] | None = getattr(config, "_pdftooling_samples_before", None)
     if root is None or before is None:
         return
     after = build_manifest(root)
     findings = diff_manifest(before, after)
-    config._pdftoolkit_samples_findings = findings  # type: ignore[attr-defined]
+    config._pdftooling_samples_findings = findings  # type: ignore[attr-defined]
     if findings:
         session.exitstatus = 1
 
 
 def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pytest.Config) -> None:
-    findings = getattr(config, "_pdftoolkit_samples_findings", None)
+    findings = getattr(config, "_pdftooling_samples_findings", None)
     if not findings:
         return
     terminalreporter.section("PLAN.md §10.1 rule 3 -- an original changed during this run")

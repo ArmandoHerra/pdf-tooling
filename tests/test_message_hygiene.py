@@ -19,7 +19,7 @@ uncleaned. `B-101` → `B-106` exactly: a proposition fixed on one carrier and
 left standing on its siblings.
 
 **ONE SITE, on the `B-068` precedent.** Thirty ``{error}`` interpolations live
-under ``src/`` (`git grep -nE '\\{error\\}|\\{exc\\}|\\{err\\}' -- src/pdf_toolkit`
+under ``src/`` (`git grep -nE '\\{error\\}|\\{exc\\}|\\{err\\}' -- src/pdf_tooling`
 → 30 at `ae723bc`). Sanitizing at the call sites is a thirty-site pass that a
 thirty-first reintroduces, so the normalization sits at
 ``PdfToolkitError.to_dict()`` — the same chokepoint, and the same argument, the
@@ -39,10 +39,10 @@ from typing import Final
 
 import pytest
 
-from pdf_toolkit.adapters.pikepdf_structure import _WARNING_PREFIX_RE, _clean_warning
-from pdf_toolkit.errors import AuthError, FailureError, PdfToolkitError, normalize_object_reprs
-from pdf_toolkit.models import SCHEMA_VERSION
-from pdf_toolkit.output import OutputFormat, emit_error
+from pdf_tooling.adapters.pikepdf_structure import _WARNING_PREFIX_RE, _clean_warning
+from pdf_tooling.errors import AuthError, FailureError, PdfToolkitError, normalize_object_reprs
+from pdf_tooling.models import SCHEMA_VERSION
+from pdf_tooling.output import OutputFormat, emit_error
 
 #: The guard AC4 drives over the CLI surface, kept here so the unit controls
 #: and the end-to-end census cannot drift apart. SIX-plus LOWERCASE hex digits:
@@ -267,7 +267,7 @@ def test_ac9_the_schema_version_is_still_one() -> None:
 
 
 def _render_json(error: PdfToolkitError) -> str:
-    from pdf_toolkit.output.json import render_error_json
+    from pdf_tooling.output.json import render_error_json
 
     return render_error_json(error.to_dict())
 
@@ -279,7 +279,7 @@ def test_ac9_redaction_still_redacts_the_path() -> None:
     checked the message would not notice if the redaction branch were dropped
     in the same edit.
     """
-    from pdf_toolkit.secret import REDACTED
+    from pdf_tooling.secret import REDACTED
 
     payload = AuthError("nope", path="/secret/value", redacted=True).to_dict()
     assert payload["path"] == REDACTED

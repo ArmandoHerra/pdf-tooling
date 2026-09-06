@@ -53,7 +53,7 @@ def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.Complet
     acceptance-signal test does.
     """
     return subprocess.run(
-        [sys.executable, "-m", "pdf_toolkit", *args],
+        [sys.executable, "-m", "pdf_tooling", *args],
         capture_output=True,
         text=True,
         check=False,
@@ -427,7 +427,7 @@ def test_doctor_writes_nothing_on_an_engines_present_host(
     assert result.returncode == 0, f"{argv}: exit {result.returncode}: {result.stderr}"
     differences = diff(before, snapshot(*roots))
     assert differences == [], (
-        f"`pdftoolkit {' '.join(argv)}` made {len(differences)} filesystem difference(s) "
+        f"`pdftooling {' '.join(argv)}` made {len(differences)} filesystem difference(s) "
         f"across {len(roots)} root(s): {[str(item) for item in differences]}"
     )
     assert not (Path(env["HOME"]) / ".config").exists(), (
@@ -476,7 +476,7 @@ def test_the_probe_environment_inherits_everything_but_the_home_variables() -> N
     prescribed red would not appear. This row asserts the property directly
     instead, where dropping the `os.environ` copy fails immediately, by name.
     """
-    from pdf_toolkit.adapters.subprocess_util import (
+    from pdf_tooling.adapters.subprocess_util import (
         PROBE_HOME_VARIABLES,
         PROBE_SANDBOX_ROOT,
         probe_env,
@@ -511,7 +511,7 @@ def test_the_probe_sandbox_root_cannot_be_created() -> None:
     directory anything can create, so there is nothing to clean up and nothing
     that can fail while cleaning up.
     """
-    from pdf_toolkit.adapters.subprocess_util import PROBE_SANDBOX_ROOT
+    from pdf_tooling.adapters.subprocess_util import PROBE_SANDBOX_ROOT
 
     if not os.path.isabs(os.devnull):  # pragma: no cover - POSIX hosts only
         pytest.skip(f"platform-gated: os.devnull is {os.devnull!r}, not an absolute path")

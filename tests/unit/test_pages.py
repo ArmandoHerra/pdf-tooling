@@ -27,9 +27,9 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.errors import NoInputError, PageRangeError, RefusedError  # noqa: E402
-from pdf_toolkit.models import PageRange  # noqa: E402
-from pdf_toolkit.ops.pages import (  # noqa: E402
+from pdf_tooling.errors import NoInputError, PageRangeError, RefusedError  # noqa: E402
+from pdf_tooling.models import PageRange  # noqa: E402
+from pdf_tooling.ops.pages import (  # noqa: E402
     ROTATION_ANGLES,
     delete_run,
     extract_run,
@@ -41,7 +41,7 @@ from pdf_toolkit.ops.pages import (  # noqa: E402
     reorder_run,
     rotate_run,
 )
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 from pdfium_text import page_texts  # noqa: E402
 from registry import PDF_08_VERBS  # noqa: E402
 
@@ -330,8 +330,8 @@ def test_ac6_each_verb_threads_the_ordered_value_its_semantics_require(
     Half (ii) -- the observable page sequences -- is AC1/AC2/AC3/AC4 above,
     and is the authority if the two ever disagree.
     """
-    import pdf_toolkit.ops.pagerange as pagerange_module
-    import pdf_toolkit.ops.pages as pages_module
+    import pdf_tooling.ops.pagerange as pagerange_module
+    import pdf_tooling.ops.pages as pages_module
 
     seen: list[tuple[str, bool]] = []
     real_parse = pagerange_module.parse
@@ -366,8 +366,8 @@ def test_ac6_each_verb_threads_the_ordered_value_its_semantics_require(
 def test_ac24_parse_is_called_exactly_once_per_input(
     corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import pdf_toolkit.ops.pagerange as pagerange_module
-    import pdf_toolkit.ops.pages as pages_module
+    import pdf_tooling.ops.pagerange as pagerange_module
+    import pdf_tooling.ops.pages as pages_module
 
     calls: list[str] = []
     real_parse = pagerange_module.parse
@@ -401,7 +401,7 @@ def test_ac24_no_verb_carries_a_second_grammar_implementation(
     rather than by grepping the source for the ABSENCE of a string, which
     asserts intent and can be satisfied by renaming a variable (X-113).
     """
-    import pdf_toolkit.ops.pages as pages_module
+    import pdf_tooling.ops.pages as pages_module
 
     def refuse(spec: str, page_count: int, *, ordered: bool = False):
         raise PageRangeError(
@@ -759,8 +759,8 @@ def test_ac38_every_verb_acquires_its_engine_through_the_one_registry_seam(
     """Asserted behaviourally: with `require_structure` patched to raise
     `EngineMissingError`, every verb surfaces exit 3. A second, by-name
     acquisition path would bypass the patch and is caught by it."""
-    import pdf_toolkit.ops.pages as pages_module
-    from pdf_toolkit.errors import EngineMissingError
+    import pdf_tooling.ops.pages as pages_module
+    from pdf_tooling.errors import EngineMissingError
 
     def refuse(*args: object, **kwargs: object):
         raise EngineMissingError("patched: no structure engine")
@@ -801,7 +801,7 @@ def test_ac38_ops_pages_never_names_an_adapter(corpus) -> None:
     del corpus
     import inspect
 
-    import pdf_toolkit.ops.pages as pages_module
+    import pdf_tooling.ops.pages as pages_module
 
     source = inspect.getsource(pages_module)
     assert "require_structure()" in source

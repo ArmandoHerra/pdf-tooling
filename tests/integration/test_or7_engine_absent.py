@@ -48,8 +48,8 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
 from helpers.engine_hiding import hidden_engine_env  # noqa: E402
-from pdf_toolkit.ops.compose import compose_document, parse_page_size  # noqa: E402
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.ops.compose import compose_document, parse_page_size  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 from registry import run_cli  # noqa: E402
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -75,7 +75,7 @@ def _convert_source(tmp_path: Path) -> list[str]:
     """`convert`'s operand is never a PDF; a plain `.txt` is what
     `tests/registry.py::_convert_invocation` already uses for this verb."""
     source = tmp_path / "or7-convert.txt"
-    source.write_text("The quick brown fox jumps over the lazy pdftoolkit.\n")
+    source.write_text("The quick brown fox jumps over the lazy pdftooling.\n")
     return [str(source)]
 
 

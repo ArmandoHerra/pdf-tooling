@@ -1,18 +1,12 @@
 # pdf-tooling
 
-An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftoolkit`) for the common PDF chores — `merge`, `split`, `extract`, `delete`, `rotate`, `reorder`, `rasterize`, `compose`, `create`, `text`, `tables`, `compress`, `repair`, `linearize`, `encrypt`, `decrypt`, `permissions`, `meta`, `watermark`, `stamp`, `ocr` and `convert`, plus `doctor`, `info` and `version` — built on a permissively licensed engine stack (pypdf, pypdfium2, reportlab, pikepdf, pdfplumber, Tesseract, LibreOffice) with nothing AGPL or GPL on the call graph.
+An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftooling`) for the common PDF chores — `merge`, `split`, `extract`, `delete`, `rotate`, `reorder`, `rasterize`, `compose`, `create`, `text`, `tables`, `compress`, `repair`, `linearize`, `encrypt`, `decrypt`, `permissions`, `meta`, `watermark`, `stamp`, `ocr` and `convert`, plus `doctor`, `info` and `version` — built on a permissively licensed engine stack (pypdf, pypdfium2, reportlab, pikepdf, pdfplumber, Tesseract, LibreOffice) with nothing AGPL or GPL on the call graph.
 
 Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write-to-temp-then-rename, and inputs that are never mutated unless you ask for `--in-place`.
 
 **Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-tooling/specs/SPEC-INDEX.md`; history in `changelog.md`.
 
 - **Website:** https://armandoherra.github.io/pdf-tooling/ — the public landing page (source in `website/`).
-
-## This is not `pdftk`
-
-`pdf-tooling` shares no code with `pdftk`, is not a fork of it, and is not a drop-in replacement for it. `pdftk` is GPL-licensed; this project is **Apache-2.0**, and its engine policy forbids anything under AGPL, GPL or LGPL from appearing as an import, an optional extra, or a `subprocess` fallback. The console script is named `pdftoolkit` precisely so the two cannot be confused on your `PATH`.
-
-The PyPI **distribution** to install is **`pdf-tooling`**. The distribution named `pdftoolkit` on PyPI is an unrelated GPL-3.0 project and is not this software. The names this project owns, and which of them moved, are the contract in [Naming](#naming).
 
 ## Naming
 
@@ -22,31 +16,36 @@ citing any of them should cite the table rather than the prose around it.
 | Kind | Name |
 |---|---|
 | PyPI distribution | `pdf-tooling` |
-| Repository | `github.com/ArmandoHerra/pdf-tooling` |
-| Import package | `pdf_toolkit` |
-| Console scripts | `pdftoolkit` (canonical), `pdf-toolkit` (alias) |
+| Repository | `pdf-tooling` |
+| Import package | `pdf_tooling` |
+| Console script | `pdftooling` |
+| Aliases | `pdf-tooling`, plus deprecated `pdftoolkit` and `pdf-toolkit` until `v1.0.0` |
 
-**Why the distribution is not `pdf-toolkit`.** That name sits too close to names already
-on PyPI, and the distribution called `pdftoolkit` there is an unrelated GPL-3.0 project
-that is not this software. The repository followed the distribution; the import package
-and both console scripts did not, because they are published surfaces and moving them
-would break an install that already works.
+**Why the names differ.** The PyPI distribution is `pdf-tooling` because `pdf-toolkit`
+sits too close to names already on PyPI, and the distribution called `pdftoolkit` there
+is an unrelated GPL-3.0 project that is not this software. The repository followed the
+distribution; the import package and the console script followed it in turn, once the
+deprecation window below made moving a published surface safe.
 
-**Both console scripts are supported.** `pdftoolkit` is canonical and `pdf-toolkit` is a
-documented alias; they resolve to the same entry point, and the alias is not deprecated
-by this rename.
+**The deprecation window.** `pdftoolkit` and `pdf-toolkit` remain installed and fully
+functional through `v1.0.0` — same behaviour, same exit codes — each printing one line
+on stderr naming `pdftooling` as the replacement. The distribution named `pdftoolkit` on
+PyPI is an unrelated GPL-3.0 project; this project's deprecated `pdftoolkit` console
+script — and this warning with it — is removed at `v1.0.0`.
 
 **Release history, so the install lines above can be read against it.** `v0.1.0` was
 git-install-only and was never published to PyPI under either name; `v0.1.1` is the
 first published release, as `pdf-tooling`; `v0.2.0` is the first published under the
-renamed repository.
+renamed repository; `v0.3.0` is the first release to ship the renamed `pdftooling`
+console script and `pdf_tooling` import package, with `pdftoolkit`/`pdf-toolkit`/
+`pdf_toolkit` deprecated behind it.
 
 ## Getting Started
 
 ```bash
 uv tool install pdf-tooling
 # or: pip install pdf-tooling
-pdftoolkit --help
+pdftooling --help
 ```
 
 ### From source
@@ -56,7 +55,7 @@ pdftoolkit --help
 git clone https://github.com/ArmandoHerra/pdf-tooling.git
 cd pdf-tooling
 uv sync
-uv run pdftoolkit --help
+uv run pdftooling --help
 ```
 
 `uv sync` installs the runtime stack *and* the development tooling, so there is no separate bootstrap step.
@@ -80,18 +79,18 @@ The complete top-level roster, by family:
 
 That table is asserted against the live command tree by set-inclusion, so a verb
 shipped tomorrow turns the check red with no author action — but
-`uv run pdftoolkit --help` remains the authoritative list.
+`uv run pdftooling --help` remains the authoritative list.
 
 ```bash
-uv run pdftoolkit --help               # the full verb tree; always the authoritative list
-uv run pdftoolkit doctor               # which engines resolved, and how
-uv run pdftoolkit merge a.pdf b.pdf -O merged.pdf
-uv run pdftoolkit rotate report.pdf --pages 2-4 --angle 90 -O rotated.pdf
-uv run pdftoolkit compress report.pdf -O small.pdf
-uv run pdftoolkit --version            # tool, Python and engine versions on one line
+uv run pdftooling --help               # the full verb tree; always the authoritative list
+uv run pdftooling doctor               # which engines resolved, and how
+uv run pdftooling merge a.pdf b.pdf -O merged.pdf
+uv run pdftooling rotate report.pdf --pages 2-4 --angle 90 -O rotated.pdf
+uv run pdftooling compress report.pdf -O small.pdf
+uv run pdftooling --version            # tool, Python and engine versions on one line
 ```
 
-`uv run pdftoolkit --help` is the authoritative list of what is actually available at any moment — if a verb is not printed there, it does not exist yet.
+`uv run pdftooling --help` is the authoritative list of what is actually available at any moment — if a verb is not printed there, it does not exist yet.
 
 ## Output contract
 
@@ -105,13 +104,13 @@ Rendered payloads go to **stdout**; diagnostics, warnings and progress go to **s
 
 Errors are the one deliberate asymmetry: with `-o table` an error is a one-line `error: …` on stderr, but with `-o json`/`-o ndjson` it is an object on **stdout**, so a machine consumer reading stdout never has to also read stderr to learn that the run failed. That holds for **every** failure you can reach, an unknown flag and a missing argument included: those are usage errors (exit 2) carrying the same envelope, not a human `Usage:` block.
 
-**A command group does not take the global block.** `meta` groups `meta get` and `meta set`, and the global flags are declared at the root and on every verb, never on a group — so `pdftoolkit meta -o json` is a usage error (exit 2) rather than a run. It names the two positions that do work: `pdftoolkit -o json meta get FILE` (before the group) and `pdftoolkit meta get FILE -o json` (after the subcommand).
+**A command group does not take the global block.** `meta` groups `meta get` and `meta set`, and the global flags are declared at the root and on every verb, never on a group — so `pdftooling meta -o json` is a usage error (exit 2) rather than a run. It names the two positions that do work: `pdftooling -o json meta get FILE` (before the group) and `pdftooling meta get FILE -o json` (after the subcommand).
 
-**Global flags with no command at all** — `pdftoolkit -o json` — are an incomplete invocation and exit 2 as well, pointing at `--help`. `pdftoolkit` on its own, with no arguments, still prints help and exits 0.
+**Global flags with no command at all** — `pdftooling -o json` — are an incomplete invocation and exit 2 as well, pointing at `--help`. `pdftooling` on its own, with no arguments, still prints help and exits 0.
 
 ### The collection key
 
-Every `-o json` envelope that carries a collection of rows carries them under `items`. `doctor` and `info` additionally publish that same list under a name of their own, and both names are frozen: `doctor`'s `ports` is pinned by the plan's own `pdftoolkit doctor -o json | jq '.ports[] | select(.available == false)'` example, and `info`'s `documents` is its shipped shape. Neither is being renamed. The alias was added beside them so that a single `jq` expression works against every verb.
+Every `-o json` envelope that carries a collection of rows carries them under `items`. `doctor` and `info` additionally publish that same list under a name of their own, and both names are frozen: `doctor`'s `ports` is pinned by the plan's own `pdftooling doctor -o json | jq '.ports[] | select(.available == false)'` example, and `info`'s `documents` is its shipped shape. Neither is being renamed. The alias was added beside them so that a single `jq` expression works against every verb.
 
 | Verb | Primary key | Universal alias | Relationship |
 |---|---|---|---|
@@ -195,7 +194,7 @@ No secure erasure is claimed, anywhere. A resolved password is held in a buffer 
 
 ### The permission vocabularies
 
-`pdftoolkit info -o json` and `pdftoolkit permissions -o json` are **both public output**, and they spell some of their permission tokens differently. That is a documented divergence, not a defect to be tidied: both spellings shipped, both are `schema_version: 1` public API, and renaming either would break a published contract. So the crossing is published here instead. **`--allow` accepts the left column only** — the right column is `info`'s output spelling and is not an input token.
+`pdftooling info -o json` and `pdftooling permissions -o json` are **both public output**, and they spell some of their permission tokens differently. That is a documented divergence, not a defect to be tidied: both spellings shipped, both are `schema_version: 1` public API, and renaming either would break a published contract. So the crossing is published here instead. **`--allow` accepts the left column only** — the right column is `info`'s output spelling and is not an input token.
 
 | `--allow` / `permissions` | `info` | `ISO 32000-1 Table 22` bit |
 |---|---|---|
@@ -220,9 +219,9 @@ The tokens spelled identically on both surfaces need no translation; the ones th
 
 ## OCR and Office conversion
 
-`ocr` and `convert` are the two verbs that depend on a system binary rather than a Python wheel — the two verbs `pdftoolkit doctor` can legitimately report as unavailable.
+`ocr` and `convert` are the two verbs that depend on a system binary rather than a Python wheel — the two verbs `pdftooling doctor` can legitimately report as unavailable.
 
-`ocr` drives the **tesseract** binary. For every selected page it renders the page, recognises a text-only layer, and overlays that layer on the **original** page object — the page's own image is never re-rendered, and a byte-level check proves the image stream is identical before and after. `--skip-text-pages` leaves a page that already has extractable text untouched (no render, no OCR call). This build ships whatever tessdata language packs the host has installed; `--lang` is validated against exactly that list (`pdftoolkit doctor`), and a pack that is not installed exits 3 with an install hint naming it. No accuracy or confidence claim is made anywhere in this tool — `ocr` is described here by its engine, not by a quality promise.
+`ocr` drives the **tesseract** binary. For every selected page it renders the page, recognises a text-only layer, and overlays that layer on the **original** page object — the page's own image is never re-rendered, and a byte-level check proves the image stream is identical before and after. `--skip-text-pages` leaves a page that already has extractable text untouched (no render, no OCR call). This build ships whatever tessdata language packs the host has installed; `--lang` is validated against exactly that list (`pdftooling doctor`), and a pack that is not installed exits 3 with an install hint naming it. No accuracy or confidence claim is made anywhere in this tool — `ocr` is described here by its engine, not by a quality promise.
 
 `convert` drives headless **LibreOffice** (`soffice`) to turn an office document into a PDF. Each invocation gets its own isolated LibreOffice profile directory and converts into a private scratch location first — LibreOffice never writes to the destination directly, and the destination is only touched through this tool's one write chokepoint. An exit 0 from `soffice` having produced no output file is treated as a failure here, not a success, because that is a real and well-known LibreOffice failure mode. `--timeout` bounds one conversion; on expiry the whole process group is killed, so no `soffice.bin` daemon is left running.
 
@@ -252,4 +251,4 @@ If a sweep ever records nothing open, this section still stands and reads *no op
 
 ## License
 
-Apache-2.0 — see `LICENSE` and `NOTICE`. `THIRD_PARTY_LICENSES` is generated from the resolved environment and ships in both the sdist and the wheel.
+Apache-2.0 — see `LICENSE` and `NOTICE`. `THIRD_PARTY_LICENSES` is generated from the resolved environment and ships in both the sdist and the wheel. `pdftk` is GPL-licensed; this project is **Apache-2.0**, and its engine policy forbids anything under AGPL, GPL or LGPL from appearing as an import, an optional extra, or a `subprocess` fallback.

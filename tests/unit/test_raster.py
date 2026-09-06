@@ -27,17 +27,17 @@ from typing import Final
 import pytest
 from PIL import Image
 
-from pdf_toolkit.errors import EngineMissingError, NoInputError, OutputEscapesDirError, UsageError
-from pdf_toolkit.ops import raster as raster_module
-from pdf_toolkit.ports.raster import RenderedPage, require_raster
-from pdf_toolkit.safety import atomic as atomic_module
-from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_tooling.errors import EngineMissingError, NoInputError, OutputEscapesDirError, UsageError
+from pdf_tooling.ops import raster as raster_module
+from pdf_tooling.ports.raster import RenderedPage, require_raster
+from pdf_tooling.safety import atomic as atomic_module
+from pdf_tooling.safety.policy import SafetyPolicy
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit"
+SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling"
 
 
 def make_policy(**overrides: object) -> SafetyPolicy:
@@ -310,7 +310,7 @@ def test_ac3_threads_1_and_threads_8_are_byte_identical(tmp_path: Path) -> None:
 
 def test_ac4_render_chunk_is_module_level_and_picklable() -> None:
     worker = raster_module._render_chunk
-    assert worker.__module__ == "pdf_toolkit.ops.raster"
+    assert worker.__module__ == "pdf_tooling.ops.raster"
     assert worker.__qualname__ == "_render_chunk"
     # The function itself pickles by reference (name lookup), which is what
     # lets a ProcessPoolExecutor worker import it fresh.
@@ -357,7 +357,7 @@ def test_ac5_the_planning_handle_is_closed_before_the_executor_is_created(
 ) -> None:
     """PDF-21/AC4(b). This REPLACES ``test_ac5_a_process_pool_dispatch_runs_in_
     a_different_pid``, which was **vacuous**: its body referenced no
-    ``pdf_toolkit`` symbol at all -- it submitted a local function to a
+    ``pdf_tooling`` symbol at all -- it submitted a local function to a
     ``ProcessPoolExecutor`` and asserted the PID differed, i.e. it tested that
     CPython forks. It would have passed with the entire rasterize feature
     deleted. (Reported as a finding, not silently dropped.)
@@ -712,7 +712,7 @@ def test_b094_displayed_size_agrees_with_pdfiums_own_unrotated_render(
     """
     import pypdfium2 as pdfium
 
-    from pdf_toolkit.adapters.pdfium_raster import _displayed_size
+    from pdf_tooling.adapters.pdfium_raster import _displayed_size
 
     for rotation in (0, 90, 180, 270):
         source = _make_banded(tmp_path / "src", rotation=rotation)
@@ -1003,8 +1003,8 @@ def test_ac16_a_render_failure_is_a_failed_item_and_exit_1_never_a_fallback(
     ``_render_chunk`` is the module-level, picklable-argument unit AC4/AC7
     already pin as what a worker executes.
     """
-    from pdf_toolkit.errors import FailureError
-    from pdf_toolkit.models import OperationResult
+    from pdf_tooling.errors import FailureError
+    from pdf_tooling.models import OperationResult
 
     source = _make_multipage(tmp_path / "src", pages=3)
     out_dir = tmp_path / "out"
@@ -1097,7 +1097,7 @@ def test_ac25_range_in_name_template_is_refused_by_the_shared_renderer(
 
 
 def test_ac25_fields_is_not_extended() -> None:
-    from pdf_toolkit.safety.naming import FIELDS
+    from pdf_tooling.safety.naming import FIELDS
 
     assert FIELDS == frozenset({"stem", "page", "index", "range", "ext"})
 
@@ -1164,7 +1164,7 @@ def test_ac26_atomic_writer_refusing_produces_zero_files(
     through a `ProcessPoolExecutor` (module docstring), and under the
     `spawn` start method (macOS always; every platform from Python 3.14) a
     parent-side monkeypatch of `AtomicWriter` never reaches a spawned
-    child -- it re-imports `pdf_toolkit.safety.atomic` fresh instead of
+    child -- it re-imports `pdf_tooling.safety.atomic` fresh instead of
     inheriting the parent's patched state. `_render_chunk` is exactly the
     module-level, picklable-argument unit AC4/AC7 already pin as what a
     worker executes; calling it directly here exercises the identical
@@ -1215,7 +1215,7 @@ def test_ac27_models_py_has_no_rasterize_specific_field() -> None:
     This pin was NOT in PDF-10's own §13 fallout table -- it is a ninth
     tripwire, found by running rather than by reading, and reported as such.
     """
-    from pdf_toolkit.models import ItemResult
+    from pdf_tooling.models import ItemResult
 
     fields = set(ItemResult.__dataclass_fields__)
     assert fields == {
@@ -1299,7 +1299,7 @@ def test_raster_engine_unavailable_exits_3_with_a_hint(
     def _missing(*, capability: str | None = None) -> object:
         raise EngineMissingError(
             "RasterEngine is unavailable. Install it with: uv tool install --force pdf-tooling. "
-            "Run 'pdftoolkit doctor' to see which engines resolved."
+            "Run 'pdftooling doctor' to see which engines resolved."
         )
 
     monkeypatch.setattr(raster_module, "require_raster", _missing)

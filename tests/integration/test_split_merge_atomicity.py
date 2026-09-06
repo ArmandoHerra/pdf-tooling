@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit import errors
-from pdf_toolkit.ops.merge import merge_documents, resolve_merge_inputs
-from pdf_toolkit.ops.split import split_document
-from pdf_toolkit.safety import atomic as atomic_module
-from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_tooling import errors
+from pdf_tooling.ops.merge import merge_documents, resolve_merge_inputs
+from pdf_tooling.ops.split import split_document
+from pdf_tooling.safety import atomic as atomic_module
+from pdf_tooling.safety.policy import SafetyPolicy
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing

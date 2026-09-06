@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pdf_toolkit.safety import TEMP_PREFIX, find_stray_temps, is_toolkit_temp
+from pdf_tooling.safety import TEMP_PREFIX, find_stray_temps, is_toolkit_temp
 
 
 def test_the_prefix_is_hidden_and_product_specific() -> None:

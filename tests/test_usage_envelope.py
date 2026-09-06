@@ -45,12 +45,12 @@ from typing import Any, Final
 import pytest
 import typer
 
-from pdf_toolkit.cli.common import (
+from pdf_tooling.cli.common import (
     GLOBAL_FLAG_SPELLINGS,
     GLOBAL_OPTIONS,
     REFUSED_PASSWORD_FLAGS,
 )
-from pdf_toolkit.cli.exit_codes import (
+from pdf_tooling.cli.exit_codes import (
     AUTH,
     ENGINE_MISSING,
     FAILURE,
@@ -59,8 +59,8 @@ from pdf_toolkit.cli.exit_codes import (
     REFUSED,
     USAGE,
 )
-from pdf_toolkit.cli.main import PROG_NAME, app
-from pdf_toolkit.output import OutputFormat
+from pdf_tooling.cli.main import PROG_NAME, app
+from pdf_tooling.output import OutputFormat
 from registry import REPO_ROOT, discover_groups, discover_verbs, run_cli, run_cli_with_pty
 
 SRC: Final[Path] = REPO_ROOT / "src"
@@ -190,7 +190,7 @@ def error_of(stdout: str) -> dict[str, Any]:
 # invocation that exits 3.
 #
 # Both tuples now name 3 and the matrix carries a `doctor --strict` row.
-# Measured: `PATH=<an empty dir> pdftoolkit doctor --strict` is **3** through
+# Measured: `PATH=<an empty dir> pdftooling doctor --strict` is **3** through
 # the real `main()` and **0** through the plant, on a host where both system
 # binaries ARE installed — so it is the PATH scrub that produces the 3, not the
 # host. That is the whole hermeticity argument, and it is why the scrub is not
@@ -390,9 +390,9 @@ def exit_matrix(workspace: Path, good: Path, encrypted: Path) -> list[tuple[Exit
 #: handlers rather than the presence of the bug.
 _PLANTED_WRONG_MAIN: Final[str] = """
 import sys
-from pdf_toolkit.cli import main as m
-from pdf_toolkit.cli.exit_codes import OK
-from pdf_toolkit.errors import PdfToolkitError
+from pdf_tooling.cli import main as m
+from pdf_tooling.cli.exit_codes import OK
+from pdf_tooling.errors import PdfToolkitError
 
 try:
     m.app(prog_name=m.PROG_NAME, standalone_mode=False)
@@ -569,7 +569,7 @@ def test_ac2_the_unknown_flag_population_is_derived_and_non_vacuous() -> None:
 # AC4 — the ARITY shape (Evidence §E4), and why the fix could not live in
 # `validate_config`.
 #
-# `pdftoolkit info --threads 0 -o json` gives exit 2, stdout 0 and stderr
+# `pdftooling info --threads 0 -o json` gives exit 2, stdout 0 and stderr
 # `Error: Missing argument 'PDF...'.` — the `--threads must be 1 or greater`
 # message `cli/common.py` exists to produce NEVER FIRES, because Click's own
 # arity check runs during parameter processing, upstream of every callback
@@ -621,7 +621,7 @@ def test_ac4_the_arity_shape_is_enveloped_and_names_the_missing_argument(verb) -
 # AC6 — `PdfToolkitError` keeps its precedence, byte for byte.
 # --------------------------------------------------------------------------- #
 
-#: Measured at `15eb4ea` (pre-change) and again after, from `pdftoolkit version
+#: Measured at `15eb4ea` (pre-change) and again after, from `pdftooling version
 #: --out-dir <dir> -o json`. Pinned as BYTES, because AC6 is a byte-identity
 #: criterion: it is the guard that the new Click branch did not quietly take
 #: over a message OR-3 owns.
@@ -651,11 +651,11 @@ def test_ac6_our_own_error_keeps_precedence_over_the_click_branch(tmp_path: Path
 
 _PLANTED_BUG: Final[str] = (
     "import sys;"
-    "from pdf_toolkit.cli import cmd_version;"
-    "from pdf_toolkit.cli.main import main;"
+    "from pdf_tooling.cli import cmd_version;"
+    "from pdf_tooling.cli.main import main;"
     "cmd_version.emit_result = "
     "(lambda *a, **k: (_ for _ in ()).throw(ZeroDivisionError('planted bug')));"
-    "sys.argv = ['pdftoolkit', 'version'];"
+    "sys.argv = ['pdftooling', 'version'];"
     "main()"
 )
 
@@ -682,7 +682,7 @@ def test_ac7_an_unexpected_exception_keeps_its_traceback_and_exit_1() -> None:
 #
 # All fifteen `GLOBAL_OPTIONS` members exit 2 at `meta` with **zero bytes on
 # stdout**. The exit code is correct and stays: `PLAN.md` §5.6 rules that a
-# grouping parent is exit 2 (`pdftoolkit meta bogus` is 2, not 0). Only the
+# grouping parent is exit 2 (`pdftooling meta bogus` is 2, not 0). Only the
 # empty stdout changes.
 #
 # The fix is explicitly NOT `@global_options` on the group. AC11 below is what
@@ -756,7 +756,7 @@ def test_ac10_the_readme_states_the_group_position_rule() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     for group in GROUPS:
         name = " ".join(group)
-        assert f"pdftoolkit {name} -o json" in readme, (
+        assert f"pdftooling {name} -o json" in readme, (
             f"README states no group-position rule for {name!r}"
         )
     assert "does not take the global block" in readme
@@ -768,10 +768,10 @@ def test_ac11_the_group_is_untouched_by_construction() -> None:
     Red: add `@global_options(consumes=())` to `meta_app` and BOTH assertions
     fail.
     """
-    from pdf_toolkit.cli.common import consumed_output_flags
+    from pdf_tooling.cli.common import consumed_output_flags
 
-    assert consumed_output_flags("pdf_toolkit.cli.cmd_meta") == ()
-    source = (SRC / "pdf_toolkit" / "cli" / "cmd_meta.py").read_text(encoding="utf-8")
+    assert consumed_output_flags("pdf_tooling.cli.cmd_meta") == ()
+    source = (SRC / "pdf_tooling" / "cli" / "cmd_meta.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     decorators = [
         node
@@ -817,7 +817,7 @@ def test_ac8_the_group_population_cannot_go_vacuous() -> None:
 # --------------------------------------------------------------------------- #
 # AC12 / AC13 — flags with no command, and no arguments at all.
 #
-# `76ece64648`. `pdftoolkit -o json` exited **0** with 3754 bytes of human help
+# `76ece64648`. `pdftooling -o json` exited **0** with 3754 bytes of human help
 # on stdout: a machine consumer reading stdout learned neither that it had
 # asked for nothing nor that it had got nothing.
 #
@@ -867,7 +867,7 @@ def test_ac13_zero_argument_invocation_keeps_help_and_exit_0_on_a_pipe() -> None
     this fails."""
     result = run_cli()
     assert result.returncode == OK
-    assert result.stdout.startswith("Usage: pdftoolkit")
+    assert result.stdout.startswith("Usage: pdftooling")
     assert "Commands:" in result.stdout
 
 
@@ -877,7 +877,7 @@ def test_ac13_zero_argument_invocation_keeps_help_and_exit_0_on_a_tty() -> None:
     `table` and a shape-dependent rule would have diverged."""
     result = run_cli_with_pty(pty_stream="stdout")
     assert result.returncode == OK
-    assert "Usage: pdftoolkit" in result.stdout
+    assert "Usage: pdftooling" in result.stdout
 
 
 # --------------------------------------------------------------------------- #
@@ -1114,7 +1114,7 @@ def test_ac16_the_readme_claim_holds_for_both_spellings_of_the_value_form() -> N
 # AC18 — `--quiet` and the ROOT logger (`d220b7d79d`).
 #
 # `pypdf/_reader.py` calls `logging.getLogger("pypdf._reader").warning("EOF
-# marker not found")`. `configure_logging` configured ONLY the `pdf_toolkit`
+# marker not found")`. `configure_logging` configured ONLY the `pdf_tooling`
 # logger, so that record propagated to root, found zero handlers there, and was
 # emitted by `logging.lastResort` — a handler this process never installed and
 # therefore never levelled. Two consequences, and the second is not in the row:
@@ -1132,7 +1132,7 @@ def restored_logging():
     and a test that left our handler on it would leak into every later test."""
     import logging as _logging
 
-    from pdf_toolkit.output.logging import LOGGER_NAME, clear_secrets
+    from pdf_tooling.output.logging import LOGGER_NAME, clear_secrets
 
     root = _logging.getLogger()
     ours = _logging.getLogger(LOGGER_NAME)
@@ -1183,7 +1183,7 @@ def test_ac18_a_third_party_record_passes_through_the_redacting_filter(
     redaction guarantee covered none of them."""
     import logging as _logging
 
-    from pdf_toolkit.output.logging import (
+    from pdf_tooling.output.logging import (
         REDACTION_PLACEHOLDER,
         configure_logging,
         register_secret,
@@ -1206,7 +1206,7 @@ def test_ac18_quiet_levels_the_root_logger_too(
     third-party WARNING is below the level root now carries."""
     import logging as _logging
 
-    from pdf_toolkit.output.logging import configure_logging
+    from pdf_tooling.output.logging import configure_logging
 
     configure_logging(verbose=0, quiet=True, no_color=True)
     _logging.getLogger("pypdf._reader").warning(CHATTER)

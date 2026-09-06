@@ -13,7 +13,7 @@ WHAT IS MECHANIZED, AND WHAT DELIBERATELY IS NOT
 Three properties, in increasing strength:
 
 1. **Existence.** Every ``tests/…py`` path named anywhere under
-   ``src/pdf_toolkit`` resolves to a real file.
+   ``src/pdf_tooling`` resolves to a real file.
 2. **Resolution.** A pointer that names an explicit target — ``::<identifier>``
    or a following ``Section <N>`` — must find that target IN the file it names.
    This is the half ``confirm.py:42`` failed.
@@ -41,7 +41,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SRC = REPO_ROOT / "src" / "pdf_toolkit"
+SRC = REPO_ROOT / "src" / "pdf_tooling"
 
 POINTER = re.compile(r"tests/[A-Za-z0-9_/]+\.py(?:::(?P<identifier>[A-Za-z_][A-Za-z0-9_]*))?")
 FOLLOWING_SECTION = re.compile(r"\A(?:``|`|\s)*Section\s+(?P<section>\d+)")
@@ -60,7 +60,7 @@ class Pointer:
 
 
 def pointers() -> list[Pointer]:
-    """Every `tests/…py` path named in a `src/pdf_toolkit/**` docstring or comment."""
+    """Every `tests/…py` path named in a `src/pdf_tooling/**` docstring or comment."""
     found: list[Pointer] = []
     for path in sorted(SRC.rglob("*.py")):
         text = path.read_text()
@@ -155,7 +155,7 @@ def test_the_resolver_is_red_on_the_pre_fix_confirm_pointer() -> None:
     `tests/test_import_boundaries.py` Section 4, which holds both.
     """
     pre_fix = Pointer(
-        source="src/pdf_toolkit/safety/confirm.py",
+        source="src/pdf_tooling/safety/confirm.py",
         line=42,
         path="tests/test_cli_spine.py",
         target="require_confirmation",
@@ -169,7 +169,7 @@ def test_the_resolver_is_red_on_the_pre_fix_confirm_pointer() -> None:
     )
 
     corrected = Pointer(
-        source="src/pdf_toolkit/safety/confirm.py",
+        source="src/pdf_tooling/safety/confirm.py",
         line=42,
         path="tests/test_import_boundaries.py",
         target="Section 4",

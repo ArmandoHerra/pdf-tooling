@@ -1,4 +1,4 @@
-"""Tests for ``pdf_toolkit.ops.pagerange`` — PDF-03.
+"""Tests for ``pdf_tooling.ops.pagerange`` — PDF-03.
 
 Structure (Design D10): the two ``PLAN.md`` §4.3 tables are *data*
 (``TOKEN_TABLE_CASES``, ``ERROR_TABLE_CASES``), each paired with a
@@ -50,8 +50,8 @@ from hypothesis import strategies as st
 from hypothesis.configuration import set_hypothesis_home_dir
 from hypothesis.database import InMemoryExampleDatabase
 
-from pdf_toolkit import errors, models
-from pdf_toolkit.ops import pagerange
+from pdf_tooling import errors, models
+from pdf_tooling.ops import pagerange
 
 # --- Hypothesis storage: repo-local-write-free, self-contained (see module
 # docstring). Must execute before any @settings(...)-decorated test below.
@@ -65,8 +65,8 @@ from pdf_toolkit.ops import pagerange
 HYPOTHESIS_HOME_DIR: str = tempfile.mkdtemp(prefix="pdf-toolkit-pagerange-hypothesis-")
 set_hypothesis_home_dir(HYPOTHESIS_HOME_DIR)
 atexit.register(shutil.rmtree, HYPOTHESIS_HOME_DIR, ignore_errors=True)
-settings.register_profile("pdf_toolkit_pagerange", database=InMemoryExampleDatabase())
-settings.load_profile("pdf_toolkit_pagerange")
+settings.register_profile("pdf_tooling_pagerange", database=InMemoryExampleDatabase())
+settings.load_profile("pdf_tooling_pagerange")
 
 
 # ===========================================================================
@@ -324,7 +324,7 @@ R04_HINT_CASES: tuple[_R04HintCase, ...] = (
 
 @pytest.mark.parametrize("case", R04_HINT_CASES, ids=lambda c: c.description)
 def test_r04_negative_index_hint(case: _R04HintCase, caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.WARNING, logger="pdf_toolkit.ops.pagerange")
+    caplog.set_level(logging.WARNING, logger="pdf_tooling.ops.pagerange")
     if case.expect_hint:
         with pytest.raises(errors.PageRangeError) as excinfo:
             pagerange.parse(case.spec, case.page_count)
@@ -466,7 +466,7 @@ def test_ac9_negative_index_hint_message() -> None:
 
 
 def test_ac9_resolvable_negative_index_is_silent(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.WARNING, logger="pdf_toolkit.ops.pagerange")
+    caplog.set_level(logging.WARNING, logger="pdf_tooling.ops.pagerange")
     result = pagerange.parse("-3", 10, ordered=True)
     assert result.indices == (8,)
     assert caplog.records == []
@@ -589,7 +589,7 @@ def test_ac15_no_io_calls_in_module() -> None:
 
 
 def test_ac15_leading_exclusion_warns_exactly_once(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.WARNING, logger="pdf_toolkit.ops.pagerange")
+    caplog.set_level(logging.WARNING, logger="pdf_tooling.ops.pagerange")
     result = pagerange.parse("!3,all", 5, ordered=False)
     assert result.indices == (1, 2, 3, 4, 5)
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -600,7 +600,7 @@ def test_ac15_leading_exclusion_warns_exactly_once(caplog: pytest.LogCaptureFixt
 
 
 def test_ac15_non_leading_exclusion_does_not_warn(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.WARNING, logger="pdf_toolkit.ops.pagerange")
+    caplog.set_level(logging.WARNING, logger="pdf_tooling.ops.pagerange")
     pagerange.parse("all,!3", 5, ordered=False)
     assert caplog.records == []
 
@@ -665,7 +665,7 @@ def test_negative_zero_is_the_same_defect_as_literal_zero() -> None:
 # AC13 — import boundary (AST walk, not a text grep)
 # ===========================================================================
 
-_ALLOWED_FROM_MODULES = frozenset({"pdf_toolkit.models", "pdf_toolkit.errors"})
+_ALLOWED_FROM_MODULES = frozenset({"pdf_tooling.models", "pdf_tooling.errors"})
 
 
 def test_pagerange_imports_are_stdlib_only() -> None:
@@ -700,7 +700,7 @@ def test_pagerange_module_does_no_io() -> None:
 # PDF-03 AC12's live successor -- single ownership of the §4.3 grammar
 # ===========================================================================
 #
-# AC12 read "grep -rn 'pagerange' src/pdf_toolkit/cli/ returns nothing", and
+# AC12 read "grep -rn 'pagerange' src/pdf_tooling/cli/ returns nothing", and
 # it was scoped to the tree at PDF-03's own commit (9d0703d). It has since
 # flipped DELIBERATELY: PDF-07/PDF-08 wired the grammar, that grep returns
 # five hits at HEAD, and PDF-03's own Validation section predicted exactly
@@ -789,7 +789,7 @@ def test_the_page_range_grammar_has_exactly_one_owner() -> None:
                         f"{rel}:{node.lineno}: a page-range regex ({arg.value!r}) outside "
                         "ops/pagerange.py -- route it through parse()/is_valid_spec()"
                     )
-            elif isinstance(node, ast.ImportFrom) and node.module == "pdf_toolkit.ops.pagerange":
+            elif isinstance(node, ast.ImportFrom) and node.module == "pdf_tooling.ops.pagerange":
                 private = sorted(a.name for a in node.names if a.name.startswith("_"))
                 if private:
                     violations.append(

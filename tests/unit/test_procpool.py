@@ -29,7 +29,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 import pytest
 
-from pdf_toolkit.ops import procpool
+from pdf_tooling.ops import procpool
 
 # --------------------------------------------------------------------------- #
 # Module-level, picklable-by-reference helpers -- the same discipline

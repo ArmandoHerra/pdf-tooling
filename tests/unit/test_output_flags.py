@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import typer
 
-from pdf_toolkit.cli.common import OUTPUT_FLAGS, consumed_output_flags, global_options
+from pdf_tooling.cli.common import OUTPUT_FLAGS, consumed_output_flags, global_options
 
 
 def test_output_flags_is_exactly_the_governed_four() -> None:
@@ -44,7 +44,7 @@ def test_a_valid_declaration_decorates_a_throwaway_command_cleanly() -> None:
 
 
 def test_the_five_landed_verbs_declare_their_documented_consumes_sets() -> None:
-    from pdf_toolkit.cli import cmd_doctor, cmd_info, cmd_merge, cmd_split, cmd_version
+    from pdf_tooling.cli import cmd_doctor, cmd_info, cmd_merge, cmd_split, cmd_version
 
     assert consumed_output_flags(cmd_version.version_command.__module__) == ()
     assert consumed_output_flags(cmd_doctor.doctor_command.__module__) == ()

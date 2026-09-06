@@ -14,7 +14,7 @@ so this file never asserts on `returncode` alone.
 D1's partition: every one of the 26 derived verbs lands in exactly HONOURED
 or REFUSED, with an empty residual (`SILENTLY_IGNORED == set()`, asserted,
 never inferred -- AC4). D4's structural predicate
-(`pdf_toolkit.cli.common.honours_password_file`) is reconciled against this
+(`pdf_tooling.cli.common.honours_password_file`) is reconciled against this
 BEHAVIOURAL result: the two instruments are independent on purpose, and a
 disagreement is a BLOCKER (D4.3), never a tie broken here.
 """
@@ -48,7 +48,7 @@ from test_password_leaks import (  # noqa: E402
 )
 
 REPO_ROOT: Final[Path] = TESTS_DIR.parent
-SRC: Final[Path] = REPO_ROOT / "src" / "pdf_toolkit"
+SRC: Final[Path] = REPO_ROOT / "src" / "pdf_tooling"
 
 #: E2's expected partition, re-derived at HEAD and reconciled against the
 #: BEHAVIOURAL probe below (AC1). Published beside the count, never trusted
@@ -148,7 +148,7 @@ def _string_constants_compared_to_verb_names(path: Path, verb_names: frozenset[s
 
 
 def test_ac2_no_hand_typed_verb_list_decides_the_classification() -> None:
-    """A test asserts that no `src/pdf_toolkit/**` module contains a literal
+    """A test asserts that no `src/pdf_tooling/**` module contains a literal
     verb name used as a password-classification key. RED control: planting
     `if verb == "info":` anywhere under `src/` must fail this test naming
     the file and line -- proved by the positive control below, against a
@@ -158,7 +158,7 @@ def test_ac2_no_hand_typed_verb_list_decides_the_classification() -> None:
     for path in sorted(SRC.rglob("*.py")):
         offenders.extend(_string_constants_compared_to_verb_names(path, verb_names))
     assert not offenders, (
-        "a literal verb name is used as a comparison key under src/pdf_toolkit/ "
+        "a literal verb name is used as a comparison key under src/pdf_tooling/ "
         f"(a hand-typed classification key, forbidden by AC2): {offenders}"
     )
 
@@ -390,7 +390,7 @@ def _verb_module_map() -> dict[str, str | None]:
     dataclass just to add a field only this test needs."""
     import typer
 
-    from pdf_toolkit.cli.main import app
+    from pdf_tooling.cli.main import app
 
     mapping: dict[str, str | None] = {}
 
@@ -414,7 +414,7 @@ def test_ac1_the_structural_predicate_agrees_with_the_behavioural_probe(
     binary) are independent instruments on purpose. A disagreement is a
     BLOCKER, never a tie broken here -- so this assertion's failure message
     names exactly which verb(s) disagree and how, for escalation."""
-    from pdf_toolkit.cli.common import honours_password_file
+    from pdf_tooling.cli.common import honours_password_file
 
     module_by_verb = _verb_module_map()
     classes = _classes(three_arm_probe)
@@ -444,19 +444,19 @@ def test_module_source_returns_none_when_getsourcefile_raises_type_error(
     """`_module_source`'s C-extension-module guard, exercised directly rather
     than left under a pragma: `inspect.getsourcefile` raises `TypeError` for
     a module with no discoverable Python source (a built-in or a C
-    extension) -- never true for anything under `pdf_toolkit.*` today, but
+    extension) -- never true for anything under `pdf_tooling.*` today, but
     the helper must still answer "cannot classify" rather than propagate,
     since it runs on every real CLI invocation via `honours_password_file`.
     """
     import inspect as inspect_module
 
-    from pdf_toolkit.cli import common
+    from pdf_tooling.cli import common
 
     def _raises_type_error(_module: object) -> str:
         raise TypeError("builtin module has no __file__")
 
     monkeypatch.setattr(inspect_module, "getsourcefile", _raises_type_error)
-    assert common._module_source("pdf_toolkit.cli.password") is None
+    assert common._module_source("pdf_tooling.cli.password") is None
 
 
 def test_module_source_returns_none_when_the_source_file_is_unreadable(
@@ -469,13 +469,13 @@ def test_module_source_returns_none_when_the_source_file_is_unreadable(
     """
     from pathlib import Path
 
-    from pdf_toolkit.cli import common
+    from pdf_tooling.cli import common
 
     def _raises_os_error(_self: Path, *, encoding: str | None = None) -> str:
         raise OSError("file vanished after import")
 
     monkeypatch.setattr(Path, "read_text", _raises_os_error)
-    assert common._module_source("pdf_toolkit.cli.password") is None
+    assert common._module_source("pdf_tooling.cli.password") is None
 
 
 # --------------------------------------------------------------------------- #

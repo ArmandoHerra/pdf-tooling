@@ -404,14 +404,14 @@ def test_ac33_extracts_refusal_needs_no_branch_in_its_own_cmd_module(
     """
     import inspect
 
-    from pdf_toolkit.cli import cmd_extract
-    from pdf_toolkit.cli.common import _check_output_flag_consumption
+    from pdf_tooling.cli import cmd_extract
+    from pdf_tooling.cli.common import _check_output_flag_consumption
 
     source = inspect.getsource(cmd_extract)
     assert "config.in_place" not in source
     assert "in_place" not in source
 
-    from pdf_toolkit.errors import UsageError
+    from pdf_tooling.errors import UsageError
 
     class _Config:
         output = None
@@ -532,7 +532,7 @@ def test_ac40_one_error_renders_through_the_single_chokepoint_in_every_shape(
 def test_ac41_no_verb_grows_a_literal_password_flag(verb: str) -> None:
     """OR-4 + X-114: no flag in this product takes a password-shaped VALUE.
     The registry, not a typed list, is what "allowed" means (X-126)."""
-    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+    from pdf_tooling.cli.common import PASSWORD_FILE_FLAGS
 
     result = run_cli(verb, "--help")
     assert result.returncode == 0

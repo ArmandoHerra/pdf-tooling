@@ -77,7 +77,7 @@ PRAGMA_CEILING: Final[int] = 46
 UNREASONED_PRAGMA_ALLOWLIST: Final[frozenset[tuple[str, str]]] = frozenset(
     {
         (
-            "pdf_toolkit/cli/common.py",
+            "pdf_tooling/cli/common.py",
             'if ctx is None or not hasattr(ctx, "get_parameter_source"):  # pragma: no cover',
         ),
     }
@@ -461,7 +461,7 @@ def test_the_floor_has_not_been_weakened_by_any_route() -> None:
     config = PYPROJECT.read_text(encoding="utf-8")
     assert not re.search(r"^\s*omit\s*=", config, re.MULTILINE), (
         "an `omit` key appeared under [tool.coverage.*] -- PDF-06's AC14 forbids omitting "
-        "anything under src/pdf_toolkit/, and an omit is how a floor gets met without tests"
+        "anything under src/pdf_tooling/, and an omit is how a floor gets met without tests"
     )
     assert not re.search(r"^\s*fail_under\s*=", config, re.MULTILINE), (
         "a `fail_under` key appeared in pyproject.toml. The floor is passed on the command "

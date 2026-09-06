@@ -57,6 +57,7 @@ import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -1244,14 +1245,18 @@ def test_the_naming_section_anchor_is_exactly_the_linked_slug() -> None:
 
 
 def test_the_naming_table_names_every_kind_of_name() -> None:
-    """AC9. The contract has a row per KIND of name, and the three rows that
-    can be derived are compared against their source of truth rather than read."""
+    """PDF-48 D5. The contract has a row per KIND of name -- five now, not
+    four: `Console script` (singular, the one canonical spelling) and
+    `Aliases` (the alternate spelling plus the two deprecated ones) replace
+    the pre-PDF-48 single `Console scripts` row. The rows that can be
+    derived are compared against their source of truth rather than read."""
     rows = naming_table_rows()
     assert set(rows) == {
         "PyPI distribution",
         "Repository",
         "Import package",
-        "Console scripts",
+        "Console script",
+        "Aliases",
     }, f"the naming table's kinds are {sorted(rows)}"
 
     import tomllib
@@ -1260,28 +1265,43 @@ def test_the_naming_table_names_every_kind_of_name() -> None:
         project = tomllib.load(handle)["project"]
 
     # Derived, not transcribed: distribution from [project] name, import
-    # package from the src/ package directory, repository from [project.urls].
+    # package from the src/ package directory. D5's operator table gives
+    # Repository the same short name as the distribution (PDF-31), not the
+    # full [project.urls] URL a pre-PDF-48 reader might expect.
     assert f"`{project['name']}`" == rows["PyPI distribution"]
+    assert f"`{project['name']}`" == rows["Repository"], (
+        f"the naming table's Repository row is {rows['Repository']!r}; D5's "
+        f"operator table pins it to the same short name as the distribution, "
+        f"`{project['name']}`, not the full [project.urls] URL"
+    )
     packages = sorted(
         p.name for p in (REPO_ROOT / "src").iterdir() if (p / "__init__.py").is_file()
     )
-    assert packages == ["pdf_toolkit"], f"src/ declares {packages}"
+    assert packages == ["pdf_tooling"], f"src/ declares {packages}"
     assert f"`{packages[0]}`" == rows["Import package"]
-    repo_url = project["urls"]["Repository"].removeprefix("https://")
-    assert f"`{repo_url}`" == rows["Repository"], (
-        f"the naming table's Repository row is {rows['Repository']}, and "
-        f"[project.urls].Repository derives `{repo_url}`"
-    )
+
+
+#: The Aliases cell's prose carries `` `v1.0.0` `` (the removal-trigger
+#: version, backtick-quoted like every other name in the table) alongside
+#: the three real alias spellings. It is not a console-script name and must
+#: be filtered out before a set-equality check against `[project.scripts]`,
+#: or a correct table would fail this arm for the wrong reason.
+_VERSION_TOKEN: Final = re.compile(r"^v\d+\.\d+\.\d+$")
 
 
 def test_the_naming_table_command_rows_equal_the_declared_console_scripts() -> None:
-    """AC10. Set equality in BOTH directions against `[project.scripts]`.
+    """AC10, PDF-48-shaped. Set equality in BOTH directions against
+    `[project.scripts]`, over the UNION of the `Console script` and
+    `Aliases` rows -- the four declared script keys are split across the two
+    rows now, not carried by one.
 
-    A third console script added tomorrow reddens the table with zero author
+    A fifth console script added tomorrow reddens the table with zero author
     action, and a name in the table that is not declared fails too. Neither
     half is redundant: the first catches an omission, the second a phantom.
     """
-    tabled = set(re.findall(r"`([^`]+)`", naming_table_rows()["Console scripts"]))
+    names = set(re.findall(r"`([^`]+)`", naming_table_rows()["Console script"]))
+    names |= set(re.findall(r"`([^`]+)`", naming_table_rows()["Aliases"]))
+    tabled = {name for name in names if not _VERSION_TOKEN.match(name)}
     declared = declared_console_scripts()
     assert tabled == declared, (
         f"the naming table lists {sorted(tabled)} and [project.scripts] declares "
@@ -1299,7 +1319,7 @@ def test_the_naming_table_check_can_fail_in_both_directions() -> None:
     assert incomplete != declared | {"pdftk-compat"}
 
     # (b) the table lists a name that is not declared
-    phantom = declared | {"pdftoolkit-legacy"}
+    phantom = declared | {"pdftooling-legacy"}
     assert phantom != declared
 
     # and the parser really does read the row it claims to read

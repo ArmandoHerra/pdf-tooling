@@ -102,9 +102,9 @@ the verb, the moment one is discovered but not registered
 intent was to derive "does this verb mutate anything" from whether its click
 command declares `-O/--output`, `--out-dir` or `--in-place`. Those three are
 part of the **global** flag block every verb inherits uniformly
-(`pdf_toolkit.cli.common.global_options`), so that signal is universally true
+(`pdf_tooling.cli.common.global_options`), so that signal is universally true
 today and cannot discriminate. `tests/registry.py` instead walks the verb's
-own callback module (and every `pdf_toolkit.*` module it imports,
+own callback module (and every `pdf_tooling.*` module it imports,
 transitively) for a reference to `AtomicWriter`, the one write chokepoint —
 still fully structural, still classifies a new verb automatically, and
 correctly reports `version`/`doctor`/`info` as non-mutating today. See
@@ -156,7 +156,7 @@ highest-consequence part of this test suite:
    with it.
 6. **Scratch lives in `.scratch/`** (gitignored). `make samples-scratch`
    copies the tree there and writes a `sha256sum`-compatible originals
-   manifest; `pdftoolkit … .scratch/samples/<file>` is the only sanctioned
+   manifest; `pdftooling … .scratch/samples/<file>` is the only sanctioned
    way to point a verb at a real document interactively. `make clean` removes
    it.
 
@@ -429,7 +429,7 @@ PDF_TOOLKIT_TEST_XDEV_DIR=/dev/shm uv run pytest tests/integration/test_cross_fi
 
 ### The write-chokepoint / import-boundary tests
 
-`tests/test_import_boundaries.py` is shared and append-only, and it now carries **five** sections rather than the three it launched with: Section 1 (PDF-04) walks the AST of every file under `src/` and fails on any filesystem-mutating call outside `src/pdf_toolkit/safety/atomic.py`; Section 2 (PDF-05) does the same for engine imports outside `adapters/` and spawns outside the one subprocess chokepoint; Section 3 (PDF-06) does the same for `typer`/`click` imports below `cli/` (`PLAN.md` §10, D-03); Section 4 (B-093) forbids a `dry_run`-guarded confirmation-gate call; Section 5 (PDF-18) forbids a local filesystem-tier refusal construction under `ops/`. Every section's allowlists are empty, a test asserts they are empty, and a stale entry — one that no longer resolves to a real call site — fails the test. Planted violations prove each walk bites, and a negative-control test proves none of the walks is a text grep.
+`tests/test_import_boundaries.py` is shared and append-only, and it now carries **five** sections rather than the three it launched with: Section 1 (PDF-04) walks the AST of every file under `src/` and fails on any filesystem-mutating call outside `src/pdf_tooling/safety/atomic.py`; Section 2 (PDF-05) does the same for engine imports outside `adapters/` and spawns outside the one subprocess chokepoint; Section 3 (PDF-06) does the same for `typer`/`click` imports below `cli/` (`PLAN.md` §10, D-03); Section 4 (B-093) forbids a `dry_run`-guarded confirmation-gate call; Section 5 (PDF-18) forbids a local filesystem-tier refusal construction under `ops/`. Every section's allowlists are empty, a test asserts they are empty, and a stale entry — one that no longer resolves to a real call site — fails the test. Planted violations prove each walk bites, and a negative-control test proves none of the walks is a text grep.
 
 **All fourteen §D7 call groups now carry a planted violation** (`PDF-19`, 2026-09-02). `PDF-04` shipped five plants covering five groups; the other nine had never been observed to red. `D7_GROUP_PLANTS` maps each group to the plants that red it, and a test asserts the map has no empty group and names no plant `PLANTED` does not carry — so the coverage claim is executed rather than written down.
 
@@ -449,7 +449,7 @@ Two exemption registers live beside the two write allowlists, in the same `# rea
 - **`tests/test_cli_spine.py`** — the command surface and its exit codes, the exit-code constants themselves, the three renderers and their stream discipline, the structured error shape, global-flag precedence across both declaration levels, the mutually exclusive flag pairs, and the startup budget (`PLAN.md` §12 R-13 — `tests/test_cli_contract.py` deliberately does not duplicate this; see its module docstring).
 - **`tests/test_docs_antirot.py`** — that the documentation cannot silently rot: one phase line per prime document, no specification identifiers or counts embedded in them, and every `make` target mentioned in the documentation actually existing in the `Makefile`.
 - **`tests/test_license_policy.py`** — the `PLAN.md` §7.2 forbidden-name AST walk (imports, dynamic imports, subprocess `argv[0]`, `shutil.which`).
-- **`tests/test_password_file_contract.py`** — PDF-37's own derived `--password-file` probe (no password / correct / wrong) over every verb `discover_verbs()` finds, reading the exit code and the rendered message together, never either alone. Asserts the HONOURED/REFUSED partition has an empty residual, that the structural classification signal (`pdf_toolkit.cli.common.honours_password_file`) agrees with this behavioural result, and that the never-echo control (a planted sentinel, `-vv`) never leaks across the verb surface. `tests/test_password_leaks.py`'s own `HONOURED_FLOOR`/`IGNORED_DEFECT_BASELINE` witness constants are the longitudinal regression guard this file's own population is reconciled against.
+- **`tests/test_password_file_contract.py`** — PDF-37's own derived `--password-file` probe (no password / correct / wrong) over every verb `discover_verbs()` finds, reading the exit code and the rendered message together, never either alone. Asserts the HONOURED/REFUSED partition has an empty residual, that the structural classification signal (`pdf_tooling.cli.common.honours_password_file`) agrees with this behavioural result, and that the never-echo control (a planted sentinel, `-vv`) never leaks across the verb surface. `tests/test_password_leaks.py`'s own `HONOURED_FLOOR`/`IGNORED_DEFECT_BASELINE` witness constants are the longitudinal regression guard this file's own population is reconciled against.
 
 ## Skips are visible, never silent
 
@@ -546,7 +546,7 @@ Every test writes into pytest's own temporary directory and never into the repos
 ## The coverage floor — status after the PDF-06 fix-forward commit
 
 `--cov-fail-under=85` (`make cover`, part of `make ci`) is measured on
-`src/pdf_toolkit`. **At PDF-06's original landing commit this floor read
+`src/pdf_tooling`. **At PDF-06's original landing commit this floor read
 71.29%, not 85%.** That number was a measurement artifact, not a real gap:
 `tests/registry.py::run_cli`, `tests/test_doctor.py`, `tests/test_info.py`
 and `tests/test_cli_spine.py` drive the CLI exclusively through
@@ -585,7 +585,7 @@ commit you are on, run `make cover`. `ci.yml`'s
 `without-engines` job does not, matching Design §6's "adapters/ get a lower
 bar where an engine is absent" via configuration, not via `omit`). `fail_under`
 was never touched — it was 85 before this fix and stays 85 after it — and no
-`omit` of anything under `src/pdf_toolkit/` was ever added.
+`omit` of anything under `src/pdf_tooling/` was ever added.
 
 ## The coverage floor — status after the B-034 fix-forward commit
 

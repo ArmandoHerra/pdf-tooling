@@ -14,11 +14,11 @@ from typing import Any
 
 import pytest
 
-from pdf_toolkit import ports
-from pdf_toolkit.adapters import AdapterProbe, subprocess_util, tesseract_ocr
-from pdf_toolkit.errors import EngineMissingError
-from pdf_toolkit.models import EngineReport
-from pdf_toolkit.ports import (
+from pdf_tooling import ports
+from pdf_tooling.adapters import AdapterProbe, subprocess_util, tesseract_ocr
+from pdf_tooling.errors import EngineMissingError
+from pdf_tooling.models import EngineReport
+from pdf_tooling.ports import (
     BROKEN_INSTALL_HINT,
     KIND_PYTHON_PACKAGE,
     KIND_SYSTEM_BINARY,
@@ -252,7 +252,7 @@ def test_every_exit_three_message_names_the_discovery_path(
         ports.reset_cache()
         with pytest.raises(EngineMissingError) as caught:
             ports.require(port)
-        assert "pdftoolkit doctor" in caught.value.message, port
+        assert "pdftooling doctor" in caught.value.message, port
         assert port in caught.value.message, port
 
 

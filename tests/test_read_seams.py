@@ -64,21 +64,21 @@ SEAMS_MODULE: Final = REPO_ROOT / "tests" / "seams.py"
 #: `compress`, and pretending it covers every branch of every verb would make the
 #: instrument lie. It is COUNTED, and the count MAY NOT GROW (X-421).
 RESIDUE_CEILING: Final[dict[str, int]] = {
-    "pdf_toolkit/adapters/pdfplumber_text.py": 1,
-    "pdf_toolkit/adapters/pikepdf_structure.py": 10,
-    "pdf_toolkit/adapters/pypdf_structure.py": 7,
-    "pdf_toolkit/adapters/tesseract_ocr.py": 2,
-    "pdf_toolkit/cli/cmd_create.py": 2,
-    "pdf_toolkit/cli/common.py": 1,
-    "pdf_toolkit/cli/password.py": 1,
-    "pdf_toolkit/ops/compose.py": 2,
-    "pdf_toolkit/ops/crypto.py": 4,
-    "pdf_toolkit/ops/document_password.py": 3,
-    "pdf_toolkit/ops/metadata.py": 1,
-    "pdf_toolkit/ops/office.py": 1,
-    "pdf_toolkit/ops/optimize.py": 3,
-    "pdf_toolkit/safety/_faults.py": 1,
-    "pdf_toolkit/safety/atomic.py": 4,
+    "pdf_tooling/adapters/pdfplumber_text.py": 1,
+    "pdf_tooling/adapters/pikepdf_structure.py": 10,
+    "pdf_tooling/adapters/pypdf_structure.py": 7,
+    "pdf_tooling/adapters/tesseract_ocr.py": 2,
+    "pdf_tooling/cli/cmd_create.py": 2,
+    "pdf_tooling/cli/common.py": 1,
+    "pdf_tooling/cli/password.py": 1,
+    "pdf_tooling/ops/compose.py": 2,
+    "pdf_tooling/ops/crypto.py": 4,
+    "pdf_tooling/ops/document_password.py": 3,
+    "pdf_tooling/ops/metadata.py": 1,
+    "pdf_tooling/ops/office.py": 1,
+    "pdf_tooling/ops/optimize.py": 3,
+    "pdf_tooling/safety/_faults.py": 1,
+    "pdf_tooling/safety/atomic.py": 4,
 }
 
 #: The scoped METADATA population -- `ops/**` plus `safety/paths.py`, the two
@@ -229,9 +229,9 @@ def test_ac1_the_observer_records_ordinal_and_both_frames_in_the_driven_child(
     ), f"ordinals must be dense and 1-based, got {[r['ordinal'] for r in reads]}"
 
     for row in reads:
-        assert row["first_party"], f"a read with no pdf_toolkit frame is unattributable: {row}"
+        assert row["first_party"], f"a read with no pdf_tooling frame is unattributable: {row}"
         assert row["origin"], f"a read with no originating frame cannot name its opener: {row}"
-        assert re.match(r"^pdf_toolkit/.+\.py:\d+$", str(row["first_party"])), row
+        assert re.match(r"^pdf_tooling/.+\.py:\d+$", str(row["first_party"])), row
 
 
 def test_ac1_a_verb_with_no_operand_observes_nothing(tmp_path: Path) -> None:
@@ -689,7 +689,7 @@ def test_ac9_the_format_dimension_is_derived_and_non_singleton(
     any depth and this arm fails.
     """
     _skip_as_root()
-    from pdf_toolkit.ops.compose import inspect_image
+    from pdf_tooling.ops.compose import inspect_image
 
     with tempfile.TemporaryDirectory() as raw:
         scratch = Path(raw)
@@ -883,7 +883,7 @@ def test_ac12_a_non_pdf_operand_never_gets_a_pdf_noun(sweeps: dict[str, seams.Sw
     # the generic noun; only the explicit `noun=IMAGE_NOUN` at the frame-header
     # read -- which takes its class from `inspect_image`'s own verdict, never
     # from the extension -- can name it an image.
-    from pdf_toolkit.safety.paths import GENERIC_NOUN, IMAGE_NOUN
+    from pdf_tooling.safety.paths import GENERIC_NOUN, IMAGE_NOUN
 
     unnamed = sweeps["compose/JPEG-as-bin"]
     _assert_installed(unnamed)
@@ -933,7 +933,7 @@ def test_ac13_the_metadata_seam_is_coded_and_the_two_populations_are_disjoint(
     sweep = sweeps["compress/PDF-delete"]
     _assert_installed(sweep)
 
-    from pdf_toolkit.errors import NoInputError
+    from pdf_tooling.errors import NoInputError
 
     coded_codes = {1, NoInputError.exit_code, 2}
     for cell in sweep.cells[:-1]:

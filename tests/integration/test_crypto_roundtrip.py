@@ -31,7 +31,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 from dryreal import dry_and_real, prediction, real_envelope  # noqa: E402
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot  # noqa: E402
 from pagetree import page_tree_digest  # noqa: E402
-from pdf_toolkit.ports.structure import (  # noqa: E402
+from pdf_tooling.ports.structure import (  # noqa: E402
     ALWAYS_GRANTED_TOKENS,
     PERMISSION_TOKENS,
 )
@@ -42,7 +42,7 @@ OTHER_PW = "not-the-right-password"
 
 
 def _policy(**overrides: Any) -> Any:
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     values: dict[str, Any] = {
         "dry_run": False,
@@ -65,7 +65,7 @@ def _password_file(tmp_path: Path, name: str = "pw.txt", value: str = PW) -> Pat
 
 
 def _slot(path: Path, slot: str = "owner") -> Any:
-    from pdf_toolkit.cli.password import plan_password
+    from pdf_tooling.cli.password import plan_password
 
     return plan_password(
         slot=slot,
@@ -85,7 +85,7 @@ def _encrypt(
     allow: frozenset[str] = frozenset(),
     legacy: bool = False,
 ) -> Any:
-    from pdf_toolkit.ops.crypto import encrypt_run
+    from pdf_tooling.ops.crypto import encrypt_run
 
     return encrypt_run(
         source,
@@ -100,7 +100,7 @@ def _encrypt(
 
 
 def _permissions(source: Path, pw: Path | None = None) -> dict[str, Any]:
-    from pdf_toolkit.ops.crypto import PasswordSource, permissions_run
+    from pdf_tooling.ops.crypto import PasswordSource, permissions_run
 
     slot = (
         _slot(pw, "password")
@@ -209,7 +209,7 @@ def test_ac9_no_flag_combination_other_than_legacy_produces_rc4(
 def test_ac10_the_page_tree_round_trips_byte_for_byte(
     corpus: Any, tmp_path: Path, fixture: str
 ) -> None:
-    from pdf_toolkit.ops.crypto import decrypt_run
+    from pdf_tooling.ops.crypto import decrypt_run
 
     pw = _password_file(tmp_path)
     source = corpus.path(fixture)
@@ -1156,11 +1156,11 @@ def test_ac19_permissions_refuses_every_output_flag_and_creates_nothing(
 
 
 def test_ac19_the_three_verbs_declare_what_the_ruling_says_they_declare() -> None:
-    from pdf_toolkit.cli.common import consumed_output_flags
+    from pdf_tooling.cli.common import consumed_output_flags
 
-    assert consumed_output_flags("pdf_toolkit.cli.cmd_encrypt") == ("--output", "--in-place")
-    assert consumed_output_flags("pdf_toolkit.cli.cmd_decrypt") == ("--output", "--in-place")
-    assert consumed_output_flags("pdf_toolkit.cli.cmd_permissions") == ()
+    assert consumed_output_flags("pdf_tooling.cli.cmd_encrypt") == ("--output", "--in-place")
+    assert consumed_output_flags("pdf_tooling.cli.cmd_decrypt") == ("--output", "--in-place")
+    assert consumed_output_flags("pdf_tooling.cli.cmd_permissions") == ()
 
 
 def test_ac19_each_verb_lives_in_its_own_cmd_module() -> None:
@@ -1172,7 +1172,7 @@ def test_ac19_each_verb_lives_in_its_own_cmd_module() -> None:
     hit exactly this. This test is what stops a later tidy-up from re-merging
     the three files.
     """
-    from pdf_toolkit.cli import cmd_decrypt, cmd_encrypt, cmd_permissions
+    from pdf_tooling.cli import cmd_decrypt, cmd_encrypt, cmd_permissions
 
     modules = {
         cmd_encrypt.encrypt_command.__module__,

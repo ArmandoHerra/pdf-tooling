@@ -209,7 +209,7 @@ def test_ac24_the_honoured_side_proves_the_verb_wrote(
 
 
 def _shapes() -> tuple[tuple[str, ...], ...]:
-    from pdf_toolkit.output import OutputFormat
+    from pdf_tooling.output import OutputFormat
 
     return (
         (),

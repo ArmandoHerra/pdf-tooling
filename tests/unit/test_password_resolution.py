@@ -23,17 +23,17 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit.cli.password import (
+from pdf_tooling.cli.password import (
     ENV_OWNER_PASSWORD,
     ENV_PASSWORD,
     plan_password,
     reject_two_stdin_streams,
 )
-from pdf_toolkit.errors import UsageError
+from pdf_tooling.errors import UsageError
 
 PW_SENTINEL = "Sentinel-PW-7f3a91c4e85b4d02"
 
-SRC = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit"
+SRC = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling"
 
 
 def _pw_file(tmp_path: Path, name: str = "pw.txt", body: str = PW_SENTINEL) -> Path:
@@ -277,7 +277,7 @@ def test_ac2_a_loose_mode_warns_and_recommends_chmod_600(
     path = tmp_path / "loose.txt"
     path.write_text(PW_SENTINEL)
     path.chmod(0o644)
-    with caplog.at_level("WARNING", logger="pdf_toolkit.cli.password"):
+    with caplog.at_level("WARNING", logger="pdf_tooling.cli.password"):
         _plan(str(path)).read()
     combined = caplog.text
     assert "chmod 600" in combined
@@ -288,7 +288,7 @@ def test_ac2_more_than_one_line_warns_without_quoting_the_content(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     path = _pw_file(tmp_path, body=f"{PW_SENTINEL}\nsecond line\n")
-    with caplog.at_level("WARNING", logger="pdf_toolkit.cli.password"):
+    with caplog.at_level("WARNING", logger="pdf_tooling.cli.password"):
         _plan(str(path)).read()
     assert "using the first" in caplog.text
     assert PW_SENTINEL not in caplog.text
@@ -302,7 +302,7 @@ def test_ac2_the_debug_record_names_the_source_and_never_the_length(
     subprocess grep cannot pass because logging was off) and carries the
     source label, the value's absence, and no length."""
     path = _pw_file(tmp_path)
-    with caplog.at_level("DEBUG", logger="pdf_toolkit.cli.password"):
+    with caplog.at_level("DEBUG", logger="pdf_tooling.cli.password"):
         _plan(str(path)).read()
     assert "password resolved from" in caplog.text
     assert f"file:{path}" in caplog.text
@@ -361,7 +361,7 @@ def test_ac2_the_user_password_alias_conflict_is_now_unreachable() -> None:
     is refused on its own, before any slot is planned. Asserted in
     ``tests/test_password_leaks.py`` (AC18); recorded here so the criterion
     reads as *superseded* rather than *dropped*."""
-    from pdf_toolkit.cli.common import GLOBAL_OPTIONS, REFUSED_PASSWORD_FLAGS
+    from pdf_tooling.cli.common import GLOBAL_OPTIONS, REFUSED_PASSWORD_FLAGS
 
     assert "--user-password" in REFUSED_PASSWORD_FLAGS
     assert "--user-password" not in GLOBAL_OPTIONS

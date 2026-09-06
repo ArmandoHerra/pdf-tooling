@@ -30,10 +30,10 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit import errors
-from pdf_toolkit.cli.exit_codes import OK, REFUSED
-from pdf_toolkit.cli.main import build_rerun_hint
-from pdf_toolkit.safety import SafetyPolicy, require_confirmation
+from pdf_tooling import errors
+from pdf_tooling.cli.exit_codes import OK, REFUSED
+from pdf_tooling.cli.main import build_rerun_hint
+from pdf_tooling.safety import SafetyPolicy, require_confirmation
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -41,7 +41,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from atomic_harness import REPO_ROOT, run_harness  # noqa: E402
 
-HINT = "pdftoolkit delete a.pdf b.pdf --in-place -y"
+HINT = "pdftooling delete a.pdf b.pdf --in-place -y"
 
 
 def make_policy(**overrides: object) -> SafetyPolicy:
@@ -151,9 +151,9 @@ def test_anything_else_declines(answer: str) -> None:
 
 
 def test_the_hint_quotes_paths_that_contain_spaces() -> None:
-    hint = build_rerun_hint(["pdftoolkit", "delete", "my documents/a.pdf"])
+    hint = build_rerun_hint(["pdftooling", "delete", "my documents/a.pdf"])
     assert hint.endswith(" -y")
-    assert shlex.split(hint) == ["pdftoolkit", "delete", "my documents/a.pdf", "-y"]
+    assert shlex.split(hint) == ["pdftooling", "delete", "my documents/a.pdf", "-y"]
 
 
 def test_the_hint_defaults_to_the_running_command() -> None:

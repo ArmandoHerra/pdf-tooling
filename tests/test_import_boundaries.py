@@ -13,12 +13,12 @@ Section 1 — the write chokepoint
 true if something enforces it, because twenty verbs are written after the spec
 that built it and none of their authors will re-read ``PLAN.md`` §5.2. So the
 rule is mechanised: every file under ``src/`` is parsed, and any filesystem
-mutation outside ``pdf_toolkit/safety/atomic.py`` fails the build.
+mutation outside ``pdf_tooling/safety/atomic.py`` fails the build.
 
 **Two tiers, two allowlists.**
 
-* Tier 1 — ``src/`` outside ``pdf_toolkit/safety/``: zero occurrences.
-* Tier 2 — inside ``pdf_toolkit/safety/``: occurrences are confined to
+* Tier 1 — ``src/`` outside ``pdf_tooling/safety/``: zero occurrences.
+* Tier 2 — inside ``pdf_tooling/safety/``: occurrences are confined to
   ``atomic.py``. The chokepoint is one **file**, not one package.
 
 Both allowlists are empty at landing and a test asserts that they are. An
@@ -119,7 +119,7 @@ def iter_python_files(root: Path) -> list[Path]:
 
 
 def module_name(path: Path, root: Path) -> str:
-    """``src/pdf_toolkit/safety/atomic.py`` -> ``pdf_toolkit.safety.atomic``."""
+    """``src/pdf_tooling/safety/atomic.py`` -> ``pdf_tooling.safety.atomic``."""
     relative = path.relative_to(root).with_suffix("")
     parts = list(relative.parts)
     if parts and parts[-1] == "__init__":
@@ -163,10 +163,10 @@ def from_import_bindings(tree: ast.Module) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 
 #: The chokepoint is one FILE, not one package.
-CHOKEPOINT: Final = "pdf_toolkit.safety.atomic"
+CHOKEPOINT: Final = "pdf_tooling.safety.atomic"
 
 #: Tier 2's scope.
-SAFETY_PACKAGE: Final = "pdf_toolkit.safety"
+SAFETY_PACKAGE: Final = "pdf_tooling.safety"
 
 #: Rows 5–14 in their qualified spelling, plus the from-import forms of the
 #: same names, which ``from_import_bindings`` resolves back to these.
@@ -252,11 +252,11 @@ MUTATING_MODES: Final = frozenset("wax+")
 # `test_both_allowlists_are_empty` asserts that outright rather than trusting the
 # spelling.
 
-#: Tier 1 escape hatch — a write outside `pdf_toolkit.safety`.
+#: Tier 1 escape hatch — a write outside `pdf_tooling.safety`.
 ALLOWED_WRITE_SITES: Final[frozenset[tuple[str, str, str]]]
 ALLOWED_WRITE_SITES = frozenset({})
 
-#: Tier 2 escape hatch — a write inside `pdf_toolkit.safety` but outside
+#: Tier 2 escape hatch — a write inside `pdf_tooling.safety` but outside
 #: `atomic.py`.
 SAFETY_INNER_ALLOW: Final[frozenset[tuple[str, str, str]]]
 SAFETY_INNER_ALLOW = frozenset({})
@@ -432,7 +432,7 @@ def test_no_write_call_outside_the_safety_package(findings: list[WriteCall]) -> 
     outer, _ = tier_violations(findings)
     listed = "\n".join(f"  - {call}" for call in outer)
     assert outer == [], (
-        "filesystem mutation outside pdf_toolkit.safety — every write goes through "
+        "filesystem mutation outside pdf_tooling.safety — every write goes through "
         f"AtomicWriter:\n{listed}"
     )
 
@@ -486,77 +486,77 @@ def test_no_allowlist_entry_is_stale(
 PLANTED: Final = (
     (
         "plant-write-bytes-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "from pathlib import Path\n\n\ndef save(p: Path) -> None:\n    p.write_bytes(b'x')\n",
     ),
     (
         "plant-mkstemp-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "import tempfile\n\n\ndef scratch() -> None:\n    tempfile.mkstemp()\n",
     ),
     (
         "plant-mkdir-in-cli",
-        "pdf_toolkit/cli/sneaky.py",
+        "pdf_tooling/cli/sneaky.py",
         "from pathlib import Path\n\n\ndef prepare(p: Path) -> None:\n    p.mkdir(parents=True)\n",
     ),
     (
         "plant-open-write-in-output",
-        "pdf_toolkit/output/sneaky.py",
+        "pdf_tooling/output/sneaky.py",
         "def dump(p: str) -> None:\n    with open(p, 'w') as fh:\n        fh.write('x')\n",
     ),
     (
         "plant-write-in-safety-but-not-atomic",
-        "pdf_toolkit/safety/sneaky.py",
+        "pdf_tooling/safety/sneaky.py",
         "from pathlib import Path\n\n\ndef save(p: Path) -> None:\n    p.write_text('x')\n",
     ),
     (
         "plant-path-open-write-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "from pathlib import Path\n\n\ndef dump(p: Path) -> None:\n    p.open(mode='w').close()\n",
     ),
     (
         "plant-shutil-copy-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "import shutil\nfrom pathlib import Path\n\n\ndef stash(a: Path, b: Path) -> None:\n"
         "    shutil.copy(a, b)\n",
     ),
     (
         "plant-shutil-move-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "import shutil\nfrom pathlib import Path\n\n\ndef relocate(a: Path, b: Path) -> None:\n"
         "    shutil.move(a, b)\n",
     ),
     (
         "plant-os-replace-in-cli",
-        "pdf_toolkit/cli/sneaky.py",
+        "pdf_tooling/cli/sneaky.py",
         "import os\nfrom pathlib import Path\n\n\ndef commit(a: Path, b: Path) -> None:\n"
         "    os.replace(a, b)\n",
     ),
     (
         "plant-os-rename-via-from-import-in-adapters",
-        "pdf_toolkit/adapters/sneaky.py",
+        "pdf_tooling/adapters/sneaky.py",
         "from os import rename\nfrom pathlib import Path\n\n\n"
         "def shuffle(a: Path, b: Path) -> None:\n    rename(a, b)\n",
     ),
     (
         "plant-unlink-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "from pathlib import Path\n\n\ndef discard(p: Path) -> None:\n    p.unlink()\n",
     ),
     (
         "plant-rmtree-in-ports",
-        "pdf_toolkit/ports/sneaky.py",
+        "pdf_tooling/ports/sneaky.py",
         "import shutil\nfrom pathlib import Path\n\n\ndef purge(p: Path) -> None:\n"
         "    shutil.rmtree(p)\n",
     ),
     (
         "plant-chmod-in-output",
-        "pdf_toolkit/output/sneaky.py",
+        "pdf_tooling/output/sneaky.py",
         "import os\n\n\ndef relax(p: str) -> None:\n    os.chmod(p, 0o644)\n",
     ),
     (
         "plant-os-symlink-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "import os\n\n\ndef alias(a: str, b: str) -> None:\n    os.symlink(a, b)\n",
     ),
 )
@@ -586,9 +586,9 @@ def test_a_planted_violation_fails_the_walk(
 
 def test_a_stale_allowlist_entry_fails(findings: list[WriteCall]) -> None:
     """Allowlist rot must be loud. An entry outliving its call site is a red."""
-    fabricated = frozenset({("pdf_toolkit.ops.gone", "vanished", "os.replace")})
+    fabricated = frozenset({("pdf_tooling.ops.gone", "vanished", "os.replace")})
     assert stale_entries(fabricated, findings) == [
-        ("pdf_toolkit.ops.gone", "vanished", "os.replace")
+        ("pdf_tooling.ops.gone", "vanished", "os.replace")
     ]
 
 
@@ -596,7 +596,7 @@ NON_LITERAL_MODE = "def dump(p: str, mode: str) -> None:\n    open(p, mode).clos
 
 
 def test_a_non_literal_mode_is_a_violation() -> None:
-    found = scan_write_calls(NON_LITERAL_MODE, "pdf_toolkit.ops.computed")
+    found = scan_write_calls(NON_LITERAL_MODE, "pdf_tooling.ops.computed")
     assert [call.call for call in found] == ["open"]
     assert "non-literal" in found[0].reason
 
@@ -623,7 +623,7 @@ def read_only(p: Path, s: str, items: list[str], d: dict[str, str]) -> object:
 
 def test_benign_calls_are_never_flagged() -> None:
     """The negative self-test. A guard with false positives gets allowlisted away."""
-    found = scan_write_calls(BENIGN, "pdf_toolkit.ops.benign")
+    found = scan_write_calls(BENIGN, "pdf_tooling.ops.benign")
     assert found == [], f"false positives: {[str(call) for call in found]}"
 
 
@@ -706,7 +706,7 @@ PATH_OPEN_POSITIONAL = (
     ),
 )
 def test_a_positional_mode_on_path_open_is_a_violation() -> None:
-    found = scan_write_calls(PATH_OPEN_POSITIONAL, "pdf_toolkit.ops.positional")
+    found = scan_write_calls(PATH_OPEN_POSITIONAL, "pdf_tooling.ops.positional")
     assert [call.call for call in found] == ["p.open"]
 
 
@@ -715,7 +715,7 @@ def test_a_positional_mode_on_path_open_is_a_violation() -> None:
 #
 # `PDF-04` AC16 mechanised this as a grep for the LITERAL:
 #
-#     grep -rn "\.pdftoolkit-" src/ | grep -v "^src/pdf_toolkit/safety/tempnames.py"
+#     grep -rn "\.pdftoolkit-" src/ | grep -v "^src/pdf_tooling/safety/tempnames.py"
 #
 # Re-run verbatim at 7522e3e that command returns THREE hits and exits 0 --
 # `ops/procpool.py:47`, `ops/procpool.py:207` and `safety/atomic.py:861`, all
@@ -732,7 +732,7 @@ def test_a_positional_mode_on_path_open_is_a_violation() -> None:
 # --------------------------------------------------------------------------- #
 
 #: The one module allowed to define the literal.
-TEMP_PREFIX_OWNER: Final = "pdf_toolkit.safety.tempnames"
+TEMP_PREFIX_OWNER: Final = "pdf_tooling.safety.tempnames"
 
 #: The value `TEMP_PREFIX` must hold, spelled here so a second definition
 #: elsewhere is detectable without importing the product.
@@ -776,12 +776,12 @@ def test_a_second_prefix_literal_is_caught(tmp_path: Path) -> None:
     """
     scratch = tmp_path / "src"
     shutil.copytree(SRC, scratch)
-    planted = scratch / "pdf_toolkit" / "ops" / "discovery.py"
+    planted = scratch / "pdf_tooling" / "ops" / "discovery.py"
     planted.parent.mkdir(parents=True, exist_ok=True)
     planted.write_text('from typing import Final\n\nSCAN_PREFIX: Final[str] = ".pdftoolkit-"\n')
     definitions = literal_prefix_definitions(scratch)
     assert len(definitions) == 2, definitions
-    assert ("pdf_toolkit.ops.discovery", 3) in definitions
+    assert ("pdf_tooling.ops.discovery", 3) in definitions
 
 
 # --------------------------------------------------------------------------- #
@@ -829,12 +829,12 @@ ENGINE_MODULES: Final = frozenset(
 )
 
 #: The one package permitted to import them.
-ADAPTER_PACKAGE: Final = "pdf_toolkit.adapters"
+ADAPTER_PACKAGE: Final = "pdf_tooling.adapters"
 
 #: The one module permitted to spawn. Spelled as a module path to match
 #: `module_name()`; `tests/test_license_policy.py` spells the same file as a
 #: path, and both are asserted to point at a file that exists.
-SPAWN_CHOKEPOINT: Final = "pdf_toolkit.adapters.subprocess_util"
+SPAWN_CHOKEPOINT: Final = "pdf_tooling.adapters.subprocess_util"
 
 #: Spawn surfaces that must not appear outside the chokepoint. `pty` is here and
 #: not in the licence walk: it is a second, less obvious way to get a child
@@ -941,7 +941,7 @@ def scan_spawn_surface(source: str, module: str) -> list[Boundary]:
 # --------------------------------------------------------------------------- #
 
 SPAWN_HELPER: Final = "subprocess_util"
-SPAWN_HELPER_QUALIFIED: Final = "pdf_toolkit.adapters.subprocess_util"
+SPAWN_HELPER_QUALIFIED: Final = "pdf_tooling.adapters.subprocess_util"
 
 
 def _module_level_literals(tree: ast.Module) -> dict[str, str]:
@@ -964,7 +964,7 @@ def _is_helper_call(target: str, bindings: dict[str, str]) -> bool:
     """Whether a dotted call target names the spawn helper's `run`.
 
     Both spellings are recognised: `subprocess_util.run(...)` after
-    `from pdf_toolkit.adapters import subprocess_util`, and a bare `run(...)`
+    `from pdf_tooling.adapters import subprocess_util`, and a bare `run(...)`
     after `from ...subprocess_util import run`.
     """
     if target == f"{SPAWN_HELPER}.run":
@@ -1129,18 +1129,18 @@ def test_the_three_finding_kinds_are_disjoint() -> None:
     ("relative", "source", "expected_kind"),
     [
         (
-            "pdf_toolkit/ops/sneaky.py",
+            "pdf_tooling/ops/sneaky.py",
             "import pikepdf\n",
             KIND_ENGINE_IMPORT,
         ),
         (
-            "pdf_toolkit/cli/sneaky.py",
+            "pdf_tooling/cli/sneaky.py",
             "import subprocess\n",
             KIND_SPAWN_SURFACE,
         ),
         (
-            "pdf_toolkit/adapters/sneaky.py",
-            "from pdf_toolkit.adapters import subprocess_util\n\n\n"
+            "pdf_tooling/adapters/sneaky.py",
+            "from pdf_tooling.adapters import subprocess_util\n\n\n"
             "def go():\n    return subprocess_util.run(['gs'], timeout=1)\n",
             KIND_HELPER_ARGV0,
         ),
@@ -1182,54 +1182,54 @@ def test_pillow_is_deliberately_not_an_engine_module() -> None:
 PLANTED_SECTION_2: Final = (
     (
         "plant-pikepdf-import-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "import pikepdf\n\n\ndef go():\n    return pikepdf\n",
     ),
     (
         "plant-pypdf-from-import-in-cli",
-        "pdf_toolkit/cli/sneaky.py",
+        "pdf_tooling/cli/sneaky.py",
         "from pypdf import PdfReader\n\n\ndef go():\n    return PdfReader\n",
     ),
     (
         "plant-reportlab-import-in-ports",
-        "pdf_toolkit/ports/sneaky.py",
+        "pdf_tooling/ports/sneaky.py",
         "import reportlab.pdfgen\n\n\ndef go():\n    return reportlab\n",
     ),
     (
         "plant-pdfplumber-import-in-output",
-        "pdf_toolkit/output/sneaky.py",
+        "pdf_tooling/output/sneaky.py",
         "import pdfplumber\n\n\ndef go():\n    return pdfplumber\n",
     ),
     (
         "plant-pypdfium2-import-in-safety",
-        "pdf_toolkit/safety/sneaky.py",
+        "pdf_tooling/safety/sneaky.py",
         "import pypdfium2\n\n\ndef go():\n    return pypdfium2\n",
     ),
     (
         "plant-subprocess-import-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "import subprocess\n\n\ndef go():\n    return subprocess\n",
     ),
     (
         "plant-os-system-in-cli",
-        "pdf_toolkit/cli/sneaky.py",
+        "pdf_tooling/cli/sneaky.py",
         "import os\n\n\ndef go():\n    os.system('ls')\n",
     ),
     (
         "plant-pty-spawn-in-adapters",
-        "pdf_toolkit/adapters/sneaky.py",
+        "pdf_tooling/adapters/sneaky.py",
         "import pty\n\n\ndef go():\n    pty.spawn(['ls'])\n",
     ),
     (
         "plant-forbidden-binary-through-the-helper",
-        "pdf_toolkit/adapters/sneaky.py",
-        "from pdf_toolkit.adapters import subprocess_util\n\n\n"
+        "pdf_tooling/adapters/sneaky.py",
+        "from pdf_tooling.adapters import subprocess_util\n\n\n"
         "def go():\n    return subprocess_util.run(['gs', '-q'], timeout=1)\n",
     ),
     (
         "plant-computed-argv0-through-the-helper",
-        "pdf_toolkit/adapters/sneaky.py",
-        "from pdf_toolkit.adapters import subprocess_util\n\n\n"
+        "pdf_tooling/adapters/sneaky.py",
+        "from pdf_tooling.adapters import subprocess_util\n\n\n"
         "def go(name):\n    return subprocess_util.run([name, '-q'], timeout=1)\n",
     ),
 )
@@ -1258,7 +1258,7 @@ def test_a_planted_section_2_violation_fails_the_walk(
 
 BENIGN_SECTION_2 = '''
 """A module that mentions every forbidden thing without doing any of them."""
-from pdf_toolkit.adapters import subprocess_util
+from pdf_tooling.adapters import subprocess_util
 
 TESSERACT_BIN = "tesseract"
 subprocess = "not the module"
@@ -1281,7 +1281,7 @@ def test_benign_section_2_calls_are_never_flagged() -> None:
     walk and not a text grep -- exactly as its Section 1 counterpart proves for
     the write chokepoint.
     """
-    module = "pdf_toolkit.ops.benign"
+    module = "pdf_tooling.ops.benign"
     found = (
         scan_engine_imports(BENIGN_SECTION_2, module)
         + scan_spawn_surface(BENIGN_SECTION_2, module)
@@ -1314,13 +1314,13 @@ def test_importing_the_port_layer_loads_no_engine() -> None:
     "lazy imports only" rule in `ports/__init__` enforced rather than intended.
     """
     ports = [
-        "pdf_toolkit.ports",
-        "pdf_toolkit.ports.structure",
-        "pdf_toolkit.ports.raster",
-        "pdf_toolkit.ports.compose",
-        "pdf_toolkit.ports.text",
-        "pdf_toolkit.ports.ocr",
-        "pdf_toolkit.ports.office",
+        "pdf_tooling.ports",
+        "pdf_tooling.ports.structure",
+        "pdf_tooling.ports.raster",
+        "pdf_tooling.ports.compose",
+        "pdf_tooling.ports.text",
+        "pdf_tooling.ports.ocr",
+        "pdf_tooling.ports.office",
     ]
     probe = (
         "import sys;"
@@ -1378,14 +1378,14 @@ PROBE_METHODS: Final = frozenset({"probe", "languages"})
 
 #: The sandbox helper, in both spellings a call site may use.
 SANDBOX_HELPER: Final = "probe_env"
-SANDBOX_HELPER_QUALIFIED: Final = "pdf_toolkit.adapters.subprocess_util.probe_env"
+SANDBOX_HELPER_QUALIFIED: Final = "pdf_tooling.adapters.subprocess_util.probe_env"
 
 #: The OPERATIONAL spawns, excluded BY DESIGN (PDF-20 Scope > Out; they belong
 #: to the office/OCR spec). `(module, enclosing function)`.
 OPERATIONAL_SPAWNS: Final[frozenset[tuple[str, str]]] = frozenset(
     {
-        ("pdf_toolkit.adapters.soffice_office", "convert_to_pdf"),
-        ("pdf_toolkit.adapters.tesseract_ocr", "text_layer"),
+        ("pdf_tooling.adapters.soffice_office", "convert_to_pdf"),
+        ("pdf_tooling.adapters.tesseract_ocr", "text_layer"),
     }
 )
 
@@ -1558,7 +1558,7 @@ def test_the_spawn_walk_sees_the_real_tree(spawn_sites: list[SpawnSite]) -> None
 # -- Proof that the AC22 guard fires, in BOTH directions -------------------- #
 
 _FOURTH_PROBE_UNSANDBOXED = """
-from pdf_toolkit.adapters import subprocess_util
+from pdf_tooling.adapters import subprocess_util
 BINARY = "widget"
 class Adapter:
     def probe(self):
@@ -1566,7 +1566,7 @@ class Adapter:
 """
 
 _FOURTH_PROBE_SANDBOXED = """
-from pdf_toolkit.adapters import subprocess_util
+from pdf_tooling.adapters import subprocess_util
 BINARY = "widget"
 class Adapter:
     def probe(self):
@@ -1577,7 +1577,7 @@ class Adapter:
 
 _PROBE_WITH_A_PLAIN_DICT = """
 import os
-from pdf_toolkit.adapters import subprocess_util
+from pdf_tooling.adapters import subprocess_util
 BINARY = "widget"
 class Adapter:
     def probe(self):
@@ -1585,7 +1585,7 @@ class Adapter:
 """
 
 _OPERATIONAL_JOINING_THE_SANDBOX = """
-from pdf_toolkit.adapters import subprocess_util
+from pdf_tooling.adapters import subprocess_util
 BINARY = "soffice"
 class Adapter:
     def convert_to_pdf(self, source):
@@ -1595,7 +1595,7 @@ class Adapter:
 """
 
 _UNDECLARED_SPAWN = """
-from pdf_toolkit.adapters import subprocess_util
+from pdf_tooling.adapters import subprocess_util
 BINARY = "widget"
 class Adapter:
     def do_something_new(self):
@@ -1604,7 +1604,7 @@ class Adapter:
 
 
 def test_the_probe_sandbox_guard_fires_on_a_fourth_unsandboxed_probe() -> None:
-    module = "pdf_toolkit.adapters.widget"
+    module = "pdf_tooling.adapters.widget"
     found = probe_sandbox_violations(scan_spawn_sites(_FOURTH_PROBE_UNSANDBOXED, module))
     assert found, "a fourth probe spawn without the sandbox was not caught"
     assert found[0].kind == KIND_PROBE_SANDBOX
@@ -1618,7 +1618,7 @@ def test_the_probe_sandbox_guard_refuses_an_arbitrary_env() -> None:
     environment whose `$HOME` the probe must not be able to write through.
     """
     found = probe_sandbox_violations(
-        scan_spawn_sites(_PROBE_WITH_A_PLAIN_DICT, "pdf_toolkit.adapters.widget")
+        scan_spawn_sites(_PROBE_WITH_A_PLAIN_DICT, "pdf_tooling.adapters.widget")
     )
     assert found, "a probe passing an arbitrary env was accepted as sandboxed"
 
@@ -1627,12 +1627,12 @@ def test_the_exclusion_is_asserted_in_the_other_direction_too() -> None:
     """An operational site may not quietly join the probe sandbox, and a new
     spawn may not appear in neither set."""
     joined = probe_sandbox_violations(
-        scan_spawn_sites(_OPERATIONAL_JOINING_THE_SANDBOX, "pdf_toolkit.adapters.soffice_office"),
-        operational=frozenset({("pdf_toolkit.adapters.soffice_office", "convert_to_pdf")}),
+        scan_spawn_sites(_OPERATIONAL_JOINING_THE_SANDBOX, "pdf_tooling.adapters.soffice_office"),
+        operational=frozenset({("pdf_tooling.adapters.soffice_office", "convert_to_pdf")}),
     )
     assert joined and "joined the probe sandbox" in joined[0].detail
     undeclared = probe_sandbox_violations(
-        scan_spawn_sites(_UNDECLARED_SPAWN, "pdf_toolkit.adapters.widget")
+        scan_spawn_sites(_UNDECLARED_SPAWN, "pdf_tooling.adapters.widget")
     )
     assert undeclared and "neither a declared probe" in undeclared[0].detail
 
@@ -1652,7 +1652,7 @@ def test_the_exclusion_is_asserted_in_the_other_direction_too() -> None:
 # --------------------------------------------------------------------------- #
 
 #: L1 -- the only package permitted to import the CLI framework.
-CLI_PACKAGE: Final = "pdf_toolkit.cli"
+CLI_PACKAGE: Final = "pdf_tooling.cli"
 
 #: `click` is checked even though nothing in this codebase can literally
 #: `import click` today -- the installed Typer vendors its own copy
@@ -1718,17 +1718,17 @@ def test_the_cli_package_actually_imports_typer() -> None:
 PLANTED_SECTION_3: Final = (
     (
         "plant-typer-import-in-ops",
-        "pdf_toolkit/ops/sneaky.py",
+        "pdf_tooling/ops/sneaky.py",
         "import typer\n\n\ndef go():\n    return typer\n",
     ),
     (
         "plant-typer-from-import-in-safety",
-        "pdf_toolkit/safety/sneaky.py",
+        "pdf_tooling/safety/sneaky.py",
         "from typer import Typer\n\n\ndef go():\n    return Typer\n",
     ),
     (
         "plant-click-import-in-ports",
-        "pdf_toolkit/ports/sneaky.py",
+        "pdf_tooling/ports/sneaky.py",
         "import click\n\n\ndef go():\n    return click\n",
     ),
 )
@@ -1773,7 +1773,7 @@ def test_benign_section_3_mentions_are_never_flagged() -> None:
     is not an import -- the mechanized proof that Section 3 is an AST walk and
     not a text grep, matching Sections 1 and 2's own negative-control
     discipline."""
-    found = scan_cli_framework_imports(BENIGN_SECTION_3, "pdf_toolkit.ops.benign")
+    found = scan_cli_framework_imports(BENIGN_SECTION_3, "pdf_tooling.ops.benign")
     assert found == [], f"false positives: {[str(item) for item in found]}"
 
 
@@ -1929,8 +1929,8 @@ def test_the_walk_actually_finds_the_confirmation_call_sites() -> None:
 PLANTED_SECTION_4: Final = (
     (
         "plant-the-original-b093-guard",
-        "pdf_toolkit/cli/cmd_sneaky.py",
-        "from pdf_toolkit.safety.confirm import require_confirmation\n\n\n"
+        "pdf_tooling/cli/cmd_sneaky.py",
+        "from pdf_tooling.safety.confirm import require_confirmation\n\n\n"
         "def go(config):\n"
         "    if not config.dry_run and config.in_place:\n"
         "        require_confirmation(config.safety, input_count=2, in_place=True,\n"
@@ -1938,8 +1938,8 @@ PLANTED_SECTION_4: Final = (
     ),
     (
         "plant-a-nested-guard",
-        "pdf_toolkit/cli/cmd_nested.py",
-        "from pdf_toolkit.safety import confirm\n\n\n"
+        "pdf_tooling/cli/cmd_nested.py",
+        "from pdf_tooling.safety import confirm\n\n\n"
         "def go(config):\n"
         "    if config.in_place:\n"
         "        if config.dry_run:\n"
@@ -1950,16 +1950,16 @@ PLANTED_SECTION_4: Final = (
     ),
     (
         "plant-a-short-circuit-guard",
-        "pdf_toolkit/cli/cmd_shortcircuit.py",
-        "from pdf_toolkit.safety.confirm import require_confirmation\n\n\n"
+        "pdf_tooling/cli/cmd_shortcircuit.py",
+        "from pdf_tooling.safety.confirm import require_confirmation\n\n\n"
         "def go(cfg):\n"
         "    cfg.dry_run or require_confirmation(cfg.safety, input_count=2,\n"
         "                                        in_place=True, rerun_hint='x')\n",
     ),
     (
         "plant-a-ternary-guard",
-        "pdf_toolkit/cli/cmd_ternary.py",
-        "from pdf_toolkit.safety.confirm import require_confirmation\n\n\n"
+        "pdf_tooling/cli/cmd_ternary.py",
+        "from pdf_tooling.safety.confirm import require_confirmation\n\n\n"
         "def go(policy, cfg):\n"
         "    return None if policy.dry_run else require_confirmation(\n"
         "        policy, input_count=2, in_place=True, rerun_hint='x')\n",
@@ -1999,7 +1999,7 @@ BENIGN_SECTION_4 = '''
 `if not config.dry_run and config.in_place:` in prose is not a guard.
 """
 
-from pdf_toolkit.safety.confirm import require_confirmation
+from pdf_tooling.safety.confirm import require_confirmation
 
 
 def go(config):
@@ -2017,7 +2017,7 @@ def test_benign_section_4_mentions_are_never_flagged() -> None:
     a docstring, are not bypasses -- the mechanized proof that Section 4 is an
     AST walk and not a text grep, matching Sections 1-3's negative-control
     discipline."""
-    found = scan_dry_run_bypass(BENIGN_SECTION_4, "pdf_toolkit.cli.cmd_benign")
+    found = scan_dry_run_bypass(BENIGN_SECTION_4, "pdf_tooling.cli.cmd_benign")
     assert found == [], f"false positives: {[str(item) for item in found]}"
 
 
@@ -2047,44 +2047,44 @@ GATE_EXEMPT: Final[frozenset[tuple[str, str]]]
 GATE_EXEMPT = frozenset(
     {
         # reason: non-producing. `version` writes nothing and takes no input.
-        ("pdf_toolkit.cli.cmd_version", "non-producing"),
+        ("pdf_tooling.cli.cmd_version", "non-producing"),
         # reason: non-producing. `doctor` reports engine availability.
         # (Its `--dry-run` IMPURITY is a separate finding -- PDF-19's
         # README.md:74 census -- and is PDF-20's to characterize, B-075/B-100.)
-        ("pdf_toolkit.cli.cmd_doctor", "non-producing"),
+        ("pdf_tooling.cli.cmd_doctor", "non-producing"),
         # reason: non-producing. `info` reads and reports.
-        ("pdf_toolkit.cli.cmd_info", "non-producing"),
+        ("pdf_tooling.cli.cmd_info", "non-producing"),
         # reason: grouping parent only; it defines no verb callback of its own.
-        ("pdf_toolkit.cli.cmd_meta", "grouping parent"),
+        ("pdf_tooling.cli.cmd_meta", "grouping parent"),
         # reason: non-producing. `meta get` reads the document information
         # dictionary; the mutating half is `meta set`, which DOES gate.
-        ("pdf_toolkit.cli.cmd_meta_get", "non-producing"),
+        ("pdf_tooling.cli.cmd_meta_get", "non-producing"),
         # reason: single-input ({PDF}), so `bulk = input_count > 1` is
         # unreachable and the gate could never fire.
-        ("pdf_toolkit.cli.cmd_permissions", "single-input"),
+        ("pdf_tooling.cli.cmd_permissions", "single-input"),
         # reason: single-input ({PDF}) producer. Same argument as permissions:
         # `split` fans one document out to many outputs, never many inputs in.
-        ("pdf_toolkit.cli.cmd_split", "single-input"),
+        ("pdf_tooling.cli.cmd_split", "single-input"),
         # reason: creates from {TEXT}, never from existing PDFs; a single
         # `--output` destination, protected by no-clobber rather than by a gate.
-        ("pdf_toolkit.cli.cmd_create", "non-pdf-input"),
+        ("pdf_tooling.cli.cmd_create", "non-pdf-input"),
         # reason: B-022 == B-045 -- OPEN. `{PDF...}` multi-input producer
         # consuming output-directory flags, so `bulk` IS reachable. Whether an
         # output-shaped producer is "destructive" is the deferred question.
-        ("pdf_toolkit.cli.cmd_extract", "B-022 == B-045 (deferred)"),
+        ("pdf_tooling.cli.cmd_extract", "B-022 == B-045 (deferred)"),
         # reason: B-022 == B-045 -- OPEN. Same shape as extract.
-        ("pdf_toolkit.cli.cmd_rasterize", "B-022 == B-045 (deferred)"),
+        ("pdf_tooling.cli.cmd_rasterize", "B-022 == B-045 (deferred)"),
         # reason: B-022 == B-045 -- OPEN. Same shape as extract.
-        ("pdf_toolkit.cli.cmd_tables", "B-022 == B-045 (deferred)"),
+        ("pdf_tooling.cli.cmd_tables", "B-022 == B-045 (deferred)"),
         # reason: B-022 == B-045 -- OPEN. Same shape as extract.
-        ("pdf_toolkit.cli.cmd_text", "B-022 == B-045 (deferred)"),
+        ("pdf_tooling.cli.cmd_text", "B-022 == B-045 (deferred)"),
     }
 )
 
 
 def _cli_command_modules(root: Path) -> list[str]:
     """Every `cli/cmd_*.py` module under *root*, dotted."""
-    cli = root / "pdf_toolkit" / "cli"
+    cli = root / "pdf_tooling" / "cli"
     return sorted(module_name(path, root) for path in cli.glob("cmd_*.py"))
 
 
@@ -2102,7 +2102,7 @@ def test_every_cli_command_either_gates_or_is_exempt_with_a_reason() -> None:
 
     Red (observed, PDF-19): delete the `require_confirmation(...)` call from
     `cli/cmd_delete.py` in a scratch copy of `src/` and this fails naming
-    `pdf_toolkit.cli.cmd_delete`.
+    `pdf_tooling.cli.cmd_delete`.
     """
     unaccounted, _ = gate_reachability(SRC)
     assert unaccounted == [], (
@@ -2141,7 +2141,7 @@ def test_the_gate_reachability_helper_actually_finds_the_modules() -> None:
     one level down."""
     modules = _cli_command_modules(SRC)
     assert len(modules) >= 20, f"only {len(modules)} cli/cmd_*.py module(s) found"
-    assert "pdf_toolkit.cli.cmd_delete" in modules
+    assert "pdf_tooling.cli.cmd_delete" in modules
 
 
 # --------------------------------------------------------------------------- #
@@ -2228,13 +2228,13 @@ def scan_local_refusal_names(source: str, module: str) -> list[Boundary]:
 
 
 def scan_ops_local_refusal_names(root: Path) -> list[Boundary]:
-    """Every Section 5 finding under ``root/pdf_toolkit/ops``.
+    """Every Section 5 finding under ``root/pdf_tooling/ops``.
 
     *root* is the ``src/`` directory to scan -- either :data:`SRC` itself or a
     scratch copy of it, mirroring every other section's ``scan_*(root)``
     shape.
     """
-    ops_root = root / "pdf_toolkit" / "ops"
+    ops_root = root / "pdf_tooling" / "ops"
     found: list[Boundary] = []
     for path in iter_python_files(ops_root):
         module = module_name(path, root)
@@ -2255,29 +2255,29 @@ def test_no_ops_module_names_a_filesystem_tier_refusal_class() -> None:
 def test_the_ops_package_actually_contains_python_files() -> None:
     """Non-vacuity. A green Section 5 over zero files proves nothing -- the
     same trap every other section's own non-vacuity test exists to catch."""
-    files = iter_python_files(SRC / "pdf_toolkit" / "ops")
+    files = iter_python_files(SRC / "pdf_tooling" / "ops")
     assert len(files) >= 8, f"Section 5 found only {len(files)} file(s) under ops/"
 
 
 PLANTED_SECTION_5: Final = (
     (
         "plant-a-raised-destination-unwritable",
-        "pdf_toolkit/ops/sneaky_refusal.py",
-        "from pdf_toolkit.errors import DestinationUnwritableError\n\n\n"
+        "pdf_tooling/ops/sneaky_refusal.py",
+        "from pdf_tooling.errors import DestinationUnwritableError\n\n\n"
         "def go(target):\n"
         "    raise DestinationUnwritableError('nope', path=str(target))\n",
     ),
     (
         "plant-a-bare-target-exists-import",
-        "pdf_toolkit/ops/sneaky_import.py",
-        "from pdf_toolkit.errors import TargetExistsError\n\n\n"
+        "pdf_tooling/ops/sneaky_import.py",
+        "from pdf_tooling.errors import TargetExistsError\n\n\n"
         "def check(refusal):\n"
         "    return isinstance(refusal, TargetExistsError)\n",
     ),
     (
         "plant-a-qualified-reference",
-        "pdf_toolkit/ops/sneaky_qualified.py",
-        "from pdf_toolkit import errors\n\n\n"
+        "pdf_tooling/ops/sneaky_qualified.py",
+        "from pdf_tooling import errors\n\n\n"
         "def label(refusal):\n"
         "    return type(refusal) is errors.DestinationUnwritableError\n",
     ),
@@ -2288,8 +2288,8 @@ PLANTED_SECTION_5: Final = (
     # Section 5 tells a raise from prose for the new name too.
     (
         "plant-a-raised-backup-exists",
-        "pdf_toolkit/ops/sneaky_sidecar.py",
-        "from pdf_toolkit.errors import BackupExistsError\n\n\n"
+        "pdf_tooling/ops/sneaky_sidecar.py",
+        "from pdf_tooling.errors import BackupExistsError\n\n\n"
         "def go(sidecar):\n"
         "    raise BackupExistsError('nope', path=str(sidecar))\n",
     ),
@@ -2328,7 +2328,7 @@ mentioned here only in prose, exactly the way this docstring does it right now
 mentions the third one for real.
 """
 
-from pdf_toolkit.safety.atomic import plan_filesystem
+from pdf_tooling.safety.atomic import plan_filesystem
 
 
 def go(targets, out_dir, policy):
@@ -2344,12 +2344,12 @@ def test_benign_section_5_mentions_are_never_flagged() -> None:
     of `plan.refusal`, are not violations -- the mechanized proof that Section 5
     is an AST walk and not a text grep, matching Sections 1-4's negative-control
     discipline."""
-    found = scan_local_refusal_names(BENIGN_SECTION_5, "pdf_toolkit.ops.benign")
+    found = scan_local_refusal_names(BENIGN_SECTION_5, "pdf_tooling.ops.benign")
     assert found == [], f"false positives: {[str(item) for item in found]}"
 
 
 # --------------------------------------------------------------------------- #
-# Section 6 -- what `pdftoolkit --help` IMPORTS (PDF-29)
+# Section 6 -- what `pdftooling --help` IMPORTS (PDF-29)
 #
 # APPENDED, never rewritten; Section 6 is the next free integer at this commit
 # (1 PDF-04, 2 PDF-05, 3 PDF-06, 4 B-093, 5 PDF-20), taken by re-reading the
@@ -2395,7 +2395,7 @@ def test_benign_section_5_mentions_are_never_flagged() -> None:
 #   * **PIL** is eager, dragging in `defusedxml`. Pillow is deliberately NOT an
 #     engine module (`test_pillow_is_deliberately_not_an_engine_module`), so
 #     nothing shipped before this section could see it. The single module-scope
-#     `PIL` import site under `src/` is **`pdf_toolkit/ops/compose.py:90`**,
+#     `PIL` import site under `src/` is **`pdf_tooling/ops/compose.py:90`**,
 #     reached from `--help` via `cli.main` -> `cli.cmd_compose` -> `ops.compose`.
 #     That site is DERIVED, not transcribed, by
 #     `test_pil_has_exactly_one_module_scope_import_site_under_src` below --
@@ -2403,11 +2403,11 @@ def test_benign_section_5_mentions_are_never_flagged() -> None:
 #     `PIL` token at all and never did (`git log -S PIL -- .../cli/common.py` is
 #     empty). A comment is one more hand-maintained claim; this one is now a
 #     test.
-#   * **email** is eager, but NOT via `pdf_toolkit.ops.textract` -- that module
+#   * **email** is eager, but NOT via `pdf_tooling.ops.textract` -- that module
 #     contains no `email` token at any indentation, and never did. Measured with
 #     `python -X importtime`, `email` and `email.message` arrive under
 #     `importlib.metadata` (through `importlib.metadata._adapters`), which
-#     `pdf_toolkit.cli.cmd_version` imports. The cause is named here only
+#     `pdf_tooling.cli.cmd_version` imports. The cause is named here only
 #     because it was measured; the previous attribution was not.
 #   * `concurrent.futures` pulls in **multiprocessing**, which pulls in
 #     **socket**.
@@ -2434,7 +2434,7 @@ class ModuleImport(NamedTuple):
 
 
 class HelpImports(NamedTuple):
-    """One `pdftoolkit --help` run's import census -- the names AND the times."""
+    """One `pdftooling --help` run's import census -- the names AND the times."""
 
     returncode: int
     total: int
@@ -2451,9 +2451,9 @@ class HelpImports(NamedTuple):
 
 #: The console script under test. Deliberately the venv's own, by path: the
 #: three-arm fallback in tests/test_cli_spine.py can resolve a globally
-#: installed (possibly STALE) `pdftoolkit`, or the `-m` bootstrap, and an import
+#: installed (possibly STALE) `pdftooling`, or the `-m` bootstrap, and an import
 #: census taken from a different build is a census of a different program (C-4).
-VENV_CONSOLE_SCRIPT: Final = REPO_ROOT / ".venv" / "bin" / "pdftoolkit"
+VENV_CONSOLE_SCRIPT: Final = REPO_ROOT / ".venv" / "bin" / "pdftooling"
 
 #: Non-stdlib top-level packages `--help` is permitted to import, asserted as a
 #: SUPERSET (a new name reddens; a name that disappears does not). The asymmetry
@@ -2469,11 +2469,11 @@ VENV_CONSOLE_SCRIPT: Final = REPO_ROOT / ".venv" / "bin" / "pdftoolkit"
 #: why this is a superset check and not an equality one.
 HELP_IMPORT_ALLOWLIST: Final = frozenset(
     {
-        "pdf_toolkit",
+        "pdf_tooling",
         "typer",
         "annotated_doc",  # typer's own
         "shellingham",  # typer's own
-        "PIL",  # FINDING: eager, via pdf_toolkit.ops.compose (measured)
+        "PIL",  # FINDING: eager, via pdf_tooling.ops.compose (measured)
         "defusedxml",  # FINDING: eager, dragged in by PIL
         "org",  # 3.11 only: xml.sax probing for Jython
         "sitecustomize",  # venv plumbing, not a product import
@@ -2504,7 +2504,7 @@ HELP_MODULE_CEILING: Final = 320
 # that `_importtime_census` already collects. They are here because the set-half
 # above is blind to latency BY CONSTRUCTION, and that blindness was measured
 # rather than argued: a module-scope `time.sleep(0.5)` in
-# `src/pdf_toolkit/cli/common.py` moves `pdftoolkit --help` from 227.0 ms to
+# `src/pdf_tooling/cli/common.py` moves `pdftooling --help` from 227.0 ms to
 # 728.7 ms (min-of-5, quiet host) while the attributable module count stays at
 # **282 -- a delta of exactly 0** -- and every assertion above stays green.
 #
@@ -2526,7 +2526,7 @@ HELP_MODULE_CEILING: Final = 320
 #: No single attributable module's import SELF time may exceed this.
 #:
 #: STATISTIC: max over modules of per-module self time, from `-X importtime`,
-#:   baseline-subtracted, one `pdftoolkit --help` run.
+#:   baseline-subtracted, one `pdftooling --help` run.
 #: DATE: 2026-09-05
 #: COMMIT: b175d10 (measured on the working tree at that commit)
 #: HOST: station-01, 8 logical CPUs, Linux. Verified quiet at the campaign's
@@ -2550,7 +2550,7 @@ HELP_MODULE_CEILING: Final = 320
 #: FACTOR: 5.18x the `-n auto` p95 (48292), rounded up to a round number. That
 #: leaves 4.15x over the quiet-arm max and 3.32x over the loaded-arm max.
 #: SEPARATION: the `time.sleep(0.5)` plant lands 504504 us in
-#: `pdf_toolkit.cli.common`'s self column (3300 us unplanted), which EXCEEDS
+#: `pdf_tooling.cli.common`'s self column (3300 us unplanted), which EXCEEDS
 #: this ceiling by 2.02x. The plant is caught with two clear factors on either
 #: side, which is the whole reason this statistic and not the total below.
 MODULE_SELF_US_CEILING: Final = 250_000
@@ -2728,14 +2728,14 @@ def test_the_help_import_census_is_not_vacuous(help_imports: HelpImports) -> Non
     prefix of the real one and every assertion below would pass by measuring
     almost nothing.
     """
-    assert help_imports.returncode == 0, "`pdftoolkit --help` did not exit 0 under the probe"
+    assert help_imports.returncode == 0, "`pdftooling --help` did not exit 0 under the probe"
     assert help_imports.total >= 120, (
         f"only {help_imports.total} module(s) attributable -- the probe did not reach the "
         "real help path, so nothing below is measuring the product. (120, not 280: the "
         "baseline subtraction legitimately credits modules to the environment under "
         "`make cover`, so the floor has to sit well below the uninstrumented reading.)"
     )
-    assert {"pdf_toolkit", "typer"} <= help_imports.non_stdlib, (
+    assert {"pdf_tooling", "typer"} <= help_imports.non_stdlib, (
         f"the census is missing the CLI itself: {sorted(help_imports.non_stdlib)}"
     )
 
@@ -2749,7 +2749,7 @@ def test_help_imports_no_third_party_package_outside_the_pin(help_imports: HelpI
     """
     unexpected = sorted(help_imports.non_stdlib - HELP_IMPORT_ALLOWLIST)
     assert unexpected == [], (
-        f"`pdftoolkit --help` now eagerly imports {unexpected}, which is not in this "
+        f"`pdftooling --help` now eagerly imports {unexpected}, which is not in this "
         "section's pin. Startup latency in a Python CLI is dominated by module import, so "
         "this is a startup regression whatever the wall-clock number happens to say on the "
         "host you are reading this on. Either make the import lazy (import it inside the "
@@ -2768,7 +2768,7 @@ def test_help_import_count_stays_under_the_ceiling(help_imports: HelpImports) ->
     of modules. The count is what sees them.
     """
     assert help_imports.total <= HELP_MODULE_CEILING, (
-        f"`pdftoolkit --help` imports {help_imports.total} modules, over the "
+        f"`pdftooling --help` imports {help_imports.total} modules, over the "
         f"{HELP_MODULE_CEILING} ceiling (measured 280 at 3.12.13 / 282 at 3.11.15 when this "
         "was pinned). Find what became eager with "
         f"`python -X importtime {VENV_CONSOLE_SCRIPT} --help`."
@@ -2796,10 +2796,10 @@ def _entry_with_a_planted_eager_import(tmp_path: Path) -> Path:
 
     **DELIBERATE DEVIATION, and the reason is a coverage floor.** The obvious
     plant is a full `src/` copy with the import added to `cli/main.py`, reached
-    by shadowing `pdf_toolkit` on `PYTHONPATH` -- and that is what this control
+    by shadowing `pdf_tooling` on `PYTHONPATH` -- and that is what this control
     did first. It was **observed breaking the gate**: under
     `[tool.coverage.run] patch = ["subprocess"]` the probe's child IS measured,
-    coverage matches `source = ["pdf_toolkit"]` by module name, and every file
+    coverage matches `source = ["pdf_tooling"]` by module name, and every file
     of the planted copy entered the report as almost entirely unexecuted. The
     total fell from ~94% to **63.24%** and `make ci` went red on
     `--cov-fail-under=85` with 2623 tests passing.
@@ -2820,13 +2820,13 @@ def _entry_with_a_planted_eager_import(tmp_path: Path) -> Path:
     imports made deep INSIDE product modules is not assumed either -- it is
     asserted directly by
     `test_the_census_sees_imports_made_inside_product_modules`, which pins
-    `PIL`, imported by `pdf_toolkit.cli.common` and by nothing this control
+    `PIL`, imported by `pdf_tooling.cli.common` and by nothing this control
     writes.
     """
     entry = tmp_path / "planted_entry.py"
     entry.write_text(
         f"import {PLANTED_EAGER_IMPORT}  # planted, module scope\n"
-        "from pdf_toolkit.cli.main import main\n"
+        "from pdf_tooling.cli.main import main\n"
         "main()\n"
     )
     return entry
@@ -2837,20 +2837,20 @@ def test_the_census_sees_imports_made_inside_product_modules(
 ) -> None:
     """The half the entry-point plant cannot show, asserted directly.
 
-    `PIL` is imported by `pdf_toolkit.ops.compose` -- three levels inside the
+    `PIL` is imported by `pdf_tooling.ops.compose` -- three levels inside the
     product, by nothing any test writes. Its presence in the census is the proof
     that this section sees eager imports made INSIDE product modules and not
     merely ones written at the entry point.
 
     **The module named above was corrected by PDF-42.** This docstring and the
-    failure message below said `pdf_toolkit.cli.common`, which has never
+    failure message below said `pdf_tooling.cli.common`, which has never
     contained a `PIL` token. The assertion was always right; only its
     explanation was wrong, and a wrong explanation costs something precisely
     here: the message tells a future reader which file to look at, and it was
     telling them to look at a file with nothing in it.
     """
     assert "PIL" in help_imports.non_stdlib, (
-        "PIL is no longer in the census. If `pdf_toolkit/ops/compose.py:90` stopped "
+        "PIL is no longer in the census. If `pdf_tooling/ops/compose.py:90` stopped "
         "importing it eagerly that is GOOD NEWS and this assertion should be re-pointed at "
         "whatever product-internal eager import remains -- but it must be re-pointed, not "
         "deleted, or the planted-entry control below is the only proof this section has "
@@ -2948,7 +2948,7 @@ def test_total_import_self_time_stays_under_the_ceiling(help_imports: HelpImport
     plant -- `test_no_single_module_costs_more_than_the_self_time_ceiling` is.
     """
     assert help_imports.total_self_us <= TOTAL_IMPORT_US_CEILING, (
-        f"`pdftoolkit --help` spends {help_imports.total_self_us} us of import self time, "
+        f"`pdftooling --help` spends {help_imports.total_self_us} us of import self time, "
         f"over the {TOTAL_IMPORT_US_CEILING} us ceiling. This is a COARSE net: if it is red "
         "the growth is large. Check the per-module view first "
         f"(`python -X importtime {VENV_CONSOLE_SCRIPT} --help`)."
@@ -2983,7 +2983,7 @@ def test_the_timing_census_is_not_vacuous(help_imports: HelpImports) -> None:
     # CPython emits repeat rows. Measured at b175d10: 282 rows over 273 distinct
     # names -- `nt` appears SIX times and `_winapi` twice (Windows-only modules
     # CPython probes for and fails to import, logging each attempt), and
-    # `pdf_toolkit.safety.policy`, `typer._click.exceptions` and `_elementtree`
+    # `pdf_tooling.safety.policy`, `typer._click.exceptions` and `_elementtree`
     # each appear twice (re-entered while already in `sys.modules`, so the second
     # row is nearly free). So the mapping is expected to be SMALLER, never larger,
     # and the repeated rows are SUMMED into their module's entry rather than
@@ -3029,14 +3029,14 @@ def test_the_ceilings_are_one_sided_and_an_improvement_is_never_a_red() -> None:
     that reddened on an improvement would be widened or deleted by the first
     person to improve startup latency.
     """
-    halved = {"pdf_toolkit.models": 10_000, "typing": 5_000}
+    halved = {"pdf_tooling.models": 10_000, "typing": 5_000}
     assert max(halved.values()) <= MODULE_SELF_US_CEILING
     assert sum(halved.values()) <= TOTAL_IMPORT_US_CEILING
 
     # ...and the same shape with one module raised past the ceiling DOES redden.
-    raised = {**halved, "pdf_toolkit.cli.common": MODULE_SELF_US_CEILING + 1}
+    raised = {**halved, "pdf_tooling.cli.common": MODULE_SELF_US_CEILING + 1}
     over = [name for name, cost in raised.items() if cost > MODULE_SELF_US_CEILING]
-    assert over == ["pdf_toolkit.cli.common"], (
+    assert over == ["pdf_tooling.cli.common"], (
         "the per-module ceiling did not notice a module raised one microsecond past it"
     )
 
@@ -3045,7 +3045,7 @@ def test_the_ceilings_are_one_sided_and_an_improvement_is_never_a_red() -> None:
 #: than transcribed. PDF-42 found the previous attribution (`cli/common.py`)
 #: false, and false in a place that cost something: it was in the failure
 #: message that tells a future reader which file to go and look at.
-PIL_IMPORT_SITE: Final = "pdf_toolkit/ops/compose.py"
+PIL_IMPORT_SITE: Final = "pdf_tooling/ops/compose.py"
 
 
 def module_scope_pil_import_sites() -> list[str]:
@@ -3080,7 +3080,7 @@ def test_pil_has_exactly_one_module_scope_import_site_under_src() -> None:
     `PDF-30`'s closure rule: *a claim about this repository is derived, gated, or
     absent.* The claim "PIL is eager via <module>" was none of those for the
     whole life of Section 6, and it was wrong the entire time -- not rotted,
-    wrong when written (`git log -S PIL -- src/pdf_toolkit/cli/common.py` is
+    wrong when written (`git log -S PIL -- src/pdf_tooling/cli/common.py` is
     empty). Deriving it means the next person to make `PIL` lazy is sent to the
     right file by a test rather than to the wrong one by a comment.
     """

@@ -12,7 +12,7 @@ A NAMED DEVIATION FROM THE LITERAL DESIGN — `is_mutating`
 -----------------------------------------------------------
 Design intended `is_mutating` to be derived from whether a verb's own click
 command declares `-O/--output`, `--out-dir` or `--in-place`. That signal does
-not exist in this codebase: `pdf_toolkit.cli.common.global_options` attaches
+not exist in this codebase: `pdf_tooling.cli.common.global_options` attaches
 the **entire** global flag block — including all three of those — to *every*
 verb uniformly (`PLAN.md` §4.2), and a verb is structurally forbidden from
 redeclaring any of those names on its own signature (`_attach()` raises
@@ -25,7 +25,7 @@ hypothetical one (see this spec's Implementation Log).
 
 The working predicate is still fully structural and still classifies a new
 verb automatically, without a hand-maintained per-verb list: it walks the
-verb's own callback module and every `pdf_toolkit.*` module it imports,
+verb's own callback module and every `pdf_tooling.*` module it imports,
 transitively and bounded, for a reference to `AtomicWriter` — the one write
 chokepoint (`PLAN.md` §5.2, `PDF-04`). A verb that never reaches the
 chokepoint cannot mutate anything the safety spine protects, which is what
@@ -38,7 +38,7 @@ registry or a live enum, never typed beside it:
 
 * ``discover_verbs()`` — the verb dimension, walked off the live Typer tree.
 * ``OUTPUT_FLAGS`` — the destination-flag dimension, RE-EXPORTED from
-  ``pdf_toolkit.cli.common`` so a consumer has one import to make. It is the
+  ``pdf_tooling.cli.common`` so a consumer has one import to make. It is the
   product's own tuple, not a copy: there is nothing here that can drift from it.
 * ``output_formats()`` — every member of the live ``OutputFormat`` StrEnum.
   Derived from the enum; a renderer added there joins every consuming matrix
@@ -75,10 +75,10 @@ from typing import Final
 
 import typer
 
-from pdf_toolkit.cli import common as _common
-from pdf_toolkit.cli.common import OUTPUT_FLAGS
-from pdf_toolkit.cli.main import PROG_NAME, app
-from pdf_toolkit.output import OutputFormat
+from pdf_tooling.cli import common as _common
+from pdf_tooling.cli.common import OUTPUT_FLAGS
+from pdf_tooling.cli.main import PROG_NAME, app
+from pdf_tooling.output import OutputFormat
 
 __all__ = [
     "INVOCATIONS",
@@ -185,7 +185,7 @@ class Invocation:
     failed. Two rows set it today (``compress``, B-079; ``ocr``, PDF-15), not
     one."""
     requires_engine: str | None = None
-    """A port name from ``pdf_toolkit.ports.PORTS`` (e.g. ``"OfficeConverter"``)
+    """A port name from ``pdf_tooling.ports.PORTS`` (e.g. ``"OfficeConverter"``)
     that this verb's registered invocation genuinely needs to REACH exit 0,
     or ``None`` (the default, and every entry but ``convert`` today).
 
@@ -201,7 +201,7 @@ class Invocation:
 
     Resolved the same way `doctor` and `tests/conftest.py`'s own
     ``@pytest.mark.requires`` marker resolve an engine --
-    ``pdf_toolkit.ports.resolve(port).available`` -- never an independent
+    ``pdf_tooling.ports.resolve(port).available`` -- never an independent
     ``shutil.which`` and never an env var or hard-coded platform check. When
     unavailable, the consuming test SKIPS with a reason naming the missing
     engine (never passes vacuously); when available, the row runs for real,
@@ -211,7 +211,7 @@ class Invocation:
 
 
 def _dotted_to_path(dotted: str) -> Path | None:
-    """``pdf_toolkit.cli.cmd_info`` -> its file, or ``None`` if it is not local."""
+    """``pdf_tooling.cli.cmd_info`` -> its file, or ``None`` if it is not local."""
     parts = dotted.split(".")
     candidate = SRC.joinpath(*parts).with_suffix(".py")
     if candidate.is_file():
@@ -223,7 +223,7 @@ def _dotted_to_path(dotted: str) -> Path | None:
 
 
 def _imports_and_references(path: Path) -> tuple[set[str], bool]:
-    """One module's own `pdf_toolkit.*` imports, and whether it names *AtomicWriter*."""
+    """One module's own `pdf_tooling.*` imports, and whether it names *AtomicWriter*."""
     tree = ast.parse(path.read_text(), filename=str(path))
     imported: set[str] = set()
     references_writer = False
@@ -231,14 +231,14 @@ def _imports_and_references(path: Path) -> tuple[set[str], bool]:
         if (
             isinstance(node, ast.ImportFrom)
             and node.module
-            and node.module.startswith("pdf_toolkit")
+            and node.module.startswith("pdf_tooling")
         ):
             imported.add(node.module)
             if any(alias.name == _ATOMIC_WRITER_NAME for alias in node.names):
                 references_writer = True
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.startswith("pdf_toolkit"):
+                if alias.name.startswith("pdf_tooling"):
                     imported.add(alias.name)
         elif isinstance(node, ast.Name) and node.id == _ATOMIC_WRITER_NAME:
             references_writer = True
@@ -248,7 +248,7 @@ def _imports_and_references(path: Path) -> tuple[set[str], bool]:
 
 
 def reaches_atomic_writer(entry_module: str, *, max_hops: int = _MAX_IMPORT_HOPS) -> bool:
-    """Whether *entry_module* reaches the write chokepoint via `pdf_toolkit.*` imports.
+    """Whether *entry_module* reaches the write chokepoint via `pdf_tooling.*` imports.
 
     Pure static analysis (`ast`, never a real import) over the source tree —
     the same style `tests/test_import_boundaries.py` already uses, so this
@@ -449,13 +449,13 @@ def discover_groups(root: object | None = None) -> tuple[tuple[str, ...], ...]:
 
 def console_script() -> list[str]:
     """The argv prefix that runs the installed CLI as a real process."""
-    sibling = Path(sys.executable).parent / "pdftoolkit"
+    sibling = Path(sys.executable).parent / "pdftooling"
     if sibling.exists():
         return [str(sibling)]
-    found = shutil.which("pdftoolkit")
+    found = shutil.which("pdftooling")
     if found:
         return [found]
-    return [sys.executable, "-m", "pdf_toolkit"]
+    return [sys.executable, "-m", "pdf_tooling"]
 
 
 def run_cli(
@@ -905,7 +905,7 @@ def _stamp_invocation(corpus: object, tmp_path: Path) -> list[str]:
 # but the generic contract rows had no way to say so. `INVOCATIONS["convert"]`
 # now declares `requires_engine="OfficeConverter"` (`Invocation`'s own
 # docstring), and `tests/test_cli_contract.py` reads it to SKIP those two
-# checks VISIBLY, by name, whenever `pdf_toolkit.ports.resolve("OfficeConverter")`
+# checks VISIBLY, by name, whenever `pdf_tooling.ports.resolve("OfficeConverter")`
 # is unavailable -- never a silent pass. The CI `engines-present` job is where
 # those two arms are still meaningfully PROVEN for `convert`
 # (`scripts/assert_skips.py --expect-zero` on that job asserts no engine-gated
@@ -1514,7 +1514,7 @@ def output_formats() -> tuple[OutputFormat, ...]:
     """Every member of the live ``OutputFormat`` StrEnum, in declaration order.
 
     DERIVED, never listed: a renderer added to
-    ``src/pdf_toolkit/output/__init__.py`` joins every consuming matrix with
+    ``src/pdf_tooling/output/__init__.py`` joins every consuming matrix with
     zero action from its author. `PDF-22` consumes this rather than building a
     second one (X-157).
     """
@@ -1601,7 +1601,7 @@ def derive_password_file_pairs() -> tuple[tuple[str, str], ...]:
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from pdf_toolkit.cli.common import PASSWORD_FILE_FLAGS
+    from pdf_tooling.cli.common import PASSWORD_FILE_FLAGS
 
     def _probe(verb_name: str) -> list[tuple[str, str]]:
         rendered = run_cli(verb_name, "--help").stdout

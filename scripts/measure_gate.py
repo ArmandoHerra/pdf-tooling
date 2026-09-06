@@ -18,7 +18,7 @@ timings stop being comparable:
 * `interpreter` — on this project's dev host `python3 -V` reports 3.14.4 while
   `uv run python -V` reports 3.12.13. The system Python is **never** recorded.
 * `binary` / `binary_arm` — `tests/test_cli_spine.py::console_script()` has a
-  three-arm fallback, and `make install` can leave a *stale* `pdftoolkit` on
+  three-arm fallback, and `make install` can leave a *stale* `pdftooling` on
   PATH. An unrecorded arm means the number may be from a different bootstrap
   than the one under test.
 * `quiet` / `foreign_processes` — captured **while the foreign processes are
@@ -204,26 +204,26 @@ def resolve_interpreter() -> dict[str, str]:
 
 
 def resolve_console_script(*, strict: bool) -> tuple[str, str]:
-    """(binary, arm) for `pdftoolkit`, mirroring tests/test_cli_spine.py's arms.
+    """(binary, arm) for `pdftooling`, mirroring tests/test_cli_spine.py's arms.
 
     C-4: that helper falls back through `venv-sibling` -> `PATH` -> `-m`, and
-    nothing asserted which arm ran. `make install` puts a `pdftoolkit` on PATH
+    nothing asserted which arm ran. `make install` puts a `pdftooling` on PATH
     that may be a stale build, and the `-m` arm has a measurably different
     bootstrap, so an unrecorded arm means the startup number may not be about
     the binary under test at all. Under ``strict`` (which is what ``--baseline``
     passes) anything but the project venv's own console script is refused.
     """
-    venv_bin = REPO_ROOT / ".venv" / "bin" / "pdftoolkit"
+    venv_bin = REPO_ROOT / ".venv" / "bin" / "pdftooling"
     if venv_bin.exists():
         return str(venv_bin), "venv-sibling"
-    sibling = Path(sys.executable).parent / "pdftoolkit"
+    sibling = Path(sys.executable).parent / "pdftooling"
     if sibling.exists():
         return str(sibling), "interpreter-sibling"
-    found = shutil.which("pdftoolkit")
+    found = shutil.which("pdftooling")
     if found:
         if strict:
             raise MeasurementRefused(
-                f"resolved `pdftoolkit` from PATH ({found}), not from the project venv. "
+                f"resolved `pdftooling` from PATH ({found}), not from the project venv. "
                 "`make install` leaves a globally installed build on PATH that may be "
                 "STALE, so a --baseline recorded from this arm would be a number about "
                 "a different build. Run `uv sync` and re-measure."
@@ -231,11 +231,11 @@ def resolve_console_script(*, strict: bool) -> tuple[str, str]:
         return found, "path"
     if strict:
         raise MeasurementRefused(
-            "no `pdftoolkit` console script resolved; the remaining arm is "
-            "`python -m pdf_toolkit`, whose bootstrap differs measurably from the "
+            "no `pdftooling` console script resolved; the remaining arm is "
+            "`python -m pdf_tooling`, whose bootstrap differs measurably from the "
             "console script's. Refusing to --baseline a different bootstrap."
         )
-    return f"{sys.executable} -m pdf_toolkit", "dash-m"
+    return f"{sys.executable} -m pdf_tooling", "dash-m"
 
 
 def engine_presence() -> dict[str, str | None]:
@@ -442,7 +442,7 @@ def run_help_startup(
             elapsed_ms = (time.perf_counter() - started) * 1000
             if result.returncode != 0:
                 raise MeasurementRefused(
-                    f"`pdftoolkit --help` exited {result.returncode}; a latency figure from a "
+                    f"`pdftooling --help` exited {result.returncode}; a latency figure from a "
                     "failing invocation measures an error path, not startup."
                 )
             samples.append(elapsed_ms)

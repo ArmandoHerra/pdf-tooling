@@ -259,7 +259,7 @@ def assert_pure(*roots: Path | str) -> Iterator[Snapshot]:
 #: **PDF-35 AMENDMENT (2026-09-04) -- the clause above about THIS PRODUCT is now
 #: false, and the LIMIT IS RETAINED ANYWAY.** `ops/procpool.py` pins the render
 #: pool to `spawn` (ruling X-401), and `spawn` binds no AF_UNIX socket at all,
-#: so `pdftoolkit` no longer contributes to this class: the run that failed in
+#: so `pdftooling` no longer contributes to this class: the run that failed in
 #: 33738793820 completes at the same `$TMPDIR` length today. What is retained is
 #: the MECHANISM, because the class is not this product's. It is created
 #: generally by pytest's own `popen-gwN` worker suffixes, and ANY child --

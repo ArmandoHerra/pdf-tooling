@@ -23,10 +23,10 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.errors import AuthError, FailureError, NoInputError, UsageError  # noqa: E402
-from pdf_toolkit.ops.optimize import compress_run, linearize_run, repair_run  # noqa: E402
-from pdf_toolkit.ports.structure import CompressOutcome, ImageXObjectFacts  # noqa: E402
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.errors import AuthError, FailureError, NoInputError, UsageError  # noqa: E402
+from pdf_tooling.ops.optimize import compress_run, linearize_run, repair_run  # noqa: E402
+from pdf_tooling.ports.structure import CompressOutcome, ImageXObjectFacts  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 from pdfium_text import page_texts  # noqa: E402
 
 REPO_ROOT = TESTS_DIR.parent
@@ -157,7 +157,7 @@ def test_ac4_lossless_with_a_lossy_image_pass_is_a_cli_level_refusal() -> None:
 def test_ac4_a_page_count_mismatch_refuses_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, corpus, tmp_path: Path
 ) -> None:
-    from pdf_toolkit.adapters import pikepdf_structure
+    from pdf_tooling.adapters import pikepdf_structure
 
     source = corpus.path("multipage_text")
     target = tmp_path / "target.pdf"
@@ -195,7 +195,7 @@ def test_ac4_a_page_count_mismatch_refuses_and_writes_nothing(
 def test_ac4_a_dct_stream_mismatch_refuses_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, corpus, tmp_path: Path
 ) -> None:
-    from pdf_toolkit.adapters import pikepdf_structure
+    from pdf_tooling.adapters import pikepdf_structure
 
     source = corpus.path("jpeg_page")
     target = tmp_path / "target.pdf"
@@ -294,7 +294,7 @@ def test_ac5_downsample_is_strictly_smaller_than_lossless_only(corpus, tmp_path:
 
 
 def test_ac6_bare_compress_leaves_the_image_inventory_identical(corpus, tmp_path: Path) -> None:
-    from pdf_toolkit.adapters.pikepdf_structure import ADAPTER as pikepdf_adapter
+    from pdf_tooling.adapters.pikepdf_structure import ADAPTER as pikepdf_adapter
 
     source = corpus.path("jpeg_page")
     target = tmp_path / "out.pdf"
@@ -380,10 +380,10 @@ def test_ac7_a_second_compression_pass_reports_a_non_positive_ratio(corpus, tmp_
 
 def test_malformed_fixture_precondition() -> None:
     """D-12.5's escalation rule: `info` must exit 1 on the fixture. Tested
-    here at the port level (never a `pdftoolkit info` subprocess -- that
+    here at the port level (never a `pdftooling info` subprocess -- that
     belongs to `tests/integration/test_optimize_cli.py` if ever needed) via
     the same adapter `info` itself uses."""
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     engine = require_structure()
     with pytest.raises(Exception):  # noqa: B017 - FailureError, asserted structurally below
@@ -418,7 +418,7 @@ def test_ac10_repair_recovers_the_malformed_fixture_to_one_page(tmp_path: Path) 
     target = tmp_path / "fixed.pdf"
     result = repair_run(MALFORMED_PDF, output=target, in_place=False, report=True, policy=policy())
     assert result.exit_code == 0
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     engine = require_structure()
     with engine.open_document(target) as document:

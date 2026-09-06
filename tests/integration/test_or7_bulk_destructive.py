@@ -93,7 +93,7 @@ def _convert_bulk_clobbering(corpus, tmp_path: Path) -> tuple[list[str], list[Pa
     sources = []
     for name in ("or7-convert-a.txt", "or7-convert-b.txt"):
         source = tmp_path / name
-        source.write_text("The quick brown fox jumps over the lazy pdftoolkit.\n")
+        source.write_text("The quick brown fox jumps over the lazy pdftooling.\n")
         sources.append(source)
     out_dir = tmp_path / "or7-convert-out"
     out_dir.mkdir()
@@ -235,8 +235,8 @@ def _ocr_bulk_in_place_needing_the_engine(corpus, tmp_path: Path) -> tuple[list[
     engine demand is genuinely reached — the same reasoning, and the same
     fixture, as `test_or7_engine_absent.py::_ocr_source`.
     """
-    from pdf_toolkit.ops.compose import compose_document, parse_page_size
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.compose import compose_document, parse_page_size
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     seed = tmp_path / "or7-scan-seed.pdf"
     result = compose_document(

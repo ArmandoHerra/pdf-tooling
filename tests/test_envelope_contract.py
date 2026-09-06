@@ -93,9 +93,9 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.adapters.pypdf_structure import _PERMISSION_BITS  # noqa: E402
-from pdf_toolkit.models import SCHEMA_VERSION  # noqa: E402
-from pdf_toolkit.ports.structure import (  # noqa: E402
+from pdf_tooling.adapters.pypdf_structure import _PERMISSION_BITS  # noqa: E402
+from pdf_tooling.models import SCHEMA_VERSION  # noqa: E402
+from pdf_tooling.ports.structure import (  # noqa: E402
     ALWAYS_GRANTED_TOKENS,
     PERMISSION_TOKEN_MAP,
     PERMISSION_TOKENS,
@@ -254,7 +254,7 @@ def _require_engine(verb: str) -> None:
     port = INVOCATIONS[verb].requires_engine
     if port is None:
         return
-    from pdf_toolkit.ports import resolve
+    from pdf_tooling.ports import resolve
 
     if not resolve(port).available:
         pytest.skip(f"{verb}: the {port} engine does not resolve on this host")
@@ -790,7 +790,7 @@ def test_ac10_neither_bespoke_payload_supplies_schema_version_itself() -> None:
     the key, which is what makes the injection LIVE rather than shadowed. If a
     later spec teaches one of them to supply its own, this test reddens and the
     docstring above stops being true — which is the point of pinning it."""
-    from pdf_toolkit.cli import cmd_doctor, cmd_info
+    from pdf_tooling.cli import cmd_doctor, cmd_info
 
     doctor_payload = cmd_doctor.build_payload(strict=False, dry_run=False, root=REPO_ROOT)
     assert "schema_version" not in doctor_payload, (
@@ -855,7 +855,7 @@ def test_ac12_the_render_json_shadowing_mechanism_is_pinned() -> None:
     published envelopes. A test that pins a hazard is how the hazard stops
     being a surprise.
     """
-    from pdf_toolkit.output.json import render_json
+    from pdf_tooling.output.json import render_json
 
     shadowed = json.loads(render_json({"schema_version": 99, "verb": "x"}))
     assert shadowed["schema_version"] == 99, (
@@ -875,7 +875,7 @@ def test_ac12_the_render_ndjson_shadowing_mechanism_is_pinned() -> None:
     each splatted over by `**item`. None is shadowed on any shipped path today
     (AC11 asserts that continuously); the mechanism is pinned here so the first
     attempt is a red rather than a silent overwrite."""
-    from pdf_toolkit.output.json import render_ndjson
+    from pdf_tooling.output.json import render_ndjson
 
     line = json.loads(
         render_ndjson(
@@ -906,7 +906,7 @@ def test_ac12_the_error_envelope_is_not_exposed_to_the_shadowing_at_all() -> Non
     envelope a hazard it never had."""
     import inspect
 
-    from pdf_toolkit.output.json import render_error_json
+    from pdf_tooling.output.json import render_error_json
 
     source = inspect.getsource(render_error_json)
     assert "**" not in source, (
@@ -1020,7 +1020,7 @@ def test_ac16_no_docstring_still_claims_items_is_withheld_from_json() -> None:
     this member's remediation must not create, and it is the one this product
     files most often."""
     sources = {
-        path: (REPO_ROOT / "src" / "pdf_toolkit" / "cli" / path).read_text()
+        path: (REPO_ROOT / "src" / "pdf_tooling" / "cli" / path).read_text()
         for path in ("cmd_doctor.py", "cmd_info.py")
     }
     for path, text in sources.items():

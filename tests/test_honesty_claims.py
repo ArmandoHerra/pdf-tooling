@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SRC = REPO_ROOT / "src" / "pdf_toolkit"
+SRC = REPO_ROOT / "src" / "pdf_tooling"
 
 #: D-12.7 -- verbatim from the spec.
 FORBIDDEN_CLAIM_PATTERNS = [
@@ -185,7 +185,7 @@ _TESTS_DIR = Path(__file__).resolve().parent
 if str(_TESTS_DIR) not in _sys.path:  # pragma: no cover - import plumbing
     _sys.path.insert(0, str(_TESTS_DIR))
 
-from pdf_toolkit.cli.common import (  # noqa: E402
+from pdf_tooling.cli.common import (  # noqa: E402
     OUTPUT_FLAGS,
     SAFETY_FLAGS,
     UNGOVERNED_FLAGS,

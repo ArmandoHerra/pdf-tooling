@@ -50,14 +50,14 @@ help: ## Show this help
 build: ## Build the sdist and wheel into dist/
 	uv build
 
-install: ## Install the CLI onto your PATH as `pdftoolkit`
+install: ## Install the CLI onto your PATH as `pdftooling`
 	uv tool install --force .
 
 run: ## Run the CLI: make run ARGS="version -o json"
-	uv run pdftoolkit $(ARGS)
+	uv run pdftooling $(ARGS)
 
 doctor: ## Report which engines resolved (arrives with the engine-ports work; exits 2 until then)
-	uv run pdftoolkit doctor
+	uv run pdftooling doctor
 
 test: ## Run the test suite
 	$(UV_RUN) pytest $(PYTEST_ARGS)
@@ -104,7 +104,7 @@ cover: ## Run the suite under coverage against the project's floor
 	echo "$$$$" > "$$lock/pid"; \
 	trap 'rm -rf "$$lock"' EXIT INT TERM; \
 	COVERAGE_FILE=$(CURDIR)/.coverage \
-	  $(UV_RUN) pytest --cov=pdf_toolkit --cov-report=term-missing --cov-fail-under=85 $(PYTEST_ARGS)
+	  $(UV_RUN) pytest --cov=pdf_tooling --cov-report=term-missing --cov-fail-under=85 $(PYTEST_ARGS)
 
 fmt: ## Format the tree
 	uv run ruff format .

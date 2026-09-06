@@ -36,15 +36,15 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.cli.common import consumed_output_flags  # noqa: E402
-from pdf_toolkit.errors import (  # noqa: E402
+from pdf_tooling.cli.common import consumed_output_flags  # noqa: E402
+from pdf_tooling.errors import (  # noqa: E402
     EngineMissingError,
     NoInputError,
     PdfToolkitError,
     UsageError,
 )
-from pdf_toolkit.models import EngineReport  # noqa: E402
-from pdf_toolkit.ops.textract import (  # noqa: E402
+from pdf_tooling.models import EngineReport  # noqa: E402
+from pdf_tooling.ops.textract import (  # noqa: E402
     extract_tables_run,
     extract_text_run,
     normalize_page_text,
@@ -52,10 +52,10 @@ from pdf_toolkit.ops.textract import (  # noqa: E402
     table_artifact_bytes,
     text_artifact_bytes,
 )
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 
 REPO_ROOT = TESTS_DIR.parent
-SRC = REPO_ROOT / "src" / "pdf_toolkit"
+SRC = REPO_ROOT / "src" / "pdf_tooling"
 GOLDEN_DIR = TESTS_DIR / "golden"
 
 #: The five source files this spec created or filled in. AC7 greps exactly
@@ -296,8 +296,8 @@ def test_ac3_the_ordering_is_imposed_by_the_tool_not_inherited(corpus) -> None:
     feeding the sorter deliberately reversed lines still yields non-decreasing
     y. This is what stops an engine upgrade turning the invariant red for a
     reason that is not a defect."""
-    from pdf_toolkit.ops.textract import _blocks_from
-    from pdf_toolkit.ports.text import TextLine
+    from pdf_tooling.ops.textract import _blocks_from
+    from pdf_tooling.ports.text import TextLine
 
     scrambled = [
         TextLine(text="third", x0=10.0, top=300.0, x1=50.0, bottom=312.0),
@@ -388,12 +388,12 @@ def _run_cli_in_process(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> int
     raises -- with the port registry's memo replaced. The exit STATUS is
     therefore the product's own, not a re-derivation of it.
     """
-    import pdf_toolkit.ports as ports
-    from pdf_toolkit.cli.common import reset_error_format
-    from pdf_toolkit.cli.main import main
+    import pdf_tooling.ports as ports
+    from pdf_tooling.cli.common import reset_error_format
+    from pdf_tooling.cli.main import main
 
     monkeypatch.setattr(ports, "_CACHE", {"TextEngine": _unavailable_text_engine()})
-    monkeypatch.setattr(sys, "argv", ["pdftoolkit", *argv])
+    monkeypatch.setattr(sys, "argv", ["pdftooling", *argv])
     reset_error_format()
     with pytest.raises(SystemExit) as excinfo:
         main()
@@ -410,7 +410,7 @@ def test_ac5_layout_with_the_adapter_unresolved_exits_3_and_never_falls_back(
 
     assert code == 3
     assert "uv tool install --force pdf-tooling" in captured.err
-    assert "pdftoolkit doctor" in captured.err
+    assert "pdftooling doctor" in captured.err
     # No extracted text, and no payload claiming the layout strategy ran.
     assert captured.out == ""
     assert "strategy: layout" not in captured.err
@@ -442,8 +442,8 @@ def test_ac5_tables_with_the_port_unresolved_exits_3(
 def test_ac5_the_port_itself_raises_the_coded_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """The refusal is the PORT's, not a per-verb check: with the memo replaced,
     the three `require_*` helpers all raise the same coded error."""
-    import pdf_toolkit.ports as ports
-    from pdf_toolkit.ports.text import require_fast_text, require_layout_text, require_tables
+    import pdf_tooling.ports as ports
+    from pdf_tooling.ports.text import require_fast_text, require_layout_text, require_tables
 
     monkeypatch.setattr(ports, "_CACHE", {"TextEngine": _unavailable_text_engine()})
     for require in (require_fast_text, require_layout_text, require_tables):
@@ -501,7 +501,7 @@ def test_ac7_the_grep_is_able_to_fail() -> None:
 
 
 @pytest.mark.parametrize(
-    "module", ["pdf_toolkit.cli.cmd_text", "pdf_toolkit.cli.cmd_tables"], ids=["text", "tables"]
+    "module", ["pdf_tooling.cli.cmd_text", "pdf_tooling.cli.cmd_tables"], ids=["text", "tables"]
 )
 def test_ac22_both_verbs_declare_exactly_the_three_destination_flags(module: str) -> None:
     __import__(module)
@@ -634,7 +634,7 @@ def test_an_unknown_strategy_is_refused_at_the_op_layer_too(corpus) -> None:
 
 
 def test_the_layout_adapter_also_implements_plain_text_extraction(corpus) -> None:
-    from pdf_toolkit.ports.text import require_layout_text
+    from pdf_tooling.ports.text import require_layout_text
 
     engine = require_layout_text()
     spec = corpus.spec("multipage_text")
@@ -643,7 +643,7 @@ def test_the_layout_adapter_also_implements_plain_text_extraction(corpus) -> Non
 
 
 def test_an_unreadable_input_is_a_coded_failure_not_a_raw_engine_error(tmp_path: Path) -> None:
-    from pdf_toolkit.ports.text import require_layout_text
+    from pdf_tooling.ports.text import require_layout_text
 
     broken = tmp_path / "broken.pdf"
     broken.write_bytes(b"not a pdf at all")
@@ -690,14 +690,14 @@ def _canonical(value: Any) -> Any:
 
 
 def test_ac16_the_text_layout_golden(corpus, golden) -> None:
-    from pdf_toolkit.cli.cmd_text import build_payload
+    from pdf_tooling.cli.cmd_text import build_payload
 
     outcome = run_text(corpus.path("multipage_text"), layout=True)
     golden.compare("text_layout", _canonical(build_payload(outcome)))
 
 
 def test_ac16_the_tables_golden(corpus, golden, tmp_path: Path) -> None:
-    from pdf_toolkit.cli.cmd_tables import build_payload
+    from pdf_tooling.cli.cmd_tables import build_payload
 
     outcome = run_tables(corpus.path("tabular"), out_dir=tmp_path / "grids")
     golden.compare("tables_lines", _canonical(build_payload(outcome)))

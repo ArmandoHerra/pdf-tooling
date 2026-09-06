@@ -33,17 +33,17 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 REPO_ROOT = TESTS_DIR.parent
 
 from corpus import STAMP_MARKER, changed_pages  # noqa: E402
-from pdf_toolkit.errors import (  # noqa: E402
+from pdf_tooling.errors import (  # noqa: E402
     EngineMissingError,
     FailureError,
     NoInputError,
     PageRangeError,
     UsageError,
 )
-from pdf_toolkit.ops.overlay import DEFAULT_POSITION, stamp_run, watermark_run  # noqa: E402
-from pdf_toolkit.ports.compose import require_compose  # noqa: E402
-from pdf_toolkit.ports.structure import require_composite  # noqa: E402
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.ops.overlay import DEFAULT_POSITION, stamp_run, watermark_run  # noqa: E402
+from pdf_tooling.ports.compose import require_compose  # noqa: E402
+from pdf_tooling.ports.structure import require_composite  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 
 
 def policy(**overrides: Any) -> SafetyPolicy:
@@ -409,7 +409,7 @@ def test_ac15_composite_layer_direct_call_scopes_via_writer(corpus) -> None:
 def test_ac26_page_range_resolution_is_invoked_exactly_once_per_run(
     monkeypatch: pytest.MonkeyPatch, corpus, tmp_path: Path
 ) -> None:
-    import pdf_toolkit.ops.overlay as overlay_module
+    import pdf_tooling.ops.overlay as overlay_module
 
     original = overlay_module.parse
     calls: list[tuple[Any, ...]] = []
@@ -473,7 +473,7 @@ def test_ac28_an_unknown_compose_capability_raises_engine_missing_exit_3() -> No
 
 
 def test_ac28_an_unknown_structure_capability_raises_engine_missing_exit_3() -> None:
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     with pytest.raises(EngineMissingError) as excinfo:
         require_structure(capability="no-such-capability")
@@ -870,8 +870,8 @@ def test_ac16_no_merge_page_or_pre_append_prose_survives_in_ports_or_ops() -> No
             "-rn",
             "--include=*.py",
             "merge_page",
-            "src/pdf_toolkit/ports/",
-            "src/pdf_toolkit/ops/",
+            "src/pdf_tooling/ports/",
+            "src/pdf_tooling/ops/",
         ],
         capture_output=True,
         text=True,
@@ -882,7 +882,7 @@ def test_ac16_no_merge_page_or_pre_append_prose_survives_in_ports_or_ops() -> No
         f"'merge_page' still referenced under ports/ or ops/: {merge_page.stdout}"
     )
     pre_append = subprocess.run(
-        ["grep", "-n", "PRE-append", "src/pdf_toolkit/ports/structure.py"],
+        ["grep", "-n", "PRE-append", "src/pdf_tooling/ports/structure.py"],
         capture_output=True,
         text=True,
         check=False,
@@ -921,8 +921,8 @@ def test_ac16_no_merge_page_or_pre_append_prose_survives_in_ports_or_ops() -> No
 
 
 def test_ac17_dry_run_still_mirrors_and_never_raises(corpus, tmp_path: Path) -> None:
-    from pdf_toolkit.errors import PdfToolkitError
-    from pdf_toolkit.ops.ocr import ocr_run
+    from pdf_tooling.errors import PdfToolkitError
+    from pdf_tooling.ops.ocr import ocr_run
 
     source = corpus.path("single_page")
 

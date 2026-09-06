@@ -50,7 +50,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit.ops import procpool
+from pdf_tooling.ops import procpool
 
 # NOTE: `pyproject.toml`'s `markers` list is closed and `--strict-markers` is in
 # `addopts`, so this file deliberately registers no marker of its own -- an
@@ -110,7 +110,7 @@ import os, sys
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 
-from pdf_toolkit.ops.procpool import _worker_initializer
+from pdf_tooling.ops.procpool import _worker_initializer
 
 
 def _chunk(args):
@@ -481,7 +481,7 @@ def test_ac3_survivors_and_post_death_growth_by_start_method(
 #
 # The matrix above proves the MECHANISM. It cannot prove that the product's own
 # CLI ignores whatever start method the interpreter (or an embedder) chose --
-# that needs a real `pdftoolkit rasterize` under a forced ambient `forkserver`.
+# that needs a real `pdftooling rasterize` under a forced ambient `forkserver`.
 #
 # This is the spec's centrepiece, and the property under test is precise: an
 # explicit `mp_context=` DEFEATS `set_start_method()`. Pre-pin, this exact
@@ -497,8 +497,8 @@ def test_ac3_survivors_and_post_death_growth_by_start_method(
 _FORKSERVER_SEAM = (
     "import multiprocessing, sys; "
     "multiprocessing.set_start_method('forkserver'); "
-    "sys.argv = ['pdftoolkit'] + sys.argv[1:]; "
-    "from pdf_toolkit.cli.main import main; "
+    "sys.argv = ['pdftooling'] + sys.argv[1:]; "
+    "from pdf_tooling.cli.main import main; "
     "sys.exit(main())"
 )
 

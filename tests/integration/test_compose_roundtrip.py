@@ -61,9 +61,9 @@ def test_ac17_rasterize_then_compose_round_trips_page_count_and_geometry(
     if "rasterize" not in _verb_names():
         pytest.skip(_ROUNDTRIP_SKIP)
 
-    from pdf_toolkit.ops.compose import compose_document, parse_page_size
-    from pdf_toolkit.ops.raster import rasterize_document
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.compose import compose_document, parse_page_size
+    from pdf_tooling.ops.raster import rasterize_document
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     policy = SafetyPolicy(
         dry_run=False,

@@ -23,9 +23,9 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.errors import NoInputError, UsageError  # noqa: E402
-from pdf_toolkit.ops.metadata import meta_get_run, meta_set_run  # noqa: E402
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.errors import NoInputError, UsageError  # noqa: E402
+from pdf_tooling.ops.metadata import meta_get_run, meta_set_run  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 
 
 def policy(**overrides: Any) -> SafetyPolicy:
@@ -303,7 +303,7 @@ def test_ac21_dry_run_predicts_an_occupied_target_via_plan_output_set(
     # `except PdfToolkitError` handler is what turns this into exit 5 for a
     # real invocation (proven end-to-end by `test_cli_contract.py::
     # test_c15_dry_run_predicts_an_occupied_target_refusal[meta set]`).
-    from pdf_toolkit.errors import TargetExistsError
+    from pdf_tooling.errors import TargetExistsError
 
     with pytest.raises(TargetExistsError):
         meta_set_run(
@@ -318,7 +318,7 @@ def test_ac21_dry_run_predicts_an_occupied_target_via_plan_output_set(
 
 
 def test_ac21_meta_set_calls_plan_filesystem_not_a_local_refusal(tmp_path: Path) -> None:
-    """`grep -n "plan_filesystem" src/pdf_toolkit/ops/metadata.py` is
+    """`grep -n "plan_filesystem" src/pdf_tooling/ops/metadata.py` is
     non-empty; nothing re-derives a refusal locally (Design D9).
 
     **PDF-18 Design D9 — re-pointed by design, not a regression.** Before
@@ -333,7 +333,7 @@ def test_ac21_meta_set_calls_plan_filesystem_not_a_local_refusal(tmp_path: Path)
     """
     import inspect
 
-    from pdf_toolkit.ops import metadata
+    from pdf_tooling.ops import metadata
 
     source = inspect.getsource(metadata)
     assert "plan_filesystem" in source
@@ -395,7 +395,7 @@ def test_meta_set_in_place_writes_a_byte_identical_backup(corpus, tmp_path: Path
 
 
 def test_ac18_the_meta_get_golden(corpus, golden) -> None:
-    from pdf_toolkit.cli.cmd_meta_get import build_payload
+    from pdf_tooling.cli.cmd_meta_get import build_payload
 
     payload = build_payload(corpus.path("metadata_typed"), xmp=False, dry_run=False)
     payload["path"] = Path(payload["path"]).name

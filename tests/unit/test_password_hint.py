@@ -33,7 +33,7 @@ resolution order product-wide is a SEPARATE and larger finding, reported to the
 PM rather than absorbed here: wiring the resolution chain into eighteen more
 verbs is a spec, not an edit.
 
-The surviving clause — *run `pdftoolkit decrypt` first* — is true on all
+The surviving clause — *run `pdftooling decrypt` first* — is true on all
 nineteen, `encrypt` included.
 """
 
@@ -128,9 +128,9 @@ def test_the_password_hint_has_exactly_one_definition_site() -> None:
         sites.extend(hint_definition_sites(path.read_text(), str(path.relative_to(REPO_ROOT))))
     assert len(sites) == 1, (
         f"the password hint is defined in {len(sites)} place(s): {sites} -- it is owned by "
-        "pdf_toolkit.ports.structure.PASSWORD_HINT and by nothing else"
+        "pdf_tooling.ports.structure.PASSWORD_HINT and by nothing else"
     )
-    assert sites[0].startswith("src/pdf_toolkit/ports/structure.py"), sites
+    assert sites[0].startswith("src/pdf_tooling/ports/structure.py"), sites
 
 
 def test_no_adapter_or_port_message_names_a_flag_the_erroring_verb_cannot_honour() -> None:
@@ -142,7 +142,7 @@ def test_no_adapter_or_port_message_names_a_flag_the_erroring_verb_cannot_honour
     """
     offenders: list[str] = []
     for tree in MESSAGE_TREES:
-        for path in _python_files(SRC / "pdf_toolkit" / tree):
+        for path in _python_files(SRC / "pdf_tooling" / tree):
             offenders.extend(
                 flag_naming_message_sites(path.read_text(), str(path.relative_to(REPO_ROOT)))
             )
@@ -154,9 +154,9 @@ def test_no_adapter_or_port_message_names_a_flag_the_erroring_verb_cannot_honour
 
 def test_the_shipped_hint_names_the_verb_that_actually_resolves_it() -> None:
     """The positive half: removing a false clause must not leave a useless one."""
-    from pdf_toolkit.ports.structure import PASSWORD_HINT
+    from pdf_tooling.ports.structure import PASSWORD_HINT
 
-    assert "pdftoolkit decrypt" in PASSWORD_HINT
+    assert "pdftooling decrypt" in PASSWORD_HINT
     assert INERT_FLAG not in PASSWORD_HINT
     assert PASSWORD_HINT.strip() == PASSWORD_HINT and PASSWORD_HINT
 
@@ -168,8 +168,8 @@ def test_both_structure_adapters_raise_through_the_one_hint() -> None:
     `make ci` cost is a `decision.md` §5 R-1 concern, and the end-to-end half is
     already asserted once by `tests/test_info.py`'s re-derived auth-message row.
     """
-    from pdf_toolkit.adapters import pikepdf_structure, pypdf_structure
-    from pdf_toolkit.ports.structure import PASSWORD_HINT
+    from pdf_tooling.adapters import pikepdf_structure, pypdf_structure
+    from pdf_tooling.ports.structure import PASSWORD_HINT
 
     sources = [
         Path(pypdf_structure.__file__).read_text(),
@@ -199,7 +199,7 @@ _PASSWORD_HINT: Final[str] = "supply one with --password-file PATH"
 _ONLY_A_COMMENT = """
 from typing import Final
 # The --password-file clause was removed by PDF-20; see the port.
-NOT_THE_HINT: Final[str] = "run 'pdftoolkit decrypt' first"
+NOT_THE_HINT: Final[str] = "run 'pdftooling decrypt' first"
 """
 
 
@@ -220,7 +220,7 @@ def test_the_flag_naming_check_fires_on_a_string_and_not_on_a_comment() -> None:
 def test_the_string_scan_sees_a_real_module_at_all() -> None:
     """Non-vacuity: a `string_constants` that returned nothing would make the
     guard above green over an empty set."""
-    source = (SRC / "pdf_toolkit" / "ports" / "structure.py").read_text()
+    source = (SRC / "pdf_tooling" / "ports" / "structure.py").read_text()
     found = string_constants(source, "ports/structure.py")
     assert len(found) > 20, f"the string scan found only {len(found)} constant(s)"
     assert any("AES-256" == text for _, text in found), "the scan missed a known constant"

@@ -62,7 +62,7 @@ import typer.core
 import typer.models
 
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot
-from pdf_toolkit.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS
+from pdf_tooling.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS
 from registry import (
     INVOCATIONS,
     OUTPUT_FLAG_INVOCATIONS,
@@ -178,7 +178,7 @@ def operand_verb_names(root: object | None = None) -> frozenset[str]:
     to `isinstance`-check against. Deliberately NOT filtered on the parameter's
     type name -- that filter is what excludes `merge` (E5).
     """
-    from pdf_toolkit.cli.main import app
+    from pdf_tooling.cli.main import app
 
     group = root if root is not None else typer.main.get_command(app)
     names: set[str] = set()
@@ -365,7 +365,7 @@ def test_c6_malformed_page_range_exits_2(verb, corpus) -> None:
 # C7 -- --no-backup alone (no --in-place) exits 2
 #
 # The global block attaches --no-backup and --in-place to every verb
-# uniformly (`pdf_toolkit.cli.common.global_options`), so "verbs with both
+# uniformly (`pdf_tooling.cli.common.global_options`), so "verbs with both
 # flags" is every verb at PDF-06 landing time -- see `tests/registry.py`'s
 # module docstring for why that same universality makes the literal
 # `is_mutating` predicate unusable, while this one is unaffected: C7 asserts
@@ -426,7 +426,7 @@ def test_c9_unconditional_dry_run_purity(verb, tmp_path: Path) -> None:
 # UNCONDITIONALLY below -- so C10 keeps running on every host and every verb.
 # Only the PREDICTED EXIT CODE is derived, and it is derived from the verb's
 # own declared precondition (`Invocation.requires_engine`) resolved through the
-# `pdf_toolkit.ports.resolve()` chokepoint that `doctor`, `conftest.py`'s
+# `pdf_tooling.ports.resolve()` chokepoint that `doctor`, `conftest.py`'s
 # `requires(engine)` marker and `_skip_unless_engine_available` below all
 # already use -- never an independent `shutil.which`, never an env var, never a
 # platform check. Today only `convert` can take the non-zero arm, and only on a
@@ -454,7 +454,7 @@ def _expected_dry_run_exit(invocation) -> int:
     engine = getattr(invocation, "requires_engine", None)
     if engine is None:
         return 0
-    from pdf_toolkit.ports import resolve
+    from pdf_tooling.ports import resolve
 
     return 0 if resolve(engine).available else ENGINE_MISSING
 
@@ -532,7 +532,7 @@ def test_c11_no_clobber_exits_5(verb, corpus, tmp_path: Path) -> None:
 #
 # This SKIPS VISIBLY, by name, exactly like `tests/conftest.py`'s own
 # `@pytest.mark.requires(engine)` marker -- resolved through the identical
-# `pdf_toolkit.ports.resolve()` chokepoint `doctor` uses, never an
+# `pdf_tooling.ports.resolve()` chokepoint `doctor` uses, never an
 # independent `shutil.which` and never an env var or platform check. When the
 # engine IS present (the `engines-present` CI job), this returns immediately
 # and the row runs for real -- `scripts/assert_skips.py --expect-zero` on
@@ -544,7 +544,7 @@ def _skip_unless_engine_available(invocation) -> None:
     engine = getattr(invocation, "requires_engine", None)
     if engine is None:
         return
-    from pdf_toolkit.ports import resolve
+    from pdf_tooling.ports import resolve
 
     report = resolve(engine)
     if not report.available:
@@ -1368,7 +1368,7 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         GLOBAL_OPTIONS,
         "C2, test_root_help_exits_0_and_lists_every_global_flag",
         1,
-        "IMPORTED from `pdf_toolkit.cli.common`, and pinned here because C2's assertions "
+        "IMPORTED from `pdf_tooling.cli.common`, and pinned here because C2's assertions "
         "live inside a `for option in GLOBAL_OPTIONS` loop: an empty tuple makes C2 report "
         "26 green cases having asserted nothing at all",
     ),
@@ -1377,7 +1377,7 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         OUTPUT_FLAGS,
         "feeds OUTPUT_FLAG_CASES -> C14; _C16_DESTINATION_FLAGS -> C16",
         1,
-        "IMPORTED from `pdf_toolkit.cli.common`; empty empties C14's whole matrix",
+        "IMPORTED from `pdf_tooling.cli.common`; empty empties C14's whole matrix",
     ),
     Population(
         "ENVELOPE_KEYS",
@@ -1532,7 +1532,7 @@ def module_level_tuple_names(source: str, namespace: Mapping[str, object]) -> fr
 
     Assignments AND imports, because two of this module's populations
     (`GLOBAL_OPTIONS`, `OUTPUT_FLAGS`) are the product's own constants imported
-    from `pdf_toolkit.cli.common` -- and an empty `GLOBAL_OPTIONS` makes C2
+    from `pdf_tooling.cli.common` -- and an empty `GLOBAL_OPTIONS` makes C2
     vacuous just as surely as an empty `VERBS` makes C1 vacuous.
 
     Static over the module's own source (`ast`, the convention
@@ -2662,7 +2662,7 @@ class PathParam:
 
 def path_parameters(root: object | None = None) -> tuple[PathParam, ...]:
     """Every path-typed parameter on *root*, with its readability veto recorded."""
-    from pdf_toolkit.cli.main import app
+    from pdf_tooling.cli.main import app
 
     group = root if root is not None else typer.main.get_command(app)
     found: list[PathParam] = []

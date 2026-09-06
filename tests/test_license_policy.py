@@ -49,7 +49,7 @@ from typing import Final, NamedTuple
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 SRC: Final = REPO_ROOT / "src"
-CHOKEPOINT: Final = "pdf_toolkit/adapters/subprocess_util.py"
+CHOKEPOINT: Final = "pdf_tooling/adapters/subprocess_util.py"
 
 # PLAN.md §7.2 mechanism 2 — the plan's list, verbatim and complete.
 PLAN_FORBIDDEN: Final = (

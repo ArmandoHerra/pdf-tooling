@@ -1,13 +1,13 @@
 ---
-// Data-driven verb roster. `status` is derived from `pdftoolkit --help` AND
+// Data-driven verb roster. `status` is derived from `pdftooling --help` AND
 // each verb's own `--help` (re-derived at implementation time, PDF-16
 // Phase B, 2026-08-31), NOT from PLAN.md §4.1 or this spec's text — that is
 // the whole point of honesty rule 7. All sixteen pdf-tooling specs have now
-// landed: every one of the 25 top-level commands `pdftoolkit --help` prints
+// landed: every one of the 25 top-level commands `pdftooling --help` prints
 // resolves with a working `--help` of its own, so every entry below is
 // `available` and `planned.length` is 0.
 //
-// `meta` is a grouping parent — `pdftoolkit meta --help` prints `get` and
+// `meta` is a grouping parent — `pdftooling meta --help` prints `get` and
 // `set` as its own two subcommands, both independently verified — so the
 // roster keeps `meta get` and `meta set` as two separate rows rather than
 // collapsing them into one `meta` row: both are real, distinct invocations,
@@ -64,7 +64,7 @@ const groups = portOrder
         <>Verbs marked <strong>planned</strong> are specified and not yet shipped. </>
       )}
       This list is
-      checked against <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftoolkit --help</code> at every deploy.
+      checked against <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftooling --help</code> at every deploy.
     </p>
   </div>
 
@@ -94,7 +94,7 @@ const groups = portOrder
   </div>
 
   <p class="mt-8 text-center text-sm text-surface-100">
-    config and completion round out the surface — run <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdftoolkit --help</code> for the whole tree.
+    config and completion round out the surface — run <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdftooling --help</code> for the whole tree.
     Phase 2 (HTML/Markdown create, redaction, forms, outline editing, attachments/annotations,
     run recipes) is parked, additive on the same spine.
   </p>

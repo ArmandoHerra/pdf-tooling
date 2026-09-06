@@ -367,7 +367,7 @@ def test_ac23b_the_refusal_exists_only_in_the_shared_option_layer() -> None:
     disagree with ``cli/common.py``'s."""
     import re
 
-    path = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit" / "cli" / "cmd_rasterize.py"
+    path = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling" / "cli" / "cmd_rasterize.py"
     hits = re.findall(r'"--output"|"-O"|"--in-place"', path.read_text())
     assert hits == [], (
         f"cmd_rasterize.py names {hits} itself -- the OR-3 refusal must come from "
@@ -376,9 +376,9 @@ def test_ac23b_the_refusal_exists_only_in_the_shared_option_layer() -> None:
 
 
 def test_ac23_declaration_is_exactly_out_dir_and_name() -> None:
-    from pdf_toolkit.cli.common import consumed_output_flags
+    from pdf_tooling.cli.common import consumed_output_flags
 
-    assert consumed_output_flags("pdf_toolkit.cli.cmd_rasterize") == ("--out-dir", "--name")
+    assert consumed_output_flags("pdf_tooling.cli.cmd_rasterize") == ("--out-dir", "--name")
 
 
 def test_ac23_ordering_mutual_exclusion_before_or3(tmp_path: Path) -> None:
@@ -402,7 +402,7 @@ def test_ac23_ordering_mutual_exclusion_before_or3(tmp_path: Path) -> None:
 def test_hc1_no_forbidden_name_in_cmd_rasterize() -> None:
     import re
 
-    path = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit" / "cli" / "cmd_rasterize.py"
+    path = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling" / "cli" / "cmd_rasterize.py"
     text = path.read_text()
     pattern = (
         r"subprocess|os\.system|os\.exec|shutil\.which|pdf2image|pdftoppm|pdftocairo|"

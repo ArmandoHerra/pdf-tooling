@@ -18,7 +18,7 @@ import pickle
 
 import pytest
 
-from pdf_toolkit.secret import REDACTED, Secret, SecretClearedError
+from pdf_tooling.secret import REDACTED, Secret, SecretClearedError
 
 PW_SENTINEL = "Sentinel-PW-7f3a91c4e85b4d02"
 PW_SENTINEL_UNICODE = "Señal-PW-Ünïcøde-7f3a91c4"

@@ -39,10 +39,10 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit import errors
-from pdf_toolkit.cli.exit_codes import FAILURE, OK, REFUSED, USAGE
-from pdf_toolkit.safety import TEMP_PREFIX, AtomicWriter, SafetyPolicy
-from pdf_toolkit.safety.atomic import PlannedOutputs, plan_filesystem, plan_output_set
+from pdf_tooling import errors
+from pdf_tooling.cli.exit_codes import FAILURE, OK, REFUSED, USAGE
+from pdf_tooling.safety import TEMP_PREFIX, AtomicWriter, SafetyPolicy
+from pdf_tooling.safety.atomic import PlannedOutputs, plan_filesystem, plan_output_set
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -859,11 +859,11 @@ def test_plan_output_set_skips_the_too_long_check_when_pathconf_is_unavailable(
 # IDENTICAL keyword set, over a `Sequence[Path]` first argument.
 # --------------------------------------------------------------------------- #
 
-_OPS_DIR = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit" / "ops"
+_OPS_DIR = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling" / "ops"
 
 
 def _plan_filesystem_call_sites() -> list[tuple[str, ast.Call]]:
-    """Every ``plan_filesystem(...)`` call under ``src/pdf_toolkit/ops/``."""
+    """Every ``plan_filesystem(...)`` call under ``src/pdf_tooling/ops/``."""
     found: list[tuple[str, ast.Call]] = []
     for path in sorted(_OPS_DIR.glob("*.py")):
         tree = ast.parse(path.read_text(), filename=str(path))
@@ -1126,7 +1126,7 @@ def test_ac1_the_call_counter_can_see_an_attribute_call(tmp_path: Path) -> None:
     assert _count_calls("plan_item", planted) == {"caller.py": 1}
     # ...and a bare name call too, which is `plan_filesystem`'s own shape.
     (planted / "bare.py").write_text(
-        "from pdf_toolkit.safety.atomic import plan_filesystem\n\n\n"
+        "from pdf_tooling.safety.atomic import plan_filesystem\n\n\n"
         "def go(t, p):\n"
         "    return plan_filesystem(t, out_dir=None, policy=p, kind='pdf')\n",
     )

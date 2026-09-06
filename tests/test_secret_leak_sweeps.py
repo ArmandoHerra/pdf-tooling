@@ -26,7 +26,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
 REPO_ROOT: Final[Path] = TESTS_DIR.parent
-SRC: Final[Path] = REPO_ROOT / "src" / "pdf_toolkit"
+SRC: Final[Path] = REPO_ROOT / "src" / "pdf_tooling"
 
 # --------------------------------------------------------------------------- #
 # Sweep 1 (B-073) -- assertions pinning a caller-supplied operand PRESENT in
@@ -280,7 +280,7 @@ def _is_enum_class_body(tree: ast.Module, node: ast.Assign | ast.AnnAssign) -> b
 
 def _sweep_2_candidates() -> list[tuple[str, str]]:
     """`(symbol, "genuine" | "dead-but-honest")` for every documented-as-
-    honoured symbol under `src/pdf_toolkit/` with ZERO token-level reads in
+    honoured symbol under `src/pdf_tooling/` with ZERO token-level reads in
     BOTH `src/` and `tests/` outside its own definition line, excluding
     `to_dict()`-only loads (bucketed separately -- D6 item 4)."""
     src_files = sorted(SRC.rglob("*.py"))

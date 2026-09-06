@@ -97,7 +97,7 @@ def run_cli(
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "pdf_toolkit", *args],
+        [sys.executable, "-m", "pdf_tooling", *args],
         capture_output=True,
         text=True,
         check=False,
@@ -307,7 +307,7 @@ def test_the_auth_message_names_a_resolution_info_can_actually_offer(
     entry = info_json(str(locked))["documents"][0]
     assert entry["error"]["code"] == 6
     message = entry["error"]["message"]
-    assert "pdftoolkit decrypt" in message, message
+    assert "pdftooling decrypt" in message, message
     assert "--password-file" not in message, (
         "the message names a flag `info` does not declare; driving it would be exit 2 (B-086)"
     )
@@ -380,7 +380,7 @@ def test_info_changes_nothing_on_the_filesystem(tmp_path: Path, extra: tuple[str
 def test_info_leaves_no_toolkit_temp_file_anywhere(tmp_path: Path) -> None:
     """Named separately from the snapshot because it is the *specific* residue
     a killed write leaves, and ``doctor --strict`` reports on exactly it."""
-    from pdf_toolkit.safety.tempnames import find_stray_temps
+    from pdf_tooling.safety.tempnames import find_stray_temps
 
     workspace = tmp_path / "work"
     workspace.mkdir()
@@ -403,7 +403,7 @@ def test_neither_info_module_constructs_a_writer() -> None:
     ``tests/test_import_boundaries.py`` already demonstrates the right tool.
     """
     for module in ("ops/inspect.py", "cli/cmd_info.py"):
-        tree = ast.parse((REPO_ROOT / "src" / "pdf_toolkit" / module).read_text(), filename=module)
+        tree = ast.parse((REPO_ROOT / "src" / "pdf_tooling" / module).read_text(), filename=module)
         referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {
             node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
         }
@@ -657,7 +657,7 @@ def test_ac16_a_toctou_race_still_exits_one_without_a_traceback(unreadable_pdf: 
     """
     skip_as_root()
     liar = (
-        "import os; os.access = lambda *a, **k: True; from pdf_toolkit.cli.main import main; main()"
+        "import os; os.access = lambda *a, **k: True; from pdf_tooling.cli.main import main; main()"
     )
     result = subprocess.run(
         [sys.executable, "-c", liar, "-o", "json", "info", str(unreadable_pdf)],
@@ -694,7 +694,7 @@ def test_ac16_the_toctou_arm_holds_at_the_open_document_seam_too(
     """
     skip_as_root()
     liar = (
-        "import os; os.access = lambda *a, **k: True; from pdf_toolkit.cli.main import main; main()"
+        "import os; os.access = lambda *a, **k: True; from pdf_tooling.cli.main import main; main()"
     )
     result = subprocess.run(
         [
@@ -724,7 +724,7 @@ def test_the_toctou_arm_is_not_vacuous(unreadable_pdf: Path) -> None:
     `os.access` must reach the §D5 classifier instead, so AC16's arm is proved
     to be exercising a different code path rather than re-measuring §D5."""
     skip_as_root()
-    honest = "from pdf_toolkit.cli.main import main; main()"
+    honest = "from pdf_tooling.cli.main import main; main()"
     result = subprocess.run(
         [sys.executable, "-c", honest, "-o", "json", "info", str(unreadable_pdf)],
         capture_output=True,
@@ -732,7 +732,7 @@ def test_the_toctou_arm_is_not_vacuous(unreadable_pdf: Path) -> None:
         check=False,
         cwd=REPO_ROOT,
     )
-    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+    from pdf_tooling.safety.paths import UNREADABLE_MESSAGE
 
     entry = json.loads(result.stdout)["documents"][0]
     assert result.returncode == 1
@@ -771,7 +771,7 @@ def test_the_toctou_arm_is_not_vacuous(unreadable_pdf: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 _LYING_ACCESS = "import os; os.access = lambda *a, **k: True; "
-_ENTRYPOINT = "from pdf_toolkit.cli.main import main; main()"
+_ENTRYPOINT = "from pdf_tooling.cli.main import main; main()"
 
 #: How the race arms tell their child which file to pull the mode bits from.
 #: An environment variable rather than an `argv` index: the arms differ in their
@@ -870,14 +870,14 @@ def test_ac16_the_toctou_arm_holds_at_composes_inspect_seam(tmp_path: Path) -> N
     as an image: [Errno 13] ...`, which this asserts against by equality.
     """
     skip_as_root()
-    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+    from pdf_tooling.safety.paths import UNREADABLE_MESSAGE
 
     source = build_image(tmp_path / "photo.jpg", "JPEG")
     # The head read succeeds; the operand goes unreadable before the decoder.
     program = (
         "import os\n"
         "from pathlib import Path\n"
-        "import pdf_toolkit.ops.compose as C\n"
+        "import pdf_tooling.ops.compose as C\n"
         f"target = Path(os.environ[{_RACE_TARGET_ENV!r}])\n"
         "_real_head = C._read_head\n"
         "def racing_head(path):\n"
@@ -915,14 +915,14 @@ def test_ac16_the_toctou_arm_holds_at_composes_decode_seam(tmp_path: Path) -> No
     `ops/compose.py`'s `_decode_for_reencode`.
     """
     skip_as_root()
-    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+    from pdf_tooling.safety.paths import UNREADABLE_MESSAGE
 
     source = build_image(tmp_path / "flat.png", "PNG")
     # Readable through the whole of `inspect_image`; unreadable before decode.
     program = (
         "import os\n"
         "from pathlib import Path\n"
-        "import pdf_toolkit.ops.compose as C\n"
+        "import pdf_tooling.ops.compose as C\n"
         f"target = Path(os.environ[{_RACE_TARGET_ENV!r}])\n"
         "_real_plan = C.plan_placements\n"
         "def racing_plan(facts, **kw):\n"
@@ -950,7 +950,7 @@ def test_the_compose_decode_arm_reaches_the_seam_it_names(tmp_path: Path) -> Non
     the extension, because "is this passed through" is `inspect_image`'s call
     and a fixture that quietly became eligible would make the arm vacuous.
     """
-    from pdf_toolkit.ops.compose import inspect_image
+    from pdf_tooling.ops.compose import inspect_image
 
     facts = inspect_image(build_image(tmp_path / "flat.png", "PNG"), dpi_flag=None)
     assert not facts.passthrough, (
@@ -1046,7 +1046,7 @@ def test_ac16_the_toctou_arm_holds_at_creates_text_seam(tmp_path: Path) -> None:
     belt alone is removed -- they never enter this module.
     """
     skip_as_root()
-    from pdf_toolkit.safety.paths import UNREADABLE_MESSAGE
+    from pdf_tooling.safety.paths import UNREADABLE_MESSAGE
 
     # Drive 1 -- AC16's own condition, the recorded repro, verbatim. Proves the
     # crash is gone. Cannot observe the classification: the patch lies to the
@@ -1079,7 +1079,7 @@ def test_ac16_the_toctou_arm_holds_at_creates_text_seam(tmp_path: Path) -> None:
     program = (
         "import os\n"
         "from pathlib import Path\n"
-        "import pdf_toolkit.cli.cmd_create as C\n"
+        "import pdf_tooling.cli.cmd_create as C\n"
         f"target = Path(os.environ[{_RACE_TARGET_ENV!r}])\n"
         "_real_resolve = C.resolve_create_output\n"
         "def racing_resolve(*a, **k):\n"
@@ -1121,7 +1121,7 @@ def pinned_exit_table() -> dict[str, int]:
     """`cmd_info.py`'s EXIT CODES table, read out of its own module docstring."""
     import re
 
-    import pdf_toolkit.cli.cmd_info as module
+    import pdf_tooling.cli.cmd_info as module
 
     docstring = module.__doc__ or ""
     body = docstring.split("EXIT CODES, PINNED", 1)[1]

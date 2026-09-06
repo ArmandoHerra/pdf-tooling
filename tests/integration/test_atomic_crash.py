@@ -39,8 +39,8 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit.safety import TEMP_PREFIX, is_toolkit_temp
-from pdf_toolkit.safety._faults import ENV_POINT, ENV_RENDEZVOUS, FAULT_POINTS
+from pdf_tooling.safety import TEMP_PREFIX, is_toolkit_temp
+from pdf_tooling.safety._faults import ENV_POINT, ENV_RENDEZVOUS, FAULT_POINTS
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -225,7 +225,7 @@ def test_a_kill_leaves_an_in_place_target_byte_identical(point: str, tmp_path: P
 @pytest.mark.parametrize("point", FAULT_POINTS)
 def test_residue_is_reported_rather_than_swept(point: str, tmp_path: Path) -> None:
     """PLAN §12 R-07 in its natural habitat: what a kill actually leaves behind."""
-    from pdf_toolkit.safety import find_stray_temps
+    from pdf_tooling.safety import find_stray_temps
 
     work = tmp_path / "work"
     work.mkdir()
@@ -271,7 +271,7 @@ def test_residue_is_reported_rather_than_swept(point: str, tmp_path: Path) -> No
 
 import ast  # noqa: E402
 
-CHOKEPOINT_SOURCE = REPO_ROOT / "src" / "pdf_toolkit" / "safety" / "atomic.py"
+CHOKEPOINT_SOURCE = REPO_ROOT / "src" / "pdf_tooling" / "safety" / "atomic.py"
 
 
 def checkpoint_call_site_names(path: Path = CHOKEPOINT_SOURCE) -> tuple[str, ...]:

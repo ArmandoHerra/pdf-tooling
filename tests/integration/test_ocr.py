@@ -28,10 +28,10 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from helpers.engine_hiding import hidden_engine_env  # noqa: E402
 from helpers.pdfstream import embedded_image_streams  # noqa: E402
-from pdf_toolkit.ops.compose import compose_document, parse_page_size  # noqa: E402
-from pdf_toolkit.ops.ocr import ocr_run  # noqa: E402
-from pdf_toolkit.ops.pages import rotate_run  # noqa: E402
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.ops.compose import compose_document, parse_page_size  # noqa: E402
+from pdf_tooling.ops.ocr import ocr_run  # noqa: E402
+from pdf_tooling.ops.pages import rotate_run  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 from pdfium_text import page_text  # noqa: E402
 from registry import run_cli  # noqa: E402
 
@@ -99,7 +99,7 @@ def _rotate90(source: Path, tmp_path: Path, *, name: str = "rotated.pdf") -> Pat
 def _collapse_whitespace(text: str) -> str:
     """The comparison AC6 and AC10 already use in this suite.
 
-    It matters on a rotated page and nowhere else: `pdftoolkit text`'s engine
+    It matters on a rotated page and nowhere else: `pdftooling text`'s engine
     groups characters into lines in the page's DISPLAYED frame, so a text
     layer that is correct in the page's own unrotated space -- which is the
     only place it can be correct, since that is where the glyphs it was read
@@ -137,7 +137,7 @@ def _layer_word_boxes(path: Path) -> list[tuple[float, float, float, float]]:
 
 
 def _extract_text(path: Path) -> str:
-    from pdf_toolkit.ports.text import require_text
+    from pdf_tooling.ports.text import require_text
 
     engine = require_text()
     return "".join(engine.extract_text(str(path), [1]))
@@ -322,7 +322,7 @@ def test_ac5_skip_text_pages_is_selective_not_a_no_op(tmp_path: Path) -> None:
     assert after_page1_content == before_page1_content
     after_page1_images = embedded_image_streams(output, 0)
     assert after_page1_images == before_page1_images
-    from pdf_toolkit.ports.text import require_text
+    from pdf_tooling.ports.text import require_text
 
     engine = require_text()
     page2_text = "".join(engine.extract_text(str(output), [2]))
@@ -448,11 +448,11 @@ def test_b094_the_quarter_turn_matrix_is_exact_not_trigonometric() -> None:
 
     The zeros must be EXACTLY 0.0. `pypdf.Transformation.rotate(90)` yields
     `6.123233995736766e-17` there instead, and `pdfplumber` reads that residue
-    as "this character is not upright", which changes what `pdftoolkit text`
+    as "this character is not upright", which changes what `pdftooling text`
     returns for a rotated page. This guard is what stops a future edit from
     reverting to `Transformation.rotate()` for the readable-looking reason.
     """
-    from pdf_toolkit.adapters.tesseract_ocr import _quarter_turn
+    from pdf_tooling.adapters.tesseract_ocr import _quarter_turn
 
     identity = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
     assert _quarter_turn(identity, 90) == (0.0, 1.0, -1.0, 0.0, 0.0, 0.0)
@@ -742,7 +742,7 @@ def test_ac16_dry_run_never_spawns_the_operational_call(tmp_path: Path, monkeypa
     """(b) -- with the engine PRESENT, a dry run performs no argv containing
     `textonly_pdf=1` (the operational call, D3)."""
     calls: list[list[str]] = []
-    from pdf_toolkit.adapters import subprocess_util
+    from pdf_tooling.adapters import subprocess_util
 
     real_run = subprocess_util.run
 
@@ -810,7 +810,7 @@ def test_ac13_group_kill_survives_a_forking_child(tmp_path: Path) -> None:
     import os
     import time
 
-    from pdf_toolkit.adapters import subprocess_util
+    from pdf_tooling.adapters import subprocess_util
 
     result = subprocess_util.run(["sh", "-c", "sleep 30 & sleep 30"], timeout=0.3, check=False)
     assert result.timed_out is True

@@ -32,8 +32,8 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit.adapters import subprocess_util
-from pdf_toolkit.errors import FailureError
+from pdf_tooling.adapters import subprocess_util
+from pdf_tooling.errors import FailureError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

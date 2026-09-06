@@ -27,9 +27,9 @@ from typing import Final
 
 import pytest
 
-from pdf_toolkit import errors
-from pdf_toolkit.cli import exit_codes
-from pdf_toolkit.cli.common import (
+from pdf_tooling import errors
+from pdf_tooling.cli import exit_codes
+from pdf_tooling.cli.common import (
     GLOBAL_OPTIONS,
     GLOBAL_PARAMS,
     OUTPUT_FLAGS,
@@ -39,9 +39,9 @@ from pdf_toolkit.cli.common import (
     build_config,
     validate_config,
 )
-from pdf_toolkit.models import SCHEMA_VERSION, ItemResult, OperationResult
-from pdf_toolkit.output import OutputFormat, emit_error, emit_result, render_payload
-from pdf_toolkit.output.logging import RedactingFilter, clear_secrets, register_secret
+from pdf_tooling.models import SCHEMA_VERSION, ItemResult, OperationResult
+from pdf_tooling.output import OutputFormat, emit_error, emit_result, render_payload
+from pdf_tooling.output.logging import RedactingFilter, clear_secrets, register_secret
 
 TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -216,13 +216,13 @@ MAKEFILE_TARGETS = {
 
 def console_script() -> list[str]:
     """The argv prefix that runs the installed CLI as a real process."""
-    sibling = Path(sys.executable).parent / "pdftoolkit"
+    sibling = Path(sys.executable).parent / "pdftooling"
     if sibling.exists():
         return [str(sibling)]
-    found = shutil.which("pdftoolkit")
+    found = shutil.which("pdftooling")
     if found:
         return [found]
-    return [sys.executable, "-m", "pdf_toolkit"]
+    return [sys.executable, "-m", "pdf_tooling"]
 
 
 def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -474,7 +474,7 @@ def test_version_flag_reports_tool_python_and_engine_versions() -> None:
     assert result.returncode == 0
     line = result.stdout.strip()
     assert "\n" not in line, "--version prints exactly one line"
-    assert "pdftoolkit" in line
+    assert "pdftooling" in line
     assert "Python" in line
     assert re.search(r"pypdf \d+\.\d+", line), line
 
@@ -486,7 +486,7 @@ def test_version_flag_reports_tool_python_and_engine_versions() -> None:
     # against a value computed here rather than against a word.
     import platform
 
-    from pdf_toolkit import __version__ as tool_version
+    from pdf_tooling import __version__ as tool_version
 
     assert platform.python_version() in line, (
         f"--version does not carry the running interpreter's version "
@@ -501,7 +501,7 @@ def test_version_flag_reports_tool_python_and_engine_versions() -> None:
 def test_every_entry_point_prints_byte_identical_help() -> None:
     canonical = run_cli("--help")
     module = subprocess.run(
-        [sys.executable, "-m", "pdf_toolkit", "--help"],
+        [sys.executable, "-m", "pdf_tooling", "--help"],
         capture_output=True,
         text=True,
         check=False,
@@ -510,7 +510,7 @@ def test_every_entry_point_prints_byte_identical_help() -> None:
     assert module.returncode == 0
     assert module.stdout == canonical.stdout
 
-    alias = Path(sys.executable).parent / "pdf-toolkit"
+    alias = Path(sys.executable).parent / "pdf-tooling"
     if alias.exists():
         aliased = subprocess.run(
             [str(alias), "--help"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
@@ -705,7 +705,7 @@ def test_every_leaf_verb_declares_its_output_flag_consumption_exactly_once() -> 
     nothing* from *never declared* -- the distinction a `consumes == ()` check
     structurally cannot make, and the one B-115's population depends on.
     """
-    from pdf_toolkit.cli import common as cli_common
+    from pdf_tooling.cli import common as cli_common
 
     verbs = discover_verbs()
     group = typer_root_command()
@@ -732,7 +732,7 @@ def test_every_leaf_verb_declares_its_output_flag_consumption_exactly_once() -> 
 def typer_root_command() -> object:
     import typer
 
-    from pdf_toolkit.cli.main import app
+    from pdf_tooling.cli.main import app
 
     return typer.main.get_command(app)
 
@@ -1159,9 +1159,9 @@ STARTUP_BUDGET_MS = 325.0
 
 #: The venv console script, as a path rather than a fallback chain. C-4: the
 #: three-arm `console_script()` below can resolve a globally installed (possibly
-#: STALE) `pdftoolkit` from PATH, or the `-m` bootstrap, and until PDF-29
+#: STALE) `pdftooling` from PATH, or the `-m` bootstrap, and until PDF-29
 #: nothing asserted which arm a startup measurement had actually used.
-VENV_CONSOLE_SCRIPT = REPO_ROOT / ".venv" / "bin" / "pdftoolkit"
+VENV_CONSOLE_SCRIPT = REPO_ROOT / ".venv" / "bin" / "pdftooling"
 
 #: `quiet` == loadavg(1m) <= this fraction of the cpu count. The same definition
 #: perf/README.md states and scripts/measure_gate.py enforces, so the test and
@@ -1171,7 +1171,7 @@ QUIET_LOAD_FRACTION = 0.25
 
 def test_no_engine_library_is_imported_at_module_scope() -> None:
     probe = (
-        "import sys, pdf_toolkit.cli.main;"
+        "import sys, pdf_tooling.cli.main;"
         f"leaked = {ENGINE_MODULES!r} & set(sys.modules);"
         "print(sorted(leaked));"
         "sys.exit(1 if leaked else 0)"
@@ -1265,14 +1265,14 @@ def test_help_stays_within_the_startup_budget() -> None:
     if not VENV_CONSOLE_SCRIPT.exists():
         pytest.skip(
             f"no console script at {VENV_CONSOLE_SCRIPT}; the remaining arms are a "
-            f"possibly STALE PATH install ({shutil.which('pdftoolkit')}) and the `-m` "
+            f"possibly STALE PATH install ({shutil.which('pdftooling')}) and the `-m` "
             "bootstrap, whose startup path differs measurably. Run `uv sync`."
         )
     chosen = console_script()
     assert chosen == [str(VENV_CONSOLE_SCRIPT)], (
         f"console_script() resolved {chosen!r}, not the project venv's own "
         f"{str(VENV_CONSOLE_SCRIPT)!r}. A startup number from a different binary is a "
-        "number about a different build -- `make install` leaves a global `pdftoolkit` "
+        "number about a different build -- `make install` leaves a global `pdftooling` "
         "on PATH that may be stale, and the `-m` arm bootstraps differently."
     )
 
@@ -1365,11 +1365,16 @@ def test_packaging_declares_the_license_and_its_license_files() -> None:
 
 
 def test_both_console_scripts_point_at_the_same_entry_point() -> None:
+    """PDF-48. The two CANONICAL spellings share one target. The two
+    deprecated spellings do NOT share it any more -- each points at its own
+    shim in `cli/deprecated.py`, which is
+    `test_the_console_script_declarations_are_exactly_the_four_key_shape`'s
+    job to pin."""
     project = load_pyproject()["project"]
     assert isinstance(project, dict)
     scripts = project["scripts"]
     assert isinstance(scripts, dict)
-    assert scripts["pdftoolkit"] == scripts["pdf-toolkit"] == "pdf_toolkit.cli.main:main"
+    assert scripts["pdftooling"] == scripts["pdf-tooling"] == "pdf_tooling.cli.main:main"
 
 
 def hc1_haystacks() -> list[Path]:
@@ -1745,7 +1750,7 @@ def test_registered_secrets_are_scrubbed_from_every_log_record() -> None:
     try:
         register_secret("hunter2")
         record = logging.LogRecord(
-            name="pdf_toolkit",
+            name="pdf_tooling",
             level=logging.DEBUG,
             pathname=__file__,
             lineno=1,
@@ -1771,49 +1776,157 @@ def test_registered_secrets_are_scrubbed_from_every_log_record() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_console_script_alias_is_still_declared() -> None:
-    """AC22. `[project.scripts]` declares EXACTLY the two keys, both pointing
-    at the same entry point. The alias is published, it is installed by a real
-    `pip install`, and removing it is a breaking change to a distribution that
-    is already on PyPI — a separate item with its own deprecation window, not
-    a tidy-up folded into a rename.
+def test_the_console_script_declarations_are_exactly_the_four_key_shape() -> None:
+    """PDF-48 AC5. `[project.scripts]` declares EXACTLY four keys with exactly
+    two distinct targets: the two canonical spellings point at `main`, and the
+    two deprecated spellings point at the two shim entry points. Dropping the
+    deprecated pair before `v1.0.0` is a breaking change to a distribution
+    that is already on PyPI, not a tidy-up folded into a later rename.
     """
     project = load_pyproject()["project"]
     assert isinstance(project, dict)
     scripts = project["scripts"]
-    assert set(scripts) == {"pdftoolkit", "pdf-toolkit"}, (
-        f"[project.scripts] declares {sorted(scripts)}; the alias `pdf-toolkit` is "
-        "PUBLISHED and pinned, and dropping it is a breaking change, not a rename"
+    assert set(scripts) == {"pdftooling", "pdf-tooling", "pdftoolkit", "pdf-toolkit"}, (
+        f"[project.scripts] declares {sorted(scripts)}; PDF-48 requires exactly the "
+        "two canonical spellings plus the two deprecated ones, no fewer and no more"
     )
-    assert set(scripts.values()) == {"pdf_toolkit.cli.main:main"}
+    assert scripts["pdftooling"] == scripts["pdf-tooling"] == "pdf_tooling.cli.main:main"
+    assert set(scripts.values()) == {
+        "pdf_tooling.cli.main:main",
+        "pdf_tooling.cli.deprecated:main_pdftoolkit",
+        "pdf_tooling.cli.deprecated:main_pdf_toolkit",
+    }, f"a deprecated key points directly at `main`, not at its own shim: {scripts}"
 
 
 def test_the_alias_arms_that_pin_it_still_exist_and_still_run() -> None:
-    """AC22. The two arms that would have to be DELETED to drop the alias are
-    asserted to still be present, by name.
+    """PDF-48. The arm that would have to be DELETED to drop the canonical
+    alias is asserted to still be present, by name.
 
     A criterion that only re-asserted the declaration would stay green while
     its own evidence was deleted underneath it; what makes the alias safe is
-    that removing it costs two passing assertions, so those are what is pinned.
+    that removing it costs a passing assertion, so that is what is pinned.
     """
     spine = Path(__file__).read_text()
     assert "def test_both_console_scripts_point_at_the_same_entry_point()" in spine
-    assert 'alias = Path(sys.executable).parent / "pdf-toolkit"' in spine, (
+    assert 'alias = Path(sys.executable).parent / "pdf-tooling"' in spine, (
         "test_cli_spine.py's alias arm constructs the CONSOLE-SCRIPT path and must "
         "not be swept: it is character-identical in shape to the planning-dir "
         "fallback in test_docs_antirot.py and opposite in disposition"
     )
 
 
-def test_the_import_package_is_still_pdf_toolkit() -> None:
-    """AC24. The distribution moved; the import package did not."""
+def test_the_import_package_is_now_pdf_tooling() -> None:
+    """PDF-48 AC9. The distribution did not move; the import package did,
+    behind its own deprecation window. Inverted from the pre-PDF-48 arm this
+    replaces, which asserted `["pdf_toolkit"]`."""
     packages = sorted(
         p.name for p in (REPO_ROOT / "src").iterdir() if (p / "__init__.py").is_file()
     )
-    assert packages == ["pdf_toolkit"], f"src/ declares {packages}"
+    assert packages == ["pdf_tooling"], f"src/ declares {packages}"
     import importlib
 
-    assert importlib.import_module("pdf_toolkit") is not None
+    assert importlib.import_module("pdf_tooling") is not None
+
+
+# --------------------------------------------------------------------------- #
+# PDF-48 D2/AC6/AC7/AC8 -- the two deprecated shims, driven.
+# --------------------------------------------------------------------------- #
+
+
+def _deprecated_alias_path(name: str) -> Path | None:
+    """Resolve one of the two deprecated console scripts, mirroring
+    `console_script()`'s own venv-sibling-first order."""
+    sibling = Path(sys.executable).parent / name
+    if sibling.exists():
+        return sibling
+    found = shutil.which(name)
+    return Path(found) if found else None
+
+
+@pytest.mark.e2e
+def test_ac6_the_deprecated_alias_produces_byte_identical_stdout() -> None:
+    """AC6. Byte-equality, never a substring check, over a SUCCESS path and a
+    USAGE-ERROR path, plus a `json.loads` proof the payload parses. The
+    deprecation notice is asserted present on stderr and ABSENT from stdout."""
+    alias = _deprecated_alias_path("pdftoolkit")
+    if alias is None:
+        pytest.skip("no `pdftoolkit` deprecated shim resolved; run `uv sync`.")
+    primary = console_script()
+
+    for args in (("version", "-o", "json"), ("meta", "bogus", "-o", "json")):
+        canonical = subprocess.run(
+            [*primary, *args], capture_output=True, text=True, check=False, cwd=REPO_ROOT
+        )
+        aliased = subprocess.run(
+            [str(alias), *args], capture_output=True, text=True, check=False, cwd=REPO_ROOT
+        )
+        assert aliased.stdout == canonical.stdout, (
+            f"{args}: alias stdout diverges from the canonical script byte-for-byte"
+        )
+        assert aliased.returncode == canonical.returncode, args
+        json.loads(aliased.stdout)  # must parse; a notice leaking onto stdout breaks this
+        assert "deprecated" in aliased.stderr and "pdftooling" in aliased.stderr, (
+            f"{args}: the deprecation notice is missing from the alias's stderr"
+        )
+        assert "deprecated" not in aliased.stdout, (
+            f"{args}: the deprecation notice leaked onto stdout"
+        )
+
+
+@pytest.mark.e2e
+def test_ac7_the_deprecated_alias_matches_exit_codes_on_a_non_zero_case() -> None:
+    """AC7. Exit-code equivalence asserted over BOTH a success path and a
+    usage-error (exit 2) path -- a shim ending `sys.exit(0)` would pass a
+    success-only test and is exactly what this criterion exists to catch."""
+    alias = _deprecated_alias_path("pdftoolkit")
+    if alias is None:
+        pytest.skip("no `pdftoolkit` deprecated shim resolved; run `uv sync`.")
+    primary = console_script()
+
+    success = subprocess.run(
+        [str(alias), "version"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
+    )
+    assert success.returncode == 0
+
+    canonical_usage = subprocess.run(
+        [*primary, "meta", "bogus"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
+    )
+    aliased_usage = subprocess.run(
+        [str(alias), "meta", "bogus"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
+    )
+    assert canonical_usage.returncode == 2, "the recorded measurement this criterion pins"
+    assert aliased_usage.returncode == canonical_usage.returncode == 2, (
+        f"alias usage-error exit {aliased_usage.returncode} != "
+        f"canonical {canonical_usage.returncode}"
+    )
+
+
+def test_ac8_the_deprecation_window_is_stated_in_all_four_machine_read_places() -> None:
+    """AC8. `v1.0.0` as the removal version, in a place a machine reads, in
+    all four of: the `[project.scripts]` comment, `cli/deprecated.py`'s
+    module docstring, the notice text itself, and README's Aliases row."""
+    pyproject_text = (REPO_ROOT / "pyproject.toml").read_text()
+    deprecated_text = (REPO_ROOT / "src" / "pdf_tooling" / "cli" / "deprecated.py").read_text()
+    readme_text = (REPO_ROOT / "README.md").read_text()
+
+    assert "v1.0.0" in pyproject_text.split("[project.scripts]", 1)[1].split("\n\n", 1)[0], (
+        "the [project.scripts] block's comment does not name v1.0.0"
+    )
+    assert "v1.0.0" in deprecated_text, "cli/deprecated.py's module docstring does not name v1.0.0"
+
+    notice = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from pdf_tooling.cli.deprecated import _notice; _notice('pdftoolkit')",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    assert "v1.0.0" in notice.stderr, f"the notice text does not name v1.0.0: {notice.stderr!r}"
+    assert "v1.0.0" in readme_text, "README does not name v1.0.0 anywhere (the Aliases row)"
 
 
 def test_the_corpus_and_golden_name_strings_are_byte_identical() -> None:

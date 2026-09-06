@@ -105,7 +105,7 @@ def _skip_unless_engine_available(verb: str) -> None:
     port = _REQUIRES_ENGINE.get(verb)
     if port is None:
         return
-    from pdf_toolkit.ports import resolve
+    from pdf_tooling.ports import resolve
 
     if not resolve(port).available:
         pytest.skip(f"{verb} needs the {port} engine to reach a written artifact; not present")
@@ -731,7 +731,7 @@ def test_ac10_unreadable_arm_dry_run_mirrors_the_real_run(
 # --------------------------------------------------------------------------- #
 
 _BATCH_MODULE: Final[Path] = (
-    Path(__file__).resolve().parent.parent / "src" / "pdf_toolkit" / "ops" / "batch.py"
+    Path(__file__).resolve().parent.parent / "src" / "pdf_tooling" / "ops" / "batch.py"
 )
 
 #: The six ops modules that must REACH the one guard rather than carry a copy.
@@ -788,8 +788,8 @@ def test_ac13_the_item_scoped_set_is_exactly_the_two_declared_classes() -> None:
     Widening to ``PdfToolkitError`` would turn an absent engine from exit 3 into
     exit 1 on ``ocr``, and a refusal from exit 5 into exit 1 everywhere.
     """
-    from pdf_toolkit.errors import AuthError, FailureError
-    from pdf_toolkit.ops.batch import ITEM_SCOPED_ERRORS
+    from pdf_tooling.errors import AuthError, FailureError
+    from pdf_tooling.ops.batch import ITEM_SCOPED_ERRORS
 
     assert ITEM_SCOPED_ERRORS == (FailureError, AuthError), (
         f"the item-scoped set moved: {ITEM_SCOPED_ERRORS}. "
@@ -828,7 +828,7 @@ def test_ac14_every_batch_ops_module_reaches_the_one_guard(module: str) -> None:
     tree = ast.parse(path.read_text())
     imports_guard = any(
         isinstance(node, ast.ImportFrom)
-        and node.module == "pdf_toolkit.ops.batch"
+        and node.module == "pdf_tooling.ops.batch"
         and any(alias.name in {"BatchLedger", "preflight_operands"} for alias in node.names)
         for node in ast.walk(tree)
     )

@@ -67,9 +67,9 @@ def test_split_help_documents_all_four_modes_and_the_comma_rule() -> None:
 #: established for `compose`/`create` rather than starting a second one
 #: (X-157: consume the existing dimension, do not build a parallel one).
 _VERB_PORT_MODULES: Final[dict[str, str]] = {
-    "compose": "pdf_toolkit.ports.compose",
-    "create": "pdf_toolkit.ports.compose",
-    "rasterize": "pdf_toolkit.ports.raster",
+    "compose": "pdf_tooling.ports.compose",
+    "create": "pdf_tooling.ports.compose",
+    "rasterize": "pdf_tooling.ports.raster",
 }
 
 

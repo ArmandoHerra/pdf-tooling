@@ -28,7 +28,7 @@ authoritative if a future spec names it differently):
 2. **Body objects intact.** All five objects (`1 0 obj` … `5 0 obj`, the
    fifth being the content stream) parse individually; `pikepdf`'s recovery
    pass reconstructs a 1-page document from them.
-3. **`pdftoolkit info testdata/malformed.pdf` exits `1`** (not 2, not 4) —
+3. **`pdftooling info testdata/malformed.pdf` exits `1`** (not 2, not 4) —
    verified against the landed `info` verb at `PDF-06` commit time.
 4. **`pikepdf.open(path, attempt_recovery=True)` recovers the document and
    reports ≥ 1 warning** via `Pdf.get_warnings()` (libqpdf under the hood;

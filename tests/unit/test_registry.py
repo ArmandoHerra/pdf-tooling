@@ -336,14 +336,14 @@ def test_verb_spec_is_a_frozen_dataclass_with_the_documented_fields() -> None:
 
 
 def test_reaches_atomic_writer_is_true_for_a_module_that_imports_it() -> None:
-    assert reaches_atomic_writer("pdf_toolkit.safety.atomic") is True
+    assert reaches_atomic_writer("pdf_tooling.safety.atomic") is True
 
 
 def test_reaches_atomic_writer_is_false_for_the_three_non_mutating_cli_modules() -> None:
     for module in (
-        "pdf_toolkit.cli.cmd_version",
-        "pdf_toolkit.cli.cmd_doctor",
-        "pdf_toolkit.cli.cmd_info",
+        "pdf_tooling.cli.cmd_version",
+        "pdf_tooling.cli.cmd_doctor",
+        "pdf_tooling.cli.cmd_info",
     ):
         assert reaches_atomic_writer(module) is False, module
 
@@ -353,12 +353,12 @@ def test_reaches_atomic_writer_is_true_for_the_two_mutating_cli_modules() -> Non
     EXISTING `_MAX_IMPORT_HOPS = 4` scan -- `cmd_merge -> ops.merge ->
     safety.atomic` and `cmd_split -> ops.split -> safety.atomic`, two hops
     each. The bound was never raised; see the Implementation Log."""
-    for module in ("pdf_toolkit.cli.cmd_merge", "pdf_toolkit.cli.cmd_split"):
+    for module in ("pdf_tooling.cli.cmd_merge", "pdf_tooling.cli.cmd_split"):
         assert reaches_atomic_writer(module) is True, module
 
 
 def test_reaches_atomic_writer_is_false_for_an_unknown_module() -> None:
-    assert reaches_atomic_writer("pdf_toolkit.this_module_does_not_exist") is False
+    assert reaches_atomic_writer("pdf_tooling.this_module_does_not_exist") is False
 
 
 def test_reaches_atomic_writer_follows_a_transitive_import_chain(
@@ -369,17 +369,17 @@ def test_reaches_atomic_writer_follows_a_transitive_import_chain(
     import registry
 
     fake_src = tmp_path / "src"
-    (fake_src / "pdf_toolkit" / "cli").mkdir(parents=True)
-    (fake_src / "pdf_toolkit" / "ops").mkdir(parents=True)
-    (fake_src / "pdf_toolkit" / "cli" / "cmd_fake.py").write_text(
-        "from pdf_toolkit.ops.ops_fake import do_it\n\n\ndef go():\n    return do_it()\n"
+    (fake_src / "pdf_tooling" / "cli").mkdir(parents=True)
+    (fake_src / "pdf_tooling" / "ops").mkdir(parents=True)
+    (fake_src / "pdf_tooling" / "cli" / "cmd_fake.py").write_text(
+        "from pdf_tooling.ops.ops_fake import do_it\n\n\ndef go():\n    return do_it()\n"
     )
-    (fake_src / "pdf_toolkit" / "ops" / "ops_fake.py").write_text(
-        "from pdf_toolkit.safety.atomic import AtomicWriter\n\n\n"
+    (fake_src / "pdf_tooling" / "ops" / "ops_fake.py").write_text(
+        "from pdf_tooling.safety.atomic import AtomicWriter\n\n\n"
         "def do_it():\n    return AtomicWriter\n"
     )
     monkeypatch.setattr(registry, "SRC", fake_src)
-    assert registry.reaches_atomic_writer("pdf_toolkit.cli.cmd_fake") is True
+    assert registry.reaches_atomic_writer("pdf_tooling.cli.cmd_fake") is True
 
 
 def test_reaches_atomic_writer_does_not_false_positive_on_an_unrelated_chain(
@@ -388,13 +388,13 @@ def test_reaches_atomic_writer_does_not_false_positive_on_an_unrelated_chain(
     import registry
 
     fake_src = tmp_path / "src"
-    (fake_src / "pdf_toolkit" / "cli").mkdir(parents=True)
-    (fake_src / "pdf_toolkit" / "ops").mkdir(parents=True)
-    (fake_src / "pdf_toolkit" / "cli" / "cmd_fake.py").write_text(
-        "from pdf_toolkit.ops.ops_fake import do_it\n\n\ndef go():\n    return do_it()\n"
+    (fake_src / "pdf_tooling" / "cli").mkdir(parents=True)
+    (fake_src / "pdf_tooling" / "ops").mkdir(parents=True)
+    (fake_src / "pdf_tooling" / "cli" / "cmd_fake.py").write_text(
+        "from pdf_tooling.ops.ops_fake import do_it\n\n\ndef go():\n    return do_it()\n"
     )
-    (fake_src / "pdf_toolkit" / "ops" / "ops_fake.py").write_text(
+    (fake_src / "pdf_tooling" / "ops" / "ops_fake.py").write_text(
         "def do_it():\n    return 'no writer here'\n"
     )
     monkeypatch.setattr(registry, "SRC", fake_src)
-    assert registry.reaches_atomic_writer("pdf_toolkit.cli.cmd_fake") is False
+    assert registry.reaches_atomic_writer("pdf_tooling.cli.cmd_fake") is False

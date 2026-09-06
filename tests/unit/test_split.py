@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit import errors
-from pdf_toolkit.ops import split as split_ops
-from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_tooling import errors
+from pdf_tooling.ops import split as split_ops
+from pdf_tooling.safety.policy import SafetyPolicy
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -58,7 +58,7 @@ def _make_source(directory: Path, pages: int, *, name: str = "src.pdf") -> Path:
 
 
 def test_ops_split_does_not_reimplement_the_grammar() -> None:
-    module_path = Path(__file__).resolve().parents[2] / "src" / "pdf_toolkit" / "ops" / "split.py"
+    module_path = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling" / "ops" / "split.py"
     text = module_path.read_text()
     assert "re.compile" not in text
     for literal in ("even", "odd", "first", "last", "all"):
@@ -68,7 +68,7 @@ def test_ops_split_does_not_reimplement_the_grammar() -> None:
     imported = {
         alias.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "pdf_toolkit.ops.pagerange"
+        if isinstance(node, ast.ImportFrom) and node.module == "pdf_tooling.ops.pagerange"
         for alias in node.names
     }
     assert "parse" in imported
@@ -94,7 +94,7 @@ def test_every_25_pages_at_10_writes_three_chunks_10_10_5(tmp_path: Path) -> Non
     assert result.exit_code == 0
     names = sorted(p.name for p in out_dir.iterdir())
     assert len(names) == 3
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     engine = require_structure()
     counts = []
@@ -137,7 +137,7 @@ def test_ranges_comma_separates_parts_not_a_union(tmp_path: Path) -> None:
     assert result.exit_code == 0
     names = sorted(p.name for p in out_dir.iterdir())
     assert len(names) == 3
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     engine = require_structure()
     counts = []
@@ -255,7 +255,7 @@ def test_at_bookmarks_leading_part_and_duplicate_bookmark(tmp_path: Path) -> Non
     # Leading part (pages 1-2) + at page 3 (3-4) + at page 5 (5-10), no
     # zero-page file for the duplicate bookmark.
     assert len(names) == 3
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     engine = require_structure()
     total = 0

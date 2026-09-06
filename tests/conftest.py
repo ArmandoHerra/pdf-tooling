@@ -125,7 +125,7 @@ _ENGINE_ALIASES: Final[dict[str, str]] = {
 
 
 def _resolve_port(engine: str) -> str:
-    from pdf_toolkit.ports import PORTS
+    from pdf_tooling.ports import PORTS
 
     if engine in PORTS:
         return engine
@@ -188,7 +188,7 @@ def _reclaim_engine_hiding_shim(shim_dir: str, original_path: str) -> None:
 
     `reset_cache()` is deliberately NOT called here. The registry memoization
     exists to serve resolution DURING the session; at interpreter exit there is
-    no consumer left to serve, and importing `pdf_toolkit.ports` during teardown
+    no consumer left to serve, and importing `pdf_tooling.ports` during teardown
     would buy a new failure mode for no benefit.
     """
     os.environ["PATH"] = original_path
@@ -234,7 +234,7 @@ def _apply_engine_hiding_shim() -> None:
     os.environ["PATH"] = str(shim_dir)
     # The registry memoizes per process; a PATH change after the first probe
     # must be seen, exactly like `doctor` resetting it before it probes.
-    from pdf_toolkit.ports import reset_cache
+    from pdf_tooling.ports import reset_cache
 
     reset_cache()
 
@@ -271,14 +271,14 @@ def pytest_configure(config: pytest.Config) -> None:
     _apply_engine_hiding_shim()
     if hasattr(config, "workerinput"):
         return
-    config._pdftoolkit_worktree_before = _tracked_files_manifest()  # type: ignore[attr-defined]
+    config._pdftooling_worktree_before = _tracked_files_manifest()  # type: ignore[attr-defined]
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
     if hasattr(config, "workerinput"):
         return
-    before: dict[str, str] | None = getattr(config, "_pdftoolkit_worktree_before", None)
+    before: dict[str, str] | None = getattr(config, "_pdftooling_worktree_before", None)
     if before is None:
         return
     after = _tracked_files_manifest()
@@ -292,13 +292,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     for relpath in sorted(set(before) & set(after)):
         if before[relpath] != after[relpath]:
             findings.append(f"{relpath}: content changed")
-    config._pdftoolkit_worktree_findings = findings  # type: ignore[attr-defined]
+    config._pdftooling_worktree_findings = findings  # type: ignore[attr-defined]
     if findings:
         session.exitstatus = 1
 
 
 def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pytest.Config) -> None:
-    findings = getattr(config, "_pdftoolkit_worktree_findings", None)
+    findings = getattr(config, "_pdftooling_worktree_findings", None)
     if not findings:
         return
     terminalreporter.section("PLAN.md §10 -- a tracked file changed during this run")
@@ -425,7 +425,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if requires_marker is not None and requires_marker.args:
             engine = requires_marker.args[0]
             port = _resolve_port(engine)
-            from pdf_toolkit.ports import resolve
+            from pdf_tooling.ports import resolve
 
             report = resolve(port)
             if not report.available:

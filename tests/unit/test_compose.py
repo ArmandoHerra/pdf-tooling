@@ -22,8 +22,8 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
 from helpers.pdfstream import embedded_image_streams, page_media_box  # noqa: E402
-from pdf_toolkit.errors import FailureError, NoInputError, UsageError  # noqa: E402
-from pdf_toolkit.ops.compose import (  # noqa: E402
+from pdf_tooling.errors import FailureError, NoInputError, UsageError  # noqa: E402
+from pdf_tooling.ops.compose import (  # noqa: E402
     DEFAULT_FIT,
     EMBED_PASSTHROUGH,
     EMBED_REENCODE,
@@ -36,8 +36,8 @@ from pdf_toolkit.ops.compose import (  # noqa: E402
     plan_placements,
     resolve_single_output,
 )
-from pdf_toolkit.ports.compose import ImagePlacement, require_compose  # noqa: E402
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.ports.compose import ImagePlacement, require_compose  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 
 REPO_ROOT = TESTS_DIR.parent
 SRC = REPO_ROOT / "src"
@@ -281,7 +281,7 @@ def test_two_inputs_with_identical_pixels_keep_their_own_bytes(tmp_path: Path) -
 
 
 def test_ac6_the_adapter_contains_no_image_transform_or_save_call() -> None:
-    adapter = (SRC / "pdf_toolkit" / "adapters" / "reportlab_compose.py").read_text()
+    adapter = (SRC / "pdf_tooling" / "adapters" / "reportlab_compose.py").read_text()
     pattern = re.compile(r"Image\.(convert|resize|rotate|thumbnail)|\.save\(")
     assert pattern.findall(adapter) == []
 
@@ -314,7 +314,7 @@ def test_ac27_the_a85_toggle_is_restored_when_the_render_raises(tmp_path: Path) 
 
 
 def test_ac27_the_toggle_is_set_and_restored_inside_one_context_manager() -> None:
-    adapter = (SRC / "pdf_toolkit" / "adapters" / "reportlab_compose.py").read_text()
+    adapter = (SRC / "pdf_tooling" / "adapters" / "reportlab_compose.py").read_text()
     body = adapter.split("def _single_filter_chain")[1].split("\ndef ")[0]
     assert "rl_config.useA85 = 0" in body
     assert "finally:" in body
@@ -724,7 +724,7 @@ def _item_kwargs() -> dict[str, object]:
 
 
 def test_ac21_to_dict_without_detail_has_exactly_the_eight_original_keys() -> None:
-    from pdf_toolkit.models import ItemResult
+    from pdf_tooling.models import ItemResult
 
     payload = ItemResult(**_item_kwargs()).to_dict()  # type: ignore[arg-type]
     assert list(payload) == [
@@ -740,7 +740,7 @@ def test_ac21_to_dict_without_detail_has_exactly_the_eight_original_keys() -> No
 
 
 def test_ac21_to_dict_with_detail_has_nine_keys_and_detail_is_last() -> None:
-    from pdf_toolkit.models import ItemResult
+    from pdf_tooling.models import ItemResult
 
     payload = ItemResult(**_item_kwargs(), detail={"page": 1}).to_dict()  # type: ignore[arg-type]
     assert len(payload) == 9
@@ -749,13 +749,13 @@ def test_ac21_to_dict_with_detail_has_nine_keys_and_detail_is_last() -> None:
 
 
 def test_ac21_detail_defaults_to_none_so_no_existing_construction_site_changes() -> None:
-    from pdf_toolkit.models import ItemResult
+    from pdf_tooling.models import ItemResult
 
     assert ItemResult(**_item_kwargs()).detail is None  # type: ignore[arg-type]
 
 
 def test_ac13_schema_version_is_unchanged() -> None:
-    from pdf_toolkit.models import SCHEMA_VERSION
+    from pdf_tooling.models import SCHEMA_VERSION
 
     assert SCHEMA_VERSION == 1
 
@@ -781,7 +781,7 @@ def test_ac23_the_engine_refuses_anything_that_is_not_a_binary_stream(tmp_path: 
 
 
 def _layout():
-    from pdf_toolkit.ports.compose import TextLayout
+    from pdf_tooling.ports.compose import TextLayout
 
     return TextLayout(
         font="Helvetica",
@@ -826,7 +826,7 @@ def test_ac23_a_dry_run_over_an_occupied_target_predicts_exit_5(tmp_path: Path) 
 
 
 def test_ac19_an_existing_target_without_force_is_exit_5(tmp_path: Path) -> None:
-    from pdf_toolkit.errors import TargetExistsError
+    from pdf_tooling.errors import TargetExistsError
 
     source = _jpeg(tmp_path / "a.jpg")
     out = tmp_path / "out.pdf"
@@ -852,7 +852,7 @@ def test_ac23_the_op_module_opens_nothing_for_writing() -> None:
     as if it were the violation."""
     import ast
 
-    tree = ast.parse((SRC / "pdf_toolkit" / "ops" / "compose.py").read_text())
+    tree = ast.parse((SRC / "pdf_tooling" / "ops" / "compose.py").read_text())
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -878,12 +878,12 @@ def test_ac23_the_op_module_opens_nothing_for_writing() -> None:
 
 
 def test_ac22_both_verbs_declare_exactly_the_single_output_flag() -> None:
-    import pdf_toolkit.cli.cmd_compose  # noqa: F401
-    import pdf_toolkit.cli.cmd_create  # noqa: F401
-    from pdf_toolkit.cli.common import consumed_output_flags
+    import pdf_tooling.cli.cmd_compose  # noqa: F401
+    import pdf_tooling.cli.cmd_create  # noqa: F401
+    from pdf_tooling.cli.common import consumed_output_flags
 
-    assert consumed_output_flags("pdf_toolkit.cli.cmd_compose") == ("--output",)
-    assert consumed_output_flags("pdf_toolkit.cli.cmd_create") == ("--output",)
+    assert consumed_output_flags("pdf_tooling.cli.cmd_compose") == ("--output",)
+    assert consumed_output_flags("pdf_tooling.cli.cmd_create") == ("--output",)
 
 
 @pytest.mark.parametrize("module", ["cmd_compose", "cmd_create"])
@@ -901,7 +901,7 @@ def test_ac22_neither_command_module_re_implements_the_refusal(module: str) -> N
     `26f4c79`). Reported as a spec defect; asserted here in the strongest form
     that is actually satisfiable.
     """
-    text = (SRC / "pdf_toolkit" / "cli" / f"{module}.py").read_text()
+    text = (SRC / "pdf_tooling" / "cli" / f"{module}.py").read_text()
     for flag in ("--out-dir", "--name", "--in-place", '"-O"', "'-O'"):
         assert flag not in text, f"{module} names {flag}"
     assert text.count("--output") == 1
@@ -912,7 +912,7 @@ def test_ac22_neither_command_module_re_implements_the_refusal(module: str) -> N
 
 def test_ac22_the_shared_option_layer_is_not_edited() -> None:
     """A widened OUTPUT_FLAGS or a second refusal path would show up here."""
-    from pdf_toolkit.cli.common import OUTPUT_FLAGS
+    from pdf_tooling.cli.common import OUTPUT_FLAGS
 
     assert OUTPUT_FLAGS == ("--output", "--out-dir", "--name", "--in-place")
 
@@ -931,8 +931,8 @@ def test_ac26_both_verbs_classify_as_mutating_at_the_existing_hop_bound() -> Non
         assert verbs[name].is_mutating is True
         assert verbs[name].is_page_addressing is False
         assert verbs[name].consumes == ("--output",)
-    assert registry.reaches_atomic_writer("pdf_toolkit.cli.cmd_compose", max_hops=2) is True
-    assert registry.reaches_atomic_writer("pdf_toolkit.cli.cmd_create", max_hops=2) is True
+    assert registry.reaches_atomic_writer("pdf_tooling.cli.cmd_compose", max_hops=2) is True
+    assert registry.reaches_atomic_writer("pdf_tooling.cli.cmd_create", max_hops=2) is True
 
 
 # --------------------------------------------------------------------------- #
@@ -947,11 +947,11 @@ def test_ac30_no_forbidden_engine_name_appears_in_this_specs_own_files() -> None
     from test_cli_spine import FORBIDDEN_NAMES
 
     owned = [
-        SRC / "pdf_toolkit" / "ops" / "compose.py",
-        SRC / "pdf_toolkit" / "cli" / "cmd_compose.py",
-        SRC / "pdf_toolkit" / "cli" / "cmd_create.py",
-        SRC / "pdf_toolkit" / "adapters" / "reportlab_compose.py",
-        SRC / "pdf_toolkit" / "ports" / "compose.py",
+        SRC / "pdf_tooling" / "ops" / "compose.py",
+        SRC / "pdf_tooling" / "cli" / "cmd_compose.py",
+        SRC / "pdf_tooling" / "cli" / "cmd_create.py",
+        SRC / "pdf_tooling" / "adapters" / "reportlab_compose.py",
+        SRC / "pdf_tooling" / "ports" / "compose.py",
     ]
     offenders = [
         f"{path.name}: {name}"

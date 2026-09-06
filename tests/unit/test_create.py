@@ -21,8 +21,8 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.errors import FailureError, NoInputError, UsageError  # noqa: E402
-from pdf_toolkit.ops.compose import (  # noqa: E402
+from pdf_tooling.errors import FailureError, NoInputError, UsageError  # noqa: E402
+from pdf_tooling.ops.compose import (  # noqa: E402
     BASE14_FONTS,
     DEFAULT_CREATE_MARGIN,
     DEFAULT_FONT,
@@ -38,7 +38,7 @@ from pdf_toolkit.ops.compose import (  # noqa: E402
     resolve_create_output,
     sanitize_text,
 )
-from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
+from pdf_tooling.safety.policy import SafetyPolicy  # noqa: E402
 
 LETTER = (612.0, 792.0)
 MARGIN = 54.0
@@ -363,7 +363,7 @@ def test_a_dry_run_over_an_occupied_target_predicts_exit_5(tmp_path: Path) -> No
 
 
 def test_an_existing_target_without_force_is_exit_5(tmp_path: Path) -> None:
-    from pdf_toolkit.errors import TargetExistsError
+    from pdf_tooling.errors import TargetExistsError
 
     out = tmp_path / "out.pdf"
     out.write_bytes(b"%PDF-1.4\n%%EOF\n")

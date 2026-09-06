@@ -77,7 +77,7 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_toolkit.safety.tempnames import find_stray_temps  # noqa: E402
+from pdf_tooling.safety.tempnames import find_stray_temps  # noqa: E402
 from registry import console_script  # noqa: E402
 
 pytestmark = [

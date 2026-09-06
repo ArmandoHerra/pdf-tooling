@@ -57,7 +57,7 @@ import pytest
 ADAPTER: Final[Path] = (
     Path(__file__).resolve().parents[1]
     / "src"
-    / "pdf_toolkit"
+    / "pdf_tooling"
     / "adapters"
     / "pikepdf_structure.py"
 )
@@ -230,7 +230,7 @@ def test_ac2i_the_walk_resolves_a_non_empty_population(engine_calls: list[Engine
     """AC2(i): a walk that resolves nothing passes vacuously.
 
     This product's second headline failure mode and the exact shape of `B-080`.
-    `git grep -cE 'pikepdf\\.' -- src/pdf_toolkit/adapters/pikepdf_structure.py`
+    `git grep -cE 'pikepdf\\.' -- src/pdf_tooling/adapters/pikepdf_structure.py`
     returned **36** references at `ae723bc`; the call population is a subset of
     those and is MEASURED, never assumed.
     """

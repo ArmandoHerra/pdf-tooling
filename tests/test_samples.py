@@ -136,7 +136,7 @@ _SAMPLE_EXPECTED_PAGES = 482
 
 @pytest.mark.samples
 def test_ac22_sample_copy_reports_the_expected_page_count(samples) -> None:
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     copy_path = samples.copy(_SAMPLE_NAME)
     engine = require_structure()
@@ -146,9 +146,9 @@ def test_ac22_sample_copy_reports_the_expected_page_count(samples) -> None:
 
 @pytest.mark.samples
 def test_ac22_split_ranges_over_a_482_page_sample(samples, tmp_path: Path) -> None:
-    from pdf_toolkit.ops.split import split_document
-    from pdf_toolkit.ports.structure import require_structure
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.split import split_document
+    from pdf_tooling.ports.structure import require_structure
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     copy_path = samples.copy(_SAMPLE_NAME)
     out_dir = tmp_path / "parts"
@@ -185,9 +185,9 @@ def test_ac22_split_ranges_over_a_482_page_sample(samples, tmp_path: Path) -> No
 
 @pytest.mark.samples
 def test_ac22_merge_union_exclusion_over_a_482_page_sample(samples, tmp_path: Path) -> None:
-    from pdf_toolkit.ops.merge import merge_documents, resolve_merge_inputs
-    from pdf_toolkit.ports.structure import require_structure
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.merge import merge_documents, resolve_merge_inputs
+    from pdf_tooling.ports.structure import require_structure
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     copy_path = samples.copy(_SAMPLE_NAME)
     output = tmp_path / "long.pdf"
@@ -232,8 +232,8 @@ def test_ac20_sample_page_1_at_72_dpi_renders_the_exact_point_pixel_size(
 ) -> None:
     from PIL import Image
 
-    from pdf_toolkit.ops.raster import rasterize_document
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.raster import rasterize_document
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     copy_path = samples.copy(_RASTER_SAMPLE_NAME)
     out_dir = tmp_path / "page1"
@@ -269,8 +269,8 @@ def test_ac20_sample_page_1_at_72_dpi_renders_the_exact_point_pixel_size(
 def test_ac20_threads_1_and_threads_8_are_byte_identical_over_a_real_scan(
     samples, tmp_path: Path
 ) -> None:
-    from pdf_toolkit.ops.raster import rasterize_document
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.raster import rasterize_document
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     copy_path = samples.copy(_RASTER_SAMPLE_NAME)
     out1 = tmp_path / "t1"
@@ -355,8 +355,8 @@ def test_ac18_every_one_of_108_real_scans_is_stored_byte_for_byte(samples, tmp_p
     if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
         sys.path.insert(0, str(tests_dir))
     from helpers.pdfstream import embedded_image_streams
-    from pdf_toolkit.ops.compose import compose_document, parse_page_size
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.compose import compose_document, parse_page_size
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     copied = samples.copy_tree(_COMPOSE_SAMPLE_TREE)
     # sorted() over fixed-width names is a total, deterministic order; the test
@@ -430,7 +430,7 @@ _EMPTY_SAMPLE_PAGES = 108
 
 
 def _read_only_policy():
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     return SafetyPolicy(
         dry_run=False,
@@ -446,7 +446,7 @@ def _read_only_policy():
 @pytest.mark.samples
 @pytest.mark.parametrize("layout", [False, True], ids=["fast", "layout"])
 def test_ac14_every_page_of_an_image_only_scan_is_empty_and_exits_0(samples, layout: bool) -> None:
-    from pdf_toolkit.ops.textract import extract_text_run
+    from pdf_tooling.ops.textract import extract_text_run
 
     copy_path = samples.copy(_EMPTY_SAMPLE_NAME)
     outcome = extract_text_run(
@@ -478,7 +478,7 @@ def test_ac14_every_page_of_an_image_only_scan_is_empty_and_exits_0(samples, lay
 
 @pytest.mark.samples
 def test_ac14_tables_finds_nothing_on_an_image_only_scan_and_exits_0(samples) -> None:
-    from pdf_toolkit.ops.textract import extract_tables_run
+    from pdf_tooling.ops.textract import extract_tables_run
 
     copy_path = samples.copy(_EMPTY_SAMPLE_NAME)
     outcome = extract_tables_run(
@@ -506,8 +506,8 @@ def test_ac15_info_has_text_and_text_emptiness_agree_on_the_same_copy(samples) -
     """AC15. `info --pages-detail` says has_text false for every page; `text`
     returns empty for every page. If these ever disagree it is a FINDING for the
     PM about PDF-05's surface, not something this spec fixes."""
-    from pdf_toolkit.cli.cmd_info import build_payload
-    from pdf_toolkit.ops.textract import extract_text_run
+    from pdf_tooling.cli.cmd_info import build_payload
+    from pdf_tooling.ops.textract import extract_text_run
 
     copy_path = samples.copy(_EMPTY_SAMPLE_NAME)
 
@@ -571,7 +571,7 @@ def test_ac16_lossless_shrinks_and_preserves_text_over_a_482_page_sample(
     tests_dir = Path(__file__).resolve().parent
     if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
         sys.path.insert(0, str(tests_dir))
-    from pdf_toolkit.ops.optimize import compress_run
+    from pdf_tooling.ops.optimize import compress_run
     from pdfium_text import page_texts
 
     copy_path = samples.copy(_OPTIMIZE_SAMPLE_NAME)
@@ -609,7 +609,7 @@ def test_ac16_downsample_does_not_exceed_lossless_only_over_a_real_scan(
     tests_dir = Path(__file__).resolve().parent
     if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
         sys.path.insert(0, str(tests_dir))
-    from pdf_toolkit.ops.optimize import compress_run
+    from pdf_tooling.ops.optimize import compress_run
     from pdfium_text import page_texts
 
     copy_path = samples.copy(_IMAGE_SAMPLE_NAME)
@@ -657,7 +657,7 @@ def test_ac16_downsample_does_not_exceed_lossless_only_over_a_real_scan(
 def test_ac16_linearize_over_a_482_page_sample(samples, tmp_path: Path) -> None:
     import pikepdf
 
-    from pdf_toolkit.ops.optimize import linearize_run
+    from pdf_tooling.ops.optimize import linearize_run
 
     copy_path = samples.copy(_OPTIMIZE_SAMPLE_NAME)
     target = tmp_path / "linearized.pdf"
@@ -687,7 +687,7 @@ _CRYPTO_SAMPLE_PASSWORD = "samples-arm-owner-password"
 
 
 def _crypto_slot(path: Path, slot: str):
-    from pdf_toolkit.cli.password import plan_password
+    from pdf_tooling.cli.password import plan_password
 
     return plan_password(
         slot=slot,
@@ -707,8 +707,8 @@ def test_ac16_encrypt_info_decrypt_round_trips_a_real_document(samples, tmp_path
     if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
         sys.path.insert(0, str(tests_dir))
     from pagetree import page_tree_digest
-    from pdf_toolkit.ops.crypto import decrypt_run, encrypt_run
-    from pdf_toolkit.ops.inspect import inspect_document
+    from pdf_tooling.ops.crypto import decrypt_run, encrypt_run
+    from pdf_tooling.ops.inspect import inspect_document
 
     copy_path = samples.copy(_CRYPTO_SAMPLE_NAME)
     password_file = tmp_path / "owner.pw"
@@ -825,7 +825,7 @@ def _page_content_digests(path: Path) -> tuple[str, ...]:
 def test_ac27_extract_preserves_order_across_a_long_range_expression(
     samples, tmp_path: Path
 ) -> None:
-    from pdf_toolkit.ops.pages import extract_run
+    from pdf_tooling.ops.pages import extract_run
 
     copy_path = samples.copy(_PAGES_SAMPLE_NAME)
     target = tmp_path / "extracted.pdf"
@@ -870,8 +870,8 @@ def test_ac27_reorder_in_place_keeps_the_document_whole_and_backs_it_up(
     """
     import hashlib
 
-    from pdf_toolkit.ops.pages import reorder_run
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.pages import reorder_run
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     copy_path = samples.copy(_PAGES_SAMPLE_NAME)
     before_hash = hashlib.sha256(copy_path.read_bytes()).hexdigest()
@@ -973,7 +973,7 @@ def _fingerprint(value: object) -> str:
 def test_pdf14_arm_a_meta_get_reports_a_non_empty_producer(
     samples, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from pdf_toolkit.ops.metadata import meta_get_run
+    from pdf_tooling.ops.metadata import meta_get_run
 
     copy_path = samples.copy(_META_SAMPLE_NAME)
     report = meta_get_run(copy_path, xmp=False)
@@ -992,7 +992,7 @@ def test_pdf14_arm_a_meta_get_reports_a_non_empty_producer(
 def test_pdf14_arm_a_meta_set_title_preserves_every_other_info_field(
     samples, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from pdf_toolkit.ops.metadata import meta_get_run, meta_set_run
+    from pdf_tooling.ops.metadata import meta_get_run, meta_set_run
 
     copy_path = samples.copy(_META_SAMPLE_NAME)
     before = meta_get_run(copy_path, xmp=False)
@@ -1001,7 +1001,7 @@ def test_pdf14_arm_a_meta_set_title_preserves_every_other_info_field(
     before_fingerprints = {key: _fingerprint(value) for key, value in before.info.items()}
 
     target = tmp_path / "tagged.pdf"
-    literal_title = "pdftoolkit-samples-arm-a-title"  # OUR OWN literal, never sample content
+    literal_title = "pdftooling-samples-arm-a-title"  # OUR OWN literal, never sample content
     result = meta_set_run(
         copy_path,
         sets={"title": literal_title},
@@ -1049,7 +1049,7 @@ def test_pdf14_arm_b_watermark_preserves_text_and_adds_draft_over_mixed_pages(
     tests_dir = Path(__file__).resolve().parent
     if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
         sys.path.insert(0, str(tests_dir))
-    from pdf_toolkit.ops.overlay import watermark_run
+    from pdf_tooling.ops.overlay import watermark_run
     from pdfium_text import page_texts
 
     copy_path = samples.copy(_META_SAMPLE_NAME)
@@ -1084,7 +1084,7 @@ def test_pdf14_arm_c_stamp_underlay_sits_beneath_a_real_page(
     import pypdf
 
     from corpus import STAMP_MARKER
-    from pdf_toolkit.ops.overlay import stamp_run
+    from pdf_tooling.ops.overlay import stamp_run
 
     copy_path = samples.copy(_META_SAMPLE_NAME)
     stamp_source = corpus.path("stamp_source")  # OUR OWN marker, never sample content
@@ -1175,10 +1175,10 @@ def test_ac19_ocr_pages_1_2_of_a_real_scan_preserves_the_image_and_recovers_text
     if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
         sys.path.insert(0, str(tests_dir))
     from helpers.pdfstream import embedded_image_streams
-    from pdf_toolkit.ops.ocr import ocr_run
-    from pdf_toolkit.ports.structure import require_structure
-    from pdf_toolkit.ports.text import require_text
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.ocr import ocr_run
+    from pdf_tooling.ports.structure import require_structure
+    from pdf_tooling.ports.text import require_text
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     policy = SafetyPolicy(
         dry_run=False,
@@ -1240,10 +1240,10 @@ def test_ac20_convert_docx_matches_the_google_docs_pdf_of_the_same_document(
 ) -> None:
     import difflib
 
-    from pdf_toolkit.ops.office import convert_run
-    from pdf_toolkit.ports.structure import require_structure
-    from pdf_toolkit.ports.text import require_text
-    from pdf_toolkit.safety.policy import SafetyPolicy
+    from pdf_tooling.ops.office import convert_run
+    from pdf_tooling.ports.structure import require_structure
+    from pdf_tooling.ports.text import require_text
+    from pdf_tooling.safety.policy import SafetyPolicy
 
     policy = SafetyPolicy(
         dry_run=False,
@@ -1331,7 +1331,7 @@ def test_the_arm_a_title_precondition_pin_fires(corpus) -> None:
     """AC14's red, taken against the GENERATED corpus so it needs no samples
     directory and touches no original: `metadata_rich` sets a title, so the
     precondition must fire on it."""
-    from pdf_toolkit.ops.metadata import meta_get_run
+    from pdf_tooling.ops.metadata import meta_get_run
 
     titled = meta_get_run(corpus.path("metadata_rich"), xmp=False)
     before_keys = sorted(titled.info)
@@ -1380,7 +1380,7 @@ def test_ac19_watermark_pages_scopes_and_counts_over_a_real_document(
     if str(tests_dir) not in sys.path:  # pragma: no cover - import plumbing
         sys.path.insert(0, str(tests_dir))
     from corpus import changed_pages
-    from pdf_toolkit.ops.overlay import watermark_run
+    from pdf_tooling.ops.overlay import watermark_run
 
     copy_path = samples.copy(_PDF23_SAMPLE_NAME)
     target = tmp_path / "watermarked.pdf"

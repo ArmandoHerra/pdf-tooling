@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit.safety import DEGRADED_PREFIX, find_stray_temps
+from pdf_tooling.safety import DEGRADED_PREFIX, find_stray_temps
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing

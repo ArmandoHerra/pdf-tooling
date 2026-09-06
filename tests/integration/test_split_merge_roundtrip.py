@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from pdf_toolkit.ops.merge import merge_documents, resolve_merge_inputs
-from pdf_toolkit.ops.split import split_document
-from pdf_toolkit.safety.policy import SafetyPolicy
+from pdf_tooling.ops.merge import merge_documents, resolve_merge_inputs
+from pdf_tooling.ops.split import split_document
+from pdf_tooling.safety.policy import SafetyPolicy
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -71,7 +71,7 @@ def test_split_each_page_then_merge_reproduces_page_count_and_text_in_process(
     merge_result = merge_documents(inputs, output=rebuilt, bookmarks="none", policy=make_policy())
     assert merge_result.exit_code == 0
 
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     engine = require_structure()
     with engine.open_document(rebuilt) as document:
@@ -102,7 +102,7 @@ def test_split_each_page_then_merge_reproduces_page_count_and_text_subprocess(
     merge_proc = run_cli("merge", *[str(p) for p in sorted_parts], "-O", str(rebuilt))
     assert merge_proc.returncode == 0, merge_proc.stderr
 
-    from pdf_toolkit.ports.structure import require_structure
+    from pdf_tooling.ports.structure import require_structure
 
     engine = require_structure()
     with engine.open_document(rebuilt) as document:

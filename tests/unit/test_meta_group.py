@@ -48,14 +48,14 @@ def test_ac1_help_exits_0_and_is_non_empty(verb: str) -> None:
 
 
 def test_ac22_or3_declarations_match_d82_exactly() -> None:
-    from pdf_toolkit.cli.common import consumed_output_flags
+    from pdf_tooling.cli.common import consumed_output_flags
 
     expected = {
-        "pdf_toolkit.cli.cmd_meta_get": (),
-        "pdf_toolkit.cli.cmd_meta_set": ("--output", "--in-place"),
-        "pdf_toolkit.cli.cmd_watermark": ("--output", "--in-place"),
-        "pdf_toolkit.cli.cmd_stamp": ("--output", "--in-place"),
-        "pdf_toolkit.cli.cmd_meta": (),
+        "pdf_tooling.cli.cmd_meta_get": (),
+        "pdf_tooling.cli.cmd_meta_set": ("--output", "--in-place"),
+        "pdf_tooling.cli.cmd_watermark": ("--output", "--in-place"),
+        "pdf_tooling.cli.cmd_stamp": ("--output", "--in-place"),
+        "pdf_tooling.cli.cmd_meta": (),
     }
     for module, want in expected.items():
         got = consumed_output_flags(module)
@@ -71,7 +71,7 @@ def test_ac22_every_meta_leaf_has_its_own_distinct_callback_module() -> None:
         # SAME way `discover_verbs()` itself does, off the live command.
         import typer
 
-        from pdf_toolkit.cli.main import app
+        from pdf_tooling.cli.main import app
 
         command = typer.main.get_command(app)
         node = command

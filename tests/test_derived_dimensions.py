@@ -48,7 +48,7 @@ from typing import Final
 
 import pytest
 
-from pdf_toolkit.output import OutputFormat, auto_format
+from pdf_tooling.output import OutputFormat, auto_format
 from registry import PDF_08_VERBS, REPO_ROOT, discover_verbs, output_formats, tty_modes
 
 TESTS_DIR: Final[Path] = REPO_ROOT / "tests"
@@ -167,7 +167,7 @@ def test_output_formats_is_non_empty_and_derived() -> None:
     assert len(formats) > 0, "output_formats() is empty -- every consuming matrix collapses"
     assert set(formats) == set(OutputFormat), (
         "output_formats() no longer returns the live enum -- it must DERIVE from "
-        "pdf_toolkit.output.OutputFormat, never list its members"
+        "pdf_tooling.output.OutputFormat, never list its members"
     )
 
 
@@ -192,7 +192,7 @@ def unhandled_output_formats(
     together, so AC12's own prescribed red (add a member to the enum) cannot
     make it fire. That is `PDF-06` AC6's defect shape, in the spec written to
     end it, so the assertion is built against a DIFFERENT CONSUMER instead:
-    `pdf_toolkit.output.render_payload`, whose `if fmt is OutputFormat.X`
+    `pdf_tooling.output.render_payload`, whose `if fmt is OutputFormat.X`
     dispatch silently falls through for any member it does not name. A renderer
     added to the enum and not wired there answers a `-o <new>` request with a
     TABLE and exit 0 -- a silent wrong answer with a success exit code -- and
@@ -228,7 +228,7 @@ def fallthrough_renderer(renderer_source: str) -> str | None:
 def _render_payload_source() -> str:
     import inspect
 
-    from pdf_toolkit.output import render_payload
+    from pdf_tooling.output import render_payload
 
     return inspect.getsource(render_payload)
 
@@ -237,7 +237,7 @@ def test_every_output_format_is_handled_by_the_renderer() -> None:
     source = _render_payload_source()
     unhandled = unhandled_output_formats(source, output_formats())
     assert unhandled == [], (
-        f"pdf_toolkit.output.render_payload never names {unhandled} -- those OutputFormat "
+        f"pdf_tooling.output.render_payload never names {unhandled} -- those OutputFormat "
         f"member(s) fall through to the {FALLTHROUGH_FORMAT.name} renderer silently. Wire "
         "the dispatch, or the product answers a `-o <new>` request with a table and exit 0."
     )
@@ -271,7 +271,7 @@ def test_the_tty_axis_still_changes_the_product_s_answer(
 
     def outcome(interactive: bool) -> OutputFormat:
         monkeypatch.setattr(
-            "pdf_toolkit.output.sys.stdout", type("S", (), {"isatty": lambda self: interactive})()
+            "pdf_tooling.output.sys.stdout", type("S", (), {"isatty": lambda self: interactive})()
         )
         return auto_format()
 
