@@ -95,6 +95,7 @@ from pdf_toolkit.models import ItemResult, OperationResult
 from pdf_toolkit.ports.compose import ImagePlacement, TextLayout, require_compose
 from pdf_toolkit.safety.atomic import AtomicWriter
 from pdf_toolkit.safety.paths import (
+    IMAGE_NOUN,
     classify_operand,
     read_source_bytes,
     unreadable_source_error,
@@ -399,6 +400,56 @@ def _image_read_error(path: Path, error: Exception) -> PdfToolkitError:
     return FailureError(f"could not read as an image: {error}", path=str(path))
 
 
+def _engine_boundary_error(placements: Sequence[ImagePlacement], error: OSError) -> PdfToolkitError:
+    """Map an ``OSError`` raised INSIDE the compose engine onto a coded error.
+
+    **THE RULE, stated because a rule is the deliverable and an instance is not:
+    when ``ops/`` hands an operand PATH across an engine boundary, the read
+    failure at that boundary is owned here.**
+
+    `09b8511ee8` is the seam this closes: on the passthrough path the adapter
+    hands reportlab the operand *path*, and reportlab opens it itself, inside
+    ``drawImage``. Three properties make that seam invisible to everything that
+    looked for it before:
+
+    * it is not a read-*shaped* call, so a static walk for ``read_bytes`` /
+      ``open`` / ``Image`` returns **zero** rows for the adapter that contains it;
+    * it is the operand's LAST read, so a mode-000-from-the-start operand fails
+      at an earlier seam and shadows it entirely;
+    * it is JPEG-only, because PNG takes the re-encode path -- so a PNG fixture
+      routes a perfectly non-vacuous control straight around it.
+
+    **Why the belt is here and not at ``drawImage``.** Not because the adapter
+    *cannot* belt -- it can, and two adapters demonstrably do
+    (``git grep -n 'from pdf_toolkit.safety' -- src/pdf_toolkit/adapters``
+    returns ``pypdf_structure.py`` and ``pdfplumber_text.py``). It is because a
+    belt at ``drawImage`` would be the FOURTH point-fix at this one seam, and
+    three have already been spent, each individually correct and each followed by
+    a new defect; and because converting the path passthrough to an
+    ``ImageReader`` would decode the JPEG and destroy the byte-identity
+    guarantee ``test_ac2_a_baseline_jpeg_is_stored_byte_for_byte`` pins. The
+    placement is a decision, and this is the rule that generates it.
+
+    **Attribution comes from the placement list, never from the engine's
+    message.** reportlab's ``Cannot open resource '<path>'`` does carry the path,
+    and parsing it would make this belt depend on a third party's wording. The
+    caller already holds the authority -- it supplied every path -- so the
+    culprit is found by asking the product's own accessibility predicate about
+    each operand in turn. An ``OSError`` that implicates no operand is still
+    coded and still exit 1, but it names no path rather than blaming one it
+    cannot identify.
+    """
+    for placement in placements:
+        # The module's OWN predicate first, so `compose` keeps one opinion about
+        # what "unreadable" means rather than acquiring a fourth. `is_file()`
+        # catches the two conditions that predicate deliberately answers `None`
+        # for -- an operand that was DELETED, and one REPLACED BY A DIRECTORY --
+        # both of which are real ways an in-flight operand stops being readable.
+        if unreadable_source_error(placement.source) is not None or not placement.source.is_file():
+            return _image_read_error(placement.source, error)
+    return FailureError(f"could not read as an image: {error}")
+
+
 def inspect_image(path: Path, *, dpi_flag: float | None) -> ImageFacts:
     """Sniff one operand. Every refusal here happens before anything is written.
 
@@ -434,7 +485,13 @@ def inspect_image(path: Path, *, dpi_flag: float | None) -> ImageFacts:
     passthrough = False
     diverted: str | None = None
     if source_format == "JPEG":
-        frame = jpeg_frame(read_source_bytes(path))
+        # `48766ee6f2`: this read is inside `if source_format == "JPEG"`, so the
+        # operand is definitionally NOT a PDF -- and until this line passed a
+        # noun, `source_read_error`'s fallback said "could not read PDF" at it.
+        # The class comes from `inspect_image`'s own verdict (Pillow's `format`),
+        # never from the extension, so a JPEG named `photo.bin` is still named an
+        # image here.
+        frame = jpeg_frame(read_source_bytes(path, noun=IMAGE_NOUN))
         if frame is None:
             diverted = "JPEG with no readable frame header"
         else:
@@ -782,7 +839,10 @@ def compose_document(
             refusal = atomic.planned_refusal
             would_exit = atomic.would_exit
         else:
-            engine.compose_images(_attach_rasters(facts, placements), out=atomic.stream)
+            try:
+                engine.compose_images(_attach_rasters(facts, placements), out=atomic.stream)
+            except OSError as error:
+                raise _engine_boundary_error(placements, error) from error
 
     written = output.stat().st_size if output.exists() else None
     duration_ms = int((time.monotonic() - started) * 1000)

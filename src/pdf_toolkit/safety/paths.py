@@ -64,9 +64,11 @@ __all__ = [
     "ensure_within",
     "identity_key",
     "nearest_existing_ancestor",
+    "metadata_probe_error",
     "read_source_bytes",
     "resolved_device",
     "same_destination",
+    "source_noun",
     "source_read_error",
     "target_exists",
     "unreadable_source_error",
@@ -307,6 +309,48 @@ DEFAULT_DIRECTORY_MESSAGE: Final[str] = "expected a PDF file, not a directory"
 #: containing the same substring would make that assertion unable to fail.
 UNREADABLE_MESSAGE: Final[str] = "exists but cannot be read"
 
+#: The operand-class nouns :func:`source_read_error` may name.
+#:
+#: **A frozen vocabulary, because the noun is a CLAIM about the operand.** The
+#: defect this replaces (`48766ee6f2`) was a fallback string that was true of
+#: every call site when it was written and false at the ninth, and it was
+#: introduced by the very wave that removed the same falsehood at `create`. A
+#: claim that can be widened quietly is how that survived review.
+PDF_NOUN: Final[str] = "PDF"
+IMAGE_NOUN: Final[str] = "this image"
+GENERIC_NOUN: Final[str] = "the input file"
+
+#: Suffixes this module is willing to call an image. Deliberately not Pillow's
+#: full registry: this is a *noun for a message*, not a format decision, and the
+#: format decision belongs to `ops/compose.py::inspect_image`, which asks Pillow.
+_IMAGE_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+)
+
+
+def source_noun(path: Path | str) -> str:
+    """What *path* is, for the purpose of naming it in a read failure.
+
+    **The noun is a property of the OPERAND, not a fallback string.** That is
+    the whole of the fix for `48766ee6f2`: the bottom rung of
+    :func:`source_read_error` used to say ``PDF`` unconditionally, which was
+    accurate at the eight PDF-reading call sites it was written for and false at
+    the ninth -- ``ops/compose.py``'s JPEG frame-header read, which `PDF-26`
+    itself introduced while removing the identical falsehood from ``create``.
+
+    A caller that *knows* the class -- because the product's own verdict told it,
+    as ``inspect_image`` tells ``compose`` -- passes it explicitly and does not
+    consult this function. This is the DEFAULT, for callers that have only a
+    path, and it is deliberately conservative: an unrecognised suffix gets a
+    noun that is true of every file rather than a guess that might not be.
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix == ".pdf":
+        return PDF_NOUN
+    if suffix in _IMAGE_SUFFIXES:
+        return IMAGE_NOUN
+    return GENERIC_NOUN
+
 
 def classify_operand(
     path: Path | str,
@@ -391,6 +435,7 @@ def source_read_error(
     error: OSError,
     *,
     as_written: Path | str | None = None,
+    noun: str | None = None,
 ) -> PdfToolkitError:
     """Map an ``OSError`` raised while READING *path* onto a coded error (§D3).
 
@@ -413,10 +458,15 @@ def source_read_error(
         return unreadable
     if isinstance(error, FileNotFoundError):
         return NoInputError(MISSING_MESSAGE, path=shown)
-    return FailureError(f"could not read PDF: {error}", path=shown)
+    return FailureError(f"could not read {noun or source_noun(path)}: {error}", path=shown)
 
 
-def read_source_bytes(path: Path | str, *, as_written: Path | str | None = None) -> bytes:
+def read_source_bytes(
+    path: Path | str,
+    *,
+    as_written: Path | str | None = None,
+    noun: str | None = None,
+) -> bytes:
     """*path*'s bytes, with an accessibility failure mapped to a coded error.
 
     The one-line form of the §D3 belt for the ``source.read_bytes()`` seams in
@@ -425,4 +475,43 @@ def read_source_bytes(path: Path | str, *, as_written: Path | str | None = None)
     try:
         return Path(path).read_bytes()
     except OSError as error:
-        raise source_read_error(path, error, as_written=as_written) from error
+        raise source_read_error(path, error, as_written=as_written, noun=noun) from error
+
+
+def metadata_probe_error(
+    path: Path | str,
+    error: OSError,
+    *,
+    as_written: Path | str | None = None,
+) -> PdfToolkitError:
+    """Map an ``OSError`` raised while probing *path*'s METADATA onto a coded error.
+
+    **Deliberately NOT :func:`source_read_error`, and the separation is the
+    point.** `PDF-26` §D3's class is a READ-seam class: seams where the operand's
+    *contents* are opened, reached by an operand that became unreadable. A
+    ``stat()`` is a different population reached by a different race -- an
+    operand *deleted* between :func:`classify_operand` and the probe -- and
+    folding it into §D3 would make a withheld verification look larger than the
+    evidence supports. **A class that absorbs whatever the instrument happens to
+    find stops being a claim**, so this belt exists precisely so that §D3's stays
+    exactly as wide as it was.
+
+    The ordering differs from the read belt for a measured reason: a metadata
+    probe's dominant failure is a *vanished* operand, so ``FileNotFoundError`` is
+    asked FIRST and mapped to :class:`NoInputError` -- the same class and the
+    same wording :func:`classify_operand`'s own rung 1 raises for the same
+    condition. That agreement is what makes the belt invisible to a caller: the
+    ``stat`` seam and the classifier rung that governs it now answer alike
+    instead of one answering with a traceback.
+
+    ``tests/seams.py::install_observer`` observes this seam on its own METADATA
+    channel, which has its own ledger and its own ceiling, and an arm asserts the
+    two populations are disjoint.
+    """
+    shown = str(as_written if as_written is not None else path)
+    if isinstance(error, FileNotFoundError):
+        return NoInputError(MISSING_MESSAGE, path=shown)
+    unreadable = unreadable_source_error(path, as_written=shown)
+    if unreadable is not None:
+        return unreadable
+    return FailureError(f"could not read {source_noun(path)}'s size: {error}", path=shown)

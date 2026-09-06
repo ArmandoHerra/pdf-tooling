@@ -2118,6 +2118,22 @@ def test_c18_an_unreadable_operand_is_a_coded_failure(
     *Red at `cdc02ee`, before any code changed*: 23 verbs failed the exit
     assertion (2, carrying "is not readable"); `merge` failed the traceback
     assertion (1, carrying `PermissionError`).
+
+    **WHAT THIS ARM'S CONDITION CAN AND CANNOT REACH (`PDF-43`).** The operand
+    here is unreadable **from the start**, so every verb fails at its **FIRST**
+    read seam and that failure **shadows every later seam in the same verb**. A
+    green here therefore means *"no verb tracebacks at its first seam"* -- it is
+    **not** a statement about a verb's remaining seams, and it must not be quoted
+    as one. `compose` was green under exactly this condition at `7afdb1a` while
+    carrying a live `OSError` traceback at its FOURTH seam, inside reportlab's
+    `drawImage`, which no mode-000-from-the-start operand can reach.
+
+    The multi-seam drive lives in ``tests/test_read_seams.py``: it flips the
+    operand after the **Nth observed open**, sweeping N to a ceiling derived per
+    cell, with an exhaustion proof at the top. **No assertion in this arm
+    changes and no `C<N>` row is added** -- the drive has its own module and its
+    own explicit population, so it cannot inherit a green tick from cells that
+    never ran it.
     """
     _skip_as_root()
     _skip_unless_engine_available(INVOCATIONS.get(verb.name))

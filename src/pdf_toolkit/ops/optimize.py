@@ -79,7 +79,12 @@ from pdf_toolkit.ports.structure import (
 )
 from pdf_toolkit.safety.atomic import AtomicWriter, plan_filesystem
 from pdf_toolkit.safety.naming import render_name
-from pdf_toolkit.safety.paths import check_output_collisions, classify_operand, read_source_bytes
+from pdf_toolkit.safety.paths import (
+    check_output_collisions,
+    classify_operand,
+    metadata_probe_error,
+    read_source_bytes,
+)
 from pdf_toolkit.safety.policy import SafetyPolicy
 from pdf_toolkit.secret import Secret
 
@@ -411,7 +416,19 @@ def _compress_write_all(
 ) -> OperationResult:
     def _compress_item(item: _CompressTarget) -> ItemResult:
         started = time.monotonic()
-        bytes_before = item.source.stat().st_size
+        # A METADATA seam, belted as one (`PDF-43` D7). The operand was
+        # classified moments ago; between that verdict and this probe it can be
+        # deleted, and an unbelted `stat()` answered that with a
+        # `FileNotFoundError` traceback. `metadata_probe_error` answers with the
+        # SAME class and wording `classify_operand`'s own rung 1 raises for the
+        # same condition, so the seam and the classifier that governs it agree.
+        #
+        # This is NOT counted against §D3, whose class is a READ-seam class and
+        # is left exactly as wide as it was.
+        try:
+            bytes_before = item.source.stat().st_size
+        except OSError as error:
+            raise metadata_probe_error(item.source, error) from error
         output_bytes, item_detail = _compress_one(
             item.source,
             lossless=lossless,
