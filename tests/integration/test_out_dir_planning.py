@@ -275,9 +275,8 @@ def test_ac12_the_five_precondition_matrix(verb: str, corpus: Any, tmp_path: Pat
 
     # N: out-dir exists, colliding (or, for `tables`, simply already there).
     n_dry, n_real = dry_and_real(verb, nmf_argv, cwd=nmf_root, env=env)
-    assert prediction(n_dry.stdout)["would_exit"] == expected_masked, (
-        f"{verb} N cell: dry predicted {prediction(n_dry.stdout)}"
-    )
+    n_detail = prediction(n_dry, context=f"{verb} N cell")
+    assert n_detail["would_exit"] == expected_masked, f"{verb} N cell: dry predicted {n_detail}"
     assert n_dry.returncode == n_real.returncode == expected_masked
 
     # M: as N, plus out-dir's OWN PARENT locked -- the mask must still hold,
@@ -289,9 +288,8 @@ def test_ac12_the_five_precondition_matrix(verb: str, corpus: Any, tmp_path: Pat
         m_dry, m_real = dry_and_real(verb, nmf_argv, cwd=nmf_root, env=env)
     finally:
         nmf_root.chmod(0o700)
-    assert prediction(m_dry.stdout)["would_exit"] == expected_masked, (
-        f"{verb} M cell: dry predicted {prediction(m_dry.stdout)}"
-    )
+    m_detail = prediction(m_dry, context=f"{verb} M cell")
+    assert m_detail["would_exit"] == expected_masked, f"{verb} M cell: dry predicted {m_detail}"
     assert m_dry.returncode == m_real.returncode == expected_masked
 
     # F: as M, plus --force -y -- the gate steps aside and a LOWER tier
@@ -303,9 +301,8 @@ def test_ac12_the_five_precondition_matrix(verb: str, corpus: Any, tmp_path: Pat
         f_dry, f_real = dry_and_real(verb, [*nmf_argv, "--force", "-y"], cwd=nmf_root, env=env)
     finally:
         nmf_root.chmod(0o700)
-    assert prediction(f_dry.stdout)["would_exit"] == 0, (
-        f"{verb} F cell: dry predicted {prediction(f_dry.stdout)}"
-    )
+    f_detail = prediction(f_dry, context=f"{verb} F cell")
+    assert f_detail["would_exit"] == 0, f"{verb} F cell: dry predicted {f_detail}"
     assert f_dry.returncode == f_real.returncode == 0, (
         f"{verb} F cell: dry {f_dry.returncode} real {f_real.returncode} "
         f"({f_real.stdout}{f_real.stderr})"
