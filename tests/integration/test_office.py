@@ -5,9 +5,11 @@ no output file is a FAILURE), and AC13's no-orphan guarantee for soffice.
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
 
@@ -15,6 +17,7 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
+from pdf_toolkit.adapters import subprocess_util  # noqa: E402
 from pdf_toolkit.errors import FailureError  # noqa: E402
 from pdf_toolkit.ops.office import convert_run  # noqa: E402
 from pdf_toolkit.safety.policy import SafetyPolicy  # noqa: E402
@@ -235,21 +238,115 @@ def test_ac15_corrupt_docx_exits_1_even_if_soffice_exits_0(tmp_path: Path) -> No
 # --------------------------------------------------------------------------- #
 
 
+#: Bound on how long the groups this invocation spawned may take to disappear
+#: after `convert_run` returns. `subprocess_util._terminate_group` already
+#: SIGTERMs, waits its grace window, SIGKILLs stragglers and reaps the direct
+#: child BEFORE `run()` returns, so the groups are normally gone at the first
+#: probe. This is a DEADLINE that keeps the assertion deterministic, never a
+#: tolerance: a survivor past it is a real orphan (the `MHC-50` shape) and is
+#: FILED, never accommodated by widening this number.
+GROUP_SETTLE_DEADLINE_S: Final = 10.0
+
+
+def _group_alive(pgid: int) -> bool:
+    """Whether any process remains in *pgid*.
+
+    ``adapters/subprocess_util.py:212`` restated locally rather than imported,
+    exactly as ``tests/integration/test_rasterize_signals.py:157`` and
+    ``tests/unit/test_subprocess_util.py:46`` already restate it. Importing the
+    product's own liveness helper into the test that judges the product's own
+    cleanup would mean one broken helper turns both green together.
+
+    ``os.killpg(pgid, 0)`` is also why nothing here scans the process table:
+    it is the same syscall on both platforms in this project's matrix, where
+    BSD and GNU ``ps`` do not agree on a stable ``sid``/``pgid`` column
+    spelling. (This file names no process-scanning binary at all -- an arm in
+    the control module asserts that, so the machine-wide count cannot creep
+    back in under a different spelling.)
+    """
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # pragma: no cover - not reachable for our own child
+        return True
+    return True
+
+
 @pytest.mark.requires("soffice")
-def test_ac13_timeout_kills_the_whole_process_group(tmp_path: Path) -> None:
-    import subprocess
-    import time
+def test_ac13_timeout_kills_the_whole_process_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timed-out ``convert`` leaves nothing in the process groups IT created.
 
-    def _soffice_bin_count() -> int:
-        try:
-            out = subprocess.run(
-                ["pgrep", "-fc", "soffice.bin"], capture_output=True, text=True, check=False
+    THIS TEST USED TO COUNT THE MACHINE, AND THAT WAS THE DEFECT (`face1c63a0`)
+    ---------------------------------------------------------------------------
+    It counted ``soffice.bin`` processes **machine-wide**, before and after,
+    inside a suite whose ``addopts`` pins ``-n auto``. The cheap symptom was a
+    false red: reproduced 6/6, *"count rose (3 -> 7)"* -- by **four**, the
+    number of concurrent xdist siblings, not by one orphan. The full history,
+    including the exact command that did the counting, is in the control
+    module's own docstring, which is where the retired predicate now lives.
+
+    **The expensive half was a false GREEN.** If a sibling's ``soffice.bin``
+    exited between the two samples while this test DID leak exactly one orphan,
+    ``after == before`` and the assertion PASSED. The instrument could not
+    detect the defect it was written for even when it was green.
+
+    The replacement is asymmetric by construction rather than by tolerance.
+    ``start_new_session=True`` puts every spawn in its own process group
+    (``subprocess_util.py:330``), so a sibling's processes are in a DIFFERENT
+    GROUP by definition and cannot enter this answer at all. The question is
+    no longer *"how many soffice.bin exist on this host"* but *"does anything
+    remain in the groups THIS invocation created"*.
+
+    That asymmetry is proven by a standing DISAGREEMENT between the old and new
+    predicates over one synthetic scenario, in
+    ``tests/integration/test_office_orphan_probe.py`` -- which is engine-free
+    and therefore runs on every leg, including the many where the marker above
+    skips this one. A green run of this test is not the evidence; that
+    disagreement is.
+    """
+    spawned: list[int] = []
+
+    class _SpawnRecorder:
+        """Records the pid of every child ``subprocess_util`` spawns.
+
+        Scoped to ``subprocess_util``'s own namespace, so it sees every spawn
+        made THROUGH THAT MODULE WHILE IT IS INSTALLED, and nothing else on
+        this host.
+
+        Measured rather than assumed: this records **1** spawn on this host,
+        not two. The ``soffice --version`` engine-resolution probe runs when
+        ``@pytest.mark.requires("soffice")`` is evaluated, which is before the
+        monkeypatch exists, so it is NOT among them. That is why the
+        non-vacuity assertion below checks the recorder saw a spawn at all --
+        a probe over an empty list would pass while observing nothing.
+
+        The pid IS the pgid, by ``start_new_session=True``, and that premise is
+        asserted at EVERY spawn rather than assumed. Taking the id from the
+        spawn (rather than from ``result.pgid``) keeps the observer and the
+        thing observed from sharing one computation: a wrong pgid would
+        otherwise blind the probe and the cleanup in the same direction, which
+        is this cycle's defining defect class.
+        """
+
+        def __init__(self, real: Any) -> None:
+            self._real = real
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._real, name)
+
+        def Popen(self, *args: Any, **kwargs: Any) -> Any:  # noqa: N802
+            assert kwargs.get("start_new_session") is True, (
+                "subprocess_util.run no longer starts a new session; the "
+                "pgid == pid premise this probe rests on is gone"
             )
-        except FileNotFoundError:  # pragma: no cover - pgrep unavailable
-            pytest.skip("pgrep is not available on this host")
-        return int(out.stdout.strip() or "0")
+            proc = self._real.Popen(*args, **kwargs)
+            spawned.append(proc.pid)
+            return proc
 
-    before = _soffice_bin_count()
+    monkeypatch.setattr(subprocess_util, "subprocess", _SpawnRecorder(subprocess_util.subprocess))
 
     large = _odt_fixture(tmp_path, "large.odt", "filler paragraph. " * 40, repeat=4000)
     output = tmp_path / "large.pdf"
@@ -264,9 +361,25 @@ def test_ac13_timeout_kills_the_whole_process_group(tmp_path: Path) -> None:
             policy=_policy(),
         )
 
-    time.sleep(1.0)
-    after = _soffice_bin_count()
-    assert after <= before, (
-        f"soffice.bin count rose ({before} -> {after}) -- an orphan survived the timeout "
-        "(the MHC-50 shape)"
+    assert spawned, (
+        "the recorder saw no spawn at all, so the probe below would pass "
+        "vacuously; the seam over subprocess_util's namespace has moved"
+    )
+
+    # A BOUNDED POLL, not a fixed sleep. It returns as soon as the groups are
+    # empty -- faster than the `time.sleep(1.0)` it replaces on a quiet host --
+    # and under contention it stops failing merely because 1.0 s was not enough.
+    started = time.monotonic()
+    while True:
+        survivors = [pgid for pgid in spawned if _group_alive(pgid)]
+        elapsed = time.monotonic() - started
+        if not survivors or elapsed >= GROUP_SETTLE_DEADLINE_S:
+            break
+        time.sleep(0.02)
+
+    assert not survivors, (
+        f"process group(s) {survivors} still exist {elapsed:.3f}s after the timeout "
+        f"(deadline {GROUP_SETTLE_DEADLINE_S}s, loadavg {os.getloadavg()}) -- an orphan "
+        "survived, which is the MHC-50 shape. This deadline may NOT be widened to make "
+        "this green: a survivor past it is a real defect and is FILED."
     )
