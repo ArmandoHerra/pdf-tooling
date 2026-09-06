@@ -67,12 +67,21 @@ above the gate rather than being left to each caller's diligence.
 
 Under ``--dry-run`` the plan is therefore **computed and captured** instead of
 raised: :attr:`planned_refusal` holds the exception the real run *would* have
-raised, :attr:`would_exit` is the status it *would* have exited with, and
-:meth:`plan_item` renders both as one machine-readable item. The dry run itself
-still exits 0 — the prediction completed successfully, and ``-o json`` carries a
-richer answer than an exit code can. Mirroring the predicted status into the dry
-run's own exit code is a separate ergonomic question, deliberately not settled
-here.
+raised and :attr:`would_exit` is the status it *would* have exited with. What
+renders them is each verb's own dry branch, over :class:`PlannedOutputs`'
+vocabulary — **not** :meth:`plan_item`, which has zero callers under ``src/``
+and is a test-only surface (PDF-38 measured it: a fix routed through that method
+would ship a green suite over twelve unchanged verbs).
+
+**~~The dry run itself still exits 0 — the prediction completed successfully,
+and ``-o json`` carries a richer answer than an exit code can. Mirroring the
+predicted status into the dry run's own exit code is a separate ergonomic
+question, deliberately not settled here.~~ Struck by PDF-38 (`6af2411c9e`):
+operator ruling OR-7 SETTLED that question, and both sentences were false at the
+commit before this one. ``--dry-run`` mirrors the status the real run would
+return — the product's own C15 row asserts ``dry == real == 5`` over an occupied
+target, and C22 now asserts the same over an occupied ``.bak`` sidecar on every
+verb that consumes ``--in-place``.**
 
 Capture stops at the **first** refusal, exactly where a real run would have
 stopped. A real run that refuses at no-clobber never reaches the writability
@@ -163,6 +172,7 @@ from pdf_toolkit.safety._faults import checkpoint
 from pdf_toolkit.safety.paths import (
     canonical,
     declared_device,
+    ensure_backup_sidecar_free,
     ensure_destination_writable,
     ensure_no_clobber,
     nearest_existing_ancestor,
@@ -504,6 +514,26 @@ def plan_filesystem(
     A tier may be omitted from the plan only if it is undecidable without
     performing the operation (password correctness; not directory
     writability, which is one ``os.access`` call).
+
+    **The ``.bak`` sidecar tier is LAST, and that position is measured rather
+    than tidy (PDF-38).** It is the fourth filesystem condition and the only one
+    the plan could not see: ``--dry-run`` predicted a clean 0 for an occupied
+    sidecar the real run refuses with 5, on every verb consuming ``--in-place``.
+    One step earlier — inside :func:`plan_output_set`'s own per-target loop —
+    closes the same twelve cells and *regresses* a different one: a target under
+    an unwritable parent WITH an occupied sidecar stops answering 1 ("destination
+    directory is not writable") and starts answering 5, changing the real run's
+    reply to a question this fix was never asked. Running the sidecar check after
+    the writability loop leaves every already-correct ordering alone.
+
+    It does change one ordering deliberately, and the change is declared rather
+    than discovered: an encrypted source with an unresolvable password AND an
+    occupied sidecar now answers 5 (``refused``) where it answered 6 (``auth``),
+    in **both** modes, because the filesystem tier answers before the document is
+    opened. That is the order this docstring already claims two paragraphs above
+    — *a real run raises at the filesystem tier before the password loop is ever
+    reached* — finally true of the fourth condition as well, and refusing on a
+    ``.bak`` collision before decrypting a document is the cheaper order too.
     """
     plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
     if plan.refusal is not None:
@@ -516,6 +546,18 @@ def plan_filesystem(
                 if not policy.dry_run:
                     raise
                 return PlannedOutputs(refusal=refusal)
+    try:
+        for target in targets:
+            ensure_backup_sidecar_free(
+                target,
+                in_place=policy.in_place,
+                backup=policy.backup,
+                force=policy.force,
+            )
+    except PdfToolkitError as refusal:
+        if not policy.dry_run:
+            raise
+        return PlannedOutputs(refusal=refusal)
     return plan
 
 

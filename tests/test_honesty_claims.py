@@ -413,6 +413,21 @@ OR7_SUPERSEDED_PREVIEW_PATTERNS = [
     r"a\s+dry\s+run[^.\n]{0,40}\bexit(?:s|\s+status)?\b[^.\n]{0,30}\bzero\b",
     r"\bexit(?:s|\s+status|\s+code)?\b[^.\n]{0,30}\bis\s+(?:always\s+)?0\b[^.\n]{0,40}"
     r"\bunder\s+--?dry[- ]run\b",
+    # PDF-38 -- the FIFTH paraphrase, and it is this detector's own AC26 failure
+    # mode recurring inside the fix for it. A copy survived in
+    # `safety/atomic.py`'s MODULE docstring saying *"The dry run itself still
+    # exits 0"* -- the same proposition again, in a fifth wording that needs
+    # none of "either way", "always", "zero" or "is 0 ... under --dry-run", so
+    # all four patterns above ran over a live false claim and returned `[]`.
+    # That empty list was the finding, not the all-clear.
+    #
+    # `[^.]` and NOT `[^.\n]`, which is the ONLY reason this pattern works: the
+    # surviving claim was WRAPPED -- *"The dry run itself\nstill exits 0"* -- so
+    # a newline-excluding gap ran over the live claim and returned nothing, in
+    # exactly the way the four patterns above already had. A sentence boundary
+    # (`.`) still bounds the match, so ordinary prose two sentences apart is not
+    # joined; only a reflowed line is.
+    r"dry[- ]run(?:'s)?[^.]{0,60}\bstill\s+exits?\s+0\b",
 ]
 _OR7_COMPILED = [re.compile(pattern, re.IGNORECASE) for pattern in OR7_SUPERSEDED_PREVIEW_PATTERNS]
 
@@ -461,6 +476,13 @@ def test_ac26_each_pattern_matches_a_distinct_rewording() -> None:
         "A dry-run always exits 0, whatever the real run would have returned.",
         "A dry run reports the plan and its exit status is zero.",
         "The exit code is always 0 under --dry-run, so scripts may ignore it.",
+        # PDF-38. The `safety/atomic.py` MODULE-docstring wording, verbatim,
+        # pre-strike -- INCLUDING the line break, because the break is what
+        # defeated the four patterns above and a single-line rewording here
+        # would prove a pattern that could not find the claim it was written
+        # for. Distinct from row 0 (no "either way"), row 1 (no "always"),
+        # row 2 (a digit, not the word) and row 3 (no "under --dry-run").
+        "The dry run itself\nstill exits 0 -- the prediction completed successfully.",
     ]
     assert len(rewordings) == len(_OR7_COMPILED), (
         "every pattern must be shown red on a rewording of its own, or an unproven "

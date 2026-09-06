@@ -299,13 +299,30 @@ def ocr_run(
         secret_by_source[source] = secret
         return _selected_pages(structure_engine, source, pages_spec, password=secret)
 
-    for planned_item in planned:
-        selected = ledger.guard(
-            planned_item.source,
-            lambda source=planned_item.source: _select_one(source),  # type: ignore[misc]
-        )
-        if selected is not None:
-            pages_by_source[planned_item.source] = selected
+    # `not plan.refused` keeps the FILESYSTEM tier's precedence, matching what
+    # the real run does -- `ops/office.py`'s own guard, applied to the one
+    # module in the product that opened documents without it (PDF-38 / D3,
+    # `af38735166`). `plan_filesystem` RAISES for a real run, so a real run
+    # never reaches this loop carrying a pending filesystem refusal and
+    # `plan.refused` is always False here on that path; the guard is therefore
+    # a no-op for real runs BY CONSTRUCTION and changes only the dry branch,
+    # where a per-source ledger `auth` row (6) was outranking a filesystem
+    # `refused` (5) the real run had already answered with.
+    #
+    # Skipping the loop starves nothing: `pages_by_source` and
+    # `secret_by_source` are consumed only by the real-path writer below, and
+    # `needs_engine` then computes over an empty mapping and is False -- so a
+    # run that is going to be refused no longer demands tesseract to find that
+    # out, which is exactly the ordering rationale stated above the
+    # `plan_filesystem` call, finally holding for this tier too.
+    if not plan.refused:
+        for planned_item in planned:
+            selected = ledger.guard(
+                planned_item.source,
+                lambda source=planned_item.source: _select_one(source),  # type: ignore[misc]
+            )
+            if selected is not None:
+                pages_by_source[planned_item.source] = selected
 
     # The lazy engine/`--lang` check (module docstring): computed identically
     # in both modes, so `dry == real` on this row holds by construction.

@@ -84,7 +84,20 @@ RESIDUE_CEILING: Final[dict[str, int]] = {
 #: The scoped METADATA population -- `ops/**` plus `safety/paths.py`, the two
 #: layers that hold an operand path. The UNSCOPED census over `src/` is published
 #: beside it so the scoping can be audited rather than trusted.
-METADATA_POPULATION_CEILING: Final = 73
+#:
+#: **73 -> 75 (PDF-38), and the disposition this guard asks for is COUNTED AND
+#: INERT rather than belted.** `safety/paths.py::ensure_backup_sidecar_free` adds
+#: two zero-argument `.exists()` probes -- one on the DESTINATION, one on the
+#: `.bak` SIDECAR beside it -- mirroring `AtomicWriter._make_backup`'s own guard
+#: clauses so a prediction and an outcome are the same answer. Neither is an
+#: OPERAND probe: they are the write-target class this census's own recipe says
+#: it deliberately over-reads, and `Path.exists()` returns `False` on `OSError`
+#: rather than raising, so neither can produce the traceback §D3 is about. They
+#: are counted here because the scoping rule is structural (module + call shape)
+#: and must stay auditable, NOT because a ceiling may be widened to clear a red:
+#: the two figures are named, and the growth is exactly the two calls the diff
+#: adds. Raising this for a seam that CAN raise would be a different act.
+METADATA_POPULATION_CEILING: Final = 75
 
 #: `ops/` calls into an engine whose port signature hands it a path (D5's rule,
 #: enumerated). Frozen so a new unbelted one is a red on the day it is written.

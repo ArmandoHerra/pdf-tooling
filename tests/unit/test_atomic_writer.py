@@ -1037,3 +1037,259 @@ def test_plan_filesystem_widens_the_writer_tier_into_both_modes(tmp_path: Path) 
             plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=False), kind="pdf")
     finally:
         parent.chmod(0o700)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-38 AC1 -- THE FIX SITE HAS CALLERS, ASSERTED RATHER THAN STATED.
+#
+# This class exists because a previous draft of PDF-38 routed the sidecar
+# predicate through `AtomicWriter._plan()` so that `would_exit` and
+# `plan_item()` would inherit it -- and `plan_item()` has ZERO callers under
+# `src/`. That fix would have shipped a GREEN SUITE OVER TWELVE UNCHANGED
+# VERBS. A sentence in a spec is exactly what failed; this is the running
+# assertion that replaces it.
+#
+# The counter below is deliberately wider than the one PDF-18 AC2 uses above:
+# it walks ALL of `src/` (not only `ops/`) and it resolves BOTH callee forms
+# (`plan_filesystem(...)` and `writer.plan_item(...)`), so the zero it reports
+# for `plan_item` is a measured absence rather than an instrument that cannot
+# see attribute calls at all. `test_ac1_the_call_counter_can_see_an_attribute_
+# call` is what proves that, and without it the zero would be unfalsifiable.
+# --------------------------------------------------------------------------- #
+
+_SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+
+
+def _count_calls(name: str, root: Path) -> dict[str, int]:
+    """Every `ast.Call` under *root* whose callee resolves to *name*, per file.
+
+    Both callee shapes: a bare `name(...)` (`ast.Name`) and a qualified
+    `obj.name(...)` (`ast.Attribute`). A docstring or comment mentioning the
+    symbol is not a call and is never visited -- which is the whole reason this
+    is an AST walk and not a grep.
+    """
+    per_file: dict[str, int] = {}
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        hits = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == name:
+                hits += 1
+            elif isinstance(func, ast.Attribute) and func.attr == name:
+                hits += 1
+        if hits:
+            per_file[str(path.relative_to(root))] = hits
+    return per_file
+
+
+def test_ac1_the_fix_site_is_reachable_and_plan_item_is_not() -> None:
+    """AC1. `plan_filesystem` has callers under `src/`; `plan_item` has none.
+
+    RED by name: route the sidecar tier through a symbol with no `src/` caller
+    -- or refactor `plan_filesystem`'s callers away -- and this fails saying so,
+    instead of a green suite over an unchanged binary.
+    """
+    reachable = _count_calls("plan_filesystem", _SRC_DIR)
+    total = sum(reachable.values())
+    assert total >= 1, (
+        "plan_filesystem has ZERO callers under src/ -- the sidecar tier PDF-38 "
+        "installs in it is then unreachable by every verb, and every criterion "
+        "downstream of it is green over a binary nothing changed"
+    )
+
+    # The positive control, in the same breath: the counter is not simply
+    # answering "yes" to any symbol handed to it.
+    unreachable = _count_calls("plan_item", _SRC_DIR)
+    assert unreachable == {}, (
+        f"plan_item now has callers under src/ {unreachable} -- it was a test-only "
+        "surface when PDF-38 refused it as a fix site; re-derive that ruling before "
+        "relying on it"
+    )
+
+
+def test_ac1_the_call_counter_can_see_an_attribute_call(tmp_path: Path) -> None:
+    """The proof that AC1's zero is a measurement and not a blind spot.
+
+    An instrument that reports 0 because it cannot observe the thing it is
+    ruling out has ruled out nothing. `plan_item` would be called as
+    `writer.plan_item()` -- an `ast.Attribute` callee -- so the counter is shown
+    finding exactly that shape before its zero is believed.
+    """
+    planted = tmp_path / "planted"
+    planted.mkdir()
+    (planted / "caller.py").write_text(
+        "def go(writer):\n    return writer.plan_item()\n",
+    )
+    assert _count_calls("plan_item", planted) == {"caller.py": 1}
+    # ...and a bare name call too, which is `plan_filesystem`'s own shape.
+    (planted / "bare.py").write_text(
+        "from pdf_toolkit.safety.atomic import plan_filesystem\n\n\n"
+        "def go(t, p):\n"
+        "    return plan_filesystem(t, out_dir=None, policy=p, kind='pdf')\n",
+    )
+    assert _count_calls("plan_filesystem", planted) == {"bare.py": 1}
+    # ...and a mere MENTION is not a call, so the zero above cannot be a
+    # docstring artefact in either direction.
+    (planted / "prose.py").write_text('"""plan_item and plan_filesystem, in prose."""\n')
+    assert "prose.py" not in _count_calls("plan_item", planted)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-38 -- the `.bak` sidecar tier inside `plan_filesystem`, and WHERE it sits.
+#
+# The tier is LAST: after `plan_output_set`, after the single-destination
+# writability loop, immediately before the return. That position is measured,
+# not tidy -- see `test_ac16_...` below, which is the difference between the
+# adopted placement and the one tier earlier, expressed as a test.
+# --------------------------------------------------------------------------- #
+
+
+def _seed_in_place(tmp_path: Path, *, sidecar: bool) -> Path:
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original bytes")
+    if sidecar:
+        (tmp_path / "doc.pdf.bak").write_bytes(b"an older backup")
+    return target
+
+
+def test_plan_filesystem_predicts_an_occupied_sidecar(tmp_path: Path) -> None:
+    """The tier fires, in BOTH modes, with the writer's own class and message."""
+    target = _seed_in_place(tmp_path, sidecar=True)
+    policy = make_policy(dry_run=True, in_place=True)
+
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+
+    assert isinstance(plan.refusal, errors.BackupExistsError)
+    assert plan.would_exit == REFUSED
+    assert plan.refused is True
+    assert plan.detail()["would_refuse"] == plan.refusal.to_dict()
+    assert plan.refusal.to_dict()["path"] == str(tmp_path / "doc.pdf.bak")
+
+    with pytest.raises(errors.BackupExistsError):
+        plan_filesystem([target], out_dir=None, policy=make_policy(in_place=True), kind="pdf")
+
+
+def test_plan_filesystem_sidecar_tier_predicts_the_writers_exact_refusal(tmp_path: Path) -> None:
+    """The prediction and the outcome are the SAME ANSWER, not merely the same
+    number. `AtomicWriter._make_backup` keeps its own raise (defence in depth
+    against a sidecar appearing between plan and commit), so the two must be
+    compared rather than assumed equal."""
+    target = _seed_in_place(tmp_path, sidecar=True)
+
+    predicted = plan_filesystem(
+        [target], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+    ).refusal
+    assert predicted is not None
+
+    with pytest.raises(errors.BackupExistsError) as raised:
+        with AtomicWriter(target, policy=make_policy(in_place=True)) as writer:
+            writer.path.write_bytes(b"rewritten")
+
+    assert predicted.to_dict() == raised.value.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "why"),
+    (
+        ({"backup": False}, "--no-backup writes no sidecar, so none is at risk"),
+        ({"force": True}, "--force replaces a stale sidecar by design"),
+    ),
+    ids=["no-backup", "force"],
+)
+def test_plan_filesystem_sidecar_tier_stays_silent_where_it_must(
+    overrides: dict, why: str, tmp_path: Path
+) -> None:
+    """The negative controls. A tier that refuses here has broken `--in-place`
+    for every verb at once while passing every positive arm above."""
+    target = _seed_in_place(tmp_path, sidecar=True)
+    policy = make_policy(**{"dry_run": True, "in_place": True, **overrides})
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    assert plan.refusal is None, f"{why}, but the tier refused: {plan.refusal}"
+
+
+def test_plan_filesystem_sidecar_tier_is_an_in_place_tier_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    """Without `--in-place` the sidecar is not this run's business at all.
+
+    Asserted as "not a BackupExistsError" rather than "no refusal": an existing
+    destination without `--in-place` is the NO-CLOBBER tier's question, and it
+    answers first -- which is itself the ordering this arm records. A tier that
+    fired here would refuse every ordinary `-O` run whose destination happened
+    to have a `.bak` file beside it.
+    """
+    target = _seed_in_place(tmp_path, sidecar=True)
+    plan = plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf")
+    assert isinstance(plan.refusal, errors.TargetExistsError), (
+        f"expected the no-clobber tier to answer, got {plan.refusal!r}"
+    )
+    assert not isinstance(plan.refusal, errors.BackupExistsError)
+
+
+def test_plan_filesystem_sidecar_tier_is_silent_when_no_sidecar_exists(tmp_path: Path) -> None:
+    """The ordinary path, which is most of every in-place run this tool makes."""
+    target = _seed_in_place(tmp_path, sidecar=False)
+    plan = plan_filesystem(
+        [target], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+    )
+    assert plan.refusal is None
+
+
+def test_plan_filesystem_sidecar_tier_visits_every_target(tmp_path: Path) -> None:
+    """AC7 at the seam. `--in-place` implies no `--out-dir`, so nothing but this
+    per-target loop can reach the SECOND target's sidecar."""
+    first = tmp_path / "first.pdf"
+    first.write_bytes(b"first")
+    second = tmp_path / "second.pdf"
+    second.write_bytes(b"second")
+    (tmp_path / "second.pdf.bak").write_bytes(b"an older backup")
+
+    plan = plan_filesystem(
+        [first, second], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+    )
+    assert isinstance(plan.refusal, errors.BackupExistsError)
+    assert plan.refusal.to_dict()["path"] == str(tmp_path / "second.pdf.bak")
+
+
+def test_ac16_an_unwritable_parent_still_answers_before_the_sidecar(tmp_path: Path) -> None:
+    """AC16 -- the cell that decides WHERE the tier goes, as a test.
+
+    Target inside an unwritable directory WITH its sidecar occupied. Both
+    conditions are armed at once, and the writability tier must still answer:
+    exit 1, "destination directory is not writable", in BOTH modes.
+
+    RED, measured: move the sidecar check one tier earlier -- into
+    `plan_output_set`'s own per-target loop -- and this cell stops answering 1
+    and starts answering 5, changing the REAL RUN's reply to a question PDF-38
+    was never asked. That is the whole difference between the two candidate
+    placements, and it is why the tier is last.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory mode bits; this arm cannot fire as root")
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    target = parent / "doc.pdf"
+    target.write_bytes(b"original bytes")
+    (parent / "doc.pdf.bak").write_bytes(b"an older backup")
+    parent.chmod(0o500)
+    try:
+        if os.access(parent, os.W_OK):
+            pytest.skip("this user can write to a mode-0500 directory (root?)")
+        plan = plan_filesystem(
+            [target], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+        )
+        assert isinstance(plan.refusal, errors.DestinationUnwritableError), (
+            f"the sidecar tier answered first: {plan.refusal!r} -- it is placed one tier "
+            "too early, and the real run's answer to this cell has changed with it"
+        )
+        assert plan.would_exit == FAILURE
+        assert plan.detail()["would_refuse"]["code"] == FAILURE
+        assert "not writable" in plan.refusal.message
+
+        with pytest.raises(errors.DestinationUnwritableError):
+            plan_filesystem([target], out_dir=None, policy=make_policy(in_place=True), kind="pdf")
+    finally:
+        parent.chmod(0o700)

@@ -2183,7 +2183,17 @@ KIND_OPS_LOCAL_REFUSAL: Final = "ops-local-filesystem-refusal-name"
 #: either one -- importing, isinstance-checking or raising it locally is all
 #: the same violation: reaching past the shared planner to build (or inspect
 #: the identity of) its own refusal.
-FORBIDDEN_OPS_REFUSAL_NAMES: Final = frozenset({"DestinationUnwritableError", "TargetExistsError"})
+#:
+#: PDF-38 adds the third. `BackupExistsError` is now constructed in exactly two
+#: places -- `safety.paths.ensure_backup_sidecar_free` (the read-only tier
+#: `plan_filesystem` calls) and `AtomicWriter._make_backup` (the writer's own
+#: raise, kept deliberately: the sidecar can appear between plan and commit, so
+#: deleting it would trade defence in depth for a TOCTOU window). Two raise
+#: sites for one condition is the intended end state; this token is what stops
+#: an `ops/` module becoming the third.
+FORBIDDEN_OPS_REFUSAL_NAMES: Final = frozenset(
+    {"BackupExistsError", "DestinationUnwritableError", "TargetExistsError"}
+)
 
 
 def scan_local_refusal_names(source: str, module: str) -> list[Boundary]:
@@ -2271,6 +2281,18 @@ PLANTED_SECTION_5: Final = (
         "def label(refusal):\n"
         "    return type(refusal) is errors.DestinationUnwritableError\n",
     ),
+    # PDF-38's own token, proven rather than added on trust. `ops/crypto.py`
+    # already MENTIONS `BackupExistsError` in a docstring (explaining why it
+    # does not construct one), so this row and
+    # `test_benign_section_5_mentions_are_never_flagged` together are what show
+    # Section 5 tells a raise from prose for the new name too.
+    (
+        "plant-a-raised-backup-exists",
+        "pdf_toolkit/ops/sneaky_sidecar.py",
+        "from pdf_toolkit.errors import BackupExistsError\n\n\n"
+        "def go(sidecar):\n"
+        "    raise BackupExistsError('nope', path=str(sidecar))\n",
+    ),
 )
 
 
@@ -2300,9 +2322,10 @@ def test_a_planted_section_5_violation_fails_the_walk(
 BENIGN_SECTION_5 = '''
 """A module that talks ABOUT the refusal classes without naming them as code.
 
-DestinationUnwritableError and TargetExistsError are mentioned here only in
-prose, exactly the way this docstring does it right now -- that is not what
-Section 5 forbids.
+DestinationUnwritableError, TargetExistsError and BackupExistsError are
+mentioned here only in prose, exactly the way this docstring does it right now
+-- that is not what Section 5 forbids, and `ops/crypto.py`'s own docstring
+mentions the third one for real.
 """
 
 from pdf_toolkit.safety.atomic import plan_filesystem

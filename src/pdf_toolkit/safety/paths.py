@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Final
 
 from pdf_toolkit.errors import (
+    BackupExistsError,
     DestinationUnwritableError,
     FailureError,
     NoInputError,
@@ -59,6 +60,7 @@ __all__ = [
     "check_output_collisions",
     "classify_operand",
     "declared_device",
+    "ensure_backup_sidecar_free",
     "ensure_destination_writable",
     "ensure_no_clobber",
     "ensure_within",
@@ -214,6 +216,60 @@ def ensure_destination_writable(
             f"destination directory is not writable: {shown}",
             path=shown,
         )
+
+
+def ensure_backup_sidecar_free(
+    target: Path | str,
+    *,
+    in_place: bool,
+    backup: bool,
+    force: bool,
+) -> None:
+    """Refuse (exit 5) when the ``.bak`` sidecar an ``--in-place`` run is about
+    to write already exists (PDF-38).
+
+    The read-only half of ``AtomicWriter._make_backup``. That method's own guard
+    clauses are mirrored here **exactly and in the same order** — not
+    ``--in-place`` with a backup, destination absent, sidecar absent, ``--force``
+    — so a prediction computed here and an outcome raised there are the same
+    answer rather than two answers that agree by luck: same class, same message,
+    same ``path``.
+
+    **Why this is a predicate and not only a raise inside the writer.** The
+    ``.bak`` sidecar either exists on disk before either run or it does not, so
+    it is *decidable before the run* — which is the rule
+    :func:`~pdf_toolkit.safety.atomic.plan_filesystem`'s own docstring already
+    states for what the plan must contain. Until this existed, ``--dry-run``
+    over an occupied sidecar predicted a clean exit 0 for an operation the real
+    run refuses with 5, on **every** verb that consumes ``--in-place``:
+    ``cmd --dry-run && cmd`` short-circuited into the very refusal the preview
+    was run to avoid (`6af2411c9e`).
+
+    ``--force`` returns rather than raising because that is what the writer
+    does: it unlinks the stale sidecar and carries on. ``--no-backup`` returns
+    for the stronger reason that no sidecar is written at all, so none is at
+    risk. Both must keep predicting 0, and an over-refusing predicate here
+    breaks ``--in-place`` for every verb at once.
+
+    ``_make_backup`` keeps its own raise. Two raise sites for one condition is
+    the intended end state: the sidecar can appear between plan and commit, so
+    deleting the writer's copy would convert defence in depth into a single
+    point of failure and open a genuine TOCTOU window.
+    """
+    if not (in_place and backup):
+        return
+    destination = canonical(target)
+    if not destination.exists():
+        return
+    sidecar = destination.with_name(destination.name + ".bak")
+    if not sidecar.exists():
+        return
+    if force:
+        return
+    raise BackupExistsError(
+        f"{sidecar.name} already exists beside {target}; pass --force to replace the sidecar",
+        path=str(sidecar),
+    )
 
 
 def declared_device(path: Path | str) -> int | None:

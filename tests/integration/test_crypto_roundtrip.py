@@ -20,7 +20,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -1209,3 +1209,144 @@ def test_ac19_a_declared_pair_genuinely_produces_a_file(
     result = run_cli(verb, *args, env=_clean_env(), cwd=workspace)
     assert result.returncode == 0, result.stdout + result.stderr
     assert subject.read_bytes() != original, "--in-place was declared but nothing changed"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-38 D2 -- THE DECLARED CONTRACT CHANGE, PINNED IN BOTH DIRECTIONS.
+#
+# PDF-38 gives `safety.atomic.plan_filesystem` a `.bak` sidecar tier, so on a
+# doubly-faulted cell -- an encrypted source with an UNRESOLVABLE password AND
+# an occupied sidecar -- the FILESYSTEM answer now arrives before the AUTH one,
+# in both modes. That is a behaviour change on a public surface (the exit-code
+# table), so it is pinned here rather than left to drift back unnoticed.
+#
+# Why it is the right order and not a regression: `plan_filesystem`'s own
+# docstring already stated the rule -- *a real run raises at the filesystem tier
+# before the password loop is ever reached* -- and it had been true of three
+# filesystem conditions and false of the fourth. `ops/crypto.py::_plan`'s
+# published ladder says the same thing in a second place: pre-refusal (1),
+# filesystem (2), document (3), password (4). Refusing on a `.bak` collision
+# before opening and decrypting a document is also the cheaper and safer order.
+#
+# BOTH DIRECTIONS, because "make everything exit 5" would satisfy the first
+# half on its own: the table below carries the verbs that MOVED and the verbs
+# that did NOT, and it is asserted to cover the derived population exactly, so a
+# thirteenth `--in-place` verb reddens the completeness arm rather than joining
+# silently.
+# --------------------------------------------------------------------------- #
+
+#: The cell, per verb, MEASURED at PDF-38's own commit: encrypted source,
+#: unresolvable password, occupied `.bak` sidecar, `(exit code, error kind)`.
+#:
+#: `refused` rows are the eight that MOVED (6 -> 5) plus `encrypt`, whose exit
+#: code did not move: it answered 5 before via the already-encrypted document
+#: tier and answers 5 now via the sidecar tier one rung above it, which is the
+#: ladder `_plan` publishes rather than a new ordering.
+#: `auth` rows are the three whose own tier-1 page-addressing open answers above
+#: the plan call, in both modes, and which therefore must NOT move.
+_SIDECAR_VS_AUTH_CELL: Final[dict[str, tuple[int, str]]] = {
+    "compress": (5, "refused"),
+    "decrypt": (5, "refused"),
+    "delete": (6, "auth"),
+    "encrypt": (5, "refused"),
+    "linearize": (5, "refused"),
+    "meta set": (5, "refused"),
+    "ocr": (5, "refused"),
+    "reorder": (6, "auth"),
+    "repair": (5, "refused"),
+    "rotate": (6, "auth"),
+    "stamp": (5, "refused"),
+    "watermark": (5, "refused"),
+}
+
+#: The slot that OPENS a document. Stripped from a registered `--in-place`
+#: invocation so the encrypted operand below is genuinely UNRESOLVABLE (exit 6)
+#: rather than merely wrong -- `--owner-password-file` is kept, because that is
+#: the password a verb SETS, not one it opens with, and dropping it turns
+#: `encrypt` into an exit-2 usage error for an unrelated reason.
+_OPENING_PASSWORD_FLAG: Final[str] = "--password-file"
+
+
+def _in_place_population() -> tuple[str, ...]:
+    from registry import discover_verbs
+
+    return tuple(sorted(v.name for v in discover_verbs() if "--in-place" in v.consumes))
+
+
+def _unresolvable_in_place_argv(verb: str, corpus: Any, tmp_path: Path) -> list[str]:
+    """*verb*'s registered `--in-place` argv, retargeted at an ENCRYPTED copy
+    with no way to open it.
+
+    Built from `OUTPUT_FLAG_INVOCATIONS[(verb, "--in-place")]` -- the same
+    callables C14's OR-3 matrix registers -- and transformed by three rules that
+    are properties of the ARGV, never of a verb name: the operand (always first)
+    becomes an encrypted copy; the opening-password pair is dropped; and
+    `--no-backup`, which would remove the very sidecar this cell is about, is
+    swapped for `-y`.
+    """
+    from registry import OUTPUT_FLAG_INVOCATIONS
+
+    build = OUTPUT_FLAG_INVOCATIONS.get((verb, "--in-place"))
+    assert build is not None, f"{verb} declares --in-place but has no registered cell"
+    args = list(build(corpus, tmp_path))
+
+    locked = tmp_path / f"locked-{verb.replace(' ', '-')}.pdf"
+    shutil.copy(corpus.path("encrypted_aes256"), locked)
+    args[0] = str(locked)
+    (tmp_path / f"{locked.name}.bak").write_bytes(b"an older backup")
+
+    stripped: list[str] = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == _OPENING_PASSWORD_FLAG:
+            skip_next = True
+            continue
+        stripped.append("-y" if arg == "--no-backup" else arg)
+    return stripped
+
+
+@pytest.mark.e2e
+def test_the_sidecar_vs_auth_table_covers_the_derived_population_exactly() -> None:
+    """The completeness guard. A thirteenth `--in-place` verb has an unmeasured
+    cell in this class, and an unmeasured cell is not a passing one."""
+    assert tuple(sorted(_SIDECAR_VS_AUTH_CELL)) == _in_place_population(), (
+        "the recorded sidecar-vs-auth table and the live `--in-place` population "
+        "disagree; re-drive the cell for every member rather than editing one side"
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", sorted(_SIDECAR_VS_AUTH_CELL))
+def test_ac14_ac15_the_filesystem_tier_answers_before_the_password_tier(
+    verb: str, corpus: Any, tmp_path: Path
+) -> None:
+    """AC14 and AC15 in one arm, which is what makes them a pin rather than a
+    direction of travel.
+
+    AC14 -- the eight verbs whose real run now answers `refused` (5) where it
+    answered `auth` (6). AC15 -- the three whose own page-addressing open still
+    answers first, plus `encrypt`, whose code was 5 before and after. An
+    over-eager placement that made every in-place run exit 5 would satisfy the
+    first half and redden the second, which is the point of asserting both.
+
+    `dry == real` on every row, in both directions: this spec closed twelve
+    OR-7 divergences and may not open one here.
+    """
+    expected_code, expected_kind = _SIDECAR_VS_AUTH_CELL[verb]
+    args = _unresolvable_in_place_argv(verb, corpus, tmp_path)
+    env = _clean_env()
+
+    dry = run_cli(verb, "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    real = run_cli(verb, *args, "-o", "json", env=env, cwd=tmp_path)
+
+    assert dry.returncode == real.returncode == expected_code, (
+        f"{verb}: dry={dry.returncode} real={real.returncode}, expected both "
+        f"{expected_code} -- dry: {dry.stdout}{dry.stderr} / real: {real.stdout}"
+        f"{real.stderr}"
+    )
+    assert json.loads(real.stdout)["error"]["kind"] == expected_kind, (
+        f"{verb}: the real run's refusal kind moved off {expected_kind!r}"
+    )

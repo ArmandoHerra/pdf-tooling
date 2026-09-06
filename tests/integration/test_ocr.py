@@ -923,3 +923,120 @@ def test_pdf23_ac12_composite_layer_itself_adds_no_deprecation_to_ocr(
         f"composite_layer's own migration may have regressed: "
         f"{[str(item.message) for item in pypdf_deprecations]}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-38 / `af38735166` -- the FILESYSTEM tier outranks the per-source AUTH row
+# in `ocr`'s dry branch, exactly as it already does in `ops/office.py`.
+#
+# `ocr` was the one module in the product that opened every source through the
+# batch ledger WITHOUT first asking whether the filesystem plan had already
+# refused. On the real path `plan_filesystem` RAISES, so that loop never ran
+# carrying a pending refusal; under `--dry-run` it did, and a per-source `auth`
+# row (6) outranked a `refused` (5) the real run had already answered with.
+#
+# Both stimuli are pinned. The first is the finding's own recorded repro; the
+# second is the cell PDF-38's filesystem tier would otherwise have CREATED --
+# measured mid-build with the tier applied and this guard not yet applied, it
+# read dry 6 / real 5, and a spec whose purpose is closing `dry != real` may not
+# ship a new one.
+# --------------------------------------------------------------------------- #
+
+
+def _no_password_env() -> dict[str, str]:
+    """The ambient environment with both password variables removed, so an
+    encrypted source with no `--password-file` is UNRESOLVABLE (exit 6) rather
+    than merely wrong."""
+    import os
+
+    env = dict(os.environ)
+    env.pop("PDF_TOOLKIT_PASSWORD", None)
+    env.pop("PDF_TOOLKIT_OWNER_PASSWORD", None)
+    return env
+
+
+def _envelope(result: object) -> dict:
+    import json
+
+    return json.loads(result.stdout)  # type: ignore[attr-defined]
+
+
+@pytest.mark.e2e
+def test_af38735166_ocr_predicts_the_occupied_output_refusal_not_the_auth_one(
+    corpus, tmp_path: Path
+) -> None:
+    """`af38735166`'s own recorded stimulus: encrypted source, occupied `-O`
+    target, no password. Pre-fix: dry 6 `auth` / real 5 `refused`."""
+    import shutil
+
+    source = tmp_path / "locked.pdf"
+    shutil.copy(corpus.path("encrypted_aes256"), source)
+    occupied = tmp_path / "occ.pdf"
+    occupied.write_bytes(b"already here")
+
+    args = [str(source), "-O", str(occupied), "--skip-text-pages"]
+    env = _no_password_env()
+    dry = run_cli("ocr", "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    real = run_cli("ocr", *args, "-o", "json", env=env, cwd=tmp_path)
+
+    assert dry.returncode == real.returncode == 5, (
+        f"dry={dry.returncode} real={real.returncode} -- dry: {dry.stdout}{dry.stderr} / "
+        f"real: {real.stdout}{real.stderr}"
+    )
+    predicted = _envelope(dry)["items"][0]["detail"]["would_refuse"]
+    assert predicted["kind"] == "refused", (
+        f"the preview reports {predicted['kind']!r}; the real run answers 'refused' -- "
+        "the per-source auth row is outranking the filesystem plan again"
+    )
+    assert _envelope(real)["error"]["kind"] == "refused"
+
+
+@pytest.mark.e2e
+def test_af38735166_ocr_predicts_the_occupied_sidecar_refusal_not_the_auth_one(
+    corpus, tmp_path: Path
+) -> None:
+    """The second stimulus: encrypted source, unresolvable password, occupied
+    `.bak` sidecar. This cell AGREED at 6/6 before PDF-38's filesystem tier and
+    at 6/5 with the tier alone; it agrees at 5/5 only with this guard."""
+    import shutil
+
+    source = tmp_path / "locked.pdf"
+    shutil.copy(corpus.path("encrypted_aes256"), source)
+    (tmp_path / "locked.pdf.bak").write_bytes(b"an older backup")
+
+    args = [str(source), "--in-place", "--skip-text-pages"]
+    env = _no_password_env()
+    dry = run_cli("ocr", "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    real = run_cli("ocr", *args, "-o", "json", env=env, cwd=tmp_path)
+
+    assert dry.returncode == real.returncode == 5, (
+        f"dry={dry.returncode} real={real.returncode} -- dry: {dry.stdout}{dry.stderr} / "
+        f"real: {real.stdout}{real.stderr}"
+    )
+    predicted = _envelope(dry)["items"][0]["detail"]["would_refuse"]
+    assert predicted["kind"] == "refused" and predicted["code"] == 5
+    assert _envelope(real)["error"]["kind"] == "refused"
+
+
+@pytest.mark.e2e
+def test_ocr_still_reports_the_auth_refusal_when_the_plan_is_clean(corpus, tmp_path: Path) -> None:
+    """The negative control for the guard above. With NO filesystem condition
+    armed, an unresolvable password is still `auth` (6) in both modes -- the
+    guard suppresses a per-source row only where the plan already refused, and
+    a version that suppressed it unconditionally would hide every auth failure
+    `ocr` can report."""
+    import shutil
+
+    source = tmp_path / "locked.pdf"
+    shutil.copy(corpus.path("encrypted_aes256"), source)
+
+    args = [str(source), "-O", str(tmp_path / "fresh.pdf"), "--skip-text-pages"]
+    env = _no_password_env()
+    dry = run_cli("ocr", "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    real = run_cli("ocr", *args, "-o", "json", env=env, cwd=tmp_path)
+
+    assert dry.returncode == real.returncode == 6, (
+        f"dry={dry.returncode} real={real.returncode} -- dry: {dry.stdout}{dry.stderr} / "
+        f"real: {real.stdout}{real.stderr}"
+    )
+    assert _envelope(real)["error"]["kind"] == "auth"

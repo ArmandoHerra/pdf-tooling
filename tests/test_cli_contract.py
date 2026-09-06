@@ -128,6 +128,39 @@ PRODUCING = tuple(
 #: superset by construction) rather than MUTATING directly.
 OUTPUT_CONSUMING_MUTATING = tuple(verb for verb in PRODUCING if "--output" in verb.consumes)
 
+#: PDF-38 / `6af2411c9e`, C22 — every verb that CONSUMES `--in-place`, and the
+#: `.bak` sidecar tier this product predicted wrong on all of them.
+#:
+#: DERIVED, never transcribed and never taken from `--help`. `--in-place` is a
+#: member of `GLOBAL_OPTIONS`, so **all 26 leaves render it in `--help`** while
+#: `info`, `version` and `permissions` report `consumes=()`: declaring is not
+#: consuming, and a `--help`-derived population would put C22's criterion on
+#: eleven verbs that cannot take the flag. A hand-asserted one is worse still --
+#: this product has already shipped a hand-asserted verb population that was
+#: half the truth. `consumes` is read off the live command's own callback module
+#: (`tests/registry.py`'s `consumed_output_flags`), so a thirteenth `--in-place`
+#: verb joins C22 with zero author action.
+IN_PLACE = tuple(verb for verb in VERBS if "--in-place" in verb.consumes)
+
+#: PDF-38 AC7 — the bulk half of the same tier. `--in-place` implies no
+#: `--out-dir`, so a batch's sidecar refusal has to come from `plan_filesystem`'s
+#: own per-target loop reaching the SECOND target; nothing else visits it.
+#: Derived by ARITY (`variadic_operands`, read off the live command's `nargs`)
+#: intersected with the registry's own bulk `--in-place` argv
+#: (`Invocation.destructive_build`), so no verb name is typed here either.
+IN_PLACE_BULK = tuple(
+    verb
+    for verb in IN_PLACE
+    if verb.variadic_operands
+    and verb.name in INVOCATIONS
+    and INVOCATIONS[verb.name].destructive_build is not None
+)
+
+#: The two flags that legitimately suppress the sidecar refusal, with why each
+#: one must keep predicting 0. `--no-backup` removes the sidecar entirely;
+#: `--force` replaces a stale one by design.
+_SIDECAR_EXEMPTIONS: Final[tuple[str, ...]] = ("--no-backup", "--force")
+
 #: PDF-25 / `a472acde7a` — C17's population. `C4` above covers a BOGUS
 #: SUBCOMMAND at every grouping parent; nothing covered a VALID GLOBAL FLAG at
 #: one, and all fifteen members of the block exited 2 with zero bytes on stdout
@@ -1443,6 +1476,40 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "test -- three operand verbs already exit 0 on garbage bytes. Zero here retires "
         "the only arm that proves C20 can still SEE the defect it was built for, while "
         "leaving all 144 of its cells green",
+    ),
+    Population(
+        "IN_PLACE",
+        IN_PLACE,
+        "C22",
+        1,
+        "PDF-38's class -- the verbs whose `--dry-run` predicted 0 for a `.bak` sidecar "
+        "collision the real run refuses with 5 (`6af2411c9e`). Zero does not make C22 "
+        "fail; it makes C22 collect no cases at all and report green over a defect that "
+        "was live on every one of them, which is the exact shape `e138934a60` shipped. "
+        "One is the floor at which the row still RUNS; the derivation off `consumes` is "
+        "what keeps it honest above that",
+    ),
+    Population(
+        "IN_PLACE_BULK",
+        IN_PLACE_BULK,
+        "C22 (bulk arm)",
+        1,
+        "PDF-38 AC7. A single-target run cannot distinguish 'the sidecar tier fires' "
+        "from 'the tier fires on the FIRST target and the loop never reaches the "
+        "second'; only a batch whose SECOND target owns the occupied sidecar can. Zero "
+        "retires the only arm that proves `plan_filesystem`'s per-target loop is a loop",
+    ),
+    Population(
+        "_SIDECAR_EXEMPTIONS",
+        _SIDECAR_EXEMPTIONS,
+        "C22 (negative controls)",
+        2,
+        "PDF-38 D6. Two flags legitimately clear the sidecar refusal -- `--no-backup` "
+        "writes no sidecar at all, `--force` replaces a stale one by design -- and BOTH "
+        "must keep predicting 0. The floor is 2 rather than 1 because these are the only "
+        "arms that can tell 'predicts the refusal' from 'refuses everything', and a "
+        "predicate that answers 5 for every in-place run passes every other C22 arm "
+        "while destroying the flag. Losing either exemption silently halves that control",
     ),
 )
 
@@ -2976,3 +3043,325 @@ def test_c21_population_is_non_empty() -> None:
     derivation to stay non-empty on its own.
     """
     assert OUT_DIR_BATCH, "the --out-dir batch population derived empty; C21 collected zero cases"
+
+
+# --------------------------------------------------------------------------- #
+# C22 (PDF-38) -- `--dry-run` predicts the `.bak` sidecar refusal, on every verb
+# that CONSUMES `--in-place`, under EVERY output shape. `6af2411c9e`.
+#
+# THE DEFECT. `--dry-run` exists to predict the refusal, and over an occupied
+# `.bak` sidecar it predicted `rc=0` / `"ok": true` for an operation the real run
+# refuses with `rc=5` / `"kind": "refused"` -- on all twelve members of
+# `IN_PLACE`. `cmd --dry-run && cmd` short-circuited into the very refusal it was
+# run to avoid.
+#
+# WHY THIS ROW ASSERTS THE ENVELOPE AND NOT ONLY THE EXIT CODE, WHICH IS THE
+# WHOLE POINT OF IT. Both of this module's existing dry-run prediction rows are
+# EXIT-CODE-ONLY: C15 asserts `dry.returncode == real.returncode == 5` and
+# nothing else, and C10 asserts `result.returncode == expected` plus purity. An
+# exit-code-only control was measured passing on 10 of 11 verbs of a
+# DELIBERATELY BROKEN binary -- it cannot tell *right number* from *right
+# answer*. So C22 pins both of X-185's observables: the process exit code AND
+# the structured envelope, including `detail.would_refuse` compared FIELD BY
+# FIELD against the real run's own top-level `error`. Neither C15 nor C10 is
+# touched; that they are narrow is this row's evidence, not its deliverable.
+#
+# THE POPULATION IS DERIVED (see `IN_PLACE` above) and the per-verb argv comes
+# from the registry's own `OUTPUT_FLAG_INVOCATIONS[(verb, "--in-place")]` cells
+# -- the same callables C14's OR-3 matrix already registers, so no verb name is
+# typed in this section and a thirteenth `--in-place` verb reddens C22 by
+# joining the population rather than by anyone remembering a list.
+#
+# ONE SUBSTITUTION, AND IT IS A PROPERTY OF THE ARGV RATHER THAN OF A VERB.
+# `--no-backup` REMOVES the sidecar this row is about, so any registered
+# `--in-place` cell carrying it would test nothing here; it is swapped for `-y`,
+# which clears the same gate (`encrypt`'s plaintext-`.bak` confirmation) while
+# KEEPING the backup. Exactly one registered cell carries `--no-backup` today
+# (`encrypt`'s, and for that stated reason), and an author who reached for the
+# obvious flag instead would have shipped a green, silent cell.
+# --------------------------------------------------------------------------- #
+
+#: The flag a registered `--in-place` cell may carry that would make C22 vacuous,
+#: and the flag that clears the same gate without removing the sidecar.
+_SIDECAR_SUPPRESSOR: Final[str] = "--no-backup"
+_SIDECAR_PRESERVING_SUBSTITUTE: Final[str] = "-y"
+
+
+def _in_place_argv(verb, corpus, tmp_path: Path) -> list[str]:
+    """*verb*'s registered `--in-place` argv, with any sidecar suppressor swapped.
+
+    Anti-lapse rather than a `KeyError`: a member of `IN_PLACE` with no
+    registered `--in-place` cell fails HERE by name. C14's OR-3 matrix already
+    requires the cell, so this should be unreachable -- and if it ever is
+    reached, the message says which verb and why.
+    """
+    build = OUTPUT_FLAG_INVOCATIONS.get((verb.name, "--in-place"))
+    if build is None:
+        pytest.fail(
+            f"{verb.name} declares it consumes --in-place but has no "
+            f"OUTPUT_FLAG_INVOCATIONS[({verb.name!r}, '--in-place')] row -- C22 cannot "
+            "seed a sidecar arm without one, and a silently skipped verb is exactly "
+            "what this row's derived population exists to prevent"
+        )
+    args = list(build(corpus, tmp_path))
+    return [_SIDECAR_PRESERVING_SUBSTITUTE if arg == _SIDECAR_SUPPRESSOR else arg for arg in args]
+
+
+def _in_place_target(verb, args: list[str], tmp_path: Path) -> Path:
+    """The target *verb*'s `--in-place` run will write, read from its OWN clean
+    `--dry-run -o json` plan -- never from the argv.
+
+    Same anti-lapse contract as `_discover_target`: a verb whose plan carries no
+    discoverable target fails by name rather than dropping out of C22's coverage.
+    """
+    result = run_cli(verb.name, "--dry-run", *args, "-o", "json", cwd=tmp_path)
+    if result.returncode != 0:
+        pytest.fail(
+            f"{verb.name}: registered --in-place invocation --dry-run exited "
+            f"{result.returncode}, not 0 -- C22 cannot discover a target from a plan "
+            f"that never completed: {result.stdout}{result.stderr}"
+        )
+    payload = json.loads(result.stdout)
+    items = payload.get("items") or []
+    output = items[0].get("output") if items else None
+    if not output:
+        pytest.fail(
+            f"{verb.name}: --dry-run produced no discoverable output target "
+            "(items[0].output) -- C22 needs one to seed the `.bak` sidecar arm"
+        )
+    return Path(output)
+
+
+def _sidecar_of(target: Path) -> Path:
+    return target.with_name(target.name + ".bak")
+
+
+def _table_rows(stdout: str) -> tuple[list[str], list[list[str]]]:
+    """The `-o table` header and data rows, split on the renderer's own 2+ space
+    column gap. The hand-rolled formatter pads with spaces and nothing else, so
+    a single-space-separated message stays one field."""
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    header = re.split(r"\s{2,}", lines[0].strip())
+    rows = [re.split(r"\s{2,}", line.strip()) for line in lines[2:]]
+    return header, rows
+
+
+def _table_detail(cell: str) -> dict:
+    """The `detail` column, parsed as the Python `repr` the renderer emits.
+
+    NOT a substring search. The table cell reads `{'would_exit': 5,
+    'would_refuse': {'code': 5, 'kind': 'refused', ...}}` -- single quotes, no
+    JSON punctuation -- so a check for `'"kind": "refused"'` reports a FALSE RED
+    on a correct binary here while passing on `json`/`ndjson`. The worst control
+    is not one that cannot fail; it is one that reports the wrong answer.
+    """
+    start = cell.index("{")
+    parsed = ast.literal_eval(cell[start:])
+    assert isinstance(parsed, dict)
+    return parsed
+
+
+def _assert_predicts_the_sidecar_refusal(verb, item: Mapping, *, shape: str) -> None:
+    """The half of C22 that is shape-independent: an item that predicts the
+    sidecar refusal rather than merely carrying the number 5."""
+    assert item["exit_code"] == 5, f"{verb.name}/{shape}: item exit_code={item['exit_code']}"
+    detail = item.get("detail") or {}
+    assert detail.get("would_exit") == 5, (
+        f"{verb.name}/{shape}: detail.would_exit={detail.get('would_exit')!r} -- the "
+        "prediction carries the right status but not the right answer"
+    )
+    would_refuse = detail.get("would_refuse")
+    assert isinstance(would_refuse, Mapping), (
+        f"{verb.name}/{shape}: detail carries no `would_refuse` mapping ({detail!r}); an "
+        "exit code alone cannot tell an operator WHICH refusal is coming"
+    )
+    assert would_refuse.get("code") == 5 and would_refuse.get("kind") == "refused", (
+        f"{verb.name}/{shape}: would_refuse={would_refuse!r}"
+    )
+    # `detail.planned_refusal` exists on `crypto`'s items and on no others, so it
+    # is asserted WHERE IT EXISTS rather than uniformly -- a uniform assertion
+    # here is unsatisfiable and would have been quietly dropped.
+    if "planned_refusal" in detail:
+        assert detail["planned_refusal"] == "BackupExistsError", (
+            f"{verb.name}/{shape}: planned_refusal={detail['planned_refusal']!r}"
+        )
+
+
+@pytest.mark.parametrize("verb", IN_PLACE, ids=_ids(IN_PLACE))
+def test_c22_dry_run_predicts_the_backup_sidecar_refusal(verb, corpus, tmp_path: Path) -> None:
+    """AC5 / AC8 / AC10 -- both observables, and `would_refuse` is the SAME
+    OBJECT the real run prints as its top-level `error`.
+
+    Pre-fix this row is red on every member of the population: dry `0` with
+    `"ok": true` and envelope `exit_code: 0`, against real `5` with
+    `{"error": {"code": 5, "kind": "refused"}}`.
+    """
+    args = _in_place_argv(verb, corpus, tmp_path)
+    sidecar = _sidecar_of(_in_place_target(verb, args, tmp_path))
+    seed = b"C22-STALE-SIDECAR"
+    sidecar.write_bytes(seed)
+
+    env, roots = redirected_environment(tmp_path)
+    before = snapshot(*roots)
+    dry = run_cli(verb.name, "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    assert_unchanged(before, snapshot(*roots))
+    assert sidecar.read_bytes() == seed, f"{verb.name}: --dry-run touched the sidecar"
+
+    real = run_cli(verb.name, *args, "-o", "json", env=env, cwd=tmp_path)
+
+    assert dry.returncode == real.returncode == 5, (
+        f"{verb.name}: dry={dry.returncode} real={real.returncode} (expected both 5) -- "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+
+    payload = json.loads(dry.stdout)
+    assert payload["exit_code"] == 5, f"{verb.name}: envelope exit_code={payload['exit_code']}"
+    refused = [item for item in payload["items"] if item["ok"] is False]
+    assert refused, f"{verb.name}: every item reports ok=true under a refused plan: {payload}"
+    for item in refused:
+        _assert_predicts_the_sidecar_refusal(verb, item, shape="json")
+
+    error = json.loads(real.stdout)["error"]
+    predicted = refused[0]["detail"]["would_refuse"]
+    for field in ("code", "kind", "message", "path"):
+        assert predicted[field] == error[field], (
+            f"{verb.name}: the prediction is a different answer from the outcome on "
+            f"{field!r}: predicted {predicted[field]!r}, real {error[field]!r}"
+        )
+
+
+@pytest.mark.parametrize("verb", IN_PLACE, ids=_ids(IN_PLACE))
+def test_c22_the_prediction_holds_under_every_output_shape(verb, corpus, tmp_path: Path) -> None:
+    """AC9 -- the same proposition on `json`, `ndjson` and `table`.
+
+    `ok` is asserted on `json` and `ndjson` only: the `table` renderer emits
+    `input | output | exit code | message | bytes before | duration ms | detail`
+    and has **no `ok` column**, so an AC demanding it on all three shapes would
+    be unwritable and would end up quietly dropped or faked.
+    """
+    args = _in_place_argv(verb, corpus, tmp_path)
+    sidecar = _sidecar_of(_in_place_target(verb, args, tmp_path))
+    sidecar.write_bytes(b"C22-STALE-SIDECAR")
+
+    as_json = run_cli(verb.name, "--dry-run", *args, "-o", "json", cwd=tmp_path)
+    as_ndjson = run_cli(verb.name, "--dry-run", *args, "-o", "ndjson", cwd=tmp_path)
+    as_table = run_cli(verb.name, "--dry-run", *args, "-o", "table", cwd=tmp_path)
+    for shape, result in (("json", as_json), ("ndjson", as_ndjson), ("table", as_table)):
+        assert result.returncode == 5, (
+            f"{verb.name}/{shape}: rc={result.returncode} {result.stdout}{result.stderr}"
+        )
+
+    lines = [json.loads(line) for line in as_ndjson.stdout.splitlines() if line.strip()]
+    ndjson_refused = [line for line in lines if line["ok"] is False]
+    assert ndjson_refused, f"{verb.name}/ndjson: no refused line: {as_ndjson.stdout}"
+    for line in ndjson_refused:
+        _assert_predicts_the_sidecar_refusal(verb, line, shape="ndjson")
+
+    json_refused = [item for item in json.loads(as_json.stdout)["items"] if item["ok"] is False]
+    assert json_refused, f"{verb.name}/json: no refused item"
+
+    header, rows = _table_rows(as_table.stdout)
+    assert "ok" not in header, (
+        f"{verb.name}: the table shape grew an `ok` column ({header}); C22's shape-aware "
+        "criterion was written against a renderer that has none -- re-derive it"
+    )
+    exit_column = header.index("exit code")
+    detail_column = header.index("detail")
+    refused_rows = [row for row in rows if row[exit_column] == "5"]
+    assert refused_rows, f"{verb.name}/table: no row reads exit code 5:\n{as_table.stdout}"
+    for row in refused_rows:
+        _assert_predicts_the_sidecar_refusal(
+            verb,
+            {"exit_code": int(row[exit_column]), "detail": _table_detail(row[detail_column])},
+            shape="table",
+        )
+
+    # AC9's OBSERVED red for the shape-aware parse above. A naive substring
+    # check passes on `json`/`ndjson` and fails on `table` FOR A CORRECT BINARY,
+    # which is why `_table_detail` parses the repr instead.
+    naive = '"kind": "refused"'
+    assert naive in as_json.stdout and naive in as_ndjson.stdout
+    assert naive not in as_table.stdout, (
+        f"{verb.name}: the table renderer now emits JSON punctuation; the shape-aware "
+        "parse may no longer be necessary -- re-measure before simplifying it"
+    )
+
+
+@pytest.mark.parametrize("verb", IN_PLACE, ids=_ids(IN_PLACE))
+def test_c22_an_absent_sidecar_is_not_refused(verb, corpus, tmp_path: Path) -> None:
+    """AC6 -- the ordinary path. A predicate that answers 5 for every in-place
+    run satisfies every criterion above and has broken the flag."""
+    args = _in_place_argv(verb, corpus, tmp_path)
+    target = _in_place_target(verb, args, tmp_path)
+    assert not _sidecar_of(target).exists(), f"{verb.name}: the arm seeded its own sidecar"
+
+    env, _roots = redirected_environment(tmp_path)
+    dry = run_cli(verb.name, "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    real = run_cli(verb.name, *args, "-o", "json", env=env, cwd=tmp_path)
+    assert dry.returncode == real.returncode == 0, (
+        f"{verb.name}: dry={dry.returncode} real={real.returncode} with NO sidecar "
+        f"present -- dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+
+
+@pytest.mark.parametrize("flag", _SIDECAR_EXEMPTIONS)
+@pytest.mark.parametrize("verb", IN_PLACE, ids=_ids(IN_PLACE))
+def test_c22_the_sidecar_exemptions_still_predict_zero(
+    verb, flag: str, corpus, tmp_path: Path
+) -> None:
+    """The negative controls that size the fix. Both flags legitimately clear
+    the refusal today, in BOTH modes, and an over-refusing predicate reddens
+    here while leaving every criterion above green."""
+    args = [*_in_place_argv(verb, corpus, tmp_path), flag]
+    target = _in_place_target(verb, args, tmp_path)
+    _sidecar_of(target).write_bytes(b"C22-STALE-SIDECAR")
+
+    env, _roots = redirected_environment(tmp_path)
+    dry = run_cli(verb.name, "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    real = run_cli(verb.name, *args, "-o", "json", env=env, cwd=tmp_path)
+    assert dry.returncode == real.returncode == 0, (
+        f"{verb.name} {flag}: dry={dry.returncode} real={real.returncode} over an "
+        f"OCCUPIED sidecar -- {flag} suppresses this refusal by design; over-refusing "
+        f"here breaks the flag. dry: {dry.stdout}{dry.stderr} / real: {real.stdout}"
+        f"{real.stderr}"
+    )
+
+
+@pytest.mark.parametrize("verb", IN_PLACE_BULK, ids=_ids(IN_PLACE_BULK))
+def test_c22_the_bulk_prediction_reaches_the_second_target(verb, corpus, tmp_path: Path) -> None:
+    """AC7 -- `plan_filesystem`'s per-target loop is a loop.
+
+    **Phrased on the SECOND target's sidecar path, not on 'only the second item
+    is refused'.** `PlannedOutputs` carries ONE refusal for the whole batch, so
+    every item renders `ok=false, exit_code=5` -- the same batch-refusal shape
+    the `--out-dir` tier already ships. A criterion demanding per-item
+    granularity would be met by rewriting the batch model, which is another
+    spec's territory.
+    """
+    invocation = INVOCATIONS[verb.name]
+    build = invocation.destructive_build
+    assert build is not None  # guaranteed by IN_PLACE_BULK's own derivation
+    args = [*build(corpus, tmp_path), "-y"]
+
+    plan = run_cli(verb.name, "--dry-run", *args, "-o", "json", cwd=tmp_path)
+    assert plan.returncode == 0, f"{verb.name}: bulk plan rc={plan.returncode} {plan.stdout}"
+    outputs = [Path(item["output"]) for item in json.loads(plan.stdout)["items"]]
+    assert len(outputs) >= 2, f"{verb.name}: bulk arm produced {len(outputs)} item(s)"
+    second = _sidecar_of(outputs[1])
+    second.write_bytes(b"C22-STALE-SIDECAR")
+    assert not _sidecar_of(outputs[0]).exists(), "only the SECOND target may be seeded"
+
+    dry = run_cli(verb.name, "--dry-run", *args, "-o", "json", cwd=tmp_path)
+    real = run_cli(verb.name, *args, "-o", "json", cwd=tmp_path)
+    assert dry.returncode == real.returncode == 5, (
+        f"{verb.name}: bulk dry={dry.returncode} real={real.returncode} -- "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+    payload = json.loads(dry.stdout)
+    assert payload["exit_code"] == 5
+    predicted = payload["items"][0]["detail"]["would_refuse"]
+    assert Path(predicted["path"]) == second, (
+        f"{verb.name}: the batch prediction names {predicted['path']!r}, not the SECOND "
+        f"target's sidecar {str(second)!r} -- the per-target loop stopped at item 0"
+    )
+    assert Path(json.loads(real.stdout)["error"]["path"]) == second
