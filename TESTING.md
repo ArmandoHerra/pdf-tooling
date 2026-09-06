@@ -193,6 +193,40 @@ skip decision itself sees the hidden PATH.
 | `samples` | The `PLAN.md` §10.1 real-document arm. Skips visibly when `$PDF_TOOLKIT_SAMPLES_DIR` is unset. |
 | `requires(engine)` | Skips visibly when the named engine/port does not resolve via `ports.resolve()`. |
 
+### The shim directory, its teardown, and the residue that predates it
+
+That symlink directory used to be created and never removed. `pytest_configure`
+runs above the `workerinput` early-return, so the controller **and** every xdist
+worker each left a directory behind — under the default `-n auto` that is a
+per-worker multiplier rather than a fixed cost, and `make test` paid it on every
+run. `tests/conftest.py` now registers an `atexit` reclaim at creation time: it
+restores the captured `PATH` **before** removing the tree, and it removes only
+the directory this interpreter made — never a glob, because a glob reaches
+directories this process never created. It is deliberately not a pytest hook.
+`pytest_sessionfinish` resolves `git` through the shimmed `PATH` and returns
+quietly on `OSError`, so a teardown racing it would blind the working-tree guard
+instead of failing.
+
+```bash
+make shim-reap                     # list what earlier runs left behind; removes nothing
+make shim-reap CONFIRM=1           # actually remove the reapable ones
+```
+
+`make shim-reap` **lists by default and removes nothing.** Removal needs
+`CONFIRM=1` typed, and even then it touches only exact-prefix real directories
+lying directly under the root it was given and older than `--min-age-days`
+(default `1`) — a young directory may belong to a live session on the same host,
+and the reaper has no way to tell. Directories left by runs that predate the
+teardown are **not** removed by any test, fixture, gate, or `make clean`: they
+are recorded evidence, and the operator reaps them deliberately.
+
+`PDF_TOOLKIT_TEST_KEEP_SHIM=1` skips the reclaim, restoring the old leaking
+behaviour **on purpose**. It is the shipped red control behind
+`tests/test_engine_hiding_shim.py`'s delta arms — a run that leaves nothing
+behind proves nothing unless a run that keeps its directories can be observed
+beside it — and no `Makefile` recipe, workflow, or `addopts` may set it, which
+that same module censuses.
+
 ## The golden primitive
 
 `tests/conftest.py::Golden` compares a payload against

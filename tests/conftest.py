@@ -11,9 +11,11 @@ for why.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Mapping
@@ -150,6 +152,48 @@ def _resolve_port(engine: str) -> str:
 
 _HIDE_ENV: Final[str] = "PDF_TOOLKIT_TEST_HIDE_ENGINES"
 
+#: PDF-46 D6. Set to a non-empty value, the reclaim below is NOT registered and
+#: the shim directory survives the interpreter -- i.e. the pre-PDF-46 behaviour,
+#: on purpose. It exists so the delta-0 arms can be shown RED on every suite run
+#: instead of once, by hand, at landing: a child session that never applied the
+#: shim leaves 0 directories too, so `0` alone proves nothing. It is a foot-gun
+#: and it is censused (`tests/test_engine_hiding_shim.py`): no Makefile recipe,
+#: no workflow, no `addopts` and no gate-parity entry may set it.
+_KEEP_ENV: Final[str] = "PDF_TOOLKIT_TEST_KEEP_SHIM"
+
+
+def _reclaim_engine_hiding_shim(shim_dir: str, original_path: str) -> None:
+    """Restore `PATH`, THEN remove this interpreter's own shim directory.
+
+    `0b672c634e`: `_apply_engine_hiding_shim()` below used to `mkdtemp()` with no
+    teardown at all -- no `TemporaryDirectory`, no `atexit`, no fixture -- and
+    `pytest_configure` calls it ABOVE the `workerinput` early-return, so under
+    the project's default `-n auto` every run leaked one directory per xdist
+    worker PLUS one for the controller.
+
+    Two properties, both of which have a control that can see them go wrong:
+
+    * **The order.** `PATH` is restored BEFORE the tree is removed, so no window
+      exists in which `PATH` names a directory that is already gone. Swapping
+      the two statements leaves the same end state, so the control monkeypatches
+      `shutil.rmtree` and reads `PATH` at call time rather than afterwards.
+    * **Own directory only.** This removes the path it was handed and never
+      globs the family prefix -- the literal glob form is deliberately not
+      spelled here, because `tests/test_engine_hiding_shim.py` censuses the
+      tree for it and a comment saying "no glob" would be read as one. OR-13,
+      and `tests/test_pagerange.py` already writes down why: a glob reaches
+      directories this process never created, and a glob-and-delete is how a
+      resource-leak fix turns into someone else's data loss. On this host
+      `/tmp` also holds another product's sentinel sandboxes.
+
+    `reset_cache()` is deliberately NOT called here. The registry memoization
+    exists to serve resolution DURING the session; at interpreter exit there is
+    no consumer left to serve, and importing `pdf_toolkit.ports` during teardown
+    would buy a new failure mode for no benefit.
+    """
+    os.environ["PATH"] = original_path
+    shutil.rmtree(shim_dir, ignore_errors=True)
+
 
 def _apply_engine_hiding_shim() -> None:
     hide_raw = os.environ.get(_HIDE_ENV)
@@ -158,6 +202,17 @@ def _apply_engine_hiding_shim() -> None:
     hidden = {name.strip() for name in hide_raw.split(",") if name.strip()}
     shim_dir = Path(tempfile.mkdtemp(prefix="pdftoolkit-hide-engines-"))
     original_path = os.environ.get("PATH", "")
+    # PDF-46 D1/D3. Registered HERE -- before the walk and before the PATH
+    # assignment -- so a directory `mkdtemp` already created is reclaimed even
+    # if the walk or the assignment raises. `atexit` and not a pytest hook:
+    # callbacks run LIFO, this registration happens in `pytest_configure`, so
+    # the reclaim runs strictly AFTER `pytest_sessionfinish` -- which resolves
+    # `git` through this very PATH (`_tracked_files_manifest()`) and returns
+    # None on OSError, i.e. a teardown that beat it there would silently blind
+    # the working-tree guard instead of failing. `_KEEP_ENV` skips the
+    # registration on purpose; it is this fix's shipped red control.
+    if not os.environ.get(_KEEP_ENV):
+        atexit.register(_reclaim_engine_hiding_shim, str(shim_dir), original_path)
     for entry in original_path.split(os.pathsep):
         entry_path = Path(entry)
         if not entry_path.is_dir():

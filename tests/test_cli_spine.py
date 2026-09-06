@@ -200,6 +200,10 @@ MAKEFILE_TARGETS = {
     # this target's arms cannot run in CI's shallow, planning-tree-less checkout
     # at all, so joining `ci` would trade a real local gate for a skipped one.
     "docs-gate",
+    # PDF-46: the standing-residue reaper. Lists by default, removes only under
+    # CONFIRM=1, and is a prerequisite of NOTHING -- asserted by parsing the
+    # Makefile in tests/test_engine_hiding_shim.py, not by reading it here.
+    "shim-reap",
     "ci",
     "clean",
 }

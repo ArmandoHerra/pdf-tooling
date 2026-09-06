@@ -41,7 +41,7 @@ endif
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
         samples-gate engines-gate licenses-check artifacts-check gate-timing \
-        docs-gate ci clean
+        docs-gate shim-reap ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -413,3 +413,23 @@ ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local
 clean: ## Remove build, cache and coverage artefacts
 	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml .scratch .make-cover.lock
 	rm -f .coverage.*
+
+# PDF-46 D5. The engine-hiding shim used to leak one directory per pytest
+# process -- and under the project's default parallel mode, one per xdist
+# worker plus one for the controller, which is the multiplier that made this
+# worth fixing. `tests/conftest.py` now reclaims its own at interpreter exit,
+# which fixes the leak going FORWARD and deliberately removes nothing that was
+# already there: the standing residue is the sentinel's recorded evidence, and
+# an engineer deleting another agent's evidence mid-cycle is the same class of
+# act as editing the ledger.
+#
+# So this target LISTS by default and the destructive path needs a word typed.
+# It is a prerequisite of NOTHING -- not `clean`, not `test`, not `cover`, not
+# `ci`, not `engines-gate`, not `docs-gate` -- and that is asserted by parsing
+# this file (tests/test_engine_hiding_shim.py), not trusted. A reaper that had
+# quietly become part of `clean` or `ci` would delete a concurrent session's
+# LIVE shim, and the symptom would look like a flake.
+SHIM_REAP_ARGS ?=
+
+shim-reap: ## List stale engine-hiding shim directories left by earlier runs; removes only with CONFIRM=1
+	$(UV_RUN) python scripts/reap_shims.py $(if $(CONFIRM),--confirm) $(SHIM_REAP_ARGS)
