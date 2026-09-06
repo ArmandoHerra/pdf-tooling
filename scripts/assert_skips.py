@@ -74,6 +74,25 @@ SKIP_CLASSES = {
     "shallow-clone": re.compile(r"shallow clone", re.IGNORECASE),
     "samples-corpus-absent": re.compile(r"PDF_TOOLKIT_SAMPLES_DIR", re.IGNORECASE),
     "parallel-session": re.compile(r"parallel session", re.IGNORECASE),
+    # PDF-47. The live read of pypi.org's PEP 740 integrity endpoint is opt-in,
+    # so its skip is a NAMED, COUNTED class rather than an anonymous remainder.
+    #
+    # APPENDED, deliberately: this census is first-match-wins, so a class added
+    # at the end can only claim skips no earlier class claimed. The reason
+    # string it matches carries neither `engine`/`tesseract`/`soffice`/
+    # `libreoffice` (so `engine-gated` above cannot swallow it) nor
+    # `PDF_TOOLKIT_SAMPLES_DIR` (so `samples-corpus-absent` cannot either), and
+    # `tests/test_assert_skips.py` asserts BOTH directions rather than assuming
+    # them -- the partition is the property, not the entry.
+    #
+    # VISIBILITY, NOT FAILURE. As the header above says, this census is
+    # reporting only and neither exit-code rule changes. The *failing*
+    # guarantee for that arm lives in whatever cadence runs it with
+    # `PDF_TOOLKIT_PYPI_PROVENANCE=1`; conflating the two would claim a
+    # strength this entry does not have.
+    "provenance-endpoint-disabled": re.compile(
+        r"provenance endpoint check disabled", re.IGNORECASE
+    ),
 }
 
 

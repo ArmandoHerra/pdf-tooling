@@ -154,6 +154,7 @@ markers = [
   "e2e: subprocess-level CLI runs against the installed console script",
   "samples: real-document arm over $PDF_TOOLKIT_SAMPLES_DIR (PLAN.md §10.1) -- skips visibly when unset",
   "requires(engine): skip visibly when the named engine/port does not resolve via ports.resolve()",
+  "pypi_provenance: PDF-47's live read of pypi.org's PEP 740 integrity endpoint -- opt in with $PDF_TOOLKIT_PYPI_PROVENANCE=1; once opted in it NEVER skips for a network reason, every failure is a failure",
 ]
 
 [tool.coverage.run]

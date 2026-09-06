@@ -462,6 +462,83 @@ In both cases the rule is the same and it is not negotiable: **a test that canno
 
 Deleting or weakening a failing test so the suite turns green is never an acceptable fix. If a test cannot pass for a reason outside the change, say so explicitly in the change's description and leave the test in place.
 
+## The PyPI provenance arm — an opt-in live read
+
+`tests/test_pypi_provenance.py` reads pypi.org's `PEP 740` integrity endpoint
+and asserts this project's published **publisher row** — `repository`,
+`environment`, `workflow` and `kind` — as a **differential** across a release
+pair, never as a single reading.
+
+The differential is the instrument. An arm asserting only that `0.2.0` reports
+`environment: pypi` is satisfied by any endpoint that returns the expected
+value, and can fail only if PyPI breaks. The `0.1.1` arm is what makes the pair
+evidence: it reports a null `environment` *although its own release job did
+declare `environment: pypi`*, so the field is read as the **configured
+publisher row** rather than as the token's claim. That release is published and
+immutable, so the red is free and permanent — no later release and no
+configuration change can ever make it report otherwise.
+
+### Running it
+
+```bash
+uv run pytest tests/test_pypi_provenance.py -rs -q
+PDF_TOOLKIT_PYPI_PROVENANCE=1 uv run pytest tests/test_pypi_provenance.py -q
+```
+
+| Context | `PDF_TOOLKIT_PYPI_PROVENANCE` | If pypi.org is unreachable |
+|---|---|---|
+| `make test`, `make ci`, PR CI | unset | **skips, visibly and by name** — the default suite stays hermetic and makes no network call at all |
+| an operator or the `qa-sentinel` re-running by hand | `=1` | **FAILS**, naming the URL and the transport error |
+
+**The live arm never skips for a network reason.** It skips only for that named
+opt-out, and its reason string is
+`provenance endpoint check disabled (set PDF_TOOLKIT_PYPI_PROVENANCE=1)` — a
+counted class in `scripts/assert_skips.py`'s census rather than an anonymous
+remainder, and a contract that module and `tests/test_assert_skips.py` assert
+against each other. Once it runs, every failure —
+transport, DNS, timeout, a non-`200` status, a wrong content type, a malformed
+body, or a wrong field — is a failure. A suite that goes green in an airport is
+a suite that stopped asserting and did not say so, so no code path here turns a
+network error into a skip, and an AST walk over the module's own source asserts
+that rather than leaving it to a docstring.
+
+`PDF_TOOLKIT_PYPI_BASE_URL` points the arm somewhere other than pypi.org. Its
+purpose is that red: set it to a closed port with the opt-in on, and the arm
+must **fail** rather than skip.
+
+### What the recorded bodies are, and what they are not
+
+`tests/fixtures/provenance/*.json` hold the bodies as served, with their fetch
+recipe and measurement date in the module docstring. **They are inputs to the
+offline arms. They are never evidence that the live endpoint still agrees** — a
+green offline suite says exactly nothing about pypi.org, and a recorded
+response presented as a live reading is the screenshot problem with better
+formatting.
+
+### The limit, and it is load-bearing
+
+`PEP 740` provenance is generated at **upload time** and is immutable
+thereafter. This arm proves **what the publisher row was when a given
+distribution was published**; it cannot see the row **as it stands today**.
+**`SR-11`'s hazard — a later edit silently dropping the environment constraint
+from the publisher row — is therefore NOT covered here.** Describing it as
+covered would rebuild, inside a new control, the "a control that appears
+present" failure the surrounding gates exist to catch. Nothing here verifies an
+attestation cryptographically: it reads fields out of a served JSON document,
+which is not verification and is never called that.
+
+### It has no scheduled home yet, and that is escalated rather than improvised
+
+`PDF-47` `AC15` asks for this arm to run on a cadence. `ci.yml`'s
+workflow-level `schedule:` is that cadence, but every honest step added to it
+counts as a gating step, and that population is registered in
+`.github/gate-parity.toml` and frozen by `tests/test_gate_parity.py`. The ways
+to add a step the scan does not count — `continue-on-error`, a trailing `||
+true` — are exactly the control-that-cannot-fail shape this arm exists to
+avoid. **Escalated to the project manager rather than decided here**; until it
+is ruled on, this arm runs when an operator or the `qa-sentinel` opts in, and
+nothing in this repository claims otherwise.
+
 ## Determinism
 
 Every test writes into pytest's own temporary directory and never into the repository tree (enforced, not just intended — see the working-tree guard above). Nothing that a test asserts depends on wall-clock timing, on the order tests run in, or on which machine runs them — with one deliberate exception: the startup-budget test measures real elapsed time. It takes the **fastest** of several runs rather than the mean, so scheduler noise cannot turn it red while a genuine regression still will.

@@ -603,3 +603,168 @@ def test_ac25_the_tool_itself_reports_print_alongside_print_highres(tmp_path: Pa
         "the user asked for `print-highres` alone; `permissions` must report "
         "`print` as well, which is the implication the documents now disclose"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-47 / `83f2defbf3` — the "pypi.org has nothing this loop can read" premise,
+# as a PROPOSITION rather than as a string.
+#
+# Appended at this module's own anchor, beside the OR-7 section above and under
+# the same rules. The `ac8`/`ac9` sections belong to PDF-12, the disclosure
+# section to PDF-24 and the OR-7 section to PDF-30/PDF-38; none is touched, and
+# `FORBIDDEN_CLAIM_PATTERNS` is neither narrowed nor widened (X-15).
+#
+# WHY A SEPARATE LIST AND NOT A WIDER `FORBIDDEN_CLAIM_PATTERNS`. PDF-47 D6
+# names that list. Three measured facts point the other way, and the deviation
+# is recorded here rather than taken quietly:
+#   * `:34` annotates that list `D-12.7 -- verbatim from the spec`, and the
+#     module docstring says it is "never widened or narrowed here without a
+#     spec amendment". Widening it would falsify its own annotation -- a false
+#     claim planted in the honesty gate by the honesty spec.
+#   * Its targets are `_SOURCE_TARGETS` + `_DOC_TARGETS` + three `--help`
+#     surfaces. This proposition cannot arrive in `compress --help`; it arrives
+#     in a DOCUMENT, and `TESTING.md`/`CLAUDE.md`/`CONTRIBUTING.md` are not in
+#     `_DOC_TARGETS`. Widening the list would have guarded a NARROWER document
+#     set than the proposition needs.
+#   * PDF-30 faced this identical question and answered it this way. A section
+#     of its own is the established idiom, and D6's own instruction is to
+#     append "at the module's own anchor".
+# AC11's substance is unchanged: >= 3 patterns, each shown red on a distinct
+# rewording, the existing list not narrowed, every pre-existing arm passing.
+#
+# WHAT THIS GUARD DOES AND DOES NOT DO, STATED SO IT IS NOT OVERSOLD. The
+# premise appears **0 times** inside this repository -- recipe, from the repo
+# root: `git grep -nIE 'no API this loop can query|exposes no API|no queryable
+# API' -- .` returns nothing. Nothing is being cleaned up. This guard prevents
+# an ARRIVAL, and an engineer who reports it as a 3 -> 0 sweep has reported a
+# fiction. Its honest scope is this repository -- the only tree an engineer
+# owns. The premise's real occurrences live in the planning tree, in artifacts
+# that are `Verified`, append-only or owned by another hand; they are history,
+# they are unreachable from here, and they stay.
+#
+# WHY THREE PATTERNS AND NOT ONE LITERAL: the same reason the OR-7 section
+# gives. `[B-101]` swept a claim with an exact-phrase grep, reported a clean
+# 3 -> 0, and a fourth copy survived stating the same proposition in different
+# words. A single literal here would rebuild that failure inside the guard
+# written against it.
+# --------------------------------------------------------------------------- #
+
+#: The claim `83f2defbf3` falsified: that this project's published publisher row
+#: is not machine-readable, so only an operator screenshot could ever show it.
+#: Measured false -- pypi.org's PEP 740 integrity endpoint answers 200 with that
+#: row in it, and `tests/test_pypi_provenance.py` reads it on demand.
+PYPI_UNREADABLE_PREMISE_PATTERNS = [
+    # (0) The subject-verb shape: the index itself is said to expose no API.
+    #     `PDF-31:26`'s own literal sentence.
+    r"\b(?:pypi(?:\.org)?|the index|the package index)\b[^.\n]{0,80}"
+    r"\b(?:expose[sd]?|offer(?:s|ed)?|provide[sd]?|publish(?:es|ed)?|ha[sd])\b"
+    r"[^.\n]{0,20}\bno\b[^.\n]{0,40}\bAPI\b",
+    # (1) The subject-free shape: no naming of pypi at all, only the absence of
+    #     a queryable/machine-readable API. Pattern 0 cannot see this one.
+    r"\bno\b[^.\n]{0,30}\b(?:queryable|machine[- ]readable|programmatic|public)\s+API\b"
+    r"|\bno\s+API\b[^.\n]{0,40}\b(?:can|could|may)\s+(?:be\s+)?quer(?:y|ied)\b",
+    # (2) The read-back shape: the proposition stated as an unavailability of
+    #     the READING rather than of the API. Neither pattern above needs to
+    #     mention an API for this one to be the same claim.
+    r"\b(?:read[- ]?back|readback)\b[^.\n]{0,60}\b(?:was|is|were)\b[^.\n]{0,20}"
+    r"\b(?:never|not|un)\s*available\b"
+    r"|\bcan(?:not|'t)\s+be\s+read\s+back\b"
+    r"|\bno\s+way\s+to\s+read\s+(?:it|the\s+publisher\s+row)\s+back\b",
+]
+_PYPI_PREMISE_COMPILED = [
+    re.compile(pattern, re.IGNORECASE) for pattern in PYPI_UNREADABLE_PREMISE_PATTERNS
+]
+
+#: The documents an engineer owns and could plausibly write this into.
+#: `tests/` is excluded from every walk in this module by construction -- the
+#: patterns are literals HERE, so a walk including the tests directory would
+#: fail on its own definition.
+_PYPI_PREMISE_TARGETS = (
+    REPO_ROOT / "README.md",
+    REPO_ROOT / "CLAUDE.md",
+    REPO_ROOT / "CONTRIBUTING.md",
+    REPO_ROOT / "TESTING.md",
+    REPO_ROOT / "changelog.md",
+)
+
+
+def _pypi_premise_findings(text: str, *, label: str) -> list[str]:
+    findings: list[str] = []
+    for pattern in _PYPI_PREMISE_COMPILED:
+        for match in pattern.finditer(text):
+            # A struck claim is a record, not a live claim -- the same escape
+            # the OR-7 walk above uses, and the same audit-trail convention
+            # (PDF-08/12/15) it was written for.
+            window = text[max(0, match.start() - 120) : match.end() + 40]
+            if "~~" in window or "Struck by" in window:
+                continue
+            findings.append(f"{label}: {pattern.pattern!r} matched {match.group(0)!r}")
+    return findings
+
+
+def test_no_document_claims_the_publisher_row_cannot_be_read_back() -> None:
+    """PDF-47 AC11. The forward guard. Nothing in this repository may assert
+    that pypi.org offers nothing this loop can query -- it does, it answers in
+    well under a second, and the reading is a standing arm."""
+    findings: list[str] = []
+    for path in _PYPI_PREMISE_TARGETS:
+        if path.is_file():
+            findings.extend(
+                _pypi_premise_findings(path.read_text(encoding="utf-8"), label=str(path))
+            )
+    assert findings == [], (
+        "a document states the falsified premise that this project's published publisher row is "
+        "not machine-readable:\n" + "\n".join(findings)
+    )
+
+
+def test_each_pypi_premise_pattern_matches_a_distinct_rewording() -> None:
+    """AC11's RED, and it is the criterion itself. A single literal would have
+    let the claim through in a fourth wording, which is exactly how `B-106`
+    survived `B-101`. Each paraphrase is shown to bite on its own."""
+    rewordings = [
+        # (0) `PDF-31:26`, VERBATIM. The sentence this whole item exists to
+        #     retire, and the one an engineer is most likely to copy forward.
+        "pypi.org exposes no API this loop can query, so a read-back was never "
+        "available to anyone but the operator.",
+        # (1) The same proposition with pypi named nowhere and no read-back
+        #     clause, so pattern 0 has no subject to anchor on and pattern 2 has
+        #     no reading to find.
+        "There is no machine-readable API for the publisher row, so the tier "
+        "cannot be raised above a screenshot.",
+        # (2) The proposition stated purely as an unavailable READING: no API is
+        #     mentioned at all, so neither pattern above can see it.
+        "The publisher row cannot be read back by anything in this loop; only "
+        "the operator ever saw it.",
+    ]
+    assert len(rewordings) == len(_PYPI_PREMISE_COMPILED), (
+        "every pattern must be shown red on a rewording of its own, or an unproven "
+        "pattern is riding along on another's evidence"
+    )
+    for index, (pattern, text) in enumerate(zip(_PYPI_PREMISE_COMPILED, rewordings, strict=True)):
+        assert pattern.search(text), (
+            f"pattern {index} ({pattern.pattern!r}) does not match its own rewording {text!r}"
+        )
+    for text in rewordings:
+        assert _pypi_premise_findings(text, label="<synthetic>"), f"the set missed {text!r}"
+
+
+def test_honest_prose_about_the_provenance_endpoint_is_not_forbidden() -> None:
+    """The negative control. This guard forbids the CLAIM THAT THE ROW IS
+    UNREADABLE; it does not forbid describing the endpoint, its limits, or the
+    fact that the reading is opt-in -- all of which `TESTING.md` now does."""
+    honest = (
+        "pypi.org exposes a PEP 740 integrity endpoint this loop can query, and "
+        "tests/test_pypi_provenance.py reads it on demand. The provenance is generated at "
+        "upload time and is immutable, so it proves what the publisher row was at "
+        "publication and cannot see the row as it stands today; SR-11 is not covered. "
+        "The live arm is opt-in and skips by name when the opt-in is unset."
+    )
+    assert _pypi_premise_findings(honest, label="<synthetic>") == []
+
+
+def test_the_existing_forbidden_claim_list_is_not_narrowed_by_this_section() -> None:
+    """X-15's append rule, mechanized for the one list PDF-47 D6 named. This
+    section adds a list of its own; it may not shrink PDF-12's."""
+    assert len(FORBIDDEN_CLAIM_PATTERNS) >= 10, FORBIDDEN_CLAIM_PATTERNS
+    assert len(_COMPILED) == len(FORBIDDEN_CLAIM_PATTERNS)

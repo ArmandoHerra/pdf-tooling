@@ -39,6 +39,7 @@ Implementation Log: `engine-gated skips: 1`, exit `1`, before the fix;
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -172,3 +173,102 @@ def test_no_committed_fixture_contains_an_xfail() -> None:
     for path in tracked_xml:
         content = (REPO_ROOT / path).read_text(errors="replace")
         assert "pytest.xfail" not in content, f"{path} carries a committed xfail JUnit fixture"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-47 AC9 — the opt-out skip is a NAMED, COUNTED class.
+#
+# Appended at this module's own anchor. Nothing above is touched: the four
+# PDF-28 arms and the committed-fixture arm keep their fixtures and their
+# assertions byte for byte.
+#
+# TWO DIRECTIONS, BOTH ASSERTED, because a partition is only a partition if
+# neither side leaks. `scripts/assert_skips.py`'s census is FIRST-MATCH-WINS
+# over an ordered dict, so it is not enough that the new pattern matches its own
+# reason -- no earlier class may claim that reason first, and the new class may
+# not claim anybody else's. Both are checked here rather than reasoned about.
+#
+# WHY THAT IS NOT PARANOIA. `ENGINE_REASON` matches on PROSE over the WHOLE skip
+# message, and a skip message can carry a path (`tmp_path`) the test never chose
+# -- so a class whose pattern is loose enough, or a reason string that happens
+# to embed one of its words, is miscounted with a green exit code. The reason
+# string below is a CONTRACT between this file and `tests/test_pypi_provenance.py`,
+# imported rather than transcribed, so a reword there cannot silently empty the
+# class here.
+# --------------------------------------------------------------------------- #
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from test_pypi_provenance import SKIP_REASON as PROVENANCE_SKIP_REASON  # noqa: E402
+
+_PROVENANCE_SKIP = (
+    '  <testcase classname="tests.test_pypi_provenance" '
+    'name="test_the_live_endpoint_still_agrees_with_the_recorded_matrix" time="0.001">\n'
+    f'    <skipped type="pytest.skip" message="{PROVENANCE_SKIP_REASON}"/>\n'
+    "  </testcase>\n"
+)
+
+
+def _census_line(stdout: str, name: str) -> int:
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(f"{name}:"):
+            return int(stripped.split(":", 1)[1])
+    raise AssertionError(f"the census printed no `{name}` line:\n{stdout}")
+
+
+def test_the_provenance_skip_class_counts_its_own_reason(tmp_path: Path) -> None:
+    """AC9. The opt-out skip is visible BY NAME in the census, not swallowed
+    into the unclassified remainder."""
+    report = tmp_path / "junit-provenance.xml"
+    report.write_text(_junit(_PROVENANCE_SKIP, _REAL_ENGINE_SKIP, total=2, skipped=2))
+
+    result = _run(report)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _census_line(result.stdout, "provenance-endpoint-disabled") == 1, result.stdout
+    assert _census_line(result.stdout, "unclassified") == 0, result.stdout
+
+
+def test_the_provenance_class_neither_swallows_nor_is_swallowed(tmp_path: Path) -> None:
+    """AC9's real content. First-match-wins means the two failure modes are
+    (a) an earlier class claiming this reason and (b) this class claiming an
+    earlier one's. Both are driven, in one report that carries both kinds."""
+    report = tmp_path / "junit-partition.xml"
+    report.write_text(_junit(_PROVENANCE_SKIP, _REAL_ENGINE_SKIP, total=2, skipped=2))
+
+    stdout = _run(report).stdout
+
+    # (a) the engine-gated class did NOT take the provenance skip ...
+    assert _census_line(stdout, "engine-gated") == 1, stdout
+    assert "engine-gated skips: 1" in stdout, stdout
+    # ... and (b) the provenance class did not take the engine skip.
+    assert _census_line(stdout, "provenance-endpoint-disabled") == 1, stdout
+
+
+def test_the_registered_pattern_matches_the_reason_the_suite_actually_emits() -> None:
+    """AC9's RED: reword the skip reason without updating the pattern and this
+    fails. The pattern is read from the script itself, so the two files cannot
+    come to disagree while both look green."""
+    spec = importlib.util.spec_from_file_location("assert_skips_under_test", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    classes = module.SKIP_CLASSES
+    assert "provenance-endpoint-disabled" in classes, sorted(classes)
+    assert classes["provenance-endpoint-disabled"].search(PROVENANCE_SKIP_REASON), (
+        f"the registered pattern does not match the reason the suite emits: "
+        f"{PROVENANCE_SKIP_REASON!r}"
+    )
+
+    # The partition, asserted against the live registry rather than against a
+    # copy of it: no OTHER class may claim this reason first.
+    claimants = [
+        name for name, pattern in classes.items() if pattern.search(PROVENANCE_SKIP_REASON)
+    ]
+    assert claimants == ["provenance-endpoint-disabled"], (
+        f"the provenance skip reason is claimed by {claimants}; first-match-wins makes the "
+        "earliest claimant the one that counts, so this reason would be filed under the wrong "
+        "class with a green exit code"
+    )
