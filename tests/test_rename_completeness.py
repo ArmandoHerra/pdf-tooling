@@ -69,9 +69,11 @@ _STEM_CAP: Final[str] = "Toolkit"
 SPELL_UNDERSCORE: Final[str] = _LOW + "_" + _STEM_LOW
 #: The no-separator form, e.g. what the canonical console script used to be.
 SPELL_BARE: Final[str] = _LOW + _STEM_LOW
-#: The environment-variable-cased form (frozen, D6a) -- `PDF_TOOLKIT_*`.
+#: The environment-variable-cased form (frozen, D6a) -- the prefix the
+#: documented secret-input env vars and a CI-absence guard both key on.
 SPELL_ENV: Final[str] = _UP + "_" + _STEM_UP
-#: The exception-class-cased form (frozen, D6b) -- `PdfToolkitError` etc.
+#: The exception-class-cased form (frozen, D6b) -- the public base
+#: exception's name, and a leftover Astro logo-import identifier.
 SPELL_CLASS: Final[str] = _CAP + _STEM_CAP
 #: The hyphenated form -- the deprecated console-script alias.
 SPELL_HYPHEN: Final[str] = _LOW + "-" + _STEM_LOW
@@ -294,6 +296,7 @@ UNDERSCORE_REMAINDER: Final[dict[str, int]] = {
     ".gitleaksignore": 1,
     "README.md": 1,
     "pyproject.toml": 1,
+    "src/pdf_tooling/cli/deprecated.py": 2,
     "tests/test_cli_spine.py": 2,
 }
 
@@ -322,6 +325,7 @@ BARE_REMAINDER: Final[dict[str, int]] = {
     "README.md": 6,
     "pyproject.toml": 2,
     "src/pdf_tooling/__init__.py": 1,
+    "src/pdf_tooling/cli/deprecated.py": 5,
     "src/pdf_tooling/cli/main.py": 1,
     "src/pdf_tooling/ops/procpool.py": 2,
     "src/pdf_tooling/safety/atomic.py": 2,
@@ -416,10 +420,10 @@ def test_reverting_one_import_grows_its_remainder_bucket_by_one() -> None:
 #: `changelog.md` is EXCLUDED from all four exact counts below for the same
 #: reason it is a floor rather than an exact count in `CHANGELOG_FLOOR`:
 #: this spec's OWN new entry (landing in the same commit as this file)
-#: already names `PDF_TOOLKIT_*` and `PdfToolkitError`/`PdfToolkitLogo` by
-#: describing what stayed frozen, so a repo-wide exact count would redden
-#: on this spec's own commit. The four floors below record what this
-#: spec's own entry legitimately added; a value BELOW its floor is a
+#: already names the frozen env-var prefix and the frozen exception-class
+#: names by describing what stayed frozen, so a repo-wide exact count would
+#: redden on this spec's own commit. The four floors below record what
+#: this spec's own entry legitimately added; a value BELOW its floor is a
 #: rewritten landed entry, which changelog.md's own third rule forbids.
 FROZEN_ENV_COUNT: Final[int] = 146
 FROZEN_CLASS_COUNT: Final[int] = 116
@@ -432,10 +436,11 @@ CHANGELOG_NOUN_FLOOR: Final[int] = 1
 
 
 def test_the_environment_variable_population_is_byte_unchanged() -> None:
-    """AC26. `PDF_TOOLKIT_*` -- a documented secret-input path and a
-    `.github/gate-parity.toml` guard both key on this literal (D6a). Frozen,
-    not merely unswept, OUTSIDE `changelog.md`: this is a COUNT check,
-    independent of `test_brand_surfaces.py`'s classifier."""
+    """AC26. The frozen environment-variable-cased prefix -- a documented
+    secret-input path and a `.github/gate-parity.toml` guard both key on
+    this literal (D6a). Frozen, not merely unswept, OUTSIDE `changelog.md`:
+    this is a COUNT check, independent of `test_brand_surfaces.py`'s
+    classifier."""
     assert _count(SPELL_ENV, scope=".", exclude="changelog.md") == FROZEN_ENV_COUNT
     assert _count(SPELL_ENV, scope="changelog.md") >= CHANGELOG_ENV_FLOOR
 

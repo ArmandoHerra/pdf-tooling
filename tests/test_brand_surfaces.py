@@ -140,6 +140,7 @@ def _is_console_script_alias(path: str, _line: int, text: str) -> bool:
     return path in {
         "pyproject.toml",
         "src/pdf_tooling/cli/main.py",
+        "src/pdf_tooling/cli/deprecated.py",
         "src/pdf_tooling/__init__.py",
         "README.md",
     }
@@ -187,15 +188,19 @@ RULES: Final[tuple[tuple[str, Rule], ...]] = (
 #: exactly the self-match hazard the module docstring already warns about;
 #: describe it ("the old hyphenated alias") instead.
 #:
-#: `E` 6 -> 7. `_is_console_script_alias` widened from four content-sniffing
+#: `E` 6 -> 9. `_is_console_script_alias` widened from four content-sniffing
 #: sub-checks (each one broken by the package move, E2) to unconditional path
-#: membership over the same four sites. The four sites now carry SEVEN
-#: needle occurrences, not six: `README.md:22,24,30,40` (the Naming section's
+#: membership over FIVE sites, not four -- `src/pdf_tooling/cli/deprecated.py`
+#: (new, D2) joins the other four. The five sites now carry NINE needle
+#: occurrences, not six: `README.md:22,24,30,40` (the Naming section's
 #: Aliases row plus the "why the names differ" / "the deprecation window" /
 #: release-history paragraphs -- one more line than pre-PDF-48's two
 #: paragraphs), `pyproject.toml:65` (the deprecated-alias script key, a NEW
-#: line D2 adds), `src/pdf_tooling/__init__.py:5`, and
-#: `src/pdf_tooling/cli/main.py:77`.
+#: line D2 adds), `src/pdf_tooling/__init__.py:5`,
+#: `src/pdf_tooling/cli/main.py:77`, and `src/pdf_tooling/cli/deprecated.py`'s
+#: own module docstring plus its second deprecated alias's notice call (2 --
+#: this file did not exist before PDF-48, so it carries no pre-rename
+#: baseline).
 #:
 #: `F` 1 -> 0, RETIRED. The paragraph `_is_readme_contract_prose` matched
 #: (the old "Why the distribution is not `<the old hyphenated alias>`"
@@ -220,7 +225,7 @@ EXPECTED_EXACT: Final[dict[str, int]] = {
     "B": 0,  # website asset paths ........ all 3 moved with the rename
     "C": 0,  # non-website brand text ..... 0, unchanged (shadowed by E's broader rule now)
     "D": 0,  # licence-adjacent ........... all 7 moved
-    "E": 7,  # console-script alias ....... deprecated, v1.0.0 removal (D1); was 6, see derivation
+    "E": 9,  # console-script alias ....... deprecated, v1.0.0 removal (D1); was 6, see derivation
     "F": 0,  # README contract prose ...... RETIRED -- the paragraph it matched is gone (D5)
     "H": 43,  # tests/ .................... FROZEN pop. minus 4 alias-identity edits, see derivation
     "I": 12,  # perf/ ...................... FROZEN, recorded measurements
