@@ -92,6 +92,8 @@ uv run pdftooling --version            # tool, Python and engine versions on one
 
 `uv run pdftooling --help` is the authoritative list of what is actually available at any moment — if a verb is not printed there, it does not exist yet.
 
+**Page selection across verbs.** `split` always operates on the whole document and takes no `--pages`; to act on a subset of pages, use `extract` (keep a subset), `delete` (remove pages) or `reorder` (permute), each of which accepts `--pages`.
+
 ## Output contract
 
 Rendered payloads go to **stdout**; diagnostics, warnings and progress go to **stderr**. `-o` selects the shape and defaults to `table` when stdout is a terminal and `json` when it is not, so piping into `jq` needs no flag.
@@ -160,7 +162,7 @@ Uniform across every verb.
 ## Safety contract
 
 - `--dry-run` plans and reports; it writes nothing, anywhere.
-- Outputs never clobber. An existing target needs `-f/--force`.
+- Outputs never clobber. An existing target needs `-f/--force`. On a non-interactive run, overwriting in a multi-input invocation (`merge`, `delete`, `convert`, etc.) additionally requires `-y`: bulk (more than a single input) plus destructive (in-place or clobbering) on a non-terminal stdin is refused with exit 5 rather than prompted.
 - Every write is write-to-temp-on-the-target-filesystem, `fsync`, then an atomic rename.
 - Inputs are never mutated unless you pass `--in-place`, which writes a `.bak` sidecar first. `--no-backup` suppresses the sidecar and requires `--in-place` — on its own it is a usage error.
 - A password is never accepted as a command-line value. `--password-file` takes a path or `-`, because `argv` is world-readable in `/proc` and lands in shell history.
