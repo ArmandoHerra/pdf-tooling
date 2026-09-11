@@ -226,6 +226,73 @@ def test_an_existing_sidecar_is_refused_and_nothing_moves(tmp_path: Path) -> Non
     assert sha256(sidecar) == sidecar_before
 
 
+def test_a_dangling_sidecar_is_refused_and_nothing_moves(tmp_path: Path) -> None:
+    """PDF-50 (E8) -- the dangling-symlink twin of the test above. The
+    predicate this exercises used to decide occupancy with a bare
+    `Path.exists()`, which follows the link and reports a broken one as
+    ABSENT, so `_make_backup` fell through to `os.link` and crashed with a
+    bare `FileExistsError` instead of raising this same, expected refusal."""
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original bytes")
+    sidecar = tmp_path / "doc.pdf.bak"
+    missing = tmp_path / "gone.bak"
+    sidecar.symlink_to(missing)
+    target_before = sha256(target)
+
+    with pytest.raises(errors.BackupExistsError):
+        with AtomicWriter(target, policy=make_policy(in_place=True)) as writer:
+            writer.path.write_bytes(b"rewritten")
+
+    assert sha256(target) == target_before
+    assert sidecar.is_symlink() and not sidecar.exists(), "the dangling sidecar must be untouched"
+    assert os.readlink(sidecar) == str(missing)
+
+
+def test_a_lost_race_on_the_sidecar_is_refused_not_crashed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PDF-50 D2 -- the TOCTOU window `paths.py:270-273`'s own rationale names:
+    the sidecar can appear BETWEEN `_make_backup`'s existence check and its
+    `os.link` call, and neither `ensure_backup_sidecar_free` nor this guard's
+    own pre-check can see a race that lands in that gap. Reproduced
+    deterministically -- `os.link` is wrapped so that its FIRST call plants a
+    same-named sidecar and then calls through, exactly what a concurrent
+    writer would have done -- rather than left to a flaky background thread.
+
+    AC15's own destructive mutant (`errno.EEXIST` folded into
+    `_LINK_FALLBACK_ERRNOS`, the `except FileExistsError` arm removed) is
+    invisible to every OTHER test in this module: the pre-check above always
+    sees the dangling/regular cases FIRST and raises before `os.link` is ever
+    reached, and `--force` unlinks before it too. This is the one path that
+    still reaches `os.link` with an occupied name, and it is why this test
+    exists rather than being additional coverage of an already-covered arm.
+    """
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original bytes")
+    sidecar = tmp_path / "doc.pdf.bak"
+    assert not os.path.lexists(sidecar), "the race must start with the sidecar truly absent"
+
+    real_link = os.link
+    raced_bytes = b"a lost race planted this"
+    calls: list[tuple[object, object]] = []
+
+    def racing_link(src: object, dst: object) -> None:
+        calls.append((src, dst))
+        Path(dst).write_bytes(raced_bytes)  # the race: something else wins first
+        real_link(src, dst)
+
+    monkeypatch.setattr(os, "link", racing_link)
+
+    with pytest.raises(errors.BackupExistsError):
+        with AtomicWriter(target, policy=make_policy(in_place=True)) as writer:
+            writer.path.write_bytes(b"rewritten")
+
+    assert calls, "the patched os.link was never reached -- the race was not exercised"
+    assert sidecar.read_bytes() == raced_bytes, (
+        "the raced-in sidecar must survive UNTOUCHED, never silently overwritten"
+    )
+
+
 def test_force_replaces_a_stale_sidecar(tmp_path: Path) -> None:
     target = tmp_path / "doc.pdf"
     target.write_bytes(b"original bytes")
@@ -233,6 +300,21 @@ def test_force_replaces_a_stale_sidecar(tmp_path: Path) -> None:
     with AtomicWriter(target, policy=make_policy(in_place=True, force=True)) as writer:
         writer.path.write_bytes(b"rewritten")
     assert (tmp_path / "doc.pdf.bak").read_bytes() == b"original bytes"
+
+
+def test_force_replaces_a_dangling_sidecar(tmp_path: Path) -> None:
+    """PDF-50 AC12 (E5), arm D at the writer's own level. Pre-fix, `--force`'s
+    `os.unlink(sidecar)` branch sat INSIDE the same blind `if sidecar.exists():`
+    gate this fix widens, so a dangling sidecar made `--force` fall straight
+    through to `os.link` and crash identically to the unflagged run."""
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original bytes")
+    sidecar = tmp_path / "doc.pdf.bak"
+    sidecar.symlink_to(tmp_path / "gone.bak")
+    with AtomicWriter(target, policy=make_policy(in_place=True, force=True)) as writer:
+        writer.path.write_bytes(b"rewritten")
+    assert not sidecar.is_symlink(), "the sidecar must become a regular file, not stay a link"
+    assert sidecar.read_bytes() == b"original bytes"
 
 
 def test_no_backup_writes_no_sidecar(tmp_path: Path) -> None:
@@ -244,12 +326,48 @@ def test_no_backup_writes_no_sidecar(tmp_path: Path) -> None:
     assert target.read_bytes() == b"rewritten"
 
 
+def test_no_backup_leaves_a_pre_existing_dangling_sidecar_alone(tmp_path: Path) -> None:
+    """PDF-50 (E8/AC16) -- `--no-backup` writes no sidecar at all, so a
+    pre-existing DANGLING one is none of its business, before or after this
+    fix: `_make_backup`'s own early return (`not (in_place and backup)`) fires
+    before the sidecar -- of any shape -- is even inspected."""
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"original bytes")
+    sidecar = tmp_path / "doc.pdf.bak"
+    missing = tmp_path / "gone.bak"
+    sidecar.symlink_to(missing)
+    with AtomicWriter(target, policy=make_policy(in_place=True, backup=False)) as writer:
+        writer.path.write_bytes(b"rewritten")
+    assert target.read_bytes() == b"rewritten"
+    assert sidecar.is_symlink() and not sidecar.exists()
+    assert os.readlink(sidecar) == str(missing)
+
+
 def test_in_place_on_a_target_that_does_not_exist_yet_writes_no_sidecar(tmp_path: Path) -> None:
     target = tmp_path / "doc.pdf"
     with AtomicWriter(target, policy=make_policy(in_place=True)) as writer:
         writer.path.write_bytes(b"fresh")
     assert target.read_bytes() == b"fresh"
     assert not (tmp_path / "doc.pdf.bak").exists()
+
+
+def test_in_place_on_a_target_that_does_not_exist_yet_leaves_a_dangling_sidecar_alone(
+    tmp_path: Path,
+) -> None:
+    """PDF-50 (E8) -- `_make_backup`'s destination-absent guard
+    (`if not self.destination.exists(): return`) fires before the sidecar is
+    inspected at all, so a pre-existing dangling `.bak` beside a target that
+    has never been written must survive completely untouched, dangling or
+    not."""
+    target = tmp_path / "doc.pdf"
+    sidecar = tmp_path / "doc.pdf.bak"
+    missing = tmp_path / "gone.bak"
+    sidecar.symlink_to(missing)
+    with AtomicWriter(target, policy=make_policy(in_place=True)) as writer:
+        writer.path.write_bytes(b"fresh")
+    assert target.read_bytes() == b"fresh"
+    assert sidecar.is_symlink() and not sidecar.exists()
+    assert os.readlink(sidecar) == str(missing)
 
 
 # --------------------------------------------------------------------------- #

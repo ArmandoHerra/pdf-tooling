@@ -236,12 +236,14 @@ def ensure_backup_sidecar_free(
     same ``path``.
 
     **Why this is a predicate and not only a raise inside the writer.** The
-    ``.bak`` sidecar either exists on disk before either run or it does not, so
-    it is *decidable before the run* — which is the rule
-    :func:`~pdf_tooling.safety.atomic.plan_filesystem`'s own docstring already
-    states for what the plan must contain. Until this existed, ``--dry-run``
-    over an occupied sidecar predicted a clean exit 0 for an operation the real
-    run refuses with 5, on **every** verb that consumes ``--in-place``:
+    ``.bak`` sidecar's occupancy is *decidable before the run*: a regular file
+    and a **dangling symlink** both count as occupied, exactly as
+    :func:`ensure_no_clobber` already decides for its own directory entry —
+    which is the rule :func:`~pdf_tooling.safety.atomic.plan_filesystem`'s own
+    docstring already states for what the plan must contain. Until this existed,
+    ``--dry-run`` over an occupied sidecar predicted a clean exit 0 for an
+    operation the real run refuses with 5, on **every** verb that consumes
+    ``--in-place``:
     ``cmd --dry-run && cmd`` short-circuited into the very refusal the preview
     was run to avoid (`6af2411c9e`).
 
@@ -262,7 +264,7 @@ def ensure_backup_sidecar_free(
     if not destination.exists():
         return
     sidecar = destination.with_name(destination.name + ".bak")
-    if not sidecar.exists():
+    if not (sidecar.exists() or os.path.lexists(sidecar)):
         return
     if force:
         return

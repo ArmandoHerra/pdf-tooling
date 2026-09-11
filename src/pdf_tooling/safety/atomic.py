@@ -792,7 +792,7 @@ class AtomicWriter:
             return
 
         sidecar = self.destination.with_name(self.destination.name + ".bak")
-        if sidecar.exists():
+        if sidecar.exists() or os.path.lexists(sidecar):
             if not self.policy.force:
                 raise BackupExistsError(
                     f"{sidecar.name} already exists beside {self.target}; "
@@ -803,6 +803,15 @@ class AtomicWriter:
 
         try:
             os.link(self.destination, sidecar)
+        except FileExistsError as error:
+            # The sidecar appeared between the guard above and this call (a lost
+            # race, not a bug): render it as the same refusal rather than let a
+            # bare OSError escape to `cli/main.py`'s bug path (PDF-50 D2).
+            raise BackupExistsError(
+                f"{sidecar.name} already exists beside {self.target}; "
+                f"pass --force to replace the sidecar",
+                path=str(sidecar),
+            ) from error
         except OSError as error:
             if error.errno not in _LINK_FALLBACK_ERRNOS:
                 raise

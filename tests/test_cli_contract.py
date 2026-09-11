@@ -161,6 +161,17 @@ IN_PLACE_BULK = tuple(
 #: `--force` replaces a stale one by design.
 _SIDECAR_EXEMPTIONS: Final[tuple[str, ...]] = ("--no-backup", "--force")
 
+#: PDF-50, C23 — the SAME `--in-place` population C22 grades, over a
+#: **dangling symlink** `.bak` sidecar rather than a regular pre-existing one
+#: (`f892cc8d75`). Independently re-derived from `discover_verbs()` rather
+#: than read off `IN_PLACE` — byte-identical in membership today, but pinned
+#: on its own roster row so a future narrowing of `IN_PLACE` for some OTHER
+#: check's sake cannot silently narrow C23's coverage too, with no row to
+#: name the loss.
+DANGLING_SIDECAR_IN_PLACE = tuple(
+    verb for verb in discover_verbs() if "--in-place" in verb.consumes
+)
+
 #: PDF-25 / `a472acde7a` — C17's population. `C4` above covers a BOGUS
 #: SUBCOMMAND at every grouping parent; nothing covered a VALID GLOBAL FLAG at
 #: one, and all fifteen members of the block exited 2 with zero bytes on stdout
@@ -1510,6 +1521,19 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "arms that can tell 'predicts the refusal' from 'refuses everything', and a "
         "predicate that answers 5 for every in-place run passes every other C22 arm "
         "while destroying the flag. Losing either exemption silently halves that control",
+    ),
+    Population(
+        "DANGLING_SIDECAR_IN_PLACE",
+        DANGLING_SIDECAR_IN_PLACE,
+        "C23",
+        1,
+        "PDF-50's class -- the same twelve verbs C22 grades over a REGULAR pre-existing "
+        "`.bak`, graded here over a DANGLING symlink one instead: `ensure_backup_sidecar_"
+        "free`'s and `_make_backup`'s occupancy tests both read `Path.exists()` alone, "
+        "which follows the link and reports a broken one as ABSENT, so `os.link` reached "
+        "`EEXIST` past every guard in the product (`f892cc8d75`). Zero does not make C23 "
+        "fail; it makes C23 collect no cases at all and report green over a defect that "
+        "was live on every one of them",
     ),
 )
 
@@ -3365,3 +3389,322 @@ def test_c22_the_bulk_prediction_reaches_the_second_target(verb, corpus, tmp_pat
         f"target's sidecar {str(second)!r} -- the per-target loop stopped at item 0"
     )
     assert Path(json.loads(real.stdout)["error"]["path"]) == second
+
+
+# --------------------------------------------------------------------------- #
+# C23 (PDF-50) -- the SAME sidecar tier C22 grades, over a DANGLING SYMLINK
+# rather than a regular pre-existing `.bak`. `f892cc8d75`.
+#
+# THE DEFECT. `ensure_backup_sidecar_free`'s and `_make_backup`'s occupancy
+# tests both read `Path.exists()` alone, which FOLLOWS a symlink and reports a
+# dangling one as ABSENT -- so a `.bak` sidecar that is a dangling symlink
+# sails past every guard in the product and reaches `AtomicWriter._make_backup`'s
+# own `os.link`, which fails `EEXIST` and escapes as a bare `FileExistsError`:
+# a traceback on eleven of the twelve `--in-place` verbs and total silence, on
+# BOTH streams, on the twelfth (`linearize`). C22's own fixture/argv machinery
+# (`_in_place_argv`, `_in_place_target`, `_sidecar_of`) is reused UNCHANGED;
+# only the sidecar's SHAPE differs, and C22 itself is not touched.
+#
+# THREE ARMS, GRADED SEPARATELY (X-713, Design D3). Arm A is the envelope and
+# the code, on all twelve, under every output shape. Arm B is `linearize`,
+# named and graded ALONE, on the PRESENCE of the envelope -- "no traceback
+# reaches the user" is a criterion already green on `linearize`'s pre-fix,
+# doubly-silent binary, so it may never be the thing arm B is graded on. Arm C
+# is the dry run predicting the same code the real run returns, with
+# `detail.would_refuse` compared field-by-field against the real error rather
+# than merely agreeing on the integer 5. Arm D (`--force` over a dangling
+# sidecar) gets its own test below: pre-fix it crashes identically to the
+# unflagged run (E5), which no ledger row carried until this spec.
+# --------------------------------------------------------------------------- #
+
+
+def _plant_dangling_sidecar(sidecar: Path) -> Path:
+    """Seed *sidecar* as a dangling symlink -- a directory entry whose target
+    does not exist. Returns the (nonexistent) target path.
+
+    `Path.symlink_to` never follows the link it creates and never touches the
+    target, so the missing target is never an operand (HC-2 is untouched).
+    """
+    missing_target = sidecar.with_name(sidecar.name + ".missing-target")
+    assert not missing_target.exists(), f"{missing_target}: the 'missing' target exists"
+    sidecar.symlink_to(missing_target)
+    assert sidecar.is_symlink() and not sidecar.exists() and os.path.lexists(sidecar), (
+        f"{sidecar}: failed to plant a dangling symlink"
+    )
+    return missing_target
+
+
+# --------------------------------------------------------------------------- #
+# AC3 -- the fix site itself. Neither occupancy test may decide with a bare
+# `Path.exists()`; both must also read `os.path.lexists`, the idiom
+# `target_exists`/`ensure_no_clobber` already ship at `paths.py:169`/`:186`.
+# --------------------------------------------------------------------------- #
+
+
+def _occupancy_decision_calls(module_path: Path, func_name: str) -> list[str]:
+    """Every dotted call name (`ast.unparse`) inside *func_name*'s own body in
+    the module at *module_path* -- located by `ast`, the convention
+    `tests/test_import_boundaries.py` already uses for structural rules."""
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+            return [ast.unparse(call.func) for call in ast.walk(node) if isinstance(call, ast.Call)]
+    pytest.fail(f"{module_path}: no function named {func_name!r} -- has it been renamed?")
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "func_name"),
+    (
+        ("src/pdf_tooling/safety/paths.py", "ensure_backup_sidecar_free"),
+        ("src/pdf_tooling/safety/atomic.py", "_make_backup"),
+    ),
+)
+def test_c23_the_sidecar_occupancy_test_is_not_a_bare_exists(
+    relative_path: str, func_name: str
+) -> None:
+    """AC3 -- asserted, not stated. A predicate that decides `.bak` occupancy
+    with a bare `Path.exists()` cannot see a dangling symlink as occupied.
+
+    RED, free: revert either site to `if not sidecar.exists():` / `if
+    sidecar.exists():` and this fails, naming the file and the function --
+    fixing only the predicate (`paths.py`) and reverting the writer
+    (`atomic.py`), or vice versa, is exactly the half-fix `paths.py:270-273`'s
+    own TOCTOU rationale forbids.
+    """
+    calls = _occupancy_decision_calls(REPO_ROOT / relative_path, func_name)
+    assert any(call.endswith("lexists") for call in calls), (
+        f"{relative_path}::{func_name} decides `.bak` sidecar occupancy without calling "
+        f"os.path.lexists anywhere in its body (calls seen: {calls}) -- a bare "
+        "Path.exists() follows a symlink and reads a dangling one as absent"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Arm A -- the envelope and the code, on all twelve, under every output shape;
+# arm C -- the dry run predicts the same code.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("verb", DANGLING_SIDECAR_IN_PLACE, ids=_ids(DANGLING_SIDECAR_IN_PLACE))
+def test_c23_a_dangling_sidecar_is_refused_not_crashed(verb, corpus, tmp_path: Path) -> None:
+    """AC4 / AC5 / AC7 / AC10 / AC11 / AC19 -- arms A and C together.
+
+    Pre-fix this row is red on every member of the population: real rc `1`,
+    ZERO bytes on stdout, and (`linearize` excepted) a `FileExistsError`
+    traceback on stderr; dry predicts `0` while real crashes with `1`.
+    """
+    args = _in_place_argv(verb, corpus, tmp_path)
+    sidecar = _sidecar_of(_in_place_target(verb, args, tmp_path))
+    missing_target = _plant_dangling_sidecar(sidecar)
+
+    env, roots = redirected_environment(tmp_path)
+    before = snapshot(*roots)
+    dry = run_cli(verb.name, "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    assert_unchanged(before, snapshot(*roots))
+    # AC19 -- purity asserted with lexists/readlink, NEVER with exists(): the
+    # whole defect is that exists() cannot see the object under test, so a
+    # purity check written with it would report a resolved or replaced link
+    # as "unchanged".
+    assert sidecar.is_symlink() and not sidecar.exists(), (
+        f"{verb.name}: --dry-run resolved or replaced the dangling sidecar"
+    )
+    assert os.readlink(sidecar) == str(missing_target), (
+        f"{verb.name}: --dry-run rewrote the dangling symlink's own target"
+    )
+
+    real = run_cli(verb.name, *args, "-o", "json", env=env, cwd=tmp_path)
+
+    assert dry.returncode == real.returncode == 5, (
+        f"{verb.name}: dry={dry.returncode} real={real.returncode} (expected both 5) over a "
+        f"DANGLING sidecar -- dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+    both_streams = real.stdout + real.stderr
+    assert "Traceback (most recent call last)" not in both_streams, (
+        f"{verb.name}: a traceback reached the user: {both_streams}"
+    )
+    assert "FileExistsError" not in both_streams, f"{verb.name}: {both_streams}"
+    assert real.stdout.strip(), f"{verb.name}: -o json produced zero bytes on stdout"
+
+    error = json.loads(real.stdout)["error"]
+    assert error["code"] == 5 and error["kind"] == "refused", f"{verb.name}: {error}"
+    assert Path(error["path"]) == sidecar, f"{verb.name}: {error}"
+
+    payload = json.loads(dry.stdout)
+    assert payload["exit_code"] == 5, f"{verb.name}: {payload}"
+    refused = [item for item in payload["items"] if item["ok"] is False]
+    assert refused, f"{verb.name}: every item reports ok=true under a refused plan: {payload}"
+    predicted = refused[0]["detail"]["would_refuse"]
+    for field in ("code", "kind", "message", "path"):
+        assert predicted[field] == error[field], (
+            f"{verb.name}: the prediction is a different answer from the outcome on "
+            f"{field!r}: predicted {predicted[field]!r}, real {error[field]!r}"
+        )
+
+
+@pytest.mark.parametrize("verb", DANGLING_SIDECAR_IN_PLACE, ids=_ids(DANGLING_SIDECAR_IN_PLACE))
+def test_c23_the_refusal_holds_under_every_output_shape(verb, corpus, tmp_path: Path) -> None:
+    """AC5 / AC6 / AC7 -- `table` is asserted to ITS OWN contract
+    (`README.md:107`), never to `json`'s: rc 5, ZERO bytes on stdout, one
+    `error:` line on stderr. An AC demanding the structured object on stdout
+    under all three shapes contradicts the published contract and is not
+    written (E7).
+
+    RED, and it must be OBSERVED: asserting a JSON object on stdout under
+    `-o table` fails on a CORRECT binary -- driven and recorded once by hand
+    for this spec's Implementation Log, proving the shape-aware assertion is
+    necessary and not decorative.
+    """
+    args = _in_place_argv(verb, corpus, tmp_path)
+    sidecar = _sidecar_of(_in_place_target(verb, args, tmp_path))
+    _plant_dangling_sidecar(sidecar)
+
+    as_json = run_cli(verb.name, *args, "-o", "json", cwd=tmp_path)
+    as_ndjson = run_cli(verb.name, *args, "-o", "ndjson", cwd=tmp_path)
+    as_table = run_cli(verb.name, *args, "-o", "table", cwd=tmp_path)
+
+    for shape, result in (("json", as_json), ("ndjson", as_ndjson), ("table", as_table)):
+        assert result.returncode == 5, (
+            f"{verb.name}/{shape}: rc={result.returncode} {result.stdout}{result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        assert "Traceback (most recent call last)" not in combined, (
+            f"{verb.name}/{shape}: a traceback reached the user: {combined}"
+        )
+
+    assert as_json.stdout.strip() and as_ndjson.stdout.strip(), (
+        f"{verb.name}: json/ndjson produced zero bytes on stdout -- 'no traceback' alone "
+        "is exactly the criterion that is already green on the pre-fix broken binary"
+    )
+    for shape, result in (("json", as_json), ("ndjson", as_ndjson)):
+        error = json.loads(result.stdout)["error"]
+        assert error["code"] == 5 and error["kind"] == "refused", f"{verb.name}/{shape}: {error}"
+
+    assert as_table.stdout == "", (
+        f"{verb.name}/table: expected ZERO bytes on stdout, got {as_table.stdout!r} -- "
+        "the documented asymmetry (README.md:107) puts the error on stderr under table"
+    )
+    # A registered cell may ALSO warn on stderr for reasons of its own (e.g.
+    # `encrypt` without `--allow` logs a permission-defaults notice before the
+    # sidecar gate is ever reached) -- unrelated to this fix, so the arm looks
+    # for the one `error:` line rather than demanding stderr carry nothing else.
+    error_lines = [line for line in as_table.stderr.splitlines() if line.startswith("error:")]
+    assert len(error_lines) == 1, (
+        f"{verb.name}/table: expected exactly one `error:` line on stderr, got {as_table.stderr!r}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Arm B -- `linearize`, named and graded ALONE (X-713). Never on this module's
+# own AC9: "no traceback reaches the user" is a criterion already green on
+# `linearize`'s pre-fix binary, which is silent on BOTH streams (E4) -- that
+# is demonstrated once by hand against the unmodified tree and recorded in
+# this spec's Implementation Log, not re-encoded as a shipped assertion here.
+# --------------------------------------------------------------------------- #
+
+
+def test_c23_linearize_specifically_reaches_the_error_envelope(corpus, tmp_path: Path) -> None:
+    """AC8 -- `linearize`'s own cell, asserted BY NAME, never only inside the
+    parametrized aggregate above. Graded on the PRESENCE of the envelope.
+
+    Pre-fix `linearize` is the ONE member of the population that produces
+    ZERO bytes on BOTH stdout and stderr while exiting 1 -- worse than its
+    eleven siblings' traceback, which at least names the fault.
+    """
+    verb = next(v for v in DANGLING_SIDECAR_IN_PLACE if v.name == "linearize")
+    args = _in_place_argv(verb, corpus, tmp_path)
+    sidecar = _sidecar_of(_in_place_target(verb, args, tmp_path))
+    _plant_dangling_sidecar(sidecar)
+
+    real = run_cli(verb.name, *args, "-o", "json", cwd=tmp_path)
+    assert real.returncode == 5, f"linearize: rc={real.returncode} {real.stdout}{real.stderr}"
+    assert real.stdout.strip(), (
+        "linearize: -o json produced zero bytes on stdout -- the pre-fix binary is silent "
+        "on BOTH streams here, which is why arm B may never be graded on the ABSENCE of a "
+        "traceback alone"
+    )
+    error = json.loads(real.stdout)["error"]
+    assert error["code"] == 5 and error["kind"] == "refused", f"linearize: {error}"
+    assert Path(error["path"]) == sidecar, f"linearize: {error}"
+
+
+# --------------------------------------------------------------------------- #
+# Arm D -- the escape hatch the message itself points at (E5). No ledger row,
+# no backlog row and no roadmap item carried this before this spec.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("verb", DANGLING_SIDECAR_IN_PLACE, ids=_ids(DANGLING_SIDECAR_IN_PLACE))
+def test_c23_force_replaces_a_dangling_sidecar(verb, corpus, tmp_path: Path) -> None:
+    """AC12 -- `--force` SUCCEEDS over a dangling sidecar, for every verb in
+    the derived population, and the sidecar afterwards is a regular file and
+    not a symlink.
+
+    Pre-fix, `--force` crashes IDENTICALLY to the unflagged run: rc 1, a
+    traceback, and the dangling link still in place. `_make_backup`'s own
+    `os.unlink(sidecar)` sits inside the same blind `if sidecar.exists():`
+    gate this spec fixes, so the documented remedy fails the same way as the
+    fault it remedies until the guard can see the link at all.
+    """
+    args = [*_in_place_argv(verb, corpus, tmp_path), "--force"]
+    sidecar = _sidecar_of(_in_place_target(verb, args, tmp_path))
+    _plant_dangling_sidecar(sidecar)
+
+    env, roots = redirected_environment(tmp_path)
+    before = snapshot(*roots)
+    dry = run_cli(verb.name, "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    assert_unchanged(before, snapshot(*roots))
+
+    real = run_cli(verb.name, *args, "-o", "json", env=env, cwd=tmp_path)
+    assert dry.returncode == real.returncode == 0, (
+        f"{verb.name}: --force over a dangling sidecar -- dry={dry.returncode} "
+        f"real={real.returncode} (expected both 0) -- dry: {dry.stdout}{dry.stderr} / "
+        f"real: {real.stdout}{real.stderr}"
+    )
+    combined = real.stdout + real.stderr
+    assert "Traceback (most recent call last)" not in combined, f"{verb.name}: {combined}"
+    assert real.stdout.strip(), f"{verb.name}: --force produced zero bytes on stdout"
+    assert not sidecar.is_symlink(), (
+        f"{verb.name}: --force left the sidecar a symlink; it must become a regular file"
+    )
+    assert sidecar.exists(), f"{verb.name}: --force did not (re)create the sidecar at all"
+
+
+# --------------------------------------------------------------------------- #
+# The neighbour that must not move (D6, AC16): `--no-backup` writes no
+# sidecar at all, so a pre-existing DANGLING one must be none of its business,
+# before or after this fix. The other two negative controls (sidecar absent,
+# sidecar a regular file) are C22's own UNCHANGED tests -- this spec adds
+# nothing to them; only the dangling `--no-backup` cell is new.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("verb", DANGLING_SIDECAR_IN_PLACE, ids=_ids(DANGLING_SIDECAR_IN_PLACE))
+def test_c23_no_backup_over_a_dangling_sidecar_still_predicts_zero(
+    verb, corpus, tmp_path: Path
+) -> None:
+    """AC16 -- an over-refusing predicate would redden this immediately while
+    every criterion above stays green, which is exactly what sizes the fix:
+    a predicate that refuses on every `--in-place` run passes arms A, B and C
+    and destroys the flag.
+    """
+    args = [*_in_place_argv(verb, corpus, tmp_path), "--no-backup"]
+    sidecar = _sidecar_of(_in_place_target(verb, args, tmp_path))
+    missing_target = _plant_dangling_sidecar(sidecar)
+
+    env, roots = redirected_environment(tmp_path)
+    before = snapshot(*roots)
+    dry = run_cli(verb.name, "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
+    assert_unchanged(before, snapshot(*roots))
+
+    real = run_cli(verb.name, *args, "-o", "json", env=env, cwd=tmp_path)
+    assert dry.returncode == real.returncode == 0, (
+        f"{verb.name} --no-backup: dry={dry.returncode} real={real.returncode} over a "
+        f"DANGLING sidecar (expected both 0) -- dry: {dry.stdout}{dry.stderr} / "
+        f"real: {real.stdout}{real.stderr}"
+    )
+    assert sidecar.is_symlink() and not sidecar.exists(), (
+        f"{verb.name}: --no-backup touched the dangling sidecar it should never look at"
+    )
+    assert os.readlink(sidecar) == str(missing_target), (
+        f"{verb.name}: --no-backup rewrote the dangling symlink's own target"
+    )
