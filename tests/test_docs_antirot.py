@@ -893,6 +893,134 @@ SHORT_SHA = re.compile(r"\b([0-9a-f]{7,40})\b")
 #: exists" is not the property a reader needs.
 VERDICT_ARTIFACTS = ("report.md", "REPRO.txt", "VERDICT.txt", "RUN-SUMMARY.txt")
 
+# --------------------------------------------------------------------------- #
+# PDF-56 D1-D3 — the missing predicate: staleness, not just deletion
+#
+# The two lines above stop the section being deleted or emptied. Neither
+# checks whether the id they find is the RIGHT id -- the newest sweep-class
+# run carrying a verdict -- or whether the sha is the commit THAT run
+# records. Both are checkable, and the classifier below is what makes
+# "sweep-class" a population rather than a guess.
+# --------------------------------------------------------------------------- #
+
+#: D2's two classes. Declared mode wins over name-shape; name-shape is the
+#: fallback ONLY when a run declares no `**Mode:**` line at all.
+RUN_CLASS_SWEEP = "sweep"
+RUN_CLASS_VERIFICATION = "verification"
+
+#: The literal shape E6 counted (13 of 30): the bold label AND the colon
+#: BOTH inside the `**...**` span. `` **Mode** `verify` `` (bold, no colon)
+#: and `` Mode: **verify** `` (colon, label not bold) are both name-shape
+#: fallback cases, not declarations -- the frozen table below pins one of
+#: each on the record, by name, so this distinction cannot regress quietly.
+MODE_LINE = re.compile(r"\*\*Mode:\*\*.*")
+
+
+def run_mode_line(report_text: str) -> str | None:
+    """The run's own `**Mode:**` line, verbatim, or `None` if it declares
+    none. Pure over the text it is handed — the caller decides whether that
+    text came from a real `report.md` or a planted one."""
+    match = MODE_LINE.search(report_text)
+    return match.group(0) if match else None
+
+
+def classify_run(*, name: str, mode_line: str | None) -> str:
+    """D2's classifier, read in the order it is applied.
+
+    1. Declared mode wins. A `**Mode:**` line matching `verif` case-
+       insensitively (catches `` `verify` ``, `` `verify PDF-26` `` and
+       `narrow re-verify`) is a **verification**; one matching `sweep` is a
+       **sweep**.
+    2. With no declared mode, name shape is the fallback, and ONLY the
+       fallback: a `_verify` substring in the directory *name* makes it a
+       verification; anything else is a sweep.
+
+    An unclassifiable declared mode — one line that matches neither `verif`
+    nor `sweep` — is a FAILURE, never a default (AC4). Falling through to
+    `sweep` silently is exactly how a naming-convention change on the other
+    side of this boundary (E6 — 17-of-30 undeclared, a layer-side
+    convention this instrument reads but does not own) would read as a
+    stale README instead of a broken classifier.
+    """
+    if mode_line is not None:
+        lowered = mode_line.lower()
+        if "verif" in lowered:
+            return RUN_CLASS_VERIFICATION
+        if "sweep" in lowered:
+            return RUN_CLASS_SWEEP
+        raise ValueError(
+            f"run {name!r} declares a `**Mode:**` line that matches neither "
+            f"`verif` nor `sweep`, so it cannot be classified: {mode_line!r}"
+        )
+    return RUN_CLASS_VERIFICATION if "_verify" in name else RUN_CLASS_SWEEP
+
+
+def run_has_verdict(run_dir: Path) -> bool:
+    """X-368's property, reused verbatim, never re-derived: at least one of
+    `VERDICT_ARTIFACTS` anywhere under *run_dir* (`rglob`, not just the top
+    level — several runs carry their verdict inside `logs/`)."""
+    return any(list(run_dir.rglob(pattern)) for pattern in VERDICT_ARTIFACTS)
+
+
+def sweep_class_runs_with_verdict(runs_root: Path) -> tuple[str, ...]:
+    """D1/D2/D6. Every sweep-class run directly under *runs_root* that
+    carries a readable verdict, name-sorted. Directory names are
+    `YYYY-MM-DD_HHMMSS[...]`, so lexicographic order is chronological order
+    and the last element is the newest.
+
+    Pure over its one parameter: a synthetic `tmp_path` inventory drives
+    this exactly as the real `qa/runs/` does, which is what lets
+    AC1/AC3/AC4/AC8 run without ever writing under the operator's planning
+    tree (AC6).
+    """
+    names = []
+    for entry in sorted(p for p in runs_root.iterdir() if p.is_dir()):
+        report = entry / "report.md"
+        mode_line = run_mode_line(report.read_text()) if report.is_file() else None
+        run_class = classify_run(name=entry.name, mode_line=mode_line)
+        if run_class == RUN_CLASS_SWEEP and run_has_verdict(entry):
+            names.append(entry.name)
+    return tuple(names)
+
+
+def newest_sweep_claim(body_text: str, runs_root: Path) -> tuple[str | None, str | None, int]:
+    """D1/D6. Pure over both parameters — extracts the sweep id `body_text`
+    names (via `SWEEP_ID`; `None` if it names none) and compares it against
+    the sweep-class-with-verdict population under `runs_root`.
+
+    Returns ``(named_id, newest_id, newer_count)``. `newer_count` is how
+    many population members sort strictly after `named_id`, which is
+    exactly the number the failure message names (D1).
+    """
+    match = SWEEP_ID.search(body_text)
+    named_id = match.group(1) if match else None
+    sweeps = sweep_class_runs_with_verdict(runs_root)
+    newest_id = sweeps[-1] if sweeps else None
+    newer_count = sum(1 for s in sweeps if named_id is not None and s > named_id)
+    return named_id, newest_id, newer_count
+
+
+def commit_occurs_in_run(sha: str, run_dir: Path) -> bool:
+    """D3. Whether *sha* occurs, as a plain substring, in any file under
+    *run_dir*. Deliberately a tolerant substring search rather than a parse
+    of a `**Target:**` field — the inventory is 17-of-30 undeclared (E6)
+    and a strict parser would skip more often than it would assert."""
+    return any(
+        sha in path.read_text(errors="ignore")
+        for path in sorted(p for p in run_dir.rglob("*") if p.is_file())
+    )
+
+
+def recorded_commit(run_dir: Path) -> str | None:
+    """Best-effort, for a legible failure message only — never load-bearing
+    for `commit_occurs_in_run`'s assertion: the first short-sha-shaped token
+    in the run's own `report.md`, naming what the run DOES record."""
+    report = run_dir / "report.md"
+    if not report.is_file():
+        return None
+    match = SHORT_SHA.search(report.read_text())
+    return match.group(1) if match else None
+
 
 def _known_issues_body_of(text: str) -> str:
     """Pure text-level extraction, AC23. Used both by `known_issues_body()`
@@ -948,6 +1076,31 @@ def test_the_no_count_criterion_can_fail() -> None:
     assert re.findall(r"[0-9]+", stripped) == ["27"]
 
 
+def vacuous_fixture_sweep_and_sha() -> tuple[str, str]:
+    """PDF-56 D8. The vacuous-rendering fixture's sweep id and sha, DERIVED
+    rather than transcribed — this fixture used to hardcode the exact same
+    superseded sweep id and sha `README.md:250` named, a second time inside
+    this guard's own file, which is the same defect this spec exists to
+    remove, just planted one function away from the arm that would have
+    caught it.
+
+    When the planning tree is reachable, both are pulled from a real
+    sweep-class run carrying a verdict (D1's own population, so this
+    fixture and the live arm can never disagree about what "sweep-class"
+    means). When it is not, both fall back to an obviously-synthetic
+    literal that could never be mistaken for a real pointer — this
+    function never skips, because the vacuous-rendering test it feeds is
+    not gated on the planning tree and must not newly become so."""
+    root = planning_dir()
+    if (root / "specs" / "SPEC-INDEX.md").is_file():
+        sweeps = sweep_class_runs_with_verdict(root / "qa" / "runs")
+        if sweeps:
+            newest = sweeps[-1]
+            sha = recorded_commit(root / "qa" / "runs" / newest) or "0000000"
+            return newest, sha
+    return "1999-01-01_000000", "0000000"
+
+
 def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path) -> None:
     """AC23. `README.md:162` promises that if a sweep ever records nothing
     open, the section still stands and reads a no-open-findings sentence
@@ -956,7 +1109,12 @@ def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path)
     synthetic `tmp_path` document — the real README.md is never written —
     and runs it through the exact same `_known_issues_body_of` slicing the
     populated state above uses, so the heading surviving and the section
-    still being found are both asserted mechanically rather than trusted."""
+    still being found are both asserted mechanically rather than trusted.
+
+    The sweep id and sha inside the vacuous sentence are DERIVED (D8), never
+    a frozen literal transcribed a second time — a fixture that cannot rot
+    is worth more than a fixture that is correct today."""
+    sweep_id, sha = vacuous_fixture_sweep_and_sha()
     vacuous = (
         f"{KNOWN_ISSUES_HEADING}\n\n"
         "Open defects and planned work are recorded, per finding, in the "
@@ -966,8 +1124,8 @@ def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path)
         "sweep has raised, with its state and its evidence.\n\n"
         "**Those artifacts live in the maintainer's planning repository and "
         "are not part of this distribution.**\n\n"
-        "no open findings are recorded as of sweep `2026-09-03_113318` "
-        "(`7afdb1a`)\n\n"
+        f"no open findings are recorded as of sweep `{sweep_id}` "
+        f"(`{sha}`)\n\n"
         "## License\n\n"
         "Apache-2.0 — see `LICENSE` and `NOTICE`.\n"
     )
@@ -990,9 +1148,17 @@ def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path)
 
 def test_the_named_sweep_resolves_to_a_readable_verdict() -> None:
     """AC22, strengthened (X-368): the sweep must EXIST **and** carry at least
-    one of the four whitelisted verdict artifacts. Recency is deliberately NOT
-    asserted — a guard that demands the newest sweep goes red every time the
-    sentinel runs, which is a guard that fights the loop."""
+    one of the four whitelisted verdict artifacts.
+
+    2026-09-12 (PDF-56, D7): X-368's observation was right and its
+    conclusion was overtaken. The observation — a guard that demands
+    recency of every run goes red every time the sentinel runs — is real;
+    "assert nothing" was not the only conclusion available. Measured at
+    89a4f1d, only 3 of 30 runs under `qa/runs/` declare `` **Mode:**
+    `sweep` `` (10%); the sentinel's frequent event is a scoped `verify`
+    run, which `classify_run`/`sweep_class_runs_with_verdict` above do not
+    count as sweep-class. Recency IS asserted now, over that narrower
+    population, by `test_the_named_sweep_is_the_newest_sweep` below."""
     root = require_planning_dir()
     body = known_issues_body()
     match = SWEEP_ID.search(body)
@@ -1019,6 +1185,304 @@ def test_the_sweep_pointer_check_can_fail() -> None:
     assert found == [], (
         "2026-09-03_135137 is X-368's planted red BECAUSE it carries no verdict "
         f"artifact; it now carries {found}, so this control no longer controls"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-56 — the missing predicate: the named sweep must be the NEWEST one, and
+# the named commit must be the one that sweep's own report records.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_named_sweep_is_the_newest_sweep() -> None:
+    """AC1/D1, the deliverable's primary arm. `README.md:250` claims the
+    named id is "the most recent sweep carrying a readable verdict" — that
+    claim has a checkable population (D2) and this is the missing half of
+    it. Applies the pure `newest_sweep_claim` to the real README and the
+    real inventory; every red this arm can produce is reproduced against
+    synthetic inputs by `test_the_newest_sweep_arm_still_bites_after_the_refresh`
+    below (AC8), so a green here is never the only evidence this arm works."""
+    root = require_planning_dir()
+    named, newest, newer = newest_sweep_claim(known_issues_body(), root / "qa" / "runs")
+    assert named, "the section names no sweep id"
+    assert named == newest, (
+        f"README names sweep {named}; the newest sweep-class run carrying a "
+        f"readable verdict is {newest}, and {newer} sweep-class run(s) are "
+        "newer. Refresh `## Known issues` (README.md:250) -- this pointer "
+        "is what the section exists for."
+    )
+
+
+def test_the_named_commit_is_the_one_the_named_sweep_records() -> None:
+    """AC2/D3, the deliverable's other primary arm. `README.md:250` claims
+    the named sweep was "taken at commit `<sha>`" — the run itself is the
+    oracle for that claim, never the README's own text and never the
+    engineer's working HEAD (E1 claim 3 is exactly an engineer's HEAD
+    transcribed into this field by mistake, and no README-only predicate
+    could have told the two apart)."""
+    root = require_planning_dir()
+    body = known_issues_body()
+    sweep_match = SWEEP_ID.search(body)
+    assert sweep_match, "the section names no sweep id"
+    sha_match = SHORT_SHA.search(body)
+    assert sha_match, "the section names no commit sha"
+    named_sweep, named_sha = sweep_match.group(1), sha_match.group(1)
+    run_dir = root / "qa" / "runs" / named_sweep
+    assert run_dir.is_dir(), (
+        f"README names sweep {named_sweep}, which does not exist under {run_dir}"
+    )
+    files = [p for p in run_dir.rglob("*") if p.is_file()]
+    if not commit_occurs_in_run(named_sha, run_dir):
+        recorded = recorded_commit(run_dir)
+        recorded_clause = (
+            f"That run records {recorded}."
+            if recorded
+            else "That run records no short-sha-shaped token at all."
+        )
+        pytest.fail(
+            f"README names commit {named_sha} as the commit sweep {named_sweep} was "
+            f"taken at; that string occurs in none of the {len(files)} file(s) under "
+            f"{run_dir}. {recorded_clause}"
+        )
+
+
+#: AC3. A FROZEN sample of the 30 directories measured under `qa/runs/` at
+#: `89a4f1d`, each with its `**Mode:**` line exactly as measured (or `None`
+#: for the 17 that declare none) and its expected class. This table does
+#: NOT grow when the sentinel runs — it is sample data proving the
+#: classifier, not a live census (which would itself become a guard that
+#: reddens on every sweep, the exact failure mode D4 is designed against).
+FROZEN_RUN_CLASSIFICATION: tuple[tuple[str, str | None, str], ...] = (
+    # -- 13 declared (a `**Mode:**` line present), chronological --
+    (
+        "2026-08-30_202600",
+        "**Mode:** `verify` — PDF-15 (31 ACs) + the four wave-7 fixes + full "
+        "ledger regression + OR-7 conformance",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        "2026-08-31_031141",
+        "**Mode:** `verify` (closing sweep — PDF-15 AC21/AC26 ruling + full "
+        "regression re-check + one PM-filed row)",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        "2026-09-01_234305",
+        "- **Mode:** `sweep` (all layers) · **Time budget:** 30 m · "
+        "**Used:** ~34 m (Layer 1 ran 15 m of it)",
+        RUN_CLASS_SWEEP,
+    ),
+    (
+        "2026-09-01_verify-PDF-17",
+        "**Run:** `2026-09-01_verify-PDF-17` · **Mode:** `verify PDF-17` (layers 1 + 6, scoped)",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        "2026-09-02_215327",
+        "**Mode:** `verify` — `PDF-23`, `PDF-24`, and an independent "
+        "re-drive of the `PDF-01` re-grant",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        # D2's third pinned shape: `**Mode:**` declared, no backticks around
+        # the value at all.
+        "2026-09-03_060525",
+        "**Mode:** narrow re-verify (wave 6) · **Commit:** `cdc02ee` "
+        "(`main` == `origin/main`, tree clean before and after)",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        # D2's first pinned shape: bare directory name, declared `verify`.
+        # Trimmed after the classifying clause (the real line continues with
+        # a `**Target:**` naming this product's pre-rename identifier, which
+        # this file must not reproduce -- `tests/test_brand_surfaces.py`
+        # freezes that count and a second occurrence under `tests/` would
+        # grow it).
+        "2026-09-03_113318",
+        "**Mode:** `verify PDF-26`",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        "2026-09-03_171838",
+        "**Mode:** `verify` (narrow) + a durable-record repair",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        "2026-09-04_073621",
+        "**Mode:** `sweep` (full, all six layers) · **Time budget:** 30 min "
+        "requested; **~38 min wall clock used** (07:36:21 → ~08:14 local), "
+        "overrun spent on Layer 6 and on writing these artifacts.",
+        RUN_CLASS_SWEEP,
+    ),
+    (
+        "2026-09-04_092622",
+        "**Mode:** `verify` — scoped to `PDF-31` (Lane B set) and `PDF-32` (AC1–AC20).",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        "2026-09-04_095036_verify-PDF-31-tag",
+        "**Mode:** `verify` — scoped by the task to the criteria the "
+        "`v0.2.0` tag unblocked (**AC27**, **AC33.3**, **AC34 links 1–2**), "
+        "plus **AC33.2**'s standing `NOT_OBSERVED` and the **Lane C** "
+        "residuals (**AC15** post-Lane-C half, **AC16–AC19**).",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        "2026-09-05_064159_verify-PDF-39",
+        "**Mode:** `verify`, scoped to **`PDF-39` only**.",
+        RUN_CLASS_VERIFICATION,
+    ),
+    (
+        # D2's fourth pinned shape: declared `` `sweep` (full) ``.
+        "2026-09-11_112955",
+        "- **Mode:** `sweep` (full)",
+        RUN_CLASS_SWEEP,
+    ),
+    # -- 17 by name-shape fallback (no `**Mode:**` line at all) --
+    ("2026-08-29_202000", None, RUN_CLASS_SWEEP),
+    ("2026-08-29_213513", None, RUN_CLASS_SWEEP),
+    ("2026-08-30_022741", None, RUN_CLASS_SWEEP),
+    ("2026-08-30_083000", None, RUN_CLASS_SWEEP),
+    ("2026-08-30_100806", None, RUN_CLASS_SWEEP),
+    ("2026-08-30_150803", None, RUN_CLASS_SWEEP),
+    ("2026-08-31_002400", None, RUN_CLASS_SWEEP),
+    ("2026-08-31_061917", None, RUN_CLASS_SWEEP),
+    ("2026-09-02_071003", None, RUN_CLASS_SWEEP),
+    ("2026-09-02_112500", None, RUN_CLASS_SWEEP),
+    ("2026-09-02_164410", None, RUN_CLASS_SWEEP),
+    ("2026-09-03_040000", None, RUN_CLASS_SWEEP),
+    ("2026-09-03_135137", None, RUN_CLASS_SWEEP),
+    ("2026-09-04_180000_verify-wave1", None, RUN_CLASS_VERIFICATION),
+    (
+        # D2's second pinned shape: `_verify` suffix in the name, no `**Mode:**`
+        # line at all.
+        "2026-09-05_033730_verify-wave2",
+        None,
+        RUN_CLASS_VERIFICATION,
+    ),
+    ("2026-09-05_112000_verify-PDF-40", None, RUN_CLASS_VERIFICATION),
+    ("2026-09-06_095123_verify-PDF-48", None, RUN_CLASS_VERIFICATION),
+)
+
+#: The four directory-name shapes D2 names explicitly as the ones that
+#: defeat a one-signal classifier. The self-test below fails if the frozen
+#: table above ever drops one of them.
+FOUR_DEFEATING_SHAPES = (
+    "2026-09-03_113318",
+    "2026-09-05_033730_verify-wave2",
+    "2026-09-03_060525",
+    "2026-09-11_112955",
+)
+
+
+def frozen_classification_mismatches(
+    rows: Iterable[tuple[str, str | None, str]],
+) -> list[str]:
+    """Pure: the classifier applied to *rows*, reporting every row where it
+    disagrees with the row's own expected class. Used both by the self-test
+    (over the real frozen table, expected empty) and by its RED control
+    (over a scratch copy with one expected class flipped, expected non-empty)."""
+    mismatches = []
+    for name, mode_line, expected in rows:
+        derived = classify_run(name=name, mode_line=mode_line)
+        if derived != expected:
+            mismatches.append(f"{name}: expected {expected!r}, classifier derives {derived!r}")
+    return mismatches
+
+
+def test_the_run_classifier_is_self_tested_before_it_is_trusted() -> None:
+    """AC3. The classifier is proven against known answers (30 rows, frozen
+    at that exact size) before its answer on the live inventory is
+    believed — and the four shapes that defeat a one-signal classifier
+    (D2) are pinned by name so none of them can quietly drop out of the
+    sample."""
+    assert len(FROZEN_RUN_CLASSIFICATION) == 30, (
+        f"the frozen self-test table has {len(FROZEN_RUN_CLASSIFICATION)} rows; it "
+        "was pinned at 30, measured at 89a4f1d -- the LIVE inventory is allowed to "
+        "drift (AC5 records that, not this), but this frozen sample must not grow "
+        "or shrink silently along with it"
+    )
+    pinned_names = {row[0] for row in FROZEN_RUN_CLASSIFICATION}
+    missing_pins = [name for name in FOUR_DEFEATING_SHAPES if name not in pinned_names]
+    assert missing_pins == [], (
+        f"the frozen table dropped shape(s) that defeat a one-signal classifier: {missing_pins}"
+    )
+    mismatches = frozen_classification_mismatches(FROZEN_RUN_CLASSIFICATION)
+    assert mismatches == [], "\n  ".join(
+        ["classifier disagrees with the frozen table:", *mismatches]
+    )
+
+
+def test_the_classifier_self_test_can_fail() -> None:
+    """AC3's RED: flip one expected class in a scratch copy of the frozen
+    table and confirm the mismatch-detection this self-test relies on
+    actually fires, naming the run, the expected class and the derived one."""
+    name, mode_line, expected = FROZEN_RUN_CLASSIFICATION[0]
+    flipped = RUN_CLASS_VERIFICATION if expected == RUN_CLASS_SWEEP else RUN_CLASS_SWEEP
+    scratch = ((name, mode_line, flipped),) + FROZEN_RUN_CLASSIFICATION[1:]
+    mismatches = frozen_classification_mismatches(scratch)
+    assert mismatches != [], (
+        "flipping one expected class must make the self-test disagree with the "
+        "classifier, or the self-test cannot fail and proves nothing"
+    )
+    assert name in mismatches[0]
+
+
+def test_an_unclassifiable_declared_mode_is_a_failure_not_a_default(tmp_path: Path) -> None:
+    """AC4. A synthetic run whose `**Mode:**` line matches neither `verif`
+    nor `sweep` must FAIL, naming the run and the line — never silently
+    default to `sweep`, which is exactly how a naming-convention change on
+    the other side of this boundary would read as a stale README instead
+    of a broken classifier. Driven through a real `tmp_path` run directory
+    and `report.md`, not a hand-built string, so the extraction
+    (`run_mode_line`) is exercised too, not just the classifier."""
+    run_dir = tmp_path / "2026-01-01_000000"
+    run_dir.mkdir()
+    (run_dir / "report.md").write_text("# scratch run\n\n**Mode:** `audit`\n")
+    mode_line = run_mode_line((run_dir / "report.md").read_text())
+    with pytest.raises(ValueError, match=r"2026-01-01_000000.*audit"):
+        classify_run(name=run_dir.name, mode_line=mode_line)
+
+
+def test_the_newest_sweep_arm_still_bites_after_the_refresh() -> None:
+    """AC8, half 1. A green `test_the_named_sweep_is_the_newest_sweep` on
+    the CORRECTED README is not evidence that arm works; this re-drives it
+    red with a PLANTED superseded id, checked against the REAL inventory
+    (never by editing the real `README.md`) — the same pure
+    `newest_sweep_claim` the applied arm uses."""
+    root = require_planning_dir()
+    runs_root = root / "qa" / "runs"
+    sweeps = sweep_class_runs_with_verdict(runs_root)
+    assert len(sweeps) >= 2, (
+        "need at least two sweep-class verdict-carrying runs in the real "
+        "inventory to plant a provably-superseded one; the live population "
+        "has shrunk below what this control needs"
+    )
+    superseded = sweeps[0]
+    planted_body = (
+        f"The most recent sweep carrying a readable verdict is `{superseded}`, "
+        "taken at commit `deadbee`."
+    )
+    named, newest, newer = newest_sweep_claim(planted_body, runs_root)
+    assert named == superseded
+    assert named != newest and newer > 0, (
+        f"planted id {superseded} did not disagree with the real inventory's "
+        f"newest ({newest}); this control proves nothing if it cannot fail"
+    )
+
+
+def test_the_commit_agreement_arm_still_bites_after_the_refresh() -> None:
+    """AC8, half 2. The correct newest sweep id, paired with a FOREIGN sha,
+    checked against the REAL run directory it names, must still turn red."""
+    root = require_planning_dir()
+    runs_root = root / "qa" / "runs"
+    sweeps = sweep_class_runs_with_verdict(runs_root)
+    assert sweeps, "the real inventory carries no sweep-class run with a verdict"
+    run_dir = runs_root / sweeps[-1]
+    foreign_sha = "deadbee"
+    assert not commit_occurs_in_run(foreign_sha, run_dir), (
+        f"the foreign sha {foreign_sha!r} must not coincidentally occur under "
+        f"{run_dir}, or this control proves nothing"
     )
 
 

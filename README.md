@@ -247,7 +247,7 @@ Open defects and planned work are recorded, per finding, in the maintainer's pla
 
 **Those artifacts live in the maintainer's planning repository and are not part of this distribution.** They are not shipped in the sdist or the wheel and are not present in a clone of this repository; the paths above are where they live for anyone reading this source tree beside it.
 
-The most recent sweep carrying a readable verdict is `2026-09-03_113318`, taken at commit `7afdb1a`. This section names a sweep and a commit and never a tally — a count is wrong the day after it is written, and the ledger's own header could not hold one still for two days. Read the ledger for what is open right now.
+The most recent sweep carrying a readable verdict is `2026-09-11_112955`, taken at commit `89a4f1d`; `make docs-gate` re-checks this pointer on every run. This section names a sweep and a commit and never a tally — a count is wrong the day after it is written, and the ledger's own header could not hold one still for two days. Read the ledger for what is open right now.
 
 If a sweep ever records nothing open, this section still stands and reads *no open findings are recorded as of sweep `<id>` (`<sha>`)*. It is not deleted: a momentarily vacuous pointer is still the affordance, and deleting it silently removes the only place a user is told where the defects are.
 
