@@ -1272,12 +1272,13 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "OUT_DIR_BATCH",
         OUT_DIR_BATCH,
-        "C21",
+        "C21,C25",
         1,
         "PDF-40's class. NECESSARY BUT NOT SUFFICIENT as an emptiness pin: C21's real "
         "guarantee is `out_dir_batch_verbs()`'s three-step derivation -- consumer set, "
         "operand arity, VERB name -- and in particular that a verb keyed on its module "
-        "basename would enter as `office` rather than `convert`",
+        "basename would enter as `office` rather than `convert`. C25 (PDF-53) reuses the "
+        "SAME population for the corrupt-kind dry-run mirror",
     ),
     Population(
         "GROUPS",
@@ -3779,3 +3780,81 @@ def test_c24_a_nonexistent_input_arrives_in_the_run_scoped_error_envelope(
     assert error["kind"] == NoInputError.kind, f"{verb.name} -o {fmt}: {error['kind']!r}"
     assert error["message"] == MISSING_MESSAGE, f"{verb.name} -o {fmt}: {error['message']!r}"
     assert error["path"], f"{verb.name} -o {fmt}: error.path must never be empty or null"
+
+
+# --------------------------------------------------------------------------- #
+# C25 (PDF-53) -- `--dry-run` predicts the real run's exit code AND per-item
+# `ok` for a CORRUPT operand, over the DERIVED `OUT_DIR_BATCH` population.
+# `4c5a6558e1`. C23 and C24 are taken (PDF-50, PDF-51); re-derived at HEAD
+# (banner census `git grep -cE '^# C[0-9]+ ' tests/test_cli_contract.py` -> 24)
+# rather than transcribed from the spec, which claimed C24 before PDF-51
+# landed in the same wave -- C25 is the next free banner ON THE TREE.
+#
+# THE DEFECT. `convert --dry-run` predicted `rc=0` / every item `ok:true` for
+# a three-input batch whose middle operand the real run refuses at `rc=1` /
+# `ok:false` -- the sole survivor of `PDF-40`'s AC10 matrix, because the other
+# nine verbs' previews open the document and a corrupt one raises as a side
+# effect their preview already relies on (E5); `convert`'s operand is an
+# office document and only LibreOffice can judge it, which a `--dry-run` may
+# not spawn (`CLAUDE.md` rule 2).
+#
+# SAME POPULATION AS `C21`, reused rather than re-derived (X-157): this row is
+# `C21`'s dry/real-mirror sibling, not a new population, so `OUT_DIR_BATCH`
+# needs no second roster entry -- only its `checks` field, extended above.
+#
+# The per-verb detail, the soundness matrix, and the single-operand case all
+# live in `tests/test_batch_continuation.py`
+# (`test_ac10_corrupt_arm_dry_run_mirrors_the_real_run`); this row is the
+# anti-regression sweep, exactly as `C21` is `test_ac3`'s sibling: a verb that
+# loses the mirror reddens HERE, naming itself, without anyone writing a
+# per-verb assertion.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("verb", OUT_DIR_BATCH)
+def test_c25_out_dir_batch_dry_run_mirrors_the_real_run_on_a_corrupt_operand(
+    verb: str, tmp_path: Path
+) -> None:
+    """PDF-53 -- the preview and the real run agree on BOTH X-185 observables.
+
+    RED, free and required: at `89a4f1d` `convert`'s dry arm reads `rc=0` /
+    `(True, True, True)` against the real arm's `rc=1` / `(True, False,
+    True)` (E1); the other nine cells were already AGREE (E3). RED, second
+    direction: revert `ops/office.py` alone in a scratch tree -- this row
+    fails naming `convert` while the other nine stay green.
+    """
+    from test_batch_continuation import (
+        _build_batch,
+        _collection,
+        _drive,
+        _skip_unless_engine_available,
+    )
+
+    _skip_unless_engine_available(verb)
+
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    real_operands = _build_batch(real_root, "corrupt", [], verb)
+    real_code, real_payload, _ = _drive(verb, real_operands, real_root / "out")
+
+    dry_root = tmp_path / "dry"
+    dry_root.mkdir()
+    dry_operands = _build_batch(dry_root, "corrupt", [], verb)
+    dry_code, dry_payload, _ = _drive(verb, dry_operands, dry_root / "out", dry_run=True)
+
+    assert dry_code == real_code, (
+        f"{verb}: --dry-run exited {dry_code}, the real run exited {real_code}"
+    )
+    real_key, real_rows = _collection(real_payload)
+    dry_key, dry_rows = _collection(dry_payload)
+    assert dry_key == real_key, f"{verb}: collection key {dry_key!r} vs {real_key!r}"
+    assert len(dry_rows) == len(real_rows), (
+        f"{verb}: {len(dry_rows)} predicted items vs {len(real_rows)} real items"
+    )
+    assert [r["ok"] for r in dry_rows] == [r["ok"] for r in real_rows], (
+        f"{verb}: ok flags diverge -- dry {[r['ok'] for r in dry_rows]} "
+        f"vs real {[r['ok'] for r in real_rows]}"
+    )
+
+
+def test_c25_population_is_non_empty() -> None:
+    """C25 cannot pass by iterating over nothing."""
+    assert OUT_DIR_BATCH, "the --out-dir batch population derived empty; C25 collected zero cases"

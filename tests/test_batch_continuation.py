@@ -688,11 +688,14 @@ def test_ac10_unreadable_arm_dry_run_mirrors_the_real_run(
     """OR-7 / X-185: BOTH observables — exit code AND envelope shape.
 
     Achievable for this kind because operand classification runs no engine, and
-    the classification now sits inside the guard on both paths. The CORRUPT kind
-    is deliberately not asserted here: a dry run that does not open a document
-    cannot know a document is corrupt, and closing that gap would require the
-    preview to parse -- which this product's dry-run contract forbids. That
-    divergence is measured and reported, not silently closed.
+    the classification now sits inside the guard on both paths. **The CORRUPT
+    kind has its own sibling arm below**
+    (``test_ac10_corrupt_arm_dry_run_mirrors_the_real_run``, PDF-53), covering
+    the container-decidable shapes a spawn-free triage tier can resolve from an
+    operand's bytes. Two residuals stay genuinely undecidable without opening
+    the document and stay divergent BY DESIGN, not by omission (PDF-53 Design
+    §D4): a malformed OLE2/CFB container, and a container-valid package whose
+    internals only the engine itself can judge as broken.
     """
     if os.geteuid() == 0:
         pytest.skip("running as root: mode 000 does not deny reads, so this arm cannot be built")
@@ -706,6 +709,51 @@ def test_ac10_unreadable_arm_dry_run_mirrors_the_real_run(
     dry_root = tmp_path / "dry"
     dry_root.mkdir()
     dry_operands = _build_batch(dry_root, "unreadable", restore_modes, verb)
+    dry_code, dry_payload, _ = _drive(verb, dry_operands, dry_root / "out", dry_run=True)
+
+    assert dry_code == real_code, (
+        f"{verb}: --dry-run exited {dry_code}, the real run exited {real_code}"
+    )
+    real_key, real_rows = _collection(real_payload)
+    dry_key, dry_rows = _collection(dry_payload)
+    assert dry_key == real_key, f"{verb}: collection key {dry_key!r} vs {real_key!r}"
+    assert len(dry_rows) == len(real_rows), (
+        f"{verb}: {len(dry_rows)} predicted items vs {len(real_rows)} real items"
+    )
+    assert [r["ok"] for r in dry_rows] == [r["ok"] for r in real_rows], (
+        f"{verb}: ok flags diverge -- dry {[r['ok'] for r in dry_rows]} "
+        f"vs real {[r['ok'] for r in real_rows]}"
+    )
+    assert [Path(r["input"]).name for r in dry_rows] == [
+        Path(r["input"]).name for r in real_rows
+    ], f"{verb}: input names or their order diverge between the preview and the real run"
+
+
+@pytest.mark.parametrize("verb", BATCH_VERBS)
+def test_ac10_corrupt_arm_dry_run_mirrors_the_real_run(
+    verb: str, tmp_path: Path, restore_modes: list[Path]
+) -> None:
+    """PDF-53 AC6 — the corrupt-arm sibling, over the SAME derived population.
+
+    Nine of the ten arms are free green (their previews already open the
+    document -- E5) and are the regression guard for the office triage's blast
+    radius (Design §D2); ``convert`` closes here via the spawn-free
+    container-triage tier (`adapters/soffice_office.py::ensure_source_loadable`)
+    reached on BOTH paths.
+
+    RED: revert `ops/office.py` alone in a scratch tree -- this row fails
+    naming `convert` while the other nine arms stay green.
+    """
+    _skip_unless_engine_available(verb)
+
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    real_operands = _build_batch(real_root, "corrupt", restore_modes, verb)
+    real_code, real_payload, _ = _drive(verb, real_operands, real_root / "out")
+
+    dry_root = tmp_path / "dry"
+    dry_root.mkdir()
+    dry_operands = _build_batch(dry_root, "corrupt", restore_modes, verb)
     dry_code, dry_payload, _ = _drive(verb, dry_operands, dry_root / "out", dry_run=True)
 
     assert dry_code == real_code, (

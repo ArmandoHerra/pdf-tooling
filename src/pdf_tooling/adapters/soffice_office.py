@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import zipfile
 from typing import TYPE_CHECKING, Final
 
 from pdf_tooling.adapters import AdapterProbe, subprocess_util
@@ -24,7 +25,14 @@ from pdf_tooling.errors import FailureError
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pathlib import Path
 
-__all__ = ["ADAPTER", "BINARY", "PROBE_TIMEOUT_S", "SofficeOfficeAdapter", "binary_present"]
+__all__ = [
+    "ADAPTER",
+    "BINARY",
+    "PROBE_TIMEOUT_S",
+    "SofficeOfficeAdapter",
+    "binary_present",
+    "ensure_source_loadable",
+]
 
 _NAME: Final[str] = "soffice"
 
@@ -55,6 +63,75 @@ _OUTPUT_SUBDIR: Final[str] = "out"
 def _parse_version(line: str) -> str | None:
     match = _VERSION_RE.search(line.strip())
     return match.group(1) if match else None
+
+
+#: PDF-53 D1 -- the one container family the triage can decide from bytes.
+#: LibreOffice's text-import filter loads everything that does NOT claim this
+#: container (E6 shapes #8-#11: ASCII behind a `.docx` name, NUL bytes, an
+#: empty file, and random bytes -- all four measured CONVERTING against the
+#: real engine), so a check keyed on anything wider than this one family
+#: would refuse a document the engine loads -- E6's three falsified designs.
+_ZIP_MAGIC: Final[bytes] = b"PK\x03\x04"
+
+#: The two package markers a genuine OOXML or ODF writer leaves behind. Their
+#: absence on an otherwise-readable zip is what tells "a zip" apart from "an
+#: office package" (E6 #4, `validzip.docx`).
+_OOXML_MARKER: Final[str] = "[Content_Types].xml"
+_ODF_MARKERS: Final[tuple[str, ...]] = ("mimetype", "META-INF/manifest.xml")
+
+
+def ensure_source_loadable(source: Path) -> None:
+    """Raise if *source* is PROVABLY not loadable by ``soffice`` -- PDF-53 D1.
+
+    Spawn-free and read-only -- the same precedent as :func:`binary_present`:
+    this reads a few leading bytes and, only on a ZIP claim, the archive's own
+    name list, never a spawn and never a write. Called on BOTH the
+    ``--dry-run`` preview and the real run (``ops/office.py`` Design D2), so
+    the two answer this question identically by construction rather than by
+    two implementations that could drift.
+
+    Two rules, and no wider than E6's eleven-shape measurement supports:
+
+    1. **No ZIP claim (leading bytes are not ``PK\\x03\\x04``) is SILENT.**
+       LibreOffice's text-import fallback loads ASCII, NUL bytes, an empty
+       file and random bytes alike (E6 #8-#11) -- undecidable without opening
+       the document. A legacy OLE2/CFB container (``.doc``) is a DIFFERENT
+       container family this tier does not decide: stdlib has no CFB reader
+       and HC-1 forbids reaching for one, so a malformed OLE2 operand is a
+       named, measured residual (Design D4), not a false negative.
+    2. **A ZIP claim is decidable.** The operand is loadable only if
+       :func:`zipfile.is_zipfile` is true AND the archive carries a
+       recognised OOXML (``[Content_Types].xml``) or ODF (``mimetype`` or
+       ``META-INF/manifest.xml``) package marker. Otherwise it is provably
+       not loadable and this raises.
+
+    A readable, marker-bearing package whose internals ``soffice`` still
+    cannot load is the SECOND named residual (Design D4): only LibreOffice
+    itself can answer that, and this tier does not spawn it to find out.
+
+    Raises:
+        FailureError: Exit 1 -- the SAME class :meth:`SofficeOfficeAdapter.
+            convert_to_pdf` raises on a real conversion failure, so a
+            caught item's ``exit_code`` and ``kind`` are identical whether
+            this tier or the engine itself is what caught it.
+    """
+    try:
+        with source.open("rb") as handle:
+            head = handle.read(len(_ZIP_MAGIC))
+    except OSError:
+        # Not this tier's to diagnose: an unreadable or missing operand is
+        # the classification seam's own rung (`ops/batch.py` rung 4),
+        # reached before this ever runs. Stay silent rather than raise twice.
+        return
+    if head != _ZIP_MAGIC:
+        return
+    if not zipfile.is_zipfile(source):
+        raise FailureError(f"{source}: not a loadable office document (malformed zip container)")
+    with zipfile.ZipFile(source) as archive:
+        names = frozenset(archive.namelist())
+    if _OOXML_MARKER in names or any(marker in names for marker in _ODF_MARKERS):
+        return
+    raise FailureError(f"{source}: not a loadable office document (no OOXML/ODF package marker)")
 
 
 def binary_present() -> bool:

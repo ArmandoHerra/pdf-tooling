@@ -43,7 +43,11 @@ from pdf_tooling.errors import UsageError
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult
 from pdf_tooling.ops.batch import BatchLedger, preflight_operands
-from pdf_tooling.ports.office import office_binary_present, require_office
+from pdf_tooling.ports.office import (
+    ensure_office_source_loadable,
+    office_binary_present,
+    require_office,
+)
 from pdf_tooling.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
@@ -203,23 +207,36 @@ def convert_run(
             # chokepoint, never a second, drifting copy of that message.
             require_office()
         detail = plan.detail()
+
+        def _predict_one(item: _ConvertTarget) -> ItemResult:
+            # PDF-53 D1/D2 -- the SAME spawn-free container triage the real
+            # path calls (`_convert_one` below), reached ONLY when the
+            # higher-precedence filesystem tier has not already refused the
+            # whole plan: a run-scoped refusal renders every item uniformly
+            # (E7 row 5's known, filed asymmetry, untouched by this spec) and
+            # must not be overridden by a per-item verdict here.
+            if not plan.refused:
+                ensure_office_source_loadable(item.source)
+            return ItemResult(
+                input=str(item.source),
+                output=str(item.target),
+                ok=not plan.refused,
+                exit_code=plan.would_exit,
+                message=("planned: convert" if not plan.refused else plan.message),
+                bytes_before=item.source.stat().st_size,
+                bytes_after=None,
+                duration_ms=0,
+                detail=detail,
+            )
+
         # OR-7 / X-185: the preview classifies every operand through the same
-        # guard the real run uses, so an unreadable input predicts its own exit
-        # code AND its own envelope shape instead of a clean batch.
+        # guard the real run uses, so an unreadable OR unloadable input
+        # predicts its own exit code AND its own envelope shape instead of a
+        # clean batch.
         predicted = [
             ledger.guard(
                 item.source,
-                lambda item=item: ItemResult(  # type: ignore[misc]
-                    input=str(item.source),
-                    output=str(item.target),
-                    ok=not plan.refused,
-                    exit_code=plan.would_exit,
-                    message=("planned: convert" if not plan.refused else plan.message),
-                    bytes_before=item.source.stat().st_size,
-                    bytes_after=None,
-                    duration_ms=0,
-                    detail=detail,
-                ),
+                lambda item=item: _predict_one(item),  # type: ignore[misc]
                 directory_message="expected a file, not a directory",
             )
             for item in planned
@@ -236,6 +253,10 @@ def convert_run(
     engine = require_office()
 
     def _convert_one(item: _ConvertTarget) -> ItemResult:
+        # PDF-53 D1/D2 -- the SAME triage the dry preview calls above, reached
+        # here BEFORE paying a LibreOffice spawn (~1.2s/file, measured) for an
+        # operand that is provably not loadable.
+        ensure_office_source_loadable(item.source)
         started = time.monotonic()
         bytes_before = item.source.stat().st_size
         with ScratchDir() as scratch_root:

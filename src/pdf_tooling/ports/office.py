@@ -20,7 +20,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
     from pdf_tooling.adapters import AdapterProbe
 
-__all__ = ["OfficeConverter", "adapters", "office_binary_present", "probe", "require_office"]
+__all__ = [
+    "OfficeConverter",
+    "adapters",
+    "ensure_office_source_loadable",
+    "office_binary_present",
+    "probe",
+    "require_office",
+]
 
 PORT = "OfficeConverter"
 
@@ -72,6 +79,29 @@ def adapters() -> tuple[Adapter, ...]:
     from pdf_tooling.adapters import soffice_office
 
     return (soffice_office.ADAPTER,)
+
+
+def ensure_office_source_loadable(source: Path) -> None:
+    """The one raising surface: is *source* PROVABLY not loadable? -- PDF-53.
+
+    Delegates to the adapter's own :func:`~pdf_tooling.adapters.
+    soffice_office.ensure_source_loadable`, in :func:`office_binary_present`'s
+    exact shape (port function, local adapter import, delegation), so a
+    ``--dry-run`` preview and the real run cannot come to disagree about what
+    the engine can load.
+
+    Raises :class:`~pdf_tooling.errors.FailureError` (exit 1, ``kind:
+    "failure"``) -- the SAME class the adapter's own conversion failure
+    raises -- and only where the answer is decidable from the operand's
+    leading bytes without spawning anything. Silent everywhere else,
+    including a genuinely loadable package with broken internals and a
+    malformed OLE2/CFB container: this is a narrow, measured triage (the
+    adapter's own docstring records the eleven-shape measurement), never an
+    oracle.
+    """
+    from pdf_tooling.adapters import soffice_office
+
+    soffice_office.ensure_source_loadable(source)
 
 
 def office_binary_present() -> bool:

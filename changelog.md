@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-53] Make `convert --dry-run` predict the real run's exit code and per-item `ok` — 2026-09-11
+
+- **Closes the ledger row `4c5a6558e1` (medium, surface-contract).** `convert --dry-run` predicted a clean batch for an input set the real run actually fails on, disagreeing on both the exit code and every item's `ok` flag — a `README.md` exit-code-table row made false at the tag. `convert` was the sole surviving divergence of `PDF-40`'s own regression matrix: every other batch verb's preview already opens the document and inherits the real run's own verdict as a side effect, but `convert`'s operand is an office document only LibreOffice can judge, and a `--dry-run` may not spawn it.
+- **A spawn-free, stdlib-only container-triage tier** (`adapters/soffice_office.py::ensure_source_loadable`, surfaced by `ports/office.py::ensure_office_source_loadable`) is now called on *both* the preview and the real run (`ops/office.py`), so the two agree by construction rather than by two implementations that could drift: an operand whose leading bytes claim a ZIP container is refused when it is not a readable archive, or is readable but carries no recognised OOXML/ODF package marker. Everywhere else the tier is silent — it is a narrow, measured triage, not an oracle.
+- **The real run's failure message changes for the operands the new tier now catches** (and no longer names an internal scratch path in the process); `ok`, `exit_code`, `output: null`, item order and envelope shape are otherwise unchanged, and `schema_version` stays `1`.
+- **Two residuals are reported, not fixed:** a malformed OLE2/CFB container (stdlib has no reader for that format), and a container-valid package whose internals only the engine itself can judge broken. Both stay divergent by design.
+- New tests: the corrupt-arm sibling of the existing dry-run mirror in `tests/test_batch_continuation.py`, and contract row `C25` in `tests/test_cli_contract.py`, both over the existing derived `--out-dir` batch population.
+
 ## [PDF-63] Drive `convert` in the read-seam sweep, so the triage's own byte reads are observed rather than counted — 2026-09-11
 
 - **`convert` becomes the third driven verb of twenty-six** in `tests/test_read_seams.py`'s runtime `open()` completeness instrument (`PDF-43`): a spawn-free `convert/office-dry` cell (`--dry-run`, an ASCII payload behind a `.docx` name) joins `_SWEEP_SPECS`, driving `soffice_office.py`'s container-triage head-read (`PDF-53`) out of AC5's undriven residue at a measured **0.69 s**, no LibreOffice spawn, no profile directory.
