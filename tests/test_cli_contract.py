@@ -63,6 +63,8 @@ import typer.models
 
 from fs_snapshot import assert_unchanged, redirected_environment, snapshot
 from pdf_tooling.cli.common import GLOBAL_OPTIONS, OUTPUT_FLAGS
+from pdf_tooling.errors import NoInputError
+from pdf_tooling.safety.paths import MISSING_MESSAGE
 from registry import (
     INVOCATIONS,
     OUTPUT_FLAG_INVOCATIONS,
@@ -1314,7 +1316,14 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         1,
         "unpinned before PDF-17 despite B-032 claiming otherwise",
     ),
-    Population("TAKES_INPUT_PATHS", TAKES_INPUT_PATHS, "C5", 1, "zero makes C5 collect zero cases"),
+    Population(
+        "TAKES_INPUT_PATHS",
+        TAKES_INPUT_PATHS,
+        "C5,C24",
+        1,
+        "zero makes C5 and C24 (PDF-51's shape row, the same population reused) collect "
+        "zero cases",
+    ),
     Population(
         "REGISTERED",
         REGISTERED,
@@ -3708,3 +3717,66 @@ def test_c23_no_backup_over_a_dangling_sidecar_still_predicts_zero(
     assert os.readlink(sidecar) == str(missing_target), (
         f"{verb.name}: --no-backup rewrote the dangling symlink's own target"
     )
+
+
+# --------------------------------------------------------------------------- #
+# C24 (PDF-51) -- a nonexistent input path arrives in the RUN-SCOPED ERROR
+# ENVELOPE, for every `takes_input_paths` verb. C23 is taken (PDF-50).
+#
+# `C5` asserts the CODE (exit 4) and nothing else -- one operand, one
+# assertion, and the assertion is the code. `info` alone used to demote that
+# same failure into a per-document row of the OPERATION envelope while the
+# other 22 verbs returned the two-key error envelope, so a consumer branching
+# on `payload["error"]` for a missing file got it from 22 verbs and not from
+# the 23rd, and nothing in the suite watched the SHAPE it arrives in at all
+# (`git grep -l "no_input" -- tests` returned 0 files before this row).
+#
+# SAME POPULATION AS `C5`, reused rather than re-derived (PDF-51 D7.1): this
+# row is `C5`'s sibling assertion, not a new population, so `TAKES_INPUT_PATHS`
+# needs no second roster entry.
+#
+# EVERY VALUE IS READ FROM A CONSTANT, NEVER TRANSCRIBED (PDF-51's own
+# anti-gaming discipline): `error.kind` against `NoInputError.kind`,
+# `error.message` against `safety.paths.MISSING_MESSAGE`. A row asserting the
+# literal string `"no such file"` typed into this file cannot tell a corrected
+# verb from a renamed constant.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("verb", TAKES_INPUT_PATHS, ids=_ids(TAKES_INPUT_PATHS))
+@pytest.mark.parametrize("fmt", ["json", "ndjson"])
+def test_c24_a_nonexistent_input_arrives_in_the_run_scoped_error_envelope(
+    verb, fmt: str, tmp_path: Path
+) -> None:
+    """PDF-51 AC1, the item's primary signal.
+
+    RED at `89a4f1d`, and it is free -- the whole defect: this row fails
+    naming `info` and passes for the other 22. RED, second direction: revert
+    `ops/inspect.py` alone in a scratch tree -- the row fails naming `info`
+    again while the other 22 stay green.
+    """
+    missing = tmp_path / "does-not-exist.pdf"
+    result = run_cli(verb.name, str(missing), "-o", fmt)
+    assert result.returncode == 4, (
+        f"{verb.name} -o {fmt}: expected exit 4 on a nonexistent operand, got "
+        f"{result.returncode} -- {result.stdout!r} / {result.stderr!r}"
+    )
+    assert result.stderr == "", (
+        f"{verb.name} -o {fmt}: a structured shape must leave stderr empty on this arm, "
+        f"got {result.stderr!r}"
+    )
+    payload = json.loads(result.stdout)
+    assert sorted(payload) == ["error", "schema_version"], (
+        f"{verb.name} -o {fmt}: expected the RUN-SCOPED error envelope's exact two keys, "
+        f"got {sorted(payload)} -- a per-document row demotes this into the OPERATION "
+        f"envelope instead"
+    )
+    assert payload["schema_version"] == 1
+    error = payload["error"]
+    assert sorted(error) == ["code", "kind", "message", "path"], (
+        f"{verb.name} -o {fmt}: {sorted(error)}"
+    )
+    assert error["code"] == NoInputError.exit_code == 4
+    assert error["kind"] == NoInputError.kind, f"{verb.name} -o {fmt}: {error['kind']!r}"
+    assert error["message"] == MISSING_MESSAGE, f"{verb.name} -o {fmt}: {error['message']!r}"
+    assert error["path"], f"{verb.name} -o {fmt}: error.path must never be empty or null"

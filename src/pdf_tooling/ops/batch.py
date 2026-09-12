@@ -3,12 +3,14 @@
 ``PLAN.md`` §5.4's Failure policy — *by default a failing input is recorded and
 the run continues (exit 1 at the end, with a per-input status in the structured
 output)* — is quoted verbatim in shipped source at ``cli/cmd_info.py``, and
-before this module it was true of exactly one verb. ``ops/inspect.py`` continues
-past a bad input because its operand classification happens **per item, inside
-the loop's own guard**; every ``--out-dir`` batch verb classified **per batch,
-outside** any guard, so one bad input cost every other input its result — and,
-on the verbs that write before they fail, produced a payload that denied an
-artifact already on disk.
+before this module it was true of exactly one verb. **``ops/inspect.py``
+continues past an existing-but-unreadable input (rung 4 only, PDF-51) because
+that ONE rung's classification happens per item, inside the loop's own guard;
+its other three rungs are run-scoped, pre-flight, on ``info`` exactly as on
+every other verb here** — every ``--out-dir`` batch verb classified its own
+rung 4 **per batch, outside** any guard, so one bad input cost every other
+input its result — and, on the verbs that write before they fail, produced a
+payload that denied an artifact already on disk.
 
 **Written once, deliberately.** The precedent is in this repository and is
 explicit about why: ``cli/common.py``'s ``operand_argument()`` records that the

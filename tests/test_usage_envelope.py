@@ -195,6 +195,19 @@ def error_of(stdout: str) -> dict[str, Any]:
 # binaries ARE installed — so it is the PATH scrub that produces the 3, not the
 # host. That is the whole hermeticity argument, and it is why the scrub is not
 # optional: without it this row reads 0 here and 3 on a bare container.
+#
+# A THIRD CORRECTION (PDF-51, 2026-09-11). `info` was the ONLY invocation in
+# this product returning `NO_INPUT` (4) rather than raising it — the batch
+# reporter accumulated a nonexistent operand into a per-item outcome and
+# derived the process exit from `run_exit_code`'s return value, exactly like
+# its own returned 1 and 6. PDF-51 moved that arm to `validate_operands`'
+# pre-flight, run-scoped, RAISED — the same mechanism the other twenty-two
+# `takes_input_paths` verbs already used. `4` is therefore no longer
+# return-signalled BY ANYTHING this matrix drives: `RETURN_SIGNALLED_CODES`
+# drops it, and `"info <good> <missing>"` — the one row that used to prove `1`
+# rode the return value on a mixed batch — now asserts `4`, raised, instead.
+# `1`, `3` and `6` are unaffected: `info`'s malformed/engine-missing/auth arms
+# stay per-item and stay returned.
 # --------------------------------------------------------------------------- #
 
 
@@ -270,7 +283,11 @@ REACHABLE_CODES: Final[tuple[int, ...]] = (
 #: and still the thing that matters: on these twenty-one invocations the split
 #: between raised and returned is pinned, so a refactor moving an exit across it
 #: is a red rather than a silent widening of a `SystemExit(OK)` blast radius.
-RETURN_SIGNALLED_CODES: Final[tuple[int, ...]] = (FAILURE, ENGINE_MISSING, NO_INPUT, AUTH)
+#:
+#: NO_INPUT (4) LEFT THIS SET AT PDF-51 (the third correction, above): `info`
+#: was the only invocation this matrix drives that ever returned it, and
+#: PDF-51 made it raise, like every other `takes_input_paths` verb's own 4.
+RETURN_SIGNALLED_CODES: Final[tuple[int, ...]] = (FAILURE, ENGINE_MISSING, AUTH)
 
 
 def exit_matrix(workspace: Path, good: Path, encrypted: Path) -> list[tuple[ExitCase, list[str]]]:
@@ -312,7 +329,13 @@ def exit_matrix(workspace: Path, good: Path, encrypted: Path) -> list[tuple[Exit
             ["text", str(MALFORMED)],
         ),
         (
-            ExitCase("info <good> <missing>", FAILURE, "a mixed batch, also returned"),
+            ExitCase(
+                "info <good> <missing>",
+                NO_INPUT,
+                "PDF-51: run-scoped now, RAISED before any per-item aggregation runs "
+                "-- was FAILURE/returned; a nonexistent operand aborts the whole batch "
+                "pre-flight instead of surviving into a demoted per-document row",
+            ),
             ["info", str(good), str(workspace / "absent.pdf")],
         ),
         (

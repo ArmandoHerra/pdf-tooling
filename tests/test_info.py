@@ -267,6 +267,41 @@ def test_the_directory_message_says_a_file_was_expected(tmp_path: Path) -> None:
     assert "directory" in (result.stdout + result.stderr).lower()
 
 
+@pytest.mark.parametrize("directory_first", [True, False], ids=["dir-first", "missing-first"])
+def test_ac7_the_directory_rung_wins_over_a_missing_operand_regardless_of_position(
+    tmp_path: Path, directory_first: bool
+) -> None:
+    """PDF-51 AC7 -- pinned at TODAY's measured values, so PDF-51's own
+    existence rung cannot move this by accident.
+
+    The directory pre-flight runs over the WHOLE batch before existence is
+    checked at all, so it wins in BOTH operand orders, exactly as it did
+    before this spec (the siblings' positional ladder, where whichever rung a
+    given operand hits first wins, is not adopted here -- D1.2).
+
+    RED: route the pre-flight through `ops.batch.preflight_operands` alone, in
+    a single pass, dropping the dedicated whole-batch directory loop that runs
+    ahead of it. Measured directly against exactly that mutation (PDF-51's own
+    Implementation Log): `[missing, directory]` then exits **4** instead of
+    **2** (existence wins positionally, because the missing operand is first
+    and the directory is never reached), which is a SECOND failure this
+    criterion catches together with the message: a single-pass design that
+    passes `directory_message` correctly still cannot hold this ordering.
+    """
+    from pdf_tooling.ops.inspect import _DIRECTORY_MESSAGE
+
+    directory = tmp_path / "a-directory"
+    directory.mkdir()
+    missing = tmp_path / "absent.pdf"
+    operands = [str(directory), str(missing)] if directory_first else [str(missing), str(directory)]
+
+    result = run_cli("info", "-o", "json", *operands)
+    assert result.returncode == 2, f"{operands}: exit {result.returncode}: {result.stdout}"
+    payload = json.loads(result.stdout)
+    assert payload["error"]["message"] == _DIRECTORY_MESSAGE, payload
+    assert payload["error"]["path"] == str(directory), payload
+
+
 def test_no_operands_is_exit_two() -> None:
     assert run_cli("info").returncode == 2
 
@@ -320,26 +355,132 @@ def test_the_password_itself_never_appears_in_the_output(plain_pdf: Path, tmp_pa
     assert "hunter2" not in result.stderr
 
 
-def test_a_batch_with_one_failure_is_exit_one(plain_pdf: Path, tmp_path: Path) -> None:
-    """``PLAN.md`` §5.4: the run continues and exits 1, with per-item status.
+def test_a_batch_with_one_item_scoped_failure_is_exit_one(plain_pdf: Path, tmp_path: Path) -> None:
+    """PDF-51 re-drive of ``test_a_batch_with_one_failure_is_exit_one``.
 
-    A single input keeps its own specific code (4 here); more than one collapses
-    to 1 so the aggregate is not mistaken for a diagnosis of the whole run.
+    ``PLAN.md`` §5.4's aggregation — a single input keeps its own specific
+    code, more than one collapses any failure to 1 — is still true, but only
+    of the **item-scoped** kinds (malformed exit 1, locked exit 6):
+    ``ops/batch.ITEM_SCOPED_ERRORS`` is what ``inspect_paths``' guard now
+    catches, and a batch continues past exactly those two.
+
+    A nonexistent input is a DIFFERENT arm since PDF-51: it is run-scoped, so
+    it no longer survives into this aggregation at all — see
+    ``test_a_missing_input_aborts_a_batch_run_scoped`` below, which replaces
+    the assertion this test used to make (``info <good> <missing>`` used to be
+    exit 1; PDF-51 moves it to exit 4, matching every other
+    ``takes_input_paths`` verb).
+    """
+    broken = build_malformed_pdf(tmp_path / "broken.pdf")
+    locked = build_encrypted_pdf(plain_pdf, tmp_path / "locked.pdf", user_password="hunter2")
+    assert run_cli("info", str(broken)).returncode == 1
+    assert run_cli("info", str(locked)).returncode == 6
+    assert run_cli("info", str(plain_pdf), str(broken)).returncode == 1
+    assert run_cli("info", str(plain_pdf), str(locked)).returncode == 1
+
+
+def test_a_missing_input_aborts_a_batch_run_scoped(plain_pdf: Path, tmp_path: Path) -> None:
+    """PDF-51 AC3: a nonexistent operand is run-scoped, so it aborts the WHOLE
+    batch (exit 4, the error envelope) rather than surviving as one item's row.
+
+    Red at the pre-fix tree: both assertions were 1, with the operation
+    envelope and the good document genuinely inspected.
     """
     missing = tmp_path / "absent.pdf"
-    assert run_cli("info", str(missing)).returncode == 4
-    assert run_cli("info", str(plain_pdf), str(missing)).returncode == 1
+    result = run_cli("info", "-o", "json", str(plain_pdf), str(missing))
+    assert result.returncode == 4, f"exit {result.returncode}: {result.stdout}{result.stderr}"
+    payload = json.loads(result.stdout)
+    assert sorted(payload) == ["error", "schema_version"], payload
+    assert payload["error"]["code"] == 4
+    assert payload["error"]["kind"] == "no_input"
+
+    # Argument order does not change the verdict: the run-scoped rung sees the
+    # whole operand list before any document opens, regardless of position.
+    assert run_cli("info", str(missing), str(plain_pdf)).returncode == 4
 
 
 def test_a_batch_preserves_per_item_codes_and_input_order(plain_pdf: Path, tmp_path: Path) -> None:
-    missing = tmp_path / "absent.pdf"
+    """PDF-51 re-drive: over ITEM-scoped kinds only (malformed, locked).
+
+    A nonexistent input no longer belongs in this population at all — it
+    aborts the run pre-flight (``test_a_missing_input_aborts_a_batch_run_
+    scoped`` above) rather than surviving as a per-item row, so driving it
+    here would fail on a ``KeyError`` rather than on this test's own
+    assertions, which is not a passing re-drive (PDF-51 D4).
+    """
     broken = build_malformed_pdf(tmp_path / "broken.pdf")
-    documents = info_json(str(plain_pdf), str(missing), str(broken))["documents"]
+    locked = build_encrypted_pdf(plain_pdf, tmp_path / "locked.pdf", user_password="hunter2")
+    documents = info_json(str(plain_pdf), str(broken), str(locked))["documents"]
     assert len(documents) == 3
     assert documents[0]["ok"] is True
-    assert documents[1]["error"]["code"] == 4
-    assert documents[2]["error"]["code"] == 1
-    assert documents[1]["path"] == str(missing)
+    assert documents[1]["error"]["code"] == 1
+    assert documents[2]["error"]["code"] == 6
+    assert documents[1]["path"] == str(broken)
+    assert documents[2]["path"] == str(locked)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-51 -- the info-specific arms of the no-input correction (D7.2). The
+# shape assertion itself, over the FULL `takes_input_paths` population, is
+# `tests/test_cli_contract.py`'s new contract row; these are the arms that are
+# specific to `info` and therefore belong in its own module.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_multi_input_run_with_two_missing_operands_exits_four(tmp_path: Path) -> None:
+    """PDF-51 AC3, second arm: no per-item survivor to even ask about.
+
+    Red at the pre-fix tree: exit **1**, the aggregate ``PLAN.md`` §5.4 code,
+    because both operands survived into `run_exit_code`'s per-item collapse.
+    """
+    first = tmp_path / "a-absent.pdf"
+    second = tmp_path / "b-absent.pdf"
+    assert run_cli("info", str(first), str(second)).returncode == 4
+
+
+def test_a_missing_input_writes_nothing_to_stderr_on_structured_shapes(tmp_path: Path) -> None:
+    """PDF-51 AC4: 0 bytes, on both structured shapes.
+
+    Red at the pre-fix tree: 44 bytes, from ``cmd_info.py``'s per-outcome echo
+    loop -- which the item-scoped arms still use
+    (``test_a_batch_with_one_item_scoped_failure_is_exit_one`` above proves it
+    survives there, so this is not the loop being deleted).
+    """
+    missing = tmp_path / "absent.pdf"
+    for fmt in ("json", "ndjson"):
+        result = run_cli("info", "-o", fmt, str(missing))
+        assert result.returncode == 4
+        assert result.stderr == "", f"-o {fmt}: {result.stderr!r}"
+
+
+def test_a_missing_input_dry_run_mirrors_the_real_run(tmp_path: Path) -> None:
+    """PDF-51 AC5: the pre-flight sits above the dry/real branch, so both
+    observables -- exit code and top-level key set -- agree on both shapes."""
+    missing = tmp_path / "absent.pdf"
+    for fmt in ("json", "ndjson"):
+        real = run_cli("info", "-o", fmt, str(missing))
+        dry = run_cli("info", "-o", fmt, str(missing), "--dry-run")
+        assert dry.returncode == real.returncode == 4, (fmt, dry.returncode, real.returncode)
+        assert sorted(json.loads(real.stdout)) == sorted(json.loads(dry.stdout)) == [
+            "error",
+            "schema_version",
+        ]
+
+
+def test_a_missing_input_under_table_format_matches_the_sibling_shape(tmp_path: Path) -> None:
+    """PDF-51 AC6: ``-o table`` on a nonexistent input is byte-comparable to a
+    sibling verb's.
+
+    Red at the pre-fix tree: a three-column table on stdout (``path`` /
+    ``error`` / ``exit code``) plus the same one-line stderr echo -- two
+    observables where the sibling has one empty and one populated.
+    """
+    missing = tmp_path / "absent.pdf"
+    info_result = run_cli("info", "-o", "table", str(missing))
+    text_result = run_cli("text", "-o", "table", str(missing))
+    assert info_result.returncode == text_result.returncode == 4
+    assert info_result.stdout == text_result.stdout == ""
+    assert info_result.stderr == text_result.stderr
 
 
 def test_a_batch_that_all_succeeds_is_exit_zero(plain_pdf: Path, tmp_path: Path) -> None:
@@ -419,6 +560,131 @@ def test_neither_info_module_constructs_a_writer() -> None:
             if isinstance(node, ast.ImportFrom) and node.module
         }
         assert "shutil" not in imported, module
+
+
+def _handler_names(node: ast.expr) -> list[str]:
+    """Mirrors ``tests/test_batch_continuation.py``'s own helper -- the same
+    shape asserted against the same AST-located handler, one module over."""
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, ast.Attribute):
+        return [node.attr]
+    if isinstance(node, ast.Tuple):
+        return [name for element in node.elts for name in _handler_names(element)]
+    return []
+
+
+def test_ac10_inspect_paths_guard_catches_the_declared_tuple_and_nothing_wider() -> None:
+    """PDF-51 AC10: the per-item guard inside ``inspect_paths`` names
+    ``ITEM_SCOPED_ERRORS`` -- imported, never re-declared -- and no handler in
+    the module is bare or catches ``Exception``/``BaseException``.
+
+    RED (first direction): widen the handler back to the module's own base
+    exception class in a scratch copy -- the walk fails naming the module and
+    the caught class.
+    RED (second direction): re-declare the tuple locally in ``ops/inspect.py``
+    instead of importing it -- the single-source assertion below fails naming
+    both definitions.
+    """
+    module_path = REPO_ROOT / "src" / "pdf_tooling" / "ops" / "inspect.py"
+    tree = ast.parse(module_path.read_text(), filename="ops/inspect.py")
+
+    functions = [
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "inspect_paths"
+    ]
+    assert len(functions) == 1, f"expected exactly one `inspect_paths` in ops/inspect.py: {functions}"
+
+    handlers = [node for node in ast.walk(functions[0]) if isinstance(node, ast.ExceptHandler)]
+    assert len(handlers) == 1, f"expected exactly one handler in `inspect_paths`: {handlers}"
+    assert handlers[0].type is not None, "a bare `except:` in inspect_paths"
+    assert _handler_names(handlers[0].type) == ["ITEM_SCOPED_ERRORS"], (
+        "inspect_paths must catch the DECLARED tuple, imported from ops.batch, so widening "
+        f"it is a one-line visible change; found {ast.dump(handlers[0].type)}"
+    )
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        if node.type is None:
+            offenders.append(f"bare `except:` at line {node.lineno}")
+            continue
+        for name in _handler_names(node.type):
+            if name in {"Exception", "BaseException"}:
+                offenders.append(f"`except {name}` at line {node.lineno}")
+    assert not offenders, f"ops/inspect.py must never catch broadly: {offenders}"
+
+    # Single-source: ITEM_SCOPED_ERRORS is imported, not re-declared as a
+    # second tuple this module could drift from ops/batch.py's own.
+    assign_targets = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "ITEM_SCOPED_ERRORS" not in assign_targets, (
+        "ops/inspect.py re-declares ITEM_SCOPED_ERRORS instead of importing ops.batch's"
+    )
+    imports_it = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "pdf_tooling.ops.batch"
+        and any(alias.name == "ITEM_SCOPED_ERRORS" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    assert imports_it, "ops/inspect.py does not import ITEM_SCOPED_ERRORS from ops.batch"
+
+
+def test_ac16_no_shipped_docstring_still_argues_no_input_belongs_on_infos_per_item_path() -> None:
+    """PDF-51 AC16 / D6: three docstrings argued for the superseded placement
+    and all three must say the corrected boundary now (`PDF-39` AC16's own
+    precedent). The `ops/inspect.py` pair is this module's own docstrings,
+    corrected in the same edit that superseded their claim.
+
+    RED: revert any one of the five sites in a scratch tree -- this test
+    fails naming that module.
+    """
+    import pdf_tooling.cli.cmd_info as cmd_info_module
+    import pdf_tooling.ops.batch as batch_module
+    import pdf_tooling.ops.inspect as inspect_module
+    import pdf_tooling.safety.paths as paths_module
+
+    # Each needle is a fragment UNIQUE to the superseded claim -- verified
+    # absent from the corrected text, never a substring the correction itself
+    # legitimately still contains (e.g. `ops/batch.py`'s corrected docstring
+    # still says rung 4 is "per item, inside the loop's own guard", truthfully
+    # -- the OLD claim was that unqualified, of *any* bad input). Named by the
+    # docstring that actually carries it: `cli/cmd_info.py` and `safety/
+    # paths.py`'s D6 sites are MODULE docstrings; `ops/inspect.py`'s pair of
+    # own-module corrections both live on FUNCTION docstrings.
+    offenders = []
+    for owner, needle in (
+        (paths_module, "For a verb whose batch survives a bad input (``info``) it belongs on"),
+        (
+            batch_module,
+            "continues past a bad input because its operand classification happens",
+        ),
+        (
+            cmd_info_module,
+            "so a\nmulti-input run reports ``1`` and the per-item codes stay in the payload.",
+        ),
+        (
+            inspect_module.inspect_document,
+            "rather than in :func:`validate_operands`, which aborts the whole batch",
+        ),
+        (
+            inspect_module.inspect_paths,
+            "Only :class:`PdfToolkitError` is caught. Anything else is a bug",
+        ),
+    ):
+        docstring = owner.__doc__ or ""
+        if needle in docstring:
+            offenders.append(getattr(owner, "__name__", repr(owner)))
+    assert not offenders, (
+        f"docstring(s) on {offenders} still carry the superseded per-verb/per-item claim "
+        "PDF-51 corrects (PDF-39 AC16's own precedent: a docstring contradicting the code "
+        "is the defect class this remediation must not create)"
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -27,11 +27,17 @@ a mistyped command line, and it exited 2 on every verb until then. Every row
 above is now driven through the CLI by `tests/test_info.py`, parsed out of this
 table rather than transcribed from it, so a row cannot claim a code nothing
 measures.
-The batch row is ``PLAN.md`` §5.4's rule — *a failing input is recorded, the run
-continues, and the run exits 1 at the end with a per-input status* — so a
-multi-input run reports ``1`` and the per-item codes stay in the payload. A
-single-input run reports that item's own code, which is what makes 1/4/6
-distinguishable at all.
+The batch row above — *"Several inputs, at least one failed"* — is ``PLAN.md``
+§5.4's aggregation rule, and it governs the ITEM-SCOPED kinds only: malformed
+(1) and existing-but-unreadable/locked (also 1, and 6). A multi-input run
+carrying one of those still exits ``1``, with every per-item code intact in
+the payload. **A nonexistent input is a different kind (PDF-51).** It is
+RUN-scoped, so it aborts pre-flight and exits ``4`` on any number of operands
+— the *"Nonexistent input path"* row above is no longer a per-input
+statement; it is the same run-scoped row every other ``takes_input_paths``
+verb already carries, and it is unconditional on operand count. A
+single-input run reports that item's own code either way, which is what keeps
+1/4/6 distinguishable at all.
 
 ENVELOPE
 --------

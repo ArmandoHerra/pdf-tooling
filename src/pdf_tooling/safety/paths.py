@@ -436,12 +436,18 @@ def classify_operand(
     modules each carried inline; they are unchanged in behaviour and in wording,
     and they live here now so rung 4 could not be added to twenty-two of them.
 
-    **Where a caller puts this call is a precedence decision.** For a verb whose
-    batch survives a bad input (``info``) it belongs on the per-item path,
-    inside the loop's own ``except PdfToolkitError`` — putting it in a pre-flight
-    that aborts the whole batch would defeat the survival half of this fix. For a
-    verb that fails closed (``merge``, and every plan-then-write verb) the
-    pre-flight validator is exactly where its own ladder already lives.
+    **Where a caller puts this call is a precedence decision, and it is decided
+    PER RUNG, not per verb (PDF-51 D1/D6).** Rungs 1-3 are properties of *how
+    the command line was typed* -- not of what a file turned out to contain --
+    and belong in a pre-flight that aborts the whole batch, on every verb,
+    ``info`` included: ``ops/batch.py``'s own run/item table already draws this
+    line (``NoInputError`` 4, both ``UsageError`` rungs 2, all RUN-scoped).
+    **Only rung 4 (existing but unreadable) belongs on the per-item path**,
+    inside a batch's own ``except`` -- putting *that* rung in a pre-flight that
+    aborts the whole batch is what would defeat the survival half of PDF-26.
+    A verb that fails closed on any rung (``merge``, and every plan-then-write
+    verb) simply never reaches rung 4's per-item path at all, because it has
+    none: its whole ladder, rung 4 included, sits in the pre-flight validator.
 
     Args:
         path: The operand, as a real filesystem path.
