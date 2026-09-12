@@ -80,7 +80,7 @@ def _occurrences() -> list[tuple[str, int, str]]:
     it counts occurrences. The line text is re-read per (path, line) so the
     classifier can key on CONTENT rather than on line numbers, which drift.
     """
-    proc = _git("grep", "-Ion", NEEDLE)
+    proc = _git("grep", "--untracked", "-Ion", NEEDLE)
     if proc.returncode not in (0, 1):
         pytest.fail(f"git grep failed rc={proc.returncode}: {proc.stderr.strip()}")
     out: list[tuple[str, int, str]] = []

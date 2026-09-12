@@ -950,8 +950,8 @@ def _no_password_env() -> dict[str, str]:
     import os
 
     env = dict(os.environ)
-    env.pop("PDF_TOOLKIT_PASSWORD", None)
-    env.pop("PDF_TOOLKIT_OWNER_PASSWORD", None)
+    env.pop("PDF_TOOLING_PASSWORD", None)
+    env.pop("PDF_TOOLING_OWNER_PASSWORD", None)
     return env
 
 

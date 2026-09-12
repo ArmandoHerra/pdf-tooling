@@ -59,14 +59,14 @@
       "text",
       "watermark"
     ],
-    "generated_at_commit": "49dec59a902a28051f9af830de2fd4e4f9b91419",
-    "generated_at_describe": "v0.3.1-7-g49dec59",
+    "generated_at_commit": "a6985def0b66be7118a3064994a02595590c8717",
+    "generated_at_describe": "v0.3.1-10-ga6985de",
     "generated_at_tag": null,
     "generated_from_a_tree_with_no_src_change": true,
     "leaves_covered": 26,
     "leaves_discovered": 26,
     "leaves_uncovered": [],
-    "regenerate": "PDF_TOOLKIT_ENVELOPE_REGISTER_REGENERATE=1 uv run pytest tests/test_envelope_contract.py -k register -p no:randomly",
+    "regenerate": "PDF_TOOLING_ENVELOPE_REGISTER_REGENERATE=1 uv run pytest tests/test_envelope_contract.py -k register -p no:randomly",
     "regenerating_this_file_to_make_a_red_go_green_is_forbidden": "See TESTING.md. A rename or a removal is the ONLY thing a superset assertion can catch, and it is caught by this file being older than the change. The sanctioned ways to make it green are (a) an ADDITION, which is already a superset and needs no regeneration at all, or (b) a PM-approved schema_version increment (models.py SCHEMA_VERSION), which is not an engineer's call.",
     "spec": "PDF-54"
   },

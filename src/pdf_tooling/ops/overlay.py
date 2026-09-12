@@ -44,7 +44,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
-from pdf_tooling.errors import AuthError, FailureError, NoInputError, PdfToolkitError, UsageError
+from pdf_tooling.errors import AuthError, FailureError, NoInputError, PdfToolingError, UsageError
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult, PageRange
 from pdf_tooling.ops.document_password import (
@@ -154,7 +154,7 @@ def _dry_run_result(
     under ``--dry-run``, so the global ``--password-file`` resolvability
     tier is predicted here explicitly, in the SAME tier as the filesystem
     refusal (never the correctness tier, X-89)."""
-    refusal: PdfToolkitError | None = plan.refusal
+    refusal: PdfToolingError | None = plan.refusal
     if refusal is None:
         refusal = predict_password_refusal(source, password=password, verb=verb)
     detail = plan.detail()

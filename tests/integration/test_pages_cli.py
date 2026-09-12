@@ -502,7 +502,7 @@ def test_ac23_an_encrypted_input_surfaces_exit_6_without_a_traceback(
 def test_ac40_one_error_renders_through_the_single_chokepoint_in_every_shape(
     verb: str, corpus, tmp_path: Path
 ) -> None:
-    """X-126: every renderer consumes `PdfToolkitError.to_dict()`, so the same
+    """X-126: every renderer consumes `PdfToolingError.to_dict()`, so the same
     refusal carries the same code and the same message in all six output
     shapes -- and PDF-08 introduces no renderer of its own."""
     target = tmp_path / "occupied.pdf"

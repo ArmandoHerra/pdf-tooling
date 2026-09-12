@@ -682,7 +682,7 @@ def test_ac16_no_shipped_docstring_still_argues_no_input_belongs_on_infos_per_it
         ),
         (
             inspect_module.inspect_paths,
-            "Only :class:`PdfToolkitError` is caught. Anything else is a bug",
+            "Only :class:`PdfToolingError` is caught. Anything else is a bug",
         ),
     ):
         docstring = owner.__doc__ or ""
@@ -747,7 +747,7 @@ def test_info_appears_in_help() -> None:
 # failing input is recorded, the run continues, and the run exits 1 at the end
 # with a per-input status* -- and it is the ONLY verb on this tree with a
 # per-item outcome model to hang that rule on (`ops/inspect.py::inspect_paths`'
-# per-input `except PdfToolkitError`). So this is where the SURVIVAL half of
+# per-input `except PdfToolingError`). So this is where the SURVIVAL half of
 # PDF-26 is asserted; the CLASSIFICATION half is uniform across all 24 operand
 # verbs and lives in `tests/test_cli_contract.py`'s C18.
 #
@@ -1051,7 +1051,7 @@ _ENTRYPOINT = "from pdf_tooling.cli.main import main; main()"
 #: An environment variable rather than an `argv` index: the arms differ in their
 #: argv tails, and a positional guess would silently start chmodding the output
 #: path the day a row grows a flag.
-_RACE_TARGET_ENV = "PDF_TOOLKIT_TEST_RACE_TARGET"
+_RACE_TARGET_ENV = "PDF_TOOLING_TEST_RACE_TARGET"
 
 
 def build_image(path: Path, fmt: str) -> Path:

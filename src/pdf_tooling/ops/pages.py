@@ -91,7 +91,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from pdf_tooling.errors import NoInputError, PdfToolkitError, RefusedError, UsageError
+from pdf_tooling.errors import NoInputError, PdfToolingError, RefusedError, UsageError
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult, PageRange
 from pdf_tooling.ops.batch import BatchLedger, preflight_operands
@@ -351,7 +351,7 @@ class _PagePlan:
     page_count_before: int
 
 
-def _selection_refusal(source: Path, verb: str, pages_spec: str, kind: str) -> PdfToolkitError:
+def _selection_refusal(source: Path, verb: str, pages_spec: str, kind: str) -> PdfToolingError:
     """The two selection-tier refusals, built in one place so §D5's pair can
     never converge: an empty *selection* is exit 4, a *full* selection under
     `delete` is exit 5."""
@@ -546,7 +546,7 @@ def _run_with_resolver(
     # rewritten set of documents is a wrong result that looks right -- and a
     # per-input verdict is a different thing from a whole-run refusal.
     page_plans: dict[str, _PagePlan] = {}
-    selection_refusal: PdfToolkitError | None = None
+    selection_refusal: PdfToolingError | None = None
 
     def _plan_one(item: _Target) -> _PagePlan:
         secret = resolver.for_source(item.source)

@@ -296,7 +296,7 @@ def password_flag_refusal(flag: str) -> UsageError:
         f"{flag} is not a flag: a password is never accepted as a command-line value "
         "(argv is world-readable in /proc and lands in shell history). Use "
         "--password-file PATH (or '-' to read one line from stdin), set "
-        "PDF_TOOLKIT_PASSWORD in the environment, or run on a terminal to be prompted.",
+        "PDF_TOOLING_PASSWORD in the environment, or run on a terminal to be prompted.",
         redacted=True,
     )
 

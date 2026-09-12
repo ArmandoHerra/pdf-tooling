@@ -11,7 +11,7 @@ NO LONGER VACUOUS, AS OF PDF-06
 --------------------------------
 PDF-05 introduced `ports.resolve()`; PDF-06 introduces `@pytest.mark.requires(
 engine)` (`tests/conftest.py`) and the PATH-shadowing engine-hiding shim
-(`PDF_TOOLKIT_TEST_HIDE_ENGINES`). This assertion's count is real from PDF-06
+(`PDF_TOOLING_TEST_HIDE_ENGINES`). This assertion's count is real from PDF-06
 onward — it is no longer possible for the `without-engines` job to pass on an
 empty input, because at least one engine-gated test (`tests/test_testdata.py`'s
 tesseract-recovery arm) now exists and skips visibly whenever the engine is
@@ -60,7 +60,7 @@ ENGINE_REASON = re.compile(r"engine|tesseract|soffice|libreoffice", re.IGNORECAS
 # This script has always answered one question -- how many skips are
 # engine-gated -- and reported everything else as an unbroken remainder. PDF-30
 # adds two skip classes that are neither engine-gated nor noise: an arm that
-# needs the maintainer's planning tree (`PDF_TOOLKIT_PLANNING_DIR`, absent in
+# needs the maintainer's planning tree (`PDF_TOOLING_PLANNING_DIR`, absent in
 # CI by construction) and an arm that needs git history deeper than a shallow
 # checkout. Both are legitimately unrunnable in CI and both must stay VISIBLE:
 # a skipped arm is never agreement, and a class that disappears into a
@@ -72,7 +72,7 @@ SKIP_CLASSES = {
     "engine-gated": ENGINE_REASON,
     "planning-directory-absent": re.compile(r"planning directory absent", re.IGNORECASE),
     "shallow-clone": re.compile(r"shallow clone", re.IGNORECASE),
-    "samples-corpus-absent": re.compile(r"PDF_TOOLKIT_SAMPLES_DIR", re.IGNORECASE),
+    "samples-corpus-absent": re.compile(r"PDF_TOOLING_SAMPLES_DIR", re.IGNORECASE),
     "parallel-session": re.compile(r"parallel session", re.IGNORECASE),
     # PDF-47. The live read of pypi.org's PEP 740 integrity endpoint is opt-in,
     # so its skip is a NAMED, COUNTED class rather than an anonymous remainder.
@@ -81,14 +81,14 @@ SKIP_CLASSES = {
     # at the end can only claim skips no earlier class claimed. The reason
     # string it matches carries neither `engine`/`tesseract`/`soffice`/
     # `libreoffice` (so `engine-gated` above cannot swallow it) nor
-    # `PDF_TOOLKIT_SAMPLES_DIR` (so `samples-corpus-absent` cannot either), and
+    # `PDF_TOOLING_SAMPLES_DIR` (so `samples-corpus-absent` cannot either), and
     # `tests/test_assert_skips.py` asserts BOTH directions rather than assuming
     # them -- the partition is the property, not the entry.
     #
     # VISIBILITY, NOT FAILURE. As the header above says, this census is
     # reporting only and neither exit-code rule changes. The *failing*
     # guarantee for that arm lives in whatever cadence runs it with
-    # `PDF_TOOLKIT_PYPI_PROVENANCE=1`; conflating the two would claim a
+    # `PDF_TOOLING_PYPI_PROVENANCE=1`; conflating the two would claim a
     # strength this entry does not have.
     "provenance-endpoint-disabled": re.compile(
         r"provenance endpoint check disabled", re.IGNORECASE

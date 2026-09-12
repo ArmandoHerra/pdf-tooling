@@ -8,7 +8,7 @@ proves the branch is reachable, not that the kernel does what the branch assumes
 The acquisition ladder, first candidate whose device differs from ``tmp_path``
 and which is writable:
 
-1. ``$PDF_TOOLKIT_TEST_XDEV_DIR`` — the operator's explicit override.
+1. ``$PDF_TOOLING_TEST_XDEV_DIR`` — the operator's explicit override.
 2. ``/dev/shm`` — a tmpfs on effectively every Linux, including GitHub's
    ``ubuntu-*`` runners and most containers. No root, no mount, no ``sudo``.
 3. ``$HOME``, then ``/var/tmp``, then ``/run/user/$UID``.
@@ -41,7 +41,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from atomic_harness import run_harness  # noqa: E402
 
-OVERRIDE = "PDF_TOOLKIT_TEST_XDEV_DIR"
+OVERRIDE = "PDF_TOOLING_TEST_XDEV_DIR"
 
 LADDER_MESSAGE = (
     "no second filesystem could be obtained on this host. The ladder tried, in order: "

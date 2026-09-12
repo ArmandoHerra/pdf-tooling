@@ -12,7 +12,7 @@ dicts, not raw strings** — key order is never a false failure.
   before committing — a golden update that nobody looked at is not a review,
   it is a rubber stamp.
 - **Goldens are built from the generated corpus only, never from a sample**
-  (`PLAN.md` §10.1 rule 4) — nothing from `$PDF_TOOLKIT_SAMPLES_DIR` may ever
+  (`PLAN.md` §10.1 rule 4) — nothing from `$PDF_TOOLING_SAMPLES_DIR` may ever
   enter a golden file.
 - An ordinary `pytest` run never writes here. A missing golden file fails the
   test with a message pointing at `--update-golden`; it is never

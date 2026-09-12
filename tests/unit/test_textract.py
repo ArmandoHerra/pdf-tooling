@@ -40,7 +40,7 @@ from pdf_tooling.cli.common import consumed_output_flags  # noqa: E402
 from pdf_tooling.errors import (  # noqa: E402
     EngineMissingError,
     NoInputError,
-    PdfToolkitError,
+    PdfToolingError,
     UsageError,
 )
 from pdf_tooling.models import EngineReport  # noqa: E402
@@ -384,7 +384,7 @@ def _run_cli_in_process(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> int
     `importlib.util.find_spec`, which a PATH or PYTHONPATH shim cannot make say
     no for a package that is genuinely installed. So this drives
     `cli.main.main()` directly -- the same function the console script calls,
-    including its one `except PdfToolkitError` handler and the `SystemExit` it
+    including its one `except PdfToolingError` handler and the `SystemExit` it
     raises -- with the port registry's memo replaced. The exit STATUS is
     therefore the product's own, not a re-derivation of it.
     """
@@ -647,7 +647,7 @@ def test_an_unreadable_input_is_a_coded_failure_not_a_raw_engine_error(tmp_path:
 
     broken = tmp_path / "broken.pdf"
     broken.write_bytes(b"not a pdf at all")
-    with pytest.raises(PdfToolkitError) as excinfo:
+    with pytest.raises(PdfToolingError) as excinfo:
         require_layout_text().extract_text(str(broken), (1,))
     assert excinfo.value.exit_code == 1
 

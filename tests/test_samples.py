@@ -14,7 +14,7 @@ Rules for every `@samples` arm, restated from Design §10 so a later engineer
 does not have to re-derive them:
 
 - Uses `samples.copy()` / `samples.copy_tree()` and nothing else. Never a
-  path constructed from `$PDF_TOOLKIT_SAMPLES_DIR` directly.
+  path constructed from `$PDF_TOOLING_SAMPLES_DIR` directly.
 - Asserts **structural** facts only — page counts, sizes, hashes,
   dimensions. **Never a content string extracted from a sample** (rule 4).
 - Produces no golden file. Goldens are built from the generated corpus only.
@@ -98,7 +98,7 @@ def test_copy_or_copy_tree_returns_a_writable_path_inside_tmp_path(samples, tmp_
 
 @pytest.mark.samples
 def test_copy_never_hands_back_a_path_under_the_originals_root(samples, tmp_path: Path) -> None:
-    root = os.environ.get("PDF_TOOLKIT_SAMPLES_DIR", "")
+    root = os.environ.get("PDF_TOOLING_SAMPLES_DIR", "")
     name = samples.names()[0]
     try:
         result = samples.copy(name)

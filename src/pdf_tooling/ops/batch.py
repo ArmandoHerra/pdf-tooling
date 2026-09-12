@@ -63,7 +63,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Final, TypeVar
 
-from pdf_tooling.errors import AuthError, FailureError, PdfToolkitError, SourceUnreadableError
+from pdf_tooling.errors import AuthError, FailureError, PdfToolingError, SourceUnreadableError
 from pdf_tooling.models import ItemResult
 from pdf_tooling.safety.paths import (
     DEFAULT_DIRECTORY_MESSAGE,
@@ -100,10 +100,10 @@ T = TypeVar("T")
 #: swallow the bare ``OSError``/``PdfError`` escapes that are a separate,
 #: still-open read-seam item's entire evidence base — destroying that evidence
 #: while appearing to improve this one. The boundary is mechanical: a
-#: ``PdfToolkitError`` subclass reaching this guard is this module's; a bare
+#: ``PdfToolingError`` subclass reaching this guard is this module's; a bare
 #: ``OSError``/``PdfError`` escaping to a traceback is not, and must keep
 #: escaping so it stays measurable.
-ITEM_SCOPED_ERRORS: Final[tuple[type[PdfToolkitError], ...]] = (FailureError, AuthError)
+ITEM_SCOPED_ERRORS: Final[tuple[type[PdfToolingError], ...]] = (FailureError, AuthError)
 
 
 def defer_unreadable(
@@ -160,7 +160,7 @@ def preflight_operands(
 
 def failure_item(
     source: Path | str,
-    error: PdfToolkitError,
+    error: PdfToolingError,
     *,
     duration_ms: int = 0,
 ) -> ItemResult:

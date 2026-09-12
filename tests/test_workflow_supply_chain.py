@@ -301,5 +301,5 @@ def test_ac13_the_samples_dir_override_is_never_set_in_ci() -> None:
         "the probe could not find `runs-on` in any workflow, so it is not "
         "reading what it claims to read"
     )
-    offenders = [name for name, text in texts.items() if "PDF_TOOLKIT_SAMPLES_DIR" in text]
+    offenders = [name for name, text in texts.items() if "PDF_TOOLING_SAMPLES_DIR" in text]
     assert not offenders, offenders

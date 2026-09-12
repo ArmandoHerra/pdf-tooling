@@ -22,7 +22,7 @@ left standing on its siblings.
 under ``src/`` (`git grep -nE '\\{error\\}|\\{exc\\}|\\{err\\}' -- src/pdf_tooling`
 → 30 at `ae723bc`). Sanitizing at the call sites is a thirty-site pass that a
 thirty-first reintroduces, so the normalization sits at
-``PdfToolkitError.to_dict()`` — the same chokepoint, and the same argument, the
+``PdfToolingError.to_dict()`` — the same chokepoint, and the same argument, the
 product already accepted for ``redacted``.
 
 **THIS MODULE IS HALF TWO ONLY.** It must stay green when the engine-boundary
@@ -40,7 +40,7 @@ from typing import Final
 import pytest
 
 from pdf_tooling.adapters.pikepdf_structure import _WARNING_PREFIX_RE, _clean_warning
-from pdf_tooling.errors import AuthError, FailureError, PdfToolkitError, normalize_object_reprs
+from pdf_tooling.errors import AuthError, FailureError, PdfToolingError, normalize_object_reprs
 from pdf_tooling.models import SCHEMA_VERSION
 from pdf_tooling.output import OutputFormat, emit_error
 
@@ -266,7 +266,7 @@ def test_ac9_the_schema_version_is_still_one() -> None:
     assert set(rendered["error"]) == {"code", "kind", "message", "path"}
 
 
-def _render_json(error: PdfToolkitError) -> str:
+def _render_json(error: PdfToolingError) -> str:
     from pdf_tooling.output.json import render_error_json
 
     return render_error_json(error.to_dict())

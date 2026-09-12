@@ -50,7 +50,7 @@ from pdf_tooling.cli.password import (
     plan_password,
     reject_two_stdin_streams,
 )
-from pdf_tooling.errors import PdfToolkitError, RefusedError, UsageError
+from pdf_tooling.errors import PdfToolingError, RefusedError, UsageError
 from pdf_tooling.ops.crypto import encrypt_run
 from pdf_tooling.ops.document_password import PasswordSource
 from pdf_tooling.output import emit_result
@@ -77,7 +77,7 @@ operation is libqpdf's; this tool implements none of its own.
 PASSWORDS. A password is never accepted as a command-line value: argv is
 world-readable in /proc and lands in shell history. --owner-password-file
 PATH reads one line from a file, or '-' reads one line from standard input.
-With no flag, PDF_TOOLKIT_OWNER_PASSWORD (owner) and PDF_TOOLKIT_PASSWORD
+With no flag, PDF_TOOLING_OWNER_PASSWORD (owner) and PDF_TOOLING_PASSWORD
 (user) are consulted, and on a terminal you are prompted. With none of
 those, the run exits 6 and writes nothing. The owner password is required;
 pass the same path twice if you want one password for both slots. Run
@@ -258,7 +258,7 @@ def encrypt_command(
             ", ".join(ALWAYS_GRANTED_TOKENS),
         )
 
-    refusal: PdfToolkitError | None = plaintext_backup_refusal(
+    refusal: PdfToolingError | None = plaintext_backup_refusal(
         in_place=config.in_place,
         backup=config.safety.backup,
         assume_yes=config.assume_yes,

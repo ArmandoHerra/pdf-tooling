@@ -292,9 +292,9 @@ def test_the_rejected_block_carries_b_r01() -> None:
 
 def test_no_samples_job_exists_in_ci_yml() -> None:
     """PLAN.md 10.1 rule 5, checked mechanically: CI must never set
-    PDF_TOOLKIT_SAMPLES_DIR or run a samples-gated job."""
+    PDF_TOOLING_SAMPLES_DIR or run a samples-gated job."""
     text = CI_WORKFLOW.read_text()
-    assert "PDF_TOOLKIT_SAMPLES_DIR" not in text
+    assert "PDF_TOOLING_SAMPLES_DIR" not in text
     assert "samples-check" not in text
     assert "samples-gate" not in text
 

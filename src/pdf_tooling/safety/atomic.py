@@ -165,7 +165,7 @@ from pdf_tooling.errors import (
     BackupExistsError,
     DestinationUnwritableError,
     FailureError,
-    PdfToolkitError,
+    PdfToolingError,
     TargetExistsError,
 )
 from pdf_tooling.safety._faults import checkpoint
@@ -337,7 +337,7 @@ def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
     -- ``EACCES``, ``ENOTDIR``, ``EEXIST``-as-file, ``ENAMETOOLONG``, ``EROFS``,
     the whole errno family, never only ``PermissionError`` -- becomes
     :class:`~pdf_tooling.errors.DestinationUnwritableError`, echoing the path
-    **as the user wrote it**. `cli/main.py`'s single ``except PdfToolkitError``
+    **as the user wrote it**. `cli/main.py`'s single ``except PdfToolingError``
     handler already routes that class through the product's structured
     envelope (exit 1) -- raising it is the entire fix; nothing else in the
     envelope path changes.
@@ -373,7 +373,7 @@ class PlannedOutputs:
 
     **PDF-18 Design D2 — the eight ``ops/`` copies of ``_FilesystemPlan``
     collapse into this one type.** Every construction in those seven
-    dataclasses (plus `ops/crypto.py`'s own divergent ``PdfToolkitError |
+    dataclasses (plus `ops/crypto.py`'s own divergent ``PdfToolingError |
     None`` return) derived its stored ``would_exit``/``would_refuse`` from a
     refusal, so absorbing them here is behaviour-preserving by inspection —
     and AC6 pins the emitted per-item payload byte-for-byte rather than
@@ -382,7 +382,7 @@ class PlannedOutputs:
     they are copied here unchanged.
     """
 
-    refusal: PdfToolkitError | None
+    refusal: PdfToolingError | None
 
     @property
     def would_exit(self) -> int:
@@ -460,7 +460,7 @@ def plan_output_set(
                 ensure_destination_writable(out_dir)
         for target in targets:
             ensure_no_clobber(target, force=policy.force, in_place=policy.in_place)
-    except PdfToolkitError as refusal:
+    except PdfToolingError as refusal:
         if not policy.dry_run:
             raise
         return PlannedOutputs(refusal=refusal)
@@ -489,7 +489,7 @@ def plan_filesystem(
     (ocr, office)
     ``(target, policy=p)``                          ``plan_filesystem([target],
     (metadata, overlay)                             out_dir=None, policy=p, kind="pdf")``
-    ``(...) -> PdfToolkitError | None`` (crypto)     same call; consumes ``.refusal``
+    ``(...) -> PdfToolingError | None`` (crypto)     same call; consumes ``.refusal``
     ============================================  ===================================
 
     ``kind`` is **not** optional. A default is how the ocr/office shape
@@ -542,7 +542,7 @@ def plan_filesystem(
         for target in targets:
             try:
                 ensure_destination_writable(canonical(target).parent, as_written=target.parent)
-            except PdfToolkitError as refusal:
+            except PdfToolingError as refusal:
                 if not policy.dry_run:
                     raise
                 return PlannedOutputs(refusal=refusal)
@@ -554,7 +554,7 @@ def plan_filesystem(
                 backup=policy.backup,
                 force=policy.force,
             )
-    except PdfToolkitError as refusal:
+    except PdfToolingError as refusal:
         if not policy.dry_run:
             raise
         return PlannedOutputs(refusal=refusal)
@@ -593,7 +593,7 @@ class AtomicWriter:
         #: X-67. Under ``--dry-run``, the refusal the real run *would* have
         #: raised, computed rather than thrown. ``None`` when the plan is clean,
         #: and always ``None`` after a real run — a real run raises instead.
-        self.planned_refusal: PdfToolkitError | None = None
+        self.planned_refusal: PdfToolingError | None = None
         self.destination: Path = canonical(target)
         self._warn_sink = warn if warn is not None else _default_warn
         self._temp_dir = Path(_temp_dir) if _temp_dir is not None else None
@@ -734,7 +734,7 @@ class AtomicWriter:
                 self.destination.parent,
                 as_written=self.target.parent,
             )
-        except PdfToolkitError as refusal:
+        except PdfToolingError as refusal:
             if not self._dry_run:
                 raise
             self.planned_refusal = refusal

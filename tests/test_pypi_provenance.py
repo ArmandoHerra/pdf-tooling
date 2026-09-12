@@ -139,19 +139,19 @@ PROJECT: Final[str] = "pdf-tooling"
 
 #: The opt-in. Absent, the live arm skips BY NAME; set, it runs and every
 #: failure mode below is a FAILURE.
-OPT_IN_VARIABLE: Final[str] = "PDF_TOOLKIT_PYPI_PROVENANCE"
+OPT_IN_VARIABLE: Final[str] = "PDF_TOOLING_PYPI_PROVENANCE"
 
 #: Points the live arm somewhere other than pypi.org. Its purpose is the
 #: unreachable-endpoint RED: set it to a closed port with the opt-in ON and the
 #: arm must FAIL, not skip.
-BASE_URL_VARIABLE: Final[str] = "PDF_TOOLKIT_PYPI_BASE_URL"
+BASE_URL_VARIABLE: Final[str] = "PDF_TOOLING_PYPI_BASE_URL"
 DEFAULT_BASE_URL: Final[str] = "https://pypi.org"
 
 #: A CONTRACT BETWEEN TWO FILES. `scripts/assert_skips.py`'s
 #: `SKIP_CLASSES["provenance-endpoint-disabled"]` matches this string, and
 #: `tests/test_assert_skips.py` asserts the match directly, so a later reword
 #: here cannot silently empty that census class.
-SKIP_REASON: Final[str] = "provenance endpoint check disabled (set PDF_TOOLKIT_PYPI_PROVENANCE=1)"
+SKIP_REASON: Final[str] = "provenance endpoint check disabled (set PDF_TOOLING_PYPI_PROVENANCE=1)"
 
 #: Measured 0.130-0.233 s over four bodies on 2026-09-06 (loadavg 0.76 at the
 #: read, on a shared box). 10 s makes "unreachable" a bounded, reported

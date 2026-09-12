@@ -7,7 +7,7 @@ Two structural rules live here.
 test asserts that importing this module leaves every engine absent from
 ``sys.modules``.
 
-**There is exactly one ``except PdfToolkitError``.** Every deliberate error in
+**There is exactly one ``except PdfToolingError``.** Every deliberate error in
 the tool is one of those, so the mapping from error to rendered output to exit
 code exists in one place. Anything else reaching the top is a bug: it prints a
 traceback and exits 1, which is a signal, not a UX.
@@ -70,7 +70,7 @@ from pdf_tooling.cli.common import (
     root_global_options,
 )
 from pdf_tooling.cli.exit_codes import OK, USAGE
-from pdf_tooling.errors import FailureError, PdfToolkitError, UsageError
+from pdf_tooling.errors import FailureError, PdfToolingError, UsageError
 from pdf_tooling.output import OutputFormat, emit_error
 
 #: Pinned so that ``pdftooling``, ``pdf-tooling``, the deprecated
@@ -293,7 +293,7 @@ def _group_position_refusal(
     )
 
 
-def _envelope_for(error: BaseException) -> tuple[PdfToolkitError, str | None]:
+def _envelope_for(error: BaseException) -> tuple[PdfToolingError, str | None]:
     """One Click parser error, as this product's own error plus a help pointer.
 
     Precedence, and every tier is load-bearing:
@@ -341,7 +341,7 @@ def _envelope_for(error: BaseException) -> tuple[PdfToolkitError, str | None]:
     return FailureError(message), pointer
 
 
-def _terminate(error: PdfToolkitError, pointer: str | None) -> NoReturn:
+def _terminate(error: PdfToolingError, pointer: str | None) -> NoReturn:
     fmt = current_error_format()
     emit_error(error, fmt)
     if pointer is not None and fmt is OutputFormat.TABLE:
@@ -368,7 +368,7 @@ def main() -> None:
 
     Measured, because the blast radius is worth stating precisely rather than
     generously: this product *raises* most non-zero exits (every
-    ``PdfToolkitError`` -- usage, safety, OR-3/OR-4, and every single-input
+    ``PdfToolingError`` -- usage, safety, OR-3/OR-4, and every single-input
     verb failure) and *returns* the rest. Today the returned ones are ``info``
     (1/4/6, the batch reporter that accumulates per-item outcomes instead of
     raising) and ``doctor`` (3). `tests/test_usage_envelope.py`'s exit-code
@@ -378,7 +378,7 @@ def main() -> None:
     """
     try:
         returned = app(prog_name=PROG_NAME, standalone_mode=False)
-    except PdfToolkitError as error:
+    except PdfToolingError as error:
         # FIRST, so the existing handler keeps its precedence unchanged: our
         # own OR-3/OR-4/safety messages must never be replaced by Click's.
         _terminate(error, None)

@@ -47,7 +47,7 @@ X-20).
 white background using the `DejaVu Sans Bold` system font (Bitstream Vera
 license, bundled with most Linux distributions) at `/usr/share/fonts/truetype/dejavu/`.
 **Not derived from, copied from, or in any way sourced from
-`$PDF_TOOLKIT_SAMPLES_DIR`** — the operator's real-document corpus is never
+`$PDF_TOOLING_SAMPLES_DIR`** — the operator's real-document corpus is never
 an input to anything under `testdata/` (`PLAN.md` §10.1 rule 4). `AC17`
 mechanizes this as a standing check: no file under `testdata/` may ever share
 a SHA-256 with any file in the samples directory.

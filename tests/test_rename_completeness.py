@@ -1,5 +1,5 @@
-"""PDF-48 -- the eight-spelling reconciliation, and the census the shipped
-brand classifier does not (and structurally cannot) own.
+"""PDF-48/PDF-57 -- the thirteen-spelling reconciliation, and the census the
+shipped brand classifier does not (and structurally cannot) own.
 
 `tests/test_brand_surfaces.py` classifies exactly ONE spelling of the old
 name -- the hyphenated one, assembled at runtime so the module never spells
@@ -9,12 +9,26 @@ the same trick does not generalise: a classifier that must not spell any of
 several needles, over a population in the thousands across a hundred files,
 in one file, is not a widening -- it is a rewrite that keeps the old name.
 
-So this module owns a DIFFERENT property: that the eight spellings this
-item's Evidence section (E1) counted are ALL of the spellings that exist,
-and that summing their occurrence counts reproduces the live case-insensitive
-total with NO residual. A ninth spelling appearing anywhere in the tree is a
-FAILURE naming it, never a silent skip -- which is the whole point of a
-reconciliation instrument: there is no seam where an occurrence can hide.
+So this module owns a DIFFERENT property: that the spellings this item's
+Evidence section (E1/E10) counted are ALL of the spellings that exist, and
+that summing their occurrence counts reproduces the live case-insensitive
+total with NO residual. A spelling this module does not already expect,
+appearing anywhere in the tree, is a FAILURE naming it, never a silent skip
+-- which is the whole point of a reconciliation instrument: there is no seam
+where an occurrence can hide.
+
+PDF-57 (2026-09-12) widens the family this module polices from EIGHT
+spellings to THIRTEEN: `PDF-48` froze the eight lower-tier spellings of the
+OLD stem ("toolkit"); `PDF-57` retires the two upper-tier ones ("the
+environment-variable-cased form", "the exception-class-cased form" plus its
+logo-import sibling) to the corresponding NEW stem ("tooling"), joining
+three NEW-stem spellings that already existed before this item landed (the
+underscore-separated, no-separator and hyphenated forms of the NEW name --
+`PDF-48`'s own package/console-script/distribution renames). **One census,
+both eras, bucketed by exact matched spelling, zero residual** (D5) -- the
+family regex widens from `pdf[-_ ]?toolkit` to `pdf[-_ ]?tool(kit|ing)` so
+the two names this rename actually moves stay inside the one instrument that
+watches for a stray occurrence, rather than exiting it unwatched.
 
 This module also owns the two named remainder censuses PDF-48's AC10
 predicts (one per moving spelling) and the four frozen-population byte
@@ -25,21 +39,22 @@ arm is blind to a sweep that moves the producer, the golden AND the oracle
 together (`B-237`), and PDF-48 sweeps `tests/` at scale. A COUNT-based
 reconciliation is a different instrument for exactly that reason.
 
-WHY THIS FILE NEVER SPELLS ANY OF THE EIGHT SPELLINGS, OR THE RESIDUE PREFIX
------------------------------------------------------------------------------
-Every one of the eight spellings is assembled from small fragments, exactly
-like `test_brand_surfaces.py`'s `NEEDLE`. Writing any of them whole here
-would make this module's own live census see itself: a fresh occurrence of
-whichever spelling got spelled out, at whichever line it was written on,
-counted by the SAME `git grep` this module runs to police the rest of the
-tree. The on-disk crash-residue dot-prefix (`safety/tempnames.py`'s
+WHY THIS FILE NEVER SPELLS ANY OF THE THIRTEEN SPELLINGS, OR THE RESIDUE PREFIX
+--------------------------------------------------------------------------------
+Every one of the thirteen spellings is assembled from small fragments,
+exactly like `test_brand_surfaces.py`'s `NEEDLE`. Writing any of them whole
+here would make this module's own live census see itself: a fresh
+occurrence of whichever spelling got spelled out, at whichever line it was
+written on, counted by the SAME `git grep` this module runs to police the
+rest of the tree. The on-disk crash-residue dot-prefix (`safety/tempnames.py`'s
 `TEMP_PREFIX`) is assembled for the identical reason -- it is a substring of
 the no-separator spelling and would self-match just as readily.
 
 Prose below refers to spellings by shape ("the underscore-separated form",
 "the no-separator form", "the environment-variable-cased form", "the
 exception-class-cased form", "the hyphenated form", "the three common-noun
-spellings") rather than by typing them, for the same reason.
+spellings", and their NEW-stem counterparts) rather than by typing them, for
+the same reason.
 """
 
 from __future__ import annotations
@@ -54,7 +69,7 @@ import pytest
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 
 # --------------------------------------------------------------------------- #
-# The eight spellings, assembled -- never spelled whole. See the module
+# The thirteen spellings, assembled -- never spelled whole. See the module
 # docstring's "WHY THIS FILE NEVER SPELLS" section.
 # --------------------------------------------------------------------------- #
 
@@ -64,37 +79,81 @@ _CAP: Final[str] = "Pdf"
 _STEM_LOW: Final[str] = "toolkit"
 _STEM_UP: Final[str] = "TOOLKIT"
 _STEM_CAP: Final[str] = "Toolkit"
+#: PDF-57 D5 -- the NEW stem, added alongside the old one rather than in its
+#: place, so both eras stay inside one census with zero residual.
+_STEM_LOW2: Final[str] = "tooling"
+_STEM_UP2: Final[str] = "TOOLING"
+_STEM_CAP2: Final[str] = "Tooling"
 
 #: The underscore-separated form, e.g. what the import package used to be.
 SPELL_UNDERSCORE: Final[str] = _LOW + "_" + _STEM_LOW
+#: Its NEW-stem counterpart -- what the import package IS, PDF-48. Not this
+#: item's own doing; it existed in the live tree before PDF-57 landed.
+SPELL_UNDERSCORE_NEW: Final[str] = _LOW + "_" + _STEM_LOW2
 #: The no-separator form, e.g. what the canonical console script used to be.
 SPELL_BARE: Final[str] = _LOW + _STEM_LOW
-#: The environment-variable-cased form (frozen, D6a) -- the prefix the
-#: documented secret-input env vars and a CI-absence guard both key on.
+#: Its NEW-stem counterpart -- the canonical console script, PDF-48.
+SPELL_BARE_NEW: Final[str] = _LOW + _STEM_LOW2
+#: The environment-variable-cased form (frozen AFTER PDF-57, D6a) -- the
+#: prefix the documented secret-input env vars and a CI-absence guard both
+#: key on. PDF-57 moves the LIVE population to its NEW-stem counterpart
+#: below; this old form survives only in its enumerated frozen carriers.
 SPELL_ENV: Final[str] = _UP + "_" + _STEM_UP
-#: The exception-class-cased form (frozen, D6b) -- the public base
-#: exception's name, and a leftover Astro logo-import identifier.
+#: PDF-57 D2 -- the prefix swap this item performs. The contract-bearing
+#: secret-input env vars and the CI-absence guard now key on THIS.
+SPELL_ENV_NEW: Final[str] = _UP + "_" + _STEM_UP2
+#: The exception-class-cased form (frozen AFTER PDF-57, D6b) -- the public
+#: base exception's OLD name, and a leftover Astro logo-import identifier's
+#: OLD name. PDF-57 moves the live population to its NEW-stem counterpart
+#: below; this old form survives only in its enumerated frozen carriers.
 SPELL_CLASS: Final[str] = _CAP + _STEM_CAP
+#: PDF-57 D2 -- the base exception's new name and the Astro logo-import
+#: identifier's new name after this item (never spelled whole here, for the
+#: same self-match reason as everything else in this file -- see the module
+#: docstring's "WHY THIS FILE NEVER SPELLS" section, which binds all
+#: thirteen spellings, not only the eight PDF-48 froze).
+SPELL_CLASS_NEW: Final[str] = _CAP + _STEM_CAP2
 #: The hyphenated form -- the deprecated console-script alias.
 SPELL_HYPHEN: Final[str] = _LOW + "-" + _STEM_LOW
+#: Its NEW-stem counterpart -- the distribution name, PDF-48/X-405 frozen.
+#: Everywhere, by construction: this is `pdf-tooling` itself.
+SPELL_HYPHEN_NEW: Final[str] = _LOW + "-" + _STEM_LOW2
 #: The three common-noun / fixture-marker spellings (D6c), out of scope.
+#: UNCHANGED by PDF-57 -- ordinary English and a generated fixture's PDF name
+#: object have no "tooling" counterpart to widen to.
 SPELL_NOUN_LOW: Final[str] = _UP + " " + _STEM_LOW
 SPELL_NOUN_UP: Final[str] = _UP + " " + _STEM_UP
 SPELL_NOUN_MIXED: Final[str] = _UP + _STEM_CAP
 
+#: PDF-57 D5.2 -- derived from the live tree, never guessed. Eight members
+#: are PDF-48's frozen family (all still present -- `changelog.md` and
+#: `tests/acceptance/` keep every one of them alive, D4's own prediction);
+#: three are PDF-48's own NEW-stem population, already live before this item
+#: touched anything; two (`SPELL_ENV_NEW`, `SPELL_CLASS_NEW`) are what THIS
+#: item's rename adds. Thirteen total, re-derived at this item's own HEAD via
+#: `git grep --untracked -Ioni -E "pdf[-_ ]?tool(kit|ing)"` bucketed by exact
+#: matched text -- see the Implementation Log for the verbatim count per
+#: member. A fourteenth member appearing anywhere is a NINTH-spelling-shaped
+#: failure (the assertion's name predates PDF-57 and still applies); one of
+#: these thirteen occurring nowhere is a "vanished" failure.
 EXPECTED_SPELLINGS: Final[frozenset[str]] = frozenset(
     {
         SPELL_UNDERSCORE,
+        SPELL_UNDERSCORE_NEW,
         SPELL_BARE,
+        SPELL_BARE_NEW,
         SPELL_ENV,
+        SPELL_ENV_NEW,
         SPELL_CLASS,
+        SPELL_CLASS_NEW,
         SPELL_HYPHEN,
+        SPELL_HYPHEN_NEW,
         SPELL_NOUN_LOW,
         SPELL_NOUN_UP,
         SPELL_NOUN_MIXED,
     }
 )
-assert len(EXPECTED_SPELLINGS) == 8, "the eight assembled fragments collided"
+assert len(EXPECTED_SPELLINGS) == 13, "the thirteen assembled fragments collided"
 
 #: The residue dot-prefix, assembled for the same reason -- it is a
 #: substring of SPELL_BARE and would self-match if spelled whole.
@@ -114,7 +173,7 @@ def _census() -> tuple[dict[str, list[str]], int]:
     matched spelling. Returns (buckets, live total). `-Ion`, never `-Ioc`
     (AC4, X-420) -- the aliased shell `grep` is never used, only `git grep`
     or an absolute-path binary."""
-    proc = _git("grep", "-Ioni", "-E", "pdf[-_ ]?toolkit")
+    proc = _git("grep", "--untracked", "-Ioni", "-E", "pdf[-_ ]?tool(kit|ing)")
     if proc.returncode not in (0, 1):
         pytest.fail(f"git grep failed rc={proc.returncode}: {proc.stderr.strip()}")
     buckets: dict[str, list[str]] = collections.defaultdict(list)
@@ -138,7 +197,7 @@ def _count(spelling: str, *, scope: str | None = None, exclude: str | None = Non
     substring search, not the `pdf[-_ ]?toolkit` family regex -- this is how
     the per-spelling remainder censuses below are taken, matching AC10's own
     recipe shape."""
-    args = ["grep", "-IFon", "--", spelling]  # no `-i`: exact case, the buckets are case-disjoint
+    args = ["grep", "--untracked", "-IFon", "--", spelling]  # no `-i`: exact case, buckets disjoint
     if scope is not None or exclude is not None:
         args += ["--", scope or "."]
         if exclude is not None:
@@ -183,21 +242,25 @@ def _assert_reconciliation(buckets: dict[str, list[str]], total: int) -> None:
     )
 
 
-def test_the_eight_spelling_reconciliation_has_no_residual() -> None:
-    """AC1. A single census over the whole tree, bucketed by EXACT matched
-    spelling, sums to the live total with zero residual, and the set of
-    observed spellings is exactly the eight of E1 -- never fewer, never
-    more."""
+def test_the_thirteen_spelling_reconciliation_has_no_residual() -> None:
+    """AC1/PDF-57 D5. A single census over the whole tree, bucketed by EXACT
+    matched spelling, sums to the live total with zero residual, and the set
+    of observed spellings is exactly the thirteen of E1/E10 (both eras) --
+    never fewer, never more. Renamed from `..._eight_spelling_...` -- PDF-57
+    widens the family this reconciliation polices; see the module docstring."""
     buckets, total = _census()
     _assert_reconciliation(buckets, total)
 
 
-def test_a_ninth_spelling_is_named_not_skipped() -> None:
-    """AC1's first RED. A synthetic ninth spelling (assembled the same way
-    the real eight are, matching the operator's own suggested plant) fails
-    the reconciliation, naming the spelling and its file:line -- never a
-    silent skip. Driven on a COPY of the real census, not a scratch file
-    left in the repository (HC-4)."""
+def test_an_unexpected_spelling_is_named_not_skipped() -> None:
+    """AC1's first RED. A synthetic spelling outside the expected thirteen
+    (assembled the same way the real ones are, matching the operator's own
+    suggested plant) fails the reconciliation, naming the spelling and its
+    file:line -- never a silent skip. Driven on a COPY of the real census,
+    not a scratch file left in the repository (HC-4). Renamed from
+    `test_a_ninth_spelling_...` -- the plant is no longer the ninth spelling
+    against a widened family of thirteen, but the failure message's own
+    "NINTH (or later)" wording already covers that (unchanged, below)."""
     buckets, total = _census()
     planted = dict(buckets)
     ninth = _CAP + "_" + _STEM_CAP  # assembled: the operator's own example plant
@@ -425,17 +488,29 @@ def test_reverting_one_import_grows_its_remainder_bucket_by_one() -> None:
 #: redden on this spec's own commit. The four floors below record what
 #: this spec's own entry legitimately added; a value BELOW its floor is a
 #: rewritten landed entry, which changelog.md's own third rule forbids.
-FROZEN_ENV_COUNT: Final[int] = 146
-#: X-717 -- bumped 116 -> 117. PDF-54's kind-independence assertion imports
-#: the base exception class to walk its subclass tree; every other
-#: reference was minimized away (aliased on import, reworded elsewhere), and
-#: the import statement is the irreducible residue -- the 38th instance of
-#: an already-sanctioned pattern 37 of this figure's own occurrences already
-#: are (`tests/` importing/annotating against the base class for a
-#: type-level need), not a new kind of occurrence. SHORT-LIVED BY DESIGN:
-#: `PDF-57` retires this spelling entirely and rewrites this census, so this
-#: figure does not survive that item.
-FROZEN_CLASS_COUNT: Final[int] = 117
+#:
+#: PDF-57 D4 -- INVERTED, not merely renumbered. `PDF-48` froze this figure
+#: at 146 (the live, moving population, outside `changelog.md`); `PDF-57`
+#: retires the spelling entirely, so what survives outside `changelog.md`
+#: is now ONLY the recorded-audit-text carrier this item never touches
+#: (`tests/acceptance/`, D6/Scope>In row 4) -- re-derived at this item's own
+#: HEAD via `_count(SPELL_ENV, scope=".", exclude="changelog.md")`, itemized
+#: per path in the Implementation Log (never spelled literally in a comment
+#: here -- doing so would self-match this module's own live census, exactly
+#: the hazard the module docstring's "WHY THIS FILE NEVER SPELLS" warns
+#: about). A value BELOW this means a frozen `tests/acceptance/` audit file
+#: was swept; a value ABOVE it means the old prefix drifted back into the
+#: live tree post-rename.
+FROZEN_ENV_COUNT: Final[int] = 18
+#: PDF-57 D4 -- INVERTED. `PDF-48`/X-717 froze this figure at 117 (bumped
+#: from 116 for `PDF-54`'s own import, "SHORT-LIVED BY DESIGN: PDF-57
+#: retires this spelling entirely and rewrites this census" -- that
+#: retirement is THIS commit). What survives outside `changelog.md` is now
+#: only the recorded-audit-text carrier (`tests/acceptance/`), re-derived at
+#: this item's own HEAD via `_count(SPELL_CLASS, scope=".",
+#: exclude="changelog.md")`, itemized per path in the Implementation Log
+#: (never spelled literally in a comment -- same self-match hazard as above).
+FROZEN_CLASS_COUNT: Final[int] = 4
 FROZEN_RESIDUE_COUNT: Final[int] = 30  # the dot-prefix (29) + its scratch sibling (1)
 FROZEN_NOUN_COUNT: Final[int] = 5  # 2 + 2 + 1, the three common-noun spellings summed
 CHANGELOG_ENV_FLOOR: Final[int] = 14
@@ -444,22 +519,45 @@ CHANGELOG_RESIDUE_FLOOR: Final[int] = 3
 CHANGELOG_NOUN_FLOOR: Final[int] = 1
 
 
-def test_the_environment_variable_population_is_byte_unchanged() -> None:
-    """AC26. The frozen environment-variable-cased prefix -- a documented
-    secret-input path and a `.github/gate-parity.toml` guard both key on
-    this literal (D6a). Frozen, not merely unswept, OUTSIDE `changelog.md`:
-    this is a COUNT check, independent of `test_brand_surfaces.py`'s
-    classifier."""
+def test_the_environment_variable_population_has_shrunk_to_its_frozen_remainder() -> None:
+    """AC26/PDF-57 D4 -- INVERTED from `test_..._is_byte_unchanged`. Before
+    this item the environment-variable-cased prefix was itself the frozen,
+    live population (146, outside `changelog.md`); after it, the prefix is
+    RETIRED and only survives inside its enumerated, recorded-audit-text
+    carrier (`tests/acceptance/`). The claim this test now makes is the
+    opposite of what its PDF-48 predecessor made, which is the point (D4):
+    an arm whose NAME still said "byte unchanged" while asserting a
+    population moved would be the exact classifier-annotation defect PDF-48
+    E2 found in PDF-33's own shipped module.
+
+    The NEW prefix (`SPELL_ENV_NEW`) is asserted PRESENT, never pinned to an
+    exact count: it is now a live, moving population (the four env vars
+    reachable from `src/` plus the twelve that are not), and pinning it here
+    would make this module red on the next ordinary spec that touches one of
+    those sixteen names -- exactly `PDF-31`'s AC6/AC14/AC20 zero-phrasing
+    failure, adopted onto a fresh population instead of a stale one (D5.4)."""
     assert _count(SPELL_ENV, scope=".", exclude="changelog.md") == FROZEN_ENV_COUNT
     assert _count(SPELL_ENV, scope="changelog.md") >= CHANGELOG_ENV_FLOOR
+    live_new = _count(SPELL_ENV_NEW, scope=".", exclude="changelog.md")
+    assert live_new > 0, (
+        "the new environment-variable-cased prefix has ZERO live occurrences -- "
+        "the rename this item performs has vanished from the tree entirely"
+    )
 
 
-def test_the_exception_class_population_is_byte_unchanged() -> None:
-    """AC26. The public base exception and its Astro-side leftover logo
-    identifier (D6b). A source-breaking rename belongs to its own item and
-    its own deprecation window, not this one."""
+def test_the_exception_class_population_has_shrunk_to_its_frozen_remainder() -> None:
+    """AC26/PDF-57 D4 -- INVERTED from `test_..._is_byte_unchanged`. The
+    public base exception and its Astro-side logo identifier are RETIRED by
+    this item; what survives outside `changelog.md` is only the
+    recorded-audit-text carrier. See the docstring above for why the NEW
+    class-cased spelling is asserted present rather than pinned."""
     assert _count(SPELL_CLASS, scope=".", exclude="changelog.md") == FROZEN_CLASS_COUNT
     assert _count(SPELL_CLASS, scope="changelog.md") >= CHANGELOG_CLASS_FLOOR
+    live_new = _count(SPELL_CLASS_NEW, scope=".", exclude="changelog.md")
+    assert live_new > 0, (
+        "the new exception-class-cased spelling has ZERO live occurrences -- "
+        "the rename this item performs has vanished from the tree entirely"
+    )
 
 
 def test_the_residue_prefix_population_is_byte_unchanged() -> None:
@@ -496,17 +594,24 @@ def test_the_common_noun_population_is_byte_unchanged() -> None:
 
 def test_sweeping_a_frozen_population_shrinks_its_bucket_and_is_caught() -> None:
     """AC26's RED, driven through AC1's reconciliation rather than a
-    file-content plant: if a frozen population were swept, its bucket in the
-    live census would shrink below its registered count, and this fails
-    naming which population and by how much -- the reconciliation catches
-    it independently of `test_brand_surfaces.py`'s classifier."""
+    file-content plant, independently of `test_brand_surfaces.py`'s
+    classifier.
+
+    PDF-57 D4 -- the DIRECTION REVERSES, and this docstring says so rather
+    than silently keeping the old claim. Before this item a value BELOW
+    `FROZEN_ENV_COUNT` meant a sweep had reached the (then-live) frozen
+    population; after this item's own rename, the old spelling is RETIRED,
+    so the only way a value can move at all is for the old name to drift
+    BACK into the live tree above its enumerated `tests/acceptance/`
+    remainder -- a value below it means one of those recorded-audit-text
+    files was itself swept, which is equally a violation."""
     buckets, _total = _census()
     live_env = len(
         [loc for loc in buckets.get(SPELL_ENV, []) if not loc.startswith("changelog.md:")]
     )
     assert live_env == FROZEN_ENV_COUNT, (
         f"the environment-variable-cased population outside changelog.md is "
-        f"{live_env}, expected exactly {FROZEN_ENV_COUNT} -- a value BELOW this is "
-        "a sweep that reached a frozen population; a value ABOVE it is scope creep "
-        "onto a surface this item explicitly freezes (D6a)"
+        f"{live_env}, expected exactly {FROZEN_ENV_COUNT} -- a value ABOVE this is "
+        "the old, retired prefix drifting back into the live tree; a value BELOW it "
+        "is a frozen tests/acceptance/ recorded-audit-text file that was itself swept"
     )

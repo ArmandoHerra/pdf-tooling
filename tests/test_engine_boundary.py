@@ -66,7 +66,7 @@ ADAPTER: Final[Path] = (
 ENGINE_ROOT: Final[str] = "pikepdf"
 
 #: A handler naming any of these converts a ``pikepdf.PdfError`` into a
-#: ``PdfToolkitError`` (or is broad enough to). ``pikepdf.PdfError``'s own base
+#: ``PdfToolingError`` (or is broad enough to). ``pikepdf.PdfError``'s own base
 #: is ``Exception``, so a bare ``except:`` and ``except Exception`` are belts
 #: too — they are listed for completeness, NOT because either is acceptable
 #: style here; every real belt in this adapter names ``pikepdf.PdfError``.
@@ -213,7 +213,7 @@ def test_ac2_the_engine_boundary_has_zero_residue(
     """AC2: residue ZERO.
 
     Every ``pikepdf``-rooted call in this adapter executes inside a handler
-    that converts ``pikepdf.PdfError`` into a ``PdfToolkitError``. Red at
+    that converts ``pikepdf.PdfError`` into a ``PdfToolingError``. Red at
     `ae723bc` with a residue of 4.
     """
     leaking = residue(engine_calls)

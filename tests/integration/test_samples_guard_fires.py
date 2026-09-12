@@ -31,7 +31,7 @@ import os
 from pathlib import Path
 
 def test_writes_to_an_original():
-    root = Path(os.environ["PDF_TOOLKIT_SAMPLES_DIR"])
+    root = Path(os.environ["PDF_TOOLING_SAMPLES_DIR"])
     (root / "original.txt").write_text("mutated by a planted violation")
 """
 
@@ -53,7 +53,7 @@ def _run_inner_pytest(
     project_dir: Path, originals_dir: Path, *extra_args: str
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
-    env["PDF_TOOLKIT_SAMPLES_DIR"] = str(originals_dir)
+    env["PDF_TOOLING_SAMPLES_DIR"] = str(originals_dir)
     env["PYTHONPATH"] = str(REAL_TESTS_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.run(
         [

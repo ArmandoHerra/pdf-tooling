@@ -46,7 +46,7 @@ from pdf_tooling.errors import (
     NoInputError,
     OutputCollisionError,
     OutputEscapesDirError,
-    PdfToolkitError,
+    PdfToolingError,
     SourceUnreadableError,
     TargetExistsError,
     UsageError,
@@ -500,7 +500,7 @@ def source_read_error(
     *,
     as_written: Path | str | None = None,
     noun: str | None = None,
-) -> PdfToolkitError:
+) -> PdfToolingError:
     """Map an ``OSError`` raised while READING *path* onto a coded error (§D3).
 
     The belt to :func:`classify_operand`'s braces. That function's ``os.access``
@@ -547,7 +547,7 @@ def metadata_probe_error(
     error: OSError,
     *,
     as_written: Path | str | None = None,
-) -> PdfToolkitError:
+) -> PdfToolingError:
     """Map an ``OSError`` raised while probing *path*'s METADATA onto a coded error.
 
     **Deliberately NOT :func:`source_read_error`, and the separation is the

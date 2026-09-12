@@ -181,7 +181,7 @@ Structure-level compression plus optional image downsampling is the ceiling of a
 |---|---|---|
 | A file | `--password-file PATH`, `--owner-password-file PATH`, `--user-password-file PATH` | The first line only. A single trailing newline is stripped; no other whitespace is, because a password may legitimately end in a space. |
 | Standard input | the same flags with `-` | One line. Only one slot may read from stdin per run. |
-| The environment | `PDF_TOOLKIT_PASSWORD`, `PDF_TOOLKIT_OWNER_PASSWORD` | Consulted only when no flag was given for that slot. |
+| The environment | `PDF_TOOLING_PASSWORD`, `PDF_TOOLING_OWNER_PASSWORD` | Consulted only when no flag was given for that slot. |
 | A prompt | none | Only when stdin is a terminal. Never on a pipe, where it would hang. |
 
 With none of those available the run exits **6** and writes nothing.
@@ -215,7 +215,7 @@ The tokens spelled identically on both surfaces need no translation; the ones th
 
 ### `--password-file` is global: honoured or refused, never silently ignored
 
-`--password-file` (and its resolution siblings — the `PDF_TOOLKIT_PASSWORD` environment variable and the interactive prompt) is declared on **every** verb, because any of them may meet a password-protected input — including the report-only ones. A verb that can open an encrypted document uses the resolved password there, on the SAME first-hit-wins chain `encrypt`/`decrypt` already document above; a verb that structurally cannot use one (it takes no document operand, or it already declares its own dedicated password flag) refuses it up front, at exit **2**, naming the flag rather than accepting it and doing nothing — the same "declared but silently inert" shape this tool refuses for every other global flag (see the safety contract above). There is no hand-maintained list of which verbs fall into which group here: run the verb's own `--help` to see the flag declared, or try it — a verb that cannot honour it says so immediately, before any document is opened.
+`--password-file` (and its resolution siblings — the `PDF_TOOLING_PASSWORD` environment variable and the interactive prompt) is declared on **every** verb, because any of them may meet a password-protected input — including the report-only ones. A verb that can open an encrypted document uses the resolved password there, on the SAME first-hit-wins chain `encrypt`/`decrypt` already document above; a verb that structurally cannot use one (it takes no document operand, or it already declares its own dedicated password flag) refuses it up front, at exit **2**, naming the flag rather than accepting it and doing nothing — the same "declared but silently inert" shape this tool refuses for every other global flag (see the safety contract above). There is no hand-maintained list of which verbs fall into which group here: run the verb's own `--help` to see the flag declared, or try it — a verb that cannot honour it says so immediately, before any document is opened.
 
 `decrypt` round-trips the **page tree** byte for byte: the decoded content streams, the page dictionaries and every embedded image's raw bytes come back identical. The whole file does not, and nothing here claims it does — `/ID`, `/Encrypt`, the trailer, the cross-reference table and object numbering all legitimately change on any resave.
 

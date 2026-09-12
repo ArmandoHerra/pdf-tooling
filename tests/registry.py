@@ -960,7 +960,7 @@ def _stamp_invocation(corpus: object, tmp_path: Path) -> list[str]:
 # demand (its module docstring: "the engine is demanded lazily") is NEVER
 # reached -- the run succeeds via the ordinary append-through path with zero
 # spawns, regardless of whether tesseract is installed. Verified: with
-# PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice, `ocr`'s own C9-C16 rows
+# PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice, `ocr`'s own C9-C16 rows
 # are unaffected by the hide.
 #
 # `convert` has no equivalent trick -- its whole job IS the conversion, so its

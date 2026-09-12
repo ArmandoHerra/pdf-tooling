@@ -84,7 +84,7 @@ class PasswordSource:
         slot: ``"owner"`` | ``"user"`` | ``"password"``. Names the plan key
             this slot renders under, so a caller never has to build one.
         source: The safe-to-log label — ``"file:/home/u/pw.txt"``,
-            ``"stdin"``, ``"env:PDF_TOOLKIT_PASSWORD"``, ``"prompt"`` — or
+            ``"stdin"``, ``"env:PDF_TOOLING_PASSWORD"``, ``"prompt"`` — or
             ``None`` when *nothing* could supply a password. ``None`` is
             decided from existence alone: no file was read, no variable's
             value was read, nothing was prompted.

@@ -1,6 +1,6 @@
 """The error hierarchy — one class per non-zero exit code.
 
-Every error the tool raises deliberately is a :class:`PdfToolkitError`. The CLI
+Every error the tool raises deliberately is a :class:`PdfToolingError`. The CLI
 has exactly one handler for them; anything else reaching the top level is a bug
 and prints a traceback.
 
@@ -36,7 +36,7 @@ __all__ = [
     "OutputCollisionError",
     "OutputEscapesDirError",
     "PageRangeError",
-    "PdfToolkitError",
+    "PdfToolingError",
     "RefusedError",
     "SourceUnreadableError",
     "TargetExistsError",
@@ -91,7 +91,7 @@ def normalize_object_reprs(message: str) -> str:
     return _OBJECT_REPR_RE.sub(r"<\1>", message)
 
 
-class PdfToolkitError(Exception):
+class PdfToolingError(Exception):
     """Base of every deliberate error.
 
     Args:
@@ -162,14 +162,14 @@ class PdfToolkitError(Exception):
         }
 
 
-class FailureError(PdfToolkitError):
+class FailureError(PdfToolingError):
     """Exit 1 — the operation ran and failed."""
 
     exit_code: ClassVar[int] = FAILURE
     kind: ClassVar[str] = "failure"
 
 
-class UsageError(PdfToolkitError):
+class UsageError(PdfToolingError):
     """Exit 2 — bad invocation.
 
     Deliberately *our* class and never Click's: ``UsageError`` must be
@@ -209,7 +209,7 @@ class PageRangeError(UsageError):
         self.reason = reason
 
 
-class EngineMissingError(PdfToolkitError):
+class EngineMissingError(PdfToolingError):
     """Exit 3 — a required engine or binary is unavailable.
 
     The message must always carry the install hint.
@@ -219,21 +219,21 @@ class EngineMissingError(PdfToolkitError):
     kind: ClassVar[str] = "engine_missing"
 
 
-class NoInputError(PdfToolkitError):
+class NoInputError(PdfToolingError):
     """Exit 4 — valid invocation, nothing to act on."""
 
     exit_code: ClassVar[int] = NO_INPUT
     kind: ClassVar[str] = "no_input"
 
 
-class RefusedError(PdfToolkitError):
+class RefusedError(PdfToolingError):
     """Exit 5 — a safety gate declined."""
 
     exit_code: ClassVar[int] = REFUSED
     kind: ClassVar[str] = "refused"
 
 
-class AuthError(PdfToolkitError):
+class AuthError(PdfToolingError):
     """Exit 6 — password required, incorrect, or of the wrong kind."""
 
     exit_code: ClassVar[int] = AUTH

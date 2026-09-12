@@ -116,7 +116,7 @@ correctly reports `version`/`doctor`/`info` as non-mutating today. See
 ## The `samples` fixture — `PLAN.md` §10.1
 
 ```bash
-export PDF_TOOLKIT_SAMPLES_DIR=/path/to/your/samples
+export PDF_TOOLING_SAMPLES_DIR=/path/to/your/samples
 make samples-gate
 ```
 
@@ -133,7 +133,7 @@ The operator's own real-document corpus, entirely outside the repository and
 highest-consequence part of this test suite:
 
 1. **Originals are never an operand.** No verb, test, or probe receives a
-   path under `$PDF_TOOLKIT_SAMPLES_DIR`. The `samples` fixture exposes
+   path under `$PDF_TOOLING_SAMPLES_DIR`. The `samples` fixture exposes
    exactly `available`, `names()`, `copy(name)`, `copy_tree(name)` — **no
    member returns a path under the originals directory.**
 2. **Copy-on-use, per test.** `samples.copy(name)` / `samples.copy_tree(name)`
@@ -151,7 +151,7 @@ highest-consequence part of this test suite:
    this file, not in `changelog.md`, not in `testdata/README.md`, not in a
    spec's Implementation Log.
 5. **Visible skip when absent.** `@pytest.mark.samples` tests skip with a
-   reason (`"PDF_TOOLKIT_SAMPLES_DIR not set — real-document arm skipped
+   reason (`"PDF_TOOLING_SAMPLES_DIR not set — real-document arm skipped
    (PLAN.md §10.1 rule 5)"`) both via the marker (collection-time) and via the
    fixture itself (`samples.copy()`/`copy_tree()`, so an unmarked test that
    reaches the fixture still skips instead of erroring). CI never sets the
@@ -175,7 +175,7 @@ module docstring for the rules every arm follows.
 
 ```bash
 uv run pytest --markers            # the registered list
-PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest -rs -q
+PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest -rs -q
 ```
 
 `@pytest.mark.requires("tesseract")` (or `"soffice"`, or a bare port name
@@ -183,7 +183,7 @@ like `"OcrEngine"`) resolves through the **same** `ports.resolve()` the CLI
 uses, never an independent `shutil.which`. A missing engine yields a visible
 `pytest.skip`, never a pass and never a silent xfail.
 
-`PDF_TOOLKIT_TEST_HIDE_ENGINES` builds a **PATH-shadowing symlink directory**
+`PDF_TOOLING_TEST_HIDE_ENGINES` builds a **PATH-shadowing symlink directory**
 under `$TMPDIR` — every executable reachable on the real `PATH` is symlinked
 into it except the named ones, and `PATH` is repointed there for the process.
 **No system binary is ever renamed, moved, or `chmod`-ed.** Applied before
@@ -193,7 +193,7 @@ skip decision itself sees the hidden PATH.
 | Marker | Selects |
 |---|---|
 | `e2e` | Tests that run the installed console script as a subprocess. Slower, and the only ones that measure real process startup. |
-| `samples` | The `PLAN.md` §10.1 real-document arm. Skips visibly when `$PDF_TOOLKIT_SAMPLES_DIR` is unset. |
+| `samples` | The `PLAN.md` §10.1 real-document arm. Skips visibly when `$PDF_TOOLING_SAMPLES_DIR` is unset. |
 | `requires(engine)` | Skips visibly when the named engine/port does not resolve via `ports.resolve()`. |
 
 ### The shim directory, its teardown, and the residue that predates it
@@ -223,7 +223,7 @@ and the reaper has no way to tell. Directories left by runs that predate the
 teardown are **not** removed by any test, fixture, gate, or `make clean`: they
 are recorded evidence, and the operator reaps them deliberately.
 
-`PDF_TOOLKIT_TEST_KEEP_SHIM=1` skips the reclaim, restoring the old leaking
+`PDF_TOOLING_TEST_KEEP_SHIM=1` skips the reclaim, restoring the old leaking
 behaviour **on purpose**. It is the shipped red control behind
 `tests/test_engine_hiding_shim.py`'s delta arms — a run that leaves nothing
 behind proves nothing unless a run that keeps its directories can be observed
@@ -292,7 +292,7 @@ carried forward from a prior run, and asserted by
 The sanctioned regeneration path, once a decision authorises it:
 
 ```bash
-PDF_TOOLKIT_ENVELOPE_REGISTER_REGENERATE=1 \
+PDF_TOOLING_ENVELOPE_REGISTER_REGENERATE=1 \
   uv run pytest tests/test_envelope_contract.py -k register -p no:randomly
 ```
 
@@ -325,12 +325,12 @@ the samples guard above.
 ## Expected skip counts
 
 Measured against the landed suite at PDF-06's own commit (`uv run pytest -rs
--q`), on Linux, with `$PDF_TOOLKIT_SAMPLES_DIR` unset (CI's own posture):
+-q`), on Linux, with `$PDF_TOOLING_SAMPLES_DIR` unset (CI's own posture):
 
 | Configuration | Total skips | What they are |
 |---|---|---|
 | **Engines present** (`tesseract` + `soffice` on `PATH`) | non-zero, but **zero are engine-gated** — `scripts/assert_skips.py --expect-zero` asserts exactly that. The non-zero remainder is the pre-existing safety-spine skips (see below) plus the `samples`-marked arms (unset). All five parametrize sets are non-empty in `test_cli_contract.py` — `GROUPS`, `MUTATING`, `DESTRUCTIVE`, `PRODUCING` and `OUTPUT_CONSUMING_MUTATING` — and each is derived from the live registry, so none of them can silently empty out; this sentence previously named four of them (`C4`, `C9`, `C10`/`C11`/`C13`) as empty, which was stale in whole rather than in part. **Every remaining skip is conditional.** PDF-15 originally shipped one that was not — `test_ac7_rotated_page_returns_the_expected_text` carried an unconditional `@pytest.mark.skip` because `adapters/pdfium_raster.py` double-applied `/Rotate`; **B-094 fixed the adapter and the test now runs**, gated only by the ordinary `requires("tesseract")` marker. |
-| **Engines hidden** (`PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice`) | the engines-present count **plus at least 20 engine-gated skips** — `tests/test_doctor.py`'s existing arms (PDF-05) and `tests/test_testdata.py`'s tesseract-recovery arm (PDF-06, 7 together) **plus PDF-15's own 20** (15 in `tests/integration/test_ocr.py`, 5 in `tests/integration/test_office.py`). The documented command is `PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest tests/integration/test_ocr.py tests/integration/test_office.py -rs -q` and it reports `11 passed, 20 skipped` — **all 20 engine-gated**, none unconditional, since B-094 unskipped AC7 and added three rotated-page arms beside it, and PDF-38 added its own engine-free `ocr` filesystem-vs-auth precedence arms, which pass here rather than skipping. **`make docs-gate` now re-runs that command and compares this figure**, which is B-099's instruction — *re-run it, do not copy it* — given a carrier at last. It needed one: B-099 measured `18` and the figure was `20` when PDF-30 re-ran it, the `test_ocr.py` half having drifted 13 → 15 across the intervening waves with nothing able to observe it. `scripts/assert_skips.py` (no `--expect-zero`) asserts this count is **non-zero**; a zero here is a regression, not vacuity, as of PDF-06. |
+| **Engines hidden** (`PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice`) | the engines-present count **plus at least 20 engine-gated skips** — `tests/test_doctor.py`'s existing arms (PDF-05) and `tests/test_testdata.py`'s tesseract-recovery arm (PDF-06, 7 together) **plus PDF-15's own 20** (15 in `tests/integration/test_ocr.py`, 5 in `tests/integration/test_office.py`). The documented command is `PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest tests/integration/test_ocr.py tests/integration/test_office.py -rs -q` and it reports `11 passed, 20 skipped` — **all 20 engine-gated**, none unconditional, since B-094 unskipped AC7 and added three rotated-page arms beside it, and PDF-38 added its own engine-free `ocr` filesystem-vs-auth precedence arms, which pass here rather than skipping. **`make docs-gate` now re-runs that command and compares this figure**, which is B-099's instruction — *re-run it, do not copy it* — given a carrier at last. It needed one: B-099 measured `18` and the figure was `20` when PDF-30 re-ran it, the `test_ocr.py` half having drifted 13 → 15 across the intervening waves with nothing able to observe it. `scripts/assert_skips.py` (no `--expect-zero`) asserts this count is **non-zero**; a zero here is a regression, not vacuity, as of PDF-06. |
 
 Both counts are read with `-rs` (`pytest`'s own reason-printing flag) — a
 skip is information, not noise: it says which guarantee this particular run
@@ -358,7 +358,7 @@ that read the maintainer's planning tree:
 
 | Arm | What it compares |
 |---|---|
-| engines-hidden | runs the documented `PDF_TOOLKIT_TEST_HIDE_ENGINES` command **verbatim** and compares the `N passed, M skipped` figure this file quotes |
+| engines-hidden | runs the documented `PDF_TOOLING_TEST_HIDE_ENGINES` command **verbatim** and compares the `N passed, M skipped` figure this file quotes |
 | derived figures | `tests/test_docs_antirot.py` — every registered claim against its derivation |
 | changelog history | `tests/test_changelog_history.py` — no-loss, prepend position, entry owed, forward format |
 | docstring pointers | `tests/test_docstring_pointers.py` — every `tests/…py` path named under `src/` resolves |
@@ -370,7 +370,7 @@ history arms cannot run there. **Where an arm cannot run it SKIPS with a reason
 and the target says so — a skipped arm is never reported as agreement**, and the
 skip classes it can report — `planning directory absent` and `shallow clone` —
 are named in `scripts/assert_skips.py`'s own verdict rather than absorbed into
-its remainder. Point `PDF_TOOLKIT_PLANNING_DIR` at the planning tree to run the
+its remainder. Point `PDF_TOOLING_PLANNING_DIR` at the planning tree to run the
 arms that need it. Its real enforcement is therefore local, this target, and the
 `qa-sentinel`.
 
@@ -410,8 +410,8 @@ here so that a red — or a skip — can be read without opening the test.
 
 | Variable | Meaning |
 |---|---|
-| `PDF_TOOLKIT_FAULT_POINT` | The point to park at: `after_temp_create`, `after_fsync` or `after_backup`. |
-| `PDF_TOOLKIT_FAULT_RENDEZVOUS` | `"<ready_fd>:<release_fd>"` — two pipe descriptors the test inherits to the child. |
+| `PDF_TOOLING_FAULT_POINT` | The point to park at: `after_temp_create`, `after_fsync` or `after_backup`. |
+| `PDF_TOOLING_FAULT_RENDEZVOUS` | `"<ready_fd>:<release_fd>"` — two pipe descriptors the test inherits to the child. |
 
 The child announces its arrival on the ready descriptor and then blocks reading the release descriptor, so when the parent delivers signal 9 the process is at that exact point. No `sleep`, no polling. With neither variable set, `safety/_faults.checkpoint()` is one environment lookup and a return: no descriptor, no filesystem access, and no branch a user can reach. That inertness is itself asserted, under the purity snapshot.
 
@@ -423,7 +423,7 @@ There is deliberately no injection point "during the replace". `os.replace` is t
 
 | Rung | Candidate | Note |
 |---|---|---|
-| `1 ($PDF_TOOLKIT_TEST_XDEV_DIR)` | the operator's explicit override | |
+| `1 ($PDF_TOOLING_TEST_XDEV_DIR)` | the operator's explicit override | |
 | `2 (/dev/shm)` | a tmpfs present on effectively every Linux, including GitHub's `ubuntu-*` runners | the rung this host resolves at |
 | `3 ($HOME)` | | |
 | `4 (/var/tmp)` | | |
@@ -438,7 +438,7 @@ resolved at — `[PDF-04] second filesystem from ladder rung 2 (/dev/shm): /dev/
 would not recognise the message they were handed.
 
 ```bash
-PDF_TOOLKIT_TEST_XDEV_DIR=/dev/shm uv run pytest tests/integration/test_cross_filesystem.py -v
+PDF_TOOLING_TEST_XDEV_DIR=/dev/shm uv run pytest tests/integration/test_cross_filesystem.py -v
 ```
 
 **If no rung succeeds, the behaviour is asymmetric on purpose.** On Linux the arm *fails*, naming the ladder — a Linux run that quietly skipped it would be a green run that proved nothing, which is the failure mode this whole document exists to prevent. On any other platform it skips, with that reason printed.
@@ -506,17 +506,17 @@ configuration change can ever make it report otherwise.
 
 ```bash
 uv run pytest tests/test_pypi_provenance.py -rs -q
-PDF_TOOLKIT_PYPI_PROVENANCE=1 uv run pytest tests/test_pypi_provenance.py -q
+PDF_TOOLING_PYPI_PROVENANCE=1 uv run pytest tests/test_pypi_provenance.py -q
 ```
 
-| Context | `PDF_TOOLKIT_PYPI_PROVENANCE` | If pypi.org is unreachable |
+| Context | `PDF_TOOLING_PYPI_PROVENANCE` | If pypi.org is unreachable |
 |---|---|---|
 | `make test`, `make ci`, PR CI | unset | **skips, visibly and by name** — the default suite stays hermetic and makes no network call at all |
 | an operator or the `qa-sentinel` re-running by hand | `=1` | **FAILS**, naming the URL and the transport error |
 
 **The live arm never skips for a network reason.** It skips only for that named
 opt-out, and its reason string is
-`provenance endpoint check disabled (set PDF_TOOLKIT_PYPI_PROVENANCE=1)` — a
+`provenance endpoint check disabled (set PDF_TOOLING_PYPI_PROVENANCE=1)` — a
 counted class in `scripts/assert_skips.py`'s census rather than an anonymous
 remainder, and a contract that module and `tests/test_assert_skips.py` assert
 against each other. Once it runs, every failure —
@@ -526,7 +526,7 @@ a suite that stopped asserting and did not say so, so no code path here turns a
 network error into a skip, and an AST walk over the module's own source asserts
 that rather than leaving it to a docstring.
 
-`PDF_TOOLKIT_PYPI_BASE_URL` points the arm somewhere other than pypi.org. Its
+`PDF_TOOLING_PYPI_BASE_URL` points the arm somewhere other than pypi.org. Its
 purpose is that red: set it to a closed port with the opt-in on, and the arm
 must **fail** rather than skip.
 

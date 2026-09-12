@@ -1573,7 +1573,7 @@ LOAD_SENSING_NON_CASES: Final = (
     "importtime",
     "pdf_tooling",
     "PYTHONPATH",
-    "PDF_TOOLKIT_SAMPLES_DIR",
+    "PDF_TOOLING_SAMPLES_DIR",
     "no console script at {path}; run `uv sync`.",
 )
 

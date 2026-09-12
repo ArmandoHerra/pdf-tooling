@@ -219,7 +219,7 @@ def test_ac15_corrupt_docx_exits_1_even_if_soffice_exits_0(tmp_path: Path) -> No
     (mirroring ``compress_run``'s own already-shipped per-item failure
     posture -- no per-item try/except, PLAN §5.4's "record and continue" is
     not this verb's contract either), so only the CLI's own one
-    ``except PdfToolkitError`` handler renders the exit code and message an
+    ``except PdfToolingError`` handler renders the exit code and message an
     in-process call to ``convert_run`` would never see."""
     corrupt = tmp_path / "corrupt.docx"
     corrupt.write_bytes(b"not a real docx file, just random bytes \x00\x01\x02" * 20)

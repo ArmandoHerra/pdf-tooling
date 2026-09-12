@@ -65,7 +65,7 @@ import time
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Final
 
-from pdf_tooling.errors import EngineMissingError, NoInputError, PdfToolkitError
+from pdf_tooling.errors import EngineMissingError, NoInputError, PdfToolingError
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult
 from pdf_tooling.ops.batch import BatchLedger, preflight_operands
@@ -238,7 +238,7 @@ def _render_one(
         rendered = adapter.render_page(
             source, page_number, dpi=dpi, width_px=width_px, grayscale=grayscale, password=password
         )
-    except PdfToolkitError as error:
+    except PdfToolingError as error:
         duration_ms = int((time.monotonic() - started) * 1000)
         return ItemResult(
             input=source,
@@ -463,7 +463,7 @@ def _rasterize_planned(
     # Design §D12) and pre-flight checked every target for no-clobber/
     # writability -- BEFORE the first page is rendered, so a planning failure
     # writes nothing. It raised already if refused (the
-    # `except PdfToolkitError: ... raise` inside plan_output_set, since
+    # `except PdfToolingError: ... raise` inside plan_output_set, since
     # policy.dry_run is False here), so plan.refusal is always None below.
     # PDF-37: revealed HERE, in the main process, exactly once per source --
     # never inside a worker, and never kept around longer than building this

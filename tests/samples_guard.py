@@ -1,6 +1,6 @@
 """`PLAN.md` §10.1 rule 3 — the originals-integrity guard.
 
-**The highest-consequence code in this spec** (Design §8). `$PDF_TOOLKIT_SAMPLES_DIR`
+**The highest-consequence code in this spec** (Design §8). `$PDF_TOOLING_SAMPLES_DIR`
 holds the operator's real, partly irreplaceable documents; `PLAN.md` §12 R-16 is
 the risk this module exists to close. At session start it writes a SHA-256 +
 size + mtime manifest of every file in the directory; at session end it
@@ -41,7 +41,7 @@ import pytest
 
 __all__ = ["ManifestEntry", "build_manifest", "diff_manifest"]
 
-_ENV_VAR = "PDF_TOOLKIT_SAMPLES_DIR"
+_ENV_VAR = "PDF_TOOLING_SAMPLES_DIR"
 
 #: (size, mtime_ns, sha256) — see `diff_manifest`'s docstring for why each field
 #: is there.
@@ -136,7 +136,7 @@ def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pyte
     for line in findings:
         terminalreporter.write_line(f"  - {line}")
     terminalreporter.write_line(
-        f"{len(findings)} file(s) under $PDF_TOOLKIT_SAMPLES_DIR changed during this test run. "
+        f"{len(findings)} file(s) under $PDF_TOOLING_SAMPLES_DIR changed during this test run. "
         "This is a defect in the tool or the test that touched it -- never the samples "
         "directory itself (PLAN.md §10.1 rule 3, PLAN.md §12 R-16)."
     )

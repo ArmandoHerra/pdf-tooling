@@ -9,7 +9,7 @@ trivially provable. PDF-04's write-chokepoint AST walk asserts that globally;
 anyway, because *provable* and *proven* are different words.
 
 Framework-free, per L2: no ``typer``, no ``click``, no ``sys.exit``, no
-printing. Errors are raised as :class:`~pdf_tooling.errors.PdfToolkitError`
+printing. Errors are raised as :class:`~pdf_tooling.errors.PdfToolingError`
 subclasses and the CLI maps them to exit codes.
 
 THE EXIT-CODE CONTRACT ANOTHER SPEC DEPENDS ON
@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pdf_tooling.errors import PdfToolkitError, UsageError
+from pdf_tooling.errors import PdfToolingError, UsageError
 from pdf_tooling.models import DocumentInfo
 from pdf_tooling.ops.batch import ITEM_SCOPED_ERRORS, preflight_operands
 from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
@@ -72,7 +72,7 @@ class InspectionOutcome:
 
     path: str
     info: DocumentInfo | None
-    error: PdfToolkitError | None
+    error: PdfToolingError | None
 
     @property
     def ok(self) -> bool:
@@ -203,13 +203,13 @@ def inspect_paths(
     **Only `ops.batch.ITEM_SCOPED_ERRORS` is caught here (PDF-51 D2)** --
     imported, never re-declared, so this guard cannot come to disagree with
     `ops/batch.py`'s own AST-asserted one about what is a per-input verdict.
-    A `PdfToolkitError` outside that tuple -- a `NoInputError`/`UsageError`
+    A `PdfToolingError` outside that tuple -- a `NoInputError`/`UsageError`
     surviving `validate_operands`' pre-flight only via a TOCTOU race, or an
     `EngineMissingError` from `require_linearization()`/`require_structure()`
     -- is run-scoped and is **not** caught here: it propagates, aborts the
     whole batch, and is handled by `cli/main.py`'s one
-    `except PdfToolkitError` -- the run-scoped error envelope, not a demoted
-    row. Anything that is not a `PdfToolkitError` at all is a genuine bug and
+    `except PdfToolingError` -- the run-scoped error envelope, not a demoted
+    row. Anything that is not a `PdfToolingError` at all is a genuine bug and
     is allowed to reach the top level as a traceback, which is a signal rather
     than a UX.
 

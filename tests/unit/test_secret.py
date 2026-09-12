@@ -104,6 +104,6 @@ def test_ac3_a_secret_is_unhashable_so_it_cannot_land_in_a_printable_set() -> No
 
 
 def test_ac3_the_source_label_is_the_one_thing_that_is_safe_to_read() -> None:
-    secret = Secret(PW_SENTINEL, source="env:PDF_TOOLKIT_PASSWORD")
-    assert secret.source == "env:PDF_TOOLKIT_PASSWORD"
+    secret = Secret(PW_SENTINEL, source="env:PDF_TOOLING_PASSWORD")
+    assert secret.source == "env:PDF_TOOLING_PASSWORD"
     assert PW_SENTINEL not in secret.source

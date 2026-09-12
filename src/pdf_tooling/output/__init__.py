@@ -16,7 +16,7 @@ import sys
 from enum import StrEnum
 from typing import Any
 
-from pdf_tooling.errors import PdfToolkitError
+from pdf_tooling.errors import PdfToolingError
 from pdf_tooling.models import OperationResult
 from pdf_tooling.output.json import render_error_json, render_json, render_ndjson
 from pdf_tooling.output.table import render_error_table, render_table
@@ -68,7 +68,7 @@ def emit_result(result: OperationResult, fmt: OutputFormat) -> None:
             print(f"warning: {warning}", file=sys.stderr)
 
 
-def emit_error(error: PdfToolkitError, fmt: OutputFormat) -> None:
+def emit_error(error: PdfToolingError, fmt: OutputFormat) -> None:
     """Write a structured error to whichever stream the format contract names."""
     payload = error.to_dict()
     if fmt is OutputFormat.TABLE:

@@ -113,8 +113,8 @@ def _permissions(source: Path, pw: Path | None = None) -> dict[str, Any]:
 
 def _clean_env(**extra: str) -> dict[str, str]:
     env = dict(os.environ)
-    env.pop("PDF_TOOLKIT_PASSWORD", None)
-    env.pop("PDF_TOOLKIT_OWNER_PASSWORD", None)
+    env.pop("PDF_TOOLING_PASSWORD", None)
+    env.pop("PDF_TOOLING_OWNER_PASSWORD", None)
     env.update(extra)
     return env
 
@@ -696,8 +696,8 @@ def test_ac15_dry_run_is_pure_and_reads_no_password(corpus: Any, tmp_path: Path,
     # opened it would fail; a run that only stat()ed it cannot tell.
     pw.chmod(0o000)
     env, roots = redirected_environment(tmp_path)
-    env["PDF_TOOLKIT_PASSWORD"] = sentinel
-    env["PDF_TOOLKIT_OWNER_PASSWORD"] = sentinel
+    env["PDF_TOOLING_PASSWORD"] = sentinel
+    env["PDF_TOOLING_OWNER_PASSWORD"] = sentinel
     before = snapshot(workspace, *roots)
     try:
         result = _dry(verb, *args, env=env, cwd=workspace)

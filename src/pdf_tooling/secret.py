@@ -57,7 +57,7 @@ class Secret:
         value: The password. ``str`` is encoded UTF-8; ``bytes`` is stored as
             given.
         source: A **safe-to-log** label describing where the value came from —
-            ``"file:/home/u/pw.txt"``, ``"stdin"``, ``"env:PDF_TOOLKIT_PASSWORD"``
+            ``"file:/home/u/pw.txt"``, ``"stdin"``, ``"env:PDF_TOOLING_PASSWORD"``
             or ``"prompt"``. This is the only thing about a secret that is ever
             rendered into a plan, a log record or structured output.
     """

@@ -82,7 +82,7 @@ from typing import Final
 from pdf_tooling.errors import (
     AuthError,
     NoInputError,
-    PdfToolkitError,
+    PdfToolingError,
     RefusedError,
     UsageError,
 )
@@ -179,7 +179,7 @@ class _Prediction:
     names which gate spoke.
     """
 
-    refusal: PdfToolkitError | None
+    refusal: PdfToolingError | None
 
     @property
     def refused(self) -> bool:
@@ -218,8 +218,8 @@ def _plan(
     *,
     target: Path,
     policy: SafetyPolicy,
-    pre_refusal: PdfToolkitError | None,
-    document_refusal: PdfToolkitError | None,
+    pre_refusal: PdfToolingError | None,
+    document_refusal: PdfToolingError | None,
     passwords: Sequence[PasswordSource],
 ) -> _Prediction:
     """The whole exit-code ladder above the engine, in one place and one order.
@@ -255,7 +255,7 @@ def _refusal_result(
     *,
     source: Path,
     target: Path | None,
-    refusal: PdfToolkitError,
+    refusal: PdfToolingError,
     would_exit: int,
     detail: dict[str, object],
 ) -> OperationResult:
@@ -307,7 +307,7 @@ def encrypt_run(
     output: Path | None,
     in_place: bool,
     policy: SafetyPolicy,
-    pre_refusal: PdfToolkitError | None = None,
+    pre_refusal: PdfToolingError | None = None,
 ) -> OperationResult:
     """Encrypt *source*: AES-256 (R6) by default, RC4-128 (R4) under ``legacy``.
 
@@ -595,7 +595,7 @@ def permissions_run(
         # `path` here is the TARGET DOCUMENT, not a password -- safe to show,
         # and useful (it says which file needs a password). `redacted=True`
         # does not belong on this one: found while landing B-068's
-        # `PdfToolkitError.to_dict()` chokepoint, which makes `redacted`
+        # `PdfToolingError.to_dict()` chokepoint, which makes `redacted`
         # actually do something for the first time -- this call site was
         # unaffected by it being a no-op, but would have silently started
         # rendering `path` as `<redacted>` instead of the document path once

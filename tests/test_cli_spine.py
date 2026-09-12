@@ -292,7 +292,7 @@ def test_exit_code_constants_hold_their_published_integers() -> None:
 
 
 def test_errors_expose_exactly_one_class_per_non_zero_exit_code() -> None:
-    subclasses = errors.PdfToolkitError.__subclasses__()
+    subclasses = errors.PdfToolingError.__subclasses__()
     codes = sorted(subclass.exit_code for subclass in subclasses)
     assert codes == [1, 2, 3, 4, 5, 6], f"got {[c.__name__ for c in subclasses]}"
 
@@ -308,20 +308,20 @@ def test_errors_expose_exactly_one_class_per_non_zero_exit_code() -> None:
 
 
 def test_base_error_defaults_to_failure_and_carries_the_redaction_marker() -> None:
-    error = errors.PdfToolkitError("boom")
+    error = errors.PdfToolingError("boom")
     assert error.exit_code == exit_codes.FAILURE
     assert error.redacted is False
     assert errors.AuthError("nope", redacted=True).redacted is True
 
 
-def _error_descendants() -> tuple[type[errors.PdfToolkitError], ...]:
-    def walk(cls: type[errors.PdfToolkitError]) -> list[type[errors.PdfToolkitError]]:
+def _error_descendants() -> tuple[type[errors.PdfToolingError], ...]:
+    def walk(cls: type[errors.PdfToolingError]) -> list[type[errors.PdfToolingError]]:
         found = [cls]
         for child in cls.__subclasses__():
             found.extend(walk(child))
         return found
 
-    return tuple(walk(errors.PdfToolkitError))
+    return tuple(walk(errors.PdfToolingError))
 
 
 def test_every_error_class_carries_a_published_exit_code() -> None:
@@ -332,7 +332,7 @@ def test_every_error_class_carries_a_published_exit_code() -> None:
     many-to-one (`REFUSED` alone carries seven concrete classes). The property
     the exit-code table actually depends on is the partition plus membership:
     **one BASE class per non-zero code** (the assertion above, which reads
-    `PdfToolkitError.__subclasses__()` -- direct subclasses only) **and every
+    `PdfToolingError.__subclasses__()` -- direct subclasses only) **and every
     concrete descendant's `exit_code` a member of `ALL_EXIT_CODES`**.
 
     **No cardinality is pinned here, deliberately.** A criterion pinning an
@@ -341,7 +341,7 @@ def test_every_error_class_carries_a_published_exit_code() -> None:
     claim.
     """
     descendants = _error_descendants()
-    assert len(descendants) > len(errors.PdfToolkitError.__subclasses__()), (
+    assert len(descendants) > len(errors.PdfToolingError.__subclasses__()), (
         "the walk found no subclass beyond the direct ones -- it is not transitive"
     )
     offenders = [
@@ -355,9 +355,9 @@ def test_every_error_class_carries_a_published_exit_code() -> None:
     )
     # A descendant may only narrow the MESSAGE, never the code's meaning: each
     # concrete class carries the code of exactly one base.
-    base_codes = {base.exit_code for base in errors.PdfToolkitError.__subclasses__()}
+    base_codes = {base.exit_code for base in errors.PdfToolingError.__subclasses__()}
     for cls in descendants:
-        if cls is errors.PdfToolkitError:
+        if cls is errors.PdfToolingError:
             continue
         assert cls.exit_code in base_codes, (
             f"{cls.__name__} carries exit_code {cls.exit_code}, which no base class owns"

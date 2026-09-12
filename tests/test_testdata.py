@@ -3,7 +3,7 @@
 `testdata/` holds exactly two artifacts that cannot be generated at test time
 (`tests/corpus.py`'s module docstring; `testdata/README.md`). This module pins
 the contract `PDF-12` (`repair`) and `PDF-15` (`ocr`) consume, and the privacy
-boundary that keeps `$PDF_TOOLKIT_SAMPLES_DIR` out of anything committed.
+boundary that keeps `$PDF_TOOLING_SAMPLES_DIR` out of anything committed.
 """
 
 from __future__ import annotations
@@ -155,10 +155,10 @@ def test_no_testdata_file_shares_a_hash_with_a_real_sample(pytestconfig: pytest.
     can only run against real content, and it must never silently pass by
     having nothing to compare against.
     """
-    samples_dir = os.environ.get("PDF_TOOLKIT_SAMPLES_DIR")
+    samples_dir = os.environ.get("PDF_TOOLING_SAMPLES_DIR")
     if not samples_dir or not Path(samples_dir).is_dir():
         pytest.skip(
-            "PDF_TOOLKIT_SAMPLES_DIR not set -- real-document arm skipped (PLAN.md §10.1 rule 5)"
+            "PDF_TOOLING_SAMPLES_DIR not set -- real-document arm skipped (PLAN.md §10.1 rule 5)"
         )
     testdata_hashes = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()

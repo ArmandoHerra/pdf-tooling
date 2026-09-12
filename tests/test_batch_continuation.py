@@ -601,7 +601,7 @@ def test_ac9_a_single_unreadable_input_keeps_the_error_envelope(
 def _path_without(binaries: set[str], root: Path) -> str:
     """A `PATH` with *binaries* removed, built by symlink — the host is untouched.
 
-    The same mechanism `tests/conftest.py`'s `PDF_TOOLKIT_TEST_HIDE_ENGINES`
+    The same mechanism `tests/conftest.py`'s `PDF_TOOLING_TEST_HIDE_ENGINES`
     shim uses, applied to ONE subprocess instead of the whole session, so this
     arm can drive the engine-missing path on a host where the engine is
     present. No system binary is renamed, moved or chmod-ed.
@@ -799,7 +799,7 @@ def test_ac13_the_guard_never_catches_a_broad_exception() -> None:
     A broad catch would swallow the bare ``OSError``/``PdfError`` escapes that
     are a separate, still-open read-seam item's ENTIRE evidence base: it would
     make that item's reds disappear while this one went green. The boundary is
-    mechanical -- a ``PdfToolkitError`` subclass reaching the guard belongs
+    mechanical -- a ``PdfToolingError`` subclass reaching the guard belongs
     here; a bare ``OSError`` escaping to a traceback does not, and must keep
     escaping so it stays measurable.
     """
@@ -833,7 +833,7 @@ def _handler_names(node: ast.expr) -> list[str]:
 def test_ac13_the_item_scoped_set_is_exactly_the_two_declared_classes() -> None:
     """The caught tuple IS the boundary; widening it changes a public exit code.
 
-    Widening to ``PdfToolkitError`` would turn an absent engine from exit 3 into
+    Widening to ``PdfToolingError`` would turn an absent engine from exit 3 into
     exit 1 on ``ocr``, and a refusal from exit 5 into exit 1 everywhere.
     """
     from pdf_tooling.errors import AuthError, FailureError

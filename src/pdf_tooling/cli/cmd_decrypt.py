@@ -48,7 +48,7 @@ operation is libqpdf's; this tool implements none of its own.
 PASSWORDS. A password is never accepted as a command-line value: argv is
 world-readable in /proc and lands in shell history. --password-file PATH
 reads one line from a file, or '-' reads one line from standard input. With
-no flag, PDF_TOOLKIT_PASSWORD is consulted, and on a terminal you are
+no flag, PDF_TOOLING_PASSWORD is consulted, and on a terminal you are
 prompted. With none of those, the run exits 6 and writes nothing. A wrong
 password also exits 6, once -- there is no retry loop, because retrying is
 the caller's recovery and a loop would complicate the exit-code contract

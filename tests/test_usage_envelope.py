@@ -5,7 +5,7 @@ never has to also read stderr to learn that the run failed."* Five ledger rows
 were live counter-examples — `4772bfd8fc`, `76ece64648`, `7fc5a169f6`,
 `d220b7d79d`, `a472acde7a` — and they are **three mechanisms**, every one of
 them a case where something other than `cli/main.py`'s single
-`except PdfToolkitError` handler terminated the process:
+`except PdfToolingError` handler terminated the process:
 
 * **M1** Click's own parser raised, and `standalone_mode=True` printed
   ``Usage:`` + ``Error:`` to stderr and exited 2 with **zero bytes on stdout**;
@@ -166,7 +166,7 @@ def error_of(stdout: str) -> dict[str, Any]:
 #
 # A CORRECTION TO THIS SPEC'S OWN AC5, MEASURED RATHER THAN ASSUMED. AC5 states
 # that under the planted defect "every non-zero case must go red". It cannot:
-# this product signals SOME non-zero exits by RAISING (`PdfToolkitError` for
+# this product signals SOME non-zero exits by RAISING (`PdfToolingError` for
 # every usage error, every safety refusal and every OR-3/OR-4 message) and
 # others by RETURNING (`typer.Exit(result.exit_code)`), and only the returned
 # ones ride the hazard. Measured at implementation time, USAGE (2) and REFUSED
@@ -415,11 +415,11 @@ _PLANTED_WRONG_MAIN: Final[str] = """
 import sys
 from pdf_tooling.cli import main as m
 from pdf_tooling.cli.exit_codes import OK
-from pdf_tooling.errors import PdfToolkitError
+from pdf_tooling.errors import PdfToolingError
 
 try:
     m.app(prog_name=m.PROG_NAME, standalone_mode=False)
-except PdfToolkitError as error:
+except PdfToolingError as error:
     m._terminate(error, None)
 except Exception as error:
     if m._is_click_exception(error):
@@ -641,7 +641,7 @@ def test_ac4_the_arity_shape_is_enveloped_and_names_the_missing_argument(verb) -
 
 
 # --------------------------------------------------------------------------- #
-# AC6 — `PdfToolkitError` keeps its precedence, byte for byte.
+# AC6 — `PdfToolingError` keeps its precedence, byte for byte.
 # --------------------------------------------------------------------------- #
 
 #: Measured at `15eb4ea` (pre-change) and again after, from `pdftooling version

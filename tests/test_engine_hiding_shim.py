@@ -68,8 +68,8 @@ GATE_PARITY = REPO_ROOT / ".github" / "gate-parity.toml"
 WORKFLOWS = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
 REAPER = REPO_ROOT / "scripts" / "reap_shims.py"
 
-KEEP_ENV = "PDF_TOOLKIT_TEST_KEEP_SHIM"
-HIDE_ENV = "PDF_TOOLKIT_TEST_HIDE_ENGINES"
+KEEP_ENV = "PDF_TOOLING_TEST_KEEP_SHIM"
+HIDE_ENV = "PDF_TOOLING_TEST_HIDE_ENGINES"
 
 #: The directory-name prefix, and the glob an incautious "cleanup" would reach
 #: for. Assembled, never spelled -- see the module docstring.

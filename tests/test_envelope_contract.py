@@ -92,15 +92,17 @@ table above: it freezes a different envelope entirely (the one the base
 exception class renders, never :class:`OperationResult`), so it gets its own
 arm key rather than a manufactured pair with ``json``/``ndjson_line``.
 
-A NOTE ON A FROZEN NAME THIS FILE DOES NOT RE-SPELL
-------------------------------------------------------
+A NOTE ON WHY THIS MODULE STILL ALIASES THE BASE ERROR IMPORT
+------------------------------------------------------------------
 D4's kind-independence walk needs the base exception class object, imported
 once (``errors.py``) and aliased immediately to ``_BASE_ERROR`` — every
-other reference below uses the alias. ``tests/test_rename_completeness.py``
-freezes that class's own name's tree-wide occurrence count byte-for-byte
-outside ``changelog.md``; the one import line is the floor a legitimate new
-caller cannot go below, and is recorded as a finding in this spec's
-Implementation Log rather than resolved by editing that count.
+other reference below uses the alias. **PDF-57 (2026-09-12) retires the
+frozen name this note used to protect** — the base class carries its
+post-rename name now, a live, moving population with no byte-frozen count
+to avoid inflating. The alias is kept anyway, unchanged, because it is
+still the right shape for the same underlying reason: one import site, one
+alias, everything else in this module reads the alias rather than
+re-spelling the class name at each use site.
 """
 
 from __future__ import annotations
@@ -123,7 +125,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
 from pdf_tooling.adapters.pypdf_structure import _PERMISSION_BITS  # noqa: E402
-from pdf_tooling.errors import PdfToolkitError as _BASE_ERROR  # noqa: E402
+from pdf_tooling.errors import PdfToolingError as _BASE_ERROR  # noqa: E402
 from pdf_tooling.models import SCHEMA_VERSION  # noqa: E402
 from pdf_tooling.output.json import render_error_json  # noqa: E402
 from pdf_tooling.ports.structure import (  # noqa: E402
@@ -173,7 +175,7 @@ FORBIDDEN_CLAUSE: Final[str] = (
 #: envelope register is not an ordinary golden — it is the only evidence that a
 #: public key was not renamed or removed, and regenerating it is exactly how
 #: that evidence would be destroyed by accident. See `TESTING.md`.
-REGENERATE_ENV: Final[str] = "PDF_TOOLKIT_ENVELOPE_REGISTER_REGENERATE"
+REGENERATE_ENV: Final[str] = "PDF_TOOLING_ENVELOPE_REGISTER_REGENERATE"
 
 #: The three fields `render_ndjson` injects into every streamed line
 #: (`output/json.py`). An item dict carrying one would silently shadow the

@@ -199,8 +199,8 @@ def _argv(verb: str, bed: Bed, label: str, tag: str) -> list[str]:
 
 def _clean_env(**extra: str) -> dict[str, str]:
     env = dict(os.environ)
-    env.pop("PDF_TOOLKIT_PASSWORD", None)
-    env.pop("PDF_TOOLKIT_OWNER_PASSWORD", None)
+    env.pop("PDF_TOOLING_PASSWORD", None)
+    env.pop("PDF_TOOLING_OWNER_PASSWORD", None)
     env.update(extra)
     return env
 
@@ -262,7 +262,7 @@ def test_ac1_ac18_a_password_shaped_flag_is_refused_and_never_echoed(
         assert value not in combined, f"{verb} {spelling} ({shape}) echoed its value"
     # (d) -- the message names all three supported paths.
     assert "--password-file" in combined
-    assert "PDF_TOOLKIT_PASSWORD" in combined
+    assert "PDF_TOOLING_PASSWORD" in combined
     assert "prompt" in combined.lower()
     # The envelope, not Click's generic path (`4772bfd8fc`).
     assert '"kind": "usage"' in result.stdout or "error:" in result.stderr
@@ -490,8 +490,8 @@ def test_ac20e_the_dry_run_leaks_nothing_through_either_channel(
     verb: str, label: str, bed: Bed
 ) -> None:
     env = _clean_env(
-        PDF_TOOLKIT_PASSWORD=SENTINELS[label],
-        PDF_TOOLKIT_OWNER_PASSWORD=SENTINELS[label],
+        PDF_TOOLING_PASSWORD=SENTINELS[label],
+        PDF_TOOLING_OWNER_PASSWORD=SENTINELS[label],
     )
     result = run_cli(
         verb, *_argv(verb, bed, label, "dry"), "--dry-run", "-vv", "-o", "json", env=env
@@ -641,7 +641,7 @@ def test_ac7_the_password_is_never_in_argv_and_the_env_channel_is_documented_not
         "-O",
         str(target),
     ]
-    env = _clean_env(PDF_TOOLKIT_PASSWORD=PW_SENTINEL)
+    env = _clean_env(PDF_TOOLING_PASSWORD=PW_SENTINEL)
     process = subprocess.Popen(  # noqa: S603 - argv is built here, never shell
         argv,
         stdin=subprocess.PIPE,
@@ -1090,7 +1090,7 @@ def test_ac5_tier_c_the_full_cross_never_renders_either_sentinel() -> None:
     just report "1 failed"."""
     import json as _json
 
-    from pdf_tooling.errors import PdfToolkitError
+    from pdf_tooling.errors import PdfToolingError
     from pdf_tooling.output.json import render_error_json
     from pdf_tooling.output.table import render_error_table
 
@@ -1100,7 +1100,7 @@ def test_ac5_tier_c_the_full_cross_never_renders_either_sentinel() -> None:
         stdout_tty, _stderr_tty, _stdin_tty = tty_state
         sentinel = SENTINELS[label]
         resolved = shape if shape is not None else _model_auto_format(stdout_tty=stdout_tty)
-        error = PdfToolkitError(
+        error = PdfToolingError(
             f"{flag} on {verb} takes a file path or '-'; the given value is not a "
             "readable file. Refusing to echo it, in case it is the password itself.",
             path=sentinel,
@@ -1142,10 +1142,10 @@ def test_r3_emit_error_never_bypasses_to_dicts_redaction_on_the_table_branch() -
     import io
     from contextlib import redirect_stderr, redirect_stdout
 
-    from pdf_tooling.errors import PdfToolkitError
+    from pdf_tooling.errors import PdfToolingError
     from pdf_tooling.output import emit_error
 
-    error = PdfToolkitError(
+    error = PdfToolingError(
         "a synthetic refusal for R3's own red control",
         path=PW_SENTINEL,
         redacted=True,

@@ -242,7 +242,7 @@ class _WorkerUnwind(BaseException):
     """Raised inside a render worker's own SIGTERM handler (never elsewhere).
 
     Deliberately a `BaseException`, not an `Exception`: `_render_one`'s own
-    `except PdfToolkitError` (a plain `Exception` subclass) must never catch
+    `except PdfToolingError` (a plain `Exception` subclass) must never catch
     it and turn a teardown into an ordinary failed-page result.
 
     Never escapes the worker PROCESS on its own -- see this module's

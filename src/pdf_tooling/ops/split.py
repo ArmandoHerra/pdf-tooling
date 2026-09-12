@@ -272,7 +272,7 @@ def split_document(
             # (chokepoint-confined) and pre-flight checked every target for
             # no-clobber/writability -- BEFORE the first AtomicWriter opens, so a
             # planning failure writes nothing. It raised already if refused (the
-            # `except PdfToolkitError: ... raise` inside plan_output_set, since
+            # `except PdfToolingError: ... raise` inside plan_output_set, since
             # policy.dry_run is False here), so plan.refusal is always None below.
             written_items: list[ItemResult] = []
             for part, target in rendered:

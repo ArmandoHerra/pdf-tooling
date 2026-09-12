@@ -139,7 +139,7 @@ def _resolve_port(engine: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# The engines-hiding PATH shim — `PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice`.
+# The engines-hiding PATH shim — `PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice`.
 #
 # Reproducible, and it NEVER touches the host: every executable reachable on
 # the current PATH is symlinked into a fresh scratch directory under $TMPDIR
@@ -150,7 +150,7 @@ def _resolve_port(engine: str) -> str:
 # must see the hidden PATH, not the host's real one.
 # --------------------------------------------------------------------------- #
 
-_HIDE_ENV: Final[str] = "PDF_TOOLKIT_TEST_HIDE_ENGINES"
+_HIDE_ENV: Final[str] = "PDF_TOOLING_TEST_HIDE_ENGINES"
 
 #: PDF-46 D6. Set to a non-empty value, the reclaim below is NOT registered and
 #: the shim directory survives the interpreter -- i.e. the pre-PDF-46 behaviour,
@@ -159,7 +159,7 @@ _HIDE_ENV: Final[str] = "PDF_TOOLKIT_TEST_HIDE_ENGINES"
 #: shim leaves 0 directories too, so `0` alone proves nothing. It is a foot-gun
 #: and it is censused (`tests/test_engine_hiding_shim.py`): no Makefile recipe,
 #: no workflow, no `addopts` and no gate-parity entry may set it.
-_KEEP_ENV: Final[str] = "PDF_TOOLKIT_TEST_KEEP_SHIM"
+_KEEP_ENV: Final[str] = "PDF_TOOLING_TEST_KEEP_SHIM"
 
 
 def _reclaim_engine_hiding_shim(shim_dir: str, original_path: str) -> None:
@@ -317,10 +317,10 @@ def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pyte
 #: Rule 5's visible-skip reason, named exactly once and reused by every skip
 #: site so the wording can never drift between the marker and the fixture.
 SAMPLES_SKIP_REASON: Final[str] = (
-    "PDF_TOOLKIT_SAMPLES_DIR not set — real-document arm skipped (PLAN.md §10.1 rule 5)"
+    "PDF_TOOLING_SAMPLES_DIR not set — real-document arm skipped (PLAN.md §10.1 rule 5)"
 )
 
-_SAMPLES_ENV: Final[str] = "PDF_TOOLKIT_SAMPLES_DIR"
+_SAMPLES_ENV: Final[str] = "PDF_TOOLING_SAMPLES_DIR"
 
 
 def samples_root() -> Path | None:
@@ -336,7 +336,7 @@ def samples_root() -> Path | None:
 
 
 class Samples:
-    """Copy-on-use over `$PDF_TOOLKIT_SAMPLES_DIR` — `PLAN.md` §10.1 rules 1-2.
+    """Copy-on-use over `$PDF_TOOLING_SAMPLES_DIR` — `PLAN.md` §10.1 rules 1-2.
 
     Exposes exactly four PUBLIC members: `available`, `names()`, `copy()`,
     `copy_tree()`. **No public member returns a path under the originals

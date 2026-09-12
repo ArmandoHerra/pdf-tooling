@@ -59,7 +59,7 @@ supplied exits 6.
 
 PASSWORDS. A password is never accepted as a command-line value.
 --password-file PATH reads one line from a file, or '-' reads one line from
-standard input; PDF_TOOLKIT_PASSWORD is consulted when no flag is given, and
+standard input; PDF_TOOLING_PASSWORD is consulted when no flag is given, and
 on a terminal you are prompted.
 """
 

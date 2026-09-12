@@ -46,7 +46,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from pdf_tooling.cli.main import build_rerun_hint
-from pdf_tooling.errors import PdfToolkitError
+from pdf_tooling.errors import PdfToolingError
 from pdf_tooling.output import OutputFormat, emit_error
 from pdf_tooling.safety import (
     AtomicWriter,
@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     fmt = OutputFormat(args.output_format)
     try:
         return int(args.handler(args, fmt))
-    except PdfToolkitError as error:
+    except PdfToolingError as error:
         emit_error(error, fmt)
         return error.exit_code
 

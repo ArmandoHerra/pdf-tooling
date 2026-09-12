@@ -28,7 +28,7 @@ from typing import Annotated
 import typer
 
 from pdf_tooling.cli.common import get_config, global_options, operand_argument
-from pdf_tooling.errors import FailureError, PdfToolkitError, UsageError
+from pdf_tooling.errors import FailureError, PdfToolingError, UsageError
 from pdf_tooling.ops.compose import (
     BASE14_FONTS,
     DEFAULT_CREATE_MARGIN,
@@ -157,7 +157,7 @@ def create_command(
     raise typer.Exit(result.exit_code)
 
 
-def _input_read_error(source: Path, error: OSError) -> PdfToolkitError:
+def _input_read_error(source: Path, error: OSError) -> PdfToolingError:
     """Map a failure raised while READING *source* onto a coded error (PDF-26 §D3).
 
     The §D3 belt for this verb's one operand read. `compose` and `create` are the

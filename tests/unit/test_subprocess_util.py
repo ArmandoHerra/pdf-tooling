@@ -238,10 +238,10 @@ def test_check_true_also_raises_on_a_timeout() -> None:
 
 def test_cwd_and_env_are_honoured(tmp_path: Path) -> None:
     result = subprocess_util.run(
-        ["sh", "-c", "pwd; echo $PDF_TOOLKIT_TEST_MARKER"],
+        ["sh", "-c", "pwd; echo $PDF_TOOLING_TEST_MARKER"],
         timeout=10,
         cwd=tmp_path,
-        env={"PATH": os.environ.get("PATH", ""), "PDF_TOOLKIT_TEST_MARKER": "marker"},
+        env={"PATH": os.environ.get("PATH", ""), "PDF_TOOLING_TEST_MARKER": "marker"},
     )
     lines = result.stdout.split()
     assert str(tmp_path) in lines[0]

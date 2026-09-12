@@ -27,7 +27,7 @@ WHAT THIS FILE ASSERTS, AND HOW IT REACHES scripts/licenses.py
 `scripts/licenses.py` is loaded by path with `importlib.util
 .spec_from_file_location` + `module_from_spec` + `exec_module`, anchored at
 `REPO_ROOT` (the same anchor `tests/test_assert_skips.py:47` uses). The path
-is overridable via the `PDF_TOOLKIT_LICENSES_MODULE` environment variable, so
+is overridable via the `PDF_TOOLING_LICENSES_MODULE` environment variable, so
 a MUTATED SCRATCH COPY can be substituted without ever editing the tracked
 file (PDF-41 D6's eight red controls; HC-4 — never `git stash`, never a
 working-tree edit).
@@ -107,9 +107,9 @@ _REQUIRED_SYMBOLS: Final[tuple[str, ...]] = (
 
 
 def _resolve_licenses_module_path() -> Path:
-    """`PDF_TOOLKIT_LICENSES_MODULE` overrides the default so D6's mutated
+    """`PDF_TOOLING_LICENSES_MODULE` overrides the default so D6's mutated
     scratch copies are a PARAMETER, never a tree edit."""
-    override = os.environ.get("PDF_TOOLKIT_LICENSES_MODULE")
+    override = os.environ.get("PDF_TOOLING_LICENSES_MODULE")
     if override:
         return Path(override).resolve()
     return DEFAULT_LICENSES_MODULE_PATH
@@ -147,7 +147,7 @@ licenses: Final[ModuleType] = _load_licenses_module(_resolve_licenses_module_pat
 # AC1 — the seam's own anti-lapse clause, mechanized as a permanent in-suite
 # regression rather than only a one-off manual D6-style run. This is NOT one
 # of the eight numbered reds (R1-R8); it is a property of THIS file's loader,
-# proven directly against `tmp_path`, with no PDF_TOOLKIT_LICENSES_MODULE
+# proven directly against `tmp_path`, with no PDF_TOOLING_LICENSES_MODULE
 # dance required.
 # --------------------------------------------------------------------------- #
 

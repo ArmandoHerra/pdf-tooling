@@ -6,7 +6,7 @@ subprocess-level contract (exit codes, `--help` content, OR-3) lives in
 X-126 -- see `tests/registry.py::INVOCATIONS`/`OUTPUT_FLAG_INVOCATIONS`) and
 `tests/integration/test_overlay_preservation.py`.
 
-HC-2 binds this module: nothing here touches `$PDF_TOOLKIT_SAMPLES_DIR`. The
+HC-2 binds this module: nothing here touches `$PDF_TOOLING_SAMPLES_DIR`. The
 `@samples` arm lives in `tests/test_samples.py`'s own PDF-14 section.
 """
 
@@ -300,7 +300,7 @@ def test_ac21_dry_run_predicts_an_occupied_target_via_plan_output_set(
 
     # The REAL run RAISES (X-67: a real run raises exactly as before; only
     # the DRY run captures the refusal and returns it) -- the CLI's single
-    # `except PdfToolkitError` handler is what turns this into exit 5 for a
+    # `except PdfToolingError` handler is what turns this into exit 5 for a
     # real invocation (proven end-to-end by `test_cli_contract.py::
     # test_c15_dry_run_predicts_an_occupied_target_refusal[meta set]`).
     from pdf_tooling.errors import TargetExistsError

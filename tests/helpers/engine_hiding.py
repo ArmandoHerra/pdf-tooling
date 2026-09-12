@@ -13,7 +13,7 @@ non-zero, correct and not a defect), i.e. silently a different contract than the
 *absent* row (dry 3 / real 3) this instrument exists to probe.
 
 ``conftest.py::_apply_engine_hiding_shim`` does the same thing for the
-``PDF_TOOLKIT_TEST_HIDE_ENGINES`` env var, but mutates the CURRENT (pytest)
+``PDF_TOOLING_TEST_HIDE_ENGINES`` env var, but mutates the CURRENT (pytest)
 process's own ``os.environ["PATH"]`` — right for collection-time
 ``requires(engine)`` skips, wrong here: this helper returns an env dict for a
 CHILD process without touching the test process's PATH, which every other test

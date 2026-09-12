@@ -13,8 +13,8 @@ Order   Source                                      Label recorded in the plan
 ======  ==========================================  =========================
 1       ``--*-password-file PATH``                  ``file:<path>``
 1       ``--*-password-file -``                     ``stdin``
-2       ``PDF_TOOLKIT_PASSWORD`` /                  ``env:<NAME>``
-        ``PDF_TOOLKIT_OWNER_PASSWORD``
+2       ``PDF_TOOLING_PASSWORD`` /                  ``env:<NAME>``
+        ``PDF_TOOLING_OWNER_PASSWORD``
 3       ``getpass`` prompt, written to **stderr**   ``prompt``
 4       nothing left                                exit **6**
 ======  ==========================================  =========================
@@ -74,8 +74,8 @@ __all__ = [
 #: *presence* when planning and for *value* only when actually reading, which
 #: is what lets ``--dry-run`` predict exit 6 without a secret entering the
 #: process.
-ENV_PASSWORD: Final[str] = "PDF_TOOLKIT_PASSWORD"
-ENV_OWNER_PASSWORD: Final[str] = "PDF_TOOLKIT_OWNER_PASSWORD"
+ENV_PASSWORD: Final[str] = "PDF_TOOLING_PASSWORD"
+ENV_OWNER_PASSWORD: Final[str] = "PDF_TOOLING_OWNER_PASSWORD"
 
 STDIN_SPELLING: Final[str] = "-"
 

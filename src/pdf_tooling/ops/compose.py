@@ -89,7 +89,7 @@ from typing import Final
 
 from PIL import Image, UnidentifiedImageError
 
-from pdf_tooling.errors import FailureError, NoInputError, PdfToolkitError, UsageError
+from pdf_tooling.errors import FailureError, NoInputError, PdfToolingError, UsageError
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult
 from pdf_tooling.ports.compose import ImagePlacement, TextLayout, require_compose
@@ -370,7 +370,7 @@ def _colorspace(mode: str, components: int | None) -> str:
     return "rgb"
 
 
-def _image_read_error(path: Path, error: Exception) -> PdfToolkitError:
+def _image_read_error(path: Path, error: Exception) -> PdfToolingError:
     """Map a failure raised while READING *path* onto a coded error (PDF-26 §D3).
 
     The §D3 belt for this module's three raster read seams, which
@@ -400,7 +400,7 @@ def _image_read_error(path: Path, error: Exception) -> PdfToolkitError:
     return FailureError(f"could not read as an image: {error}", path=str(path))
 
 
-def _engine_boundary_error(placements: Sequence[ImagePlacement], error: OSError) -> PdfToolkitError:
+def _engine_boundary_error(placements: Sequence[ImagePlacement], error: OSError) -> PdfToolingError:
     """Map an ``OSError`` raised INSIDE the compose engine onto a coded error.
 
     **THE RULE, stated because a rule is the deliverable and an instance is not:

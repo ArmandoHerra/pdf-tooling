@@ -8,8 +8,8 @@ proves whatever the scheduler decided that run. So instead:
 
 1. The test creates two pipes and passes their read/write ends down to a child
    process, handing the file-descriptor numbers over in
-   ``PDF_TOOLKIT_FAULT_RENDEZVOUS`` as ``"<ready_fd>:<release_fd>"``, with the
-   name of the wanted point in ``PDF_TOOLKIT_FAULT_POINT``.
+   ``PDF_TOOLING_FAULT_RENDEZVOUS`` as ``"<ready_fd>:<release_fd>"``, with the
+   name of the wanted point in ``PDF_TOOLING_FAULT_POINT``.
 2. :func:`checkpoint` fires at the matching point only. It writes one line to the
    *ready* descriptor — carrying an optional detail string, which is how a test
    learns the live temp path without guessing it — and then **blocks reading**
@@ -41,10 +41,10 @@ from typing import Final
 __all__ = ["ENV_POINT", "ENV_RENDEZVOUS", "FAULT_POINTS", "checkpoint"]
 
 #: Names the point at which the process should park. Unset in every real run.
-ENV_POINT: Final[str] = "PDF_TOOLKIT_FAULT_POINT"
+ENV_POINT: Final[str] = "PDF_TOOLING_FAULT_POINT"
 
 #: ``"<ready_fd>:<release_fd>"`` — two inherited pipe descriptors.
-ENV_RENDEZVOUS: Final[str] = "PDF_TOOLKIT_FAULT_RENDEZVOUS"
+ENV_RENDEZVOUS: Final[str] = "PDF_TOOLING_FAULT_RENDEZVOUS"
 
 #: Every point the writer offers. All three are necessarily *before* the
 #: replace: there is no "during ``os.replace``" to inject into, and that absence

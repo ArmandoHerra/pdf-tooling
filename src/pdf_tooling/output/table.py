@@ -5,7 +5,7 @@ to sit in a shell loop, and no module under ``src/`` may import ``rich`` even
 though the CLI framework pulls it into the environment.
 
 Everything here consumes the dict produced by ``OperationResult.to_dict()`` (or
-``PdfToolkitError.to_dict()``); it never reaches into a dataclass field.
+``PdfToolingError.to_dict()``); it never reaches into a dataclass field.
 """
 
 from __future__ import annotations

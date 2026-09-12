@@ -142,14 +142,14 @@ licenses: ## Regenerate THIRD_PARTY_LICENSES from the pinned closure, then gate 
 	$(UV_RUN) python scripts/licenses.py generate
 	$(UV_RUN) python scripts/licenses.py check
 
-samples-scratch: ## Copy $$PDF_TOOLKIT_SAMPLES_DIR into .scratch/samples/ + write the originals manifest (PLAN.md §10.1)
-	@if [ -z "$$PDF_TOOLKIT_SAMPLES_DIR" ]; then \
-		echo "make samples-scratch: PDF_TOOLKIT_SAMPLES_DIR is not set." >&2; \
-		echo "  export PDF_TOOLKIT_SAMPLES_DIR=/path/to/your/samples" >&2; \
+samples-scratch: ## Copy $$PDF_TOOLING_SAMPLES_DIR into .scratch/samples/ + write the originals manifest (PLAN.md §10.1)
+	@if [ -z "$$PDF_TOOLING_SAMPLES_DIR" ]; then \
+		echo "make samples-scratch: PDF_TOOLING_SAMPLES_DIR is not set." >&2; \
+		echo "  export PDF_TOOLING_SAMPLES_DIR=/path/to/your/samples" >&2; \
 		exit 1; \
 	fi
-	@if [ ! -d "$$PDF_TOOLKIT_SAMPLES_DIR" ]; then \
-		echo "make samples-scratch: $$PDF_TOOLKIT_SAMPLES_DIR is not a directory." >&2; \
+	@if [ ! -d "$$PDF_TOOLING_SAMPLES_DIR" ]; then \
+		echo "make samples-scratch: $$PDF_TOOLING_SAMPLES_DIR is not a directory." >&2; \
 		exit 1; \
 	fi
 	@if [ -e .scratch/samples.MANIFEST.sha256 ]; then \
@@ -164,22 +164,22 @@ samples-scratch: ## Copy $$PDF_TOOLKIT_SAMPLES_DIR into .scratch/samples/ + writ
 	fi
 	@mkdir -p .scratch
 	@rm -rf .scratch/samples
-	@cp -R "$$PDF_TOOLKIT_SAMPLES_DIR" .scratch/samples
-	@cd "$$PDF_TOOLKIT_SAMPLES_DIR" && find . -type f -print0 | sort -z \
+	@cp -R "$$PDF_TOOLING_SAMPLES_DIR" .scratch/samples
+	@cd "$$PDF_TOOLING_SAMPLES_DIR" && find . -type f -print0 | sort -z \
 		| xargs -0 sha256sum > "$(CURDIR)/.scratch/samples.MANIFEST.sha256"
 	@echo "samples copied to .scratch/samples/; originals manifest written to .scratch/samples.MANIFEST.sha256"
 
-samples-check: ## Re-hash $$PDF_TOOLKIT_SAMPLES_DIR against .scratch/samples.MANIFEST.sha256 (PLAN.md §10.1 rule 3)
-	@if [ -z "$$PDF_TOOLKIT_SAMPLES_DIR" ]; then \
-		echo "make samples-check: PDF_TOOLKIT_SAMPLES_DIR is not set." >&2; \
-		echo "  export PDF_TOOLKIT_SAMPLES_DIR=/path/to/your/samples" >&2; \
+samples-check: ## Re-hash $$PDF_TOOLING_SAMPLES_DIR against .scratch/samples.MANIFEST.sha256 (PLAN.md §10.1 rule 3)
+	@if [ -z "$$PDF_TOOLING_SAMPLES_DIR" ]; then \
+		echo "make samples-check: PDF_TOOLING_SAMPLES_DIR is not set." >&2; \
+		echo "  export PDF_TOOLING_SAMPLES_DIR=/path/to/your/samples" >&2; \
 		exit 1; \
 	fi
 	@if [ ! -f .scratch/samples.MANIFEST.sha256 ]; then \
 		echo "make samples-check: no manifest at .scratch/samples.MANIFEST.sha256 -- run 'make samples-scratch' first." >&2; \
 		exit 1; \
 	fi
-	@cd "$$PDF_TOOLKIT_SAMPLES_DIR" && sha256sum -c --quiet "$(CURDIR)/.scratch/samples.MANIFEST.sha256"
+	@cd "$$PDF_TOOLING_SAMPLES_DIR" && sha256sum -c --quiet "$(CURDIR)/.scratch/samples.MANIFEST.sha256"
 	@echo "originals unchanged"
 
 # The @samples control chain, encoded ONCE (decision.md §8 X-115).
@@ -219,7 +219,7 @@ if total == 0:
     )
 if passed or broken:
     sys.exit(
-        "make samples-gate: with PDF_TOOLKIT_SAMPLES_DIR unset every samples test must "
+        "make samples-gate: with PDF_TOOLING_SAMPLES_DIR unset every samples test must "
         "SKIP, with a reason. Got %d test(s): %d skipped, %d passed, %d failed. "
         "A pass here IS the defect (PLAN.md 10.1 rule 5)." % (total, skipped, passed, broken)
     )
@@ -242,7 +242,7 @@ samples-gate: ## Run the whole @samples chain in the one correct order (PLAN.md 
 	@echo "samples-gate 3/5: with the corpus present the arm must RUN and pass"
 	uv run pytest -m samples -rs --junitxml=.scratch/samples-set.xml
 	@echo "samples-gate 4/5: with the corpus absent the arm must SKIP, with zero passes"
-	env -u PDF_TOOLKIT_SAMPLES_DIR uv run pytest -m samples -rs --junitxml=.scratch/samples-unset.xml
+	env -u PDF_TOOLING_SAMPLES_DIR uv run pytest -m samples -rs --junitxml=.scratch/samples-unset.xml
 	@uv run python -c "$$SAMPLES_UNSET_ASSERT"
 	@echo "samples-gate 5/5: only NOW is the originals comparison meaningful"
 	$(MAKE) samples-check
@@ -271,7 +271,7 @@ engines-gate: ## Run both engine configurations (present + hidden) with skip-vis
 	$(MAKE) cover PYTEST_ARGS="--junitxml=.scratch/junit-engines-present.xml"
 	$(UV_RUN) python scripts/assert_skips.py .scratch/junit-engines-present.xml --expect-zero
 	@echo "engines-gate 2/2: engines hidden -- test + skip-visibility assertion"
-	PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice $(MAKE) test PYTEST_ARGS="--junitxml=.scratch/junit-without-engines.xml"
+	PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice $(MAKE) test PYTEST_ARGS="--junitxml=.scratch/junit-without-engines.xml"
 	$(UV_RUN) python scripts/assert_skips.py .scratch/junit-without-engines.xml
 
 # PDF-29. DELIBERATELY NOT a prerequisite of `ci`, and that is a decision
@@ -341,8 +341,8 @@ export DOCS_GATE_ENGINES_ASSERT
 # the thing in each condition, because the previous figures here ("two" and
 # "four") were BOTH wrong and nothing checked them -- a stale count in the
 # comment above a skip census is the same defect this target exists to end:
-#   FIVE  arms read the maintainer's planning tree (`PDF_TOOLKIT_PLANNING_DIR`);
-#         recipe: PDF_TOOLKIT_PLANNING_DIR=/nonexistent make docs-gate
+#   FIVE  arms read the maintainer's planning tree (`PDF_TOOLING_PLANNING_DIR`);
+#         recipe: PDF_TOOLING_PLANNING_DIR=/nonexistent make docs-gate
 #   ELEVEN arms read git history deeper than a shallow checkout, in TWO classes
 #         -- 10 against MINIMUM_HISTORY_DEPTH, plus 1 that cannot check a depth
 #         precondition against a checkout never given the depth to check it;
@@ -373,7 +373,7 @@ for count, reason in skipped:
     print("  SKIPPED [%s] -- %s" % (count, reason))
 if skipped:
     print("")
-    print("  A SKIPPED ARM IS NOT AGREEMENT. Re-run with PDF_TOOLKIT_PLANNING_DIR")
+    print("  A SKIPPED ARM IS NOT AGREEMENT. Re-run with PDF_TOOLING_PLANNING_DIR")
     print("  pointed at the planning tree, and in a full (non-shallow) clone, to")
     print("  turn these into real comparisons. `make ci` does not run this target.")
 # PDF-34 D3. For as long as this epilogue has existed it has PRINTED
@@ -397,7 +397,7 @@ export DOCS_GATE_EPILOGUE
 docs-gate: ## Re-run the documented commands and compare the figures the docs quote (PDF-30; NOT part of `ci`)
 	@mkdir -p .scratch
 	@echo "docs-gate 1/3: the documented engines-hidden command, run VERBATIM"
-	@PDF_TOOLKIT_TEST_HIDE_ENGINES=tesseract,soffice $(UV_RUN) pytest \
+	@PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice $(UV_RUN) pytest \
 	  tests/integration/test_ocr.py tests/integration/test_office.py -rs -q \
 	  2>&1 | tee .scratch/docs-gate-engines-hidden.txt | tail -1
 	@echo "docs-gate 2/3: TESTING.md's quoted figure must equal what that run reported"

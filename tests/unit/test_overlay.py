@@ -5,7 +5,7 @@ sits on) directly. The subprocess-level contract (exit codes, `--help`
 content, OR-3) lives in `tests/test_cli_contract.py` (unedited by this spec)
 and `tests/integration/test_overlay_preservation.py`.
 
-HC-2 binds this module: nothing here touches `$PDF_TOOLKIT_SAMPLES_DIR`. The
+HC-2 binds this module: nothing here touches `$PDF_TOOLING_SAMPLES_DIR`. The
 `@samples` arm lives in `tests/test_samples.py`'s own PDF-14 section.
 
 Design D5 -- why this module extracts with pypdf directly
@@ -907,10 +907,10 @@ def test_ac16_no_merge_page_or_pre_append_prose_survives_in_ports_or_ops() -> No
 #
 # The RED THIS TEST OBSERVES, and the CLI-level `test_c15` above CANNOT: a
 # temporary, reverted mutation of `safety/atomic.py::plan_output_set`'s
-# dry-run branch (`except PdfToolkitError as refusal: raise` unconditionally,
+# dry-run branch (`except PdfToolingError as refusal: raise` unconditionally,
 # dropping the `if not policy.dry_run:` guard) makes `dry.returncode ==
 # real.returncode == 5` STILL hold at the CLI/subprocess level (the
-# top-level error handler converts ANY raised `PdfToolkitError` to its own
+# top-level error handler converts ANY raised `PdfToolingError` to its own
 # `exit_code`, which happens to be 5 either way) -- X-185's fuller claim,
 # that `--dry-run` NEVER raises and instead returns a graceful envelope
 # carrying `would_exit`, is what actually breaks, and only an IN-PROCESS
@@ -921,7 +921,7 @@ def test_ac16_no_merge_page_or_pre_append_prose_survives_in_ports_or_ops() -> No
 
 
 def test_ac17_dry_run_still_mirrors_and_never_raises(corpus, tmp_path: Path) -> None:
-    from pdf_tooling.errors import PdfToolkitError
+    from pdf_tooling.errors import PdfToolingError
     from pdf_tooling.ops.ocr import ocr_run
 
     source = corpus.path("single_page")
@@ -940,7 +940,7 @@ def test_ac17_dry_run_still_mirrors_and_never_raises(corpus, tmp_path: Path) -> 
             in_place=False,
             policy=policy(dry_run=True),
         )
-        with pytest.raises(PdfToolkitError) as excinfo:
+        with pytest.raises(PdfToolingError) as excinfo:
             watermark_run(
                 source,
                 text="X",
@@ -967,7 +967,7 @@ def test_ac17_dry_run_still_mirrors_and_never_raises(corpus, tmp_path: Path) -> 
             in_place=False,
             policy=policy(dry_run=True),
         )
-        with pytest.raises(PdfToolkitError) as excinfo:
+        with pytest.raises(PdfToolingError) as excinfo:
             stamp_run(
                 source,
                 from_path=corpus.path("stamp_source"),
@@ -994,7 +994,7 @@ def test_ac17_dry_run_still_mirrors_and_never_raises(corpus, tmp_path: Path) -> 
             in_place=False,
             policy=policy(dry_run=True),
         )
-        with pytest.raises(PdfToolkitError) as excinfo:
+        with pytest.raises(PdfToolingError) as excinfo:
             ocr_run(
                 [source],
                 lang="eng",

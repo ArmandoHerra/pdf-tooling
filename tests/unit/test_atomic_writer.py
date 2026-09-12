@@ -406,7 +406,7 @@ D8_TABLE = (
     ids=[row[0].__name__ for row in D8_TABLE],
 )
 def test_each_safety_error_carries_its_documented_exit_code(
-    error_class: type[errors.PdfToolkitError],
+    error_class: type[errors.PdfToolingError],
     code: int,
     kind: str,
 ) -> None:
@@ -422,7 +422,7 @@ def test_the_table_covers_every_safety_error_the_package_exports() -> None:
     exported = {
         name
         for name in errors.__all__
-        if name.endswith("Error") and name not in {"PdfToolkitError"}
+        if name.endswith("Error") and name not in {"PdfToolingError"}
     }
     spine = exported - {
         "AuthError",

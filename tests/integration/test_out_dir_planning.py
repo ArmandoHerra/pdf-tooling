@@ -219,7 +219,7 @@ def test_ac12_the_five_precondition_matrix(verb: str, corpus: Any, tmp_path: Pat
         # ever constructs one: `require_office()` raises before the dry
         # branch builds `items` and before the real branch's write loop
         # starts, so both envelopes are the top-level `{"error": {...}}`
-        # shape `render_error_json` emits for an uncaught `PdfToolkitError`.
+        # shape `render_error_json` emits for an uncaught `PdfToolingError`.
         # Asserted directly instead, on the SHAPE (X-184(b)/X-185), never
         # the exit integer alone. `c_out_dir`'s own existence after the real
         # run is NOT asserted here: `plan_filesystem`'s real-mode branch

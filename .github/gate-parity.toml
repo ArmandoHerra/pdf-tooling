@@ -106,7 +106,7 @@ step = "make test PYTEST_ARGS=--junitxml=junit-without-engines.xml"
 local = "engines-gate"
 in_make_ci = false
 reason = "needs-engine-configuration"
-note = "identical command since PDF-28; ci.yml invoked pytest directly until then (changelog.md:123). Not `in_make_ci` because `test` alone does not hide the engines -- that is what `engines-gate` arm 2 adds via PDF_TOOLKIT_TEST_HIDE_ENGINES."
+note = "identical command since PDF-28; ci.yml invoked pytest directly until then (changelog.md:123). Not `in_make_ci` because `test` alone does not hide the engines -- that is what `engines-gate` arm 2 adds via PDF_TOOLING_TEST_HIDE_ENGINES."
 
 [[check]]
 job = "without-engines"
@@ -198,4 +198,4 @@ reason = "needs-built-artifact"
 [[rejected]]
 proposal = "make samples-check as a CI job"
 id = "B-R01"
-reason = "PLAN.md 10.1 rule 5 forbids CI from ever setting PDF_TOOLKIT_SAMPLES_DIR; the job would be a permanent no-op that looks like coverage. TESTING.md:118-120."
+reason = "PLAN.md 10.1 rule 5 forbids CI from ever setting PDF_TOOLING_SAMPLES_DIR; the job would be a permanent no-op that looks like coverage. TESTING.md:118-120."

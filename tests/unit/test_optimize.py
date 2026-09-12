@@ -7,7 +7,7 @@ AUTH path, the `--in-place` `.bak` sidecar as a real process sees it) lives in
 this spec's subprocess count proportionate to what genuinely needs a process
 (B-061).
 
-HC-2 binds this module: nothing here touches `$PDF_TOOLKIT_SAMPLES_DIR`. The
+HC-2 binds this module: nothing here touches `$PDF_TOOLING_SAMPLES_DIR`. The
 `@samples` arm lives in `tests/test_samples.py`'s own PDF-12 section.
 """
 

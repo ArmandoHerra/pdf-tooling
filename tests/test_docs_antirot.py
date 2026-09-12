@@ -41,7 +41,7 @@ THE PLANNING SEAM, AND ITS HONEST ABSENCE STORY
 -----------------------------------------------
 The specs and their roster live OUTSIDE this repository, in the maintainer's
 planning tree. :func:`planning_dir` resolves it through
-``PDF_TOOLKIT_PLANNING_DIR`` and the arms that read it **skip with a reason
+``PDF_TOOLING_PLANNING_DIR`` and the arms that read it **skip with a reason
 naming the resolved path** when it is absent — never a pass. CI checks out this
 repository alone, so in CI those arms skip and their real enforcement is local,
 ``make docs-gate`` and the ``qa-sentinel``. That is stated here rather than
@@ -631,7 +631,7 @@ def test_the_floor_agreement_check_can_fail() -> None:
 
 #: How a test reaches the maintainer's planning tree. Absent -> SKIP with a
 #: reason naming the resolved path. Never a pass.
-PLANNING_DIR_ENV = "PDF_TOOLKIT_PLANNING_DIR"
+PLANNING_DIR_ENV = "PDF_TOOLING_PLANNING_DIR"
 
 STATUS_VOCABULARY = ("Proposed", "Implemented", "Verified", "Parked")
 
