@@ -1321,8 +1321,7 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         TAKES_INPUT_PATHS,
         "C5,C24",
         1,
-        "zero makes C5 and C24 (PDF-51's shape row, the same population reused) collect "
-        "zero cases",
+        "zero makes C5 and C24 (PDF-51's shape row, the same population reused) collect zero cases",
     ),
     Population(
         "REGISTERED",

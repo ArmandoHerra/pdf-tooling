@@ -461,10 +461,14 @@ def test_a_missing_input_dry_run_mirrors_the_real_run(tmp_path: Path) -> None:
         real = run_cli("info", "-o", fmt, str(missing))
         dry = run_cli("info", "-o", fmt, str(missing), "--dry-run")
         assert dry.returncode == real.returncode == 4, (fmt, dry.returncode, real.returncode)
-        assert sorted(json.loads(real.stdout)) == sorted(json.loads(dry.stdout)) == [
-            "error",
-            "schema_version",
-        ]
+        assert (
+            sorted(json.loads(real.stdout))
+            == sorted(json.loads(dry.stdout))
+            == [
+                "error",
+                "schema_version",
+            ]
+        )
 
 
 def test_a_missing_input_under_table_format_matches_the_sibling_shape(tmp_path: Path) -> None:
@@ -590,9 +594,13 @@ def test_ac10_inspect_paths_guard_catches_the_declared_tuple_and_nothing_wider()
     tree = ast.parse(module_path.read_text(), filename="ops/inspect.py")
 
     functions = [
-        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "inspect_paths"
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "inspect_paths"
     ]
-    assert len(functions) == 1, f"expected exactly one `inspect_paths` in ops/inspect.py: {functions}"
+    assert len(functions) == 1, (
+        f"expected exactly one `inspect_paths` in ops/inspect.py: {functions}"
+    )
 
     handlers = [node for node in ast.walk(functions[0]) if isinstance(node, ast.ExceptHandler)]
     assert len(handlers) == 1, f"expected exactly one handler in `inspect_paths`: {handlers}"
