@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-63] Drive `convert` in the read-seam sweep, so the triage's own byte reads are observed rather than counted — 2026-09-11
+
+- **`convert` becomes the third driven verb of twenty-six** in `tests/test_read_seams.py`'s runtime `open()` completeness instrument (`PDF-43`): a spawn-free `convert/office-dry` cell (`--dry-run`, an ASCII payload behind a `.docx` name) joins `_SWEEP_SPECS`, driving `soffice_office.py`'s container-triage head-read (`PDF-53`) out of AC5's undriven residue at a measured **0.69 s**, no LibreOffice spawn, no profile directory.
+- **The cell alone is not sufficient, and that finding is why this spec has a second half.** The triage's second read — `handle.read(...)` on an already-open handle — raises no `open` audit event under any verb, race or depth, so it is structurally unobservable rather than undriven. The `project-manager` ruled **X-715 — DRIVE *AND* REGISTER** (`decision.md` §11): the cell **plus exactly one** authorised `RESIDUE_CEILING` entry, `"pdf_tooling/adapters/soffice_office.py": 1` (modules constant, `tests/test_read_seams.py:66`, sum `43 → 44`, comment naming the class and the control) — never `tests/test_docs_antirot.py`'s same-named, untouched documents constant (sum frozen at `171`). `test_ac5_…` is green at `(1, 1)`.
+- **A standalone arm, kept outside the sweep population,** drives the `PK`-claiming branch directly and answers a question `PDF-53` only asserted: `soffice_office.py`'s `except OSError: return` is reachable and silent under a TOCTOU race, previewing a provably-unloadable operand as a clean success (filed as F-1, not fixed here — a `PDF-53`/`src/**` defect).
+- Three further findings are filed, not fixed: `zipfile.is_zipfile`/`zipfile.ZipFile` are unenumerated seams if driven inside the sweep population (F-2); the residue mixes genuinely undriven branches with structurally unobservable ones (F-3); the drive still covers three of twenty-six verbs (F-4).
+
 ## [PDF-52] Disclose password verification in the dry-run tier and in the five honoured verbs — 2026-09-11
 
 - **Closes two ledger rows that do not nest.** `d01c9d52fb` (high): six verbs — `compress`, `linearize`, `meta set`, `repair`, `stamp`, `watermark` — previewed `"ok": true, "exit_code": 0` on a resolvable-but-wrong `--password-file` with nothing in the payload saying verification was never attempted, while the real run exits 6 `kind: auth` seconds later. `0f230317ef` (medium): five honoured verbs — `compress`, `decrypt`, `linearize`, `permissions`, `repair` — logged where a password came from but never whether it worked, at any verbosity.

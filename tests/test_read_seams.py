@@ -67,6 +67,22 @@ RESIDUE_CEILING: Final[dict[str, int]] = {
     "pdf_tooling/adapters/pdfplumber_text.py": 1,
     "pdf_tooling/adapters/pikepdf_structure.py": 10,
     "pdf_tooling/adapters/pypdf_structure.py": 7,
+    #: X-715 -- the ONE entry this constant is licensed to gain, and no other.
+    #: (a) THE CLASS: `:120` is `handle.read(...)` on an ALREADY-OPEN handle, a
+    #: read-shaped call that cannot raise the `open` audit event this observer
+    #: hooks -- structurally unobservable, not undriven, under any verb, race
+    #: or depth. (b) THE CONTROL: `ops/compose.py:538` is observed and `:539`
+    #: is residual under the identical two-line idiom, in a module the drive
+    #: DOES reach, absorbed by that module's own frozen ceiling of `2` (E3) --
+    #: the same concession, at the same size, for the same structural reason.
+    #: (c) FORWARD-LOOKING BY ONE COMMIT: at `PDF-63`'s own commit the adapter
+    #: carries no read-shaped site at all, so this key is inert here and
+    #: registers a site arriving in the next commit of the same push (X-715.1).
+    #: `1`, not `2`: `:119` IS observable and IS driven by the `convert/
+    #: office-dry` cell below, and the value must not cover it -- a `2` would
+    #: let a future engineer delete that cell and stay green, which is the act
+    #: this constant exists to forbid (X-715, decision.md §11).
+    "pdf_tooling/adapters/soffice_office.py": 1,
     "pdf_tooling/adapters/tesseract_ocr.py": 2,
     "pdf_tooling/cli/cmd_create.py": 2,
     "pdf_tooling/cli/common.py": 1,
@@ -147,6 +163,24 @@ def _compress_argv(operand: Path, workdir: Path) -> list[str]:
     return ["-o", "json", "compress", str(operand), "-O", str(workdir / "out.pdf")]
 
 
+#: PDF-63 D2 -- an ASCII payload behind a `.docx` name. Reaches BOTH residue
+#: sites (`ensure_source_loadable` opens and reads the head before the
+#: `head != _ZIP_MAGIC` early return) and stops there: a non-`PK` operand never
+#: reaches `zipfile.is_zipfile`/`zipfile.ZipFile`, which are invisible to the
+#: static walk and unregistered, so this shape keeps AC4's rogue list empty
+#: (E5) -- a `PK`-prefixed operand does not (driven separately, D3, outside
+#: this population). This is the MINIMAL drive of the two residue sites, not
+#: an operand chosen to dodge a red.
+def _office_dry_operand(directory: Path) -> Path:
+    target = directory / "operand.docx"
+    target.write_bytes(b"an ASCII operand behind a .docx name\n")
+    return target
+
+
+def _convert_dry_argv(operand: Path, workdir: Path) -> list[str]:
+    return ["-o", "json", "convert", str(operand), "--out-dir", str(workdir / "out"), "--dry-run"]
+
+
 _SWEEP_SPECS: Final = {
     "compose/JPEG": (_image_operand("JPEG", ".jpg"), _compose_argv, seams.RACE_UNREADABLE),
     # A JPEG whose NAME says nothing. The suffix-derived default noun answers
@@ -157,6 +191,14 @@ _SWEEP_SPECS: Final = {
     "compose/PNG": (_image_operand("PNG", ".png"), _compose_argv, seams.RACE_UNREADABLE),
     "compose/JPEG-dir": (_image_operand("JPEG", ".jpg"), _compose_argv, seams.RACE_DIRECTORY),
     "compress/PDF-delete": (_pdf_operand, _compress_argv, seams.RACE_DELETE),
+    # PDF-63 -- the third driven verb of twenty-six. Spawn-free (`--dry-run`,
+    # no `soffice` spawn, no LibreOffice profile dir), so this is the cheapest
+    # cell in the drive (E7). Drives `soffice_office.py:119` out of AC5's
+    # residue; `:120` (`handle.read` on an already-open handle) raises no
+    # `open` audit event and is structurally unobservable under any verb, race
+    # or depth (E2) -- covered instead by the X-715 `RESIDUE_CEILING` entry
+    # above, not by widening this cell.
+    "convert/office-dry": (_office_dry_operand, _convert_dry_argv, seams.RACE_UNREADABLE),
 }
 
 _CACHE: dict[str, seams.Sweep] = {}
@@ -583,9 +625,128 @@ def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow
         f"a module joined the residue with no ceiling entry: "
         f"{sorted(set(counts) - set(RESIDUE_CEILING))}"
     )
-    assert sum(RESIDUE_CEILING.values()) == 43, (
+    assert sum(RESIDUE_CEILING.values()) == 44, (
         "the residue ceiling's TOTAL is frozen too, so a shrink in one module cannot silently "
-        "pay for a growth in another"
+        "pay for a growth in another -- 44 under X-715's one registered entry (decision.md §11)"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-63 D3/D4 -- the `PK`-claiming branch, driven OUTSIDE `_SWEEP_SPECS`, and
+# the `OSError`-catch reachability answer (E6).
+# --------------------------------------------------------------------------- #
+
+
+def test_convert_zip_claim_branch_and_the_oserror_catch_reachability(tmp_path: Path) -> None:
+    """The `PK`-claiming branch of `ensure_source_loadable`, driven directly.
+
+    **Kept OUT of `_SWEEP_SPECS` on purpose (D3).** A `PK\\x03\\x04`-prefixed
+    operand routes past the early return into `zipfile.is_zipfile`/
+    `zipfile.ZipFile` -- neither call is read-shaped (invisible to the static
+    walk) and `zipfile` is registered nowhere (invisible to bucket 3), so
+    driving it INSIDE the `sweeps` population would redden
+    `test_ac4_no_observed_seam_escapes_all_three_enumerators` naming the frame
+    (E5) -- a strictly worse trade than the AC5 red this spec exists to clear.
+    Driven here, standalone, it informs this criterion without enlarging that
+    population.
+
+    **What it answers (D4, E6): is `soffice_office.py`'s `except OSError:
+    return` reachable, and does it mispredict?** The catch's own ground is
+    that an unreadable operand is "`ops/batch.py` rung 4 ... reached before
+    this ever runs" -- true of a STATICALLY unreadable operand, untested
+    against a RACING one. Driven at `depth=None` (control) and
+    `depth=FIRST_ORDINAL` (the operand becomes unreadable at its own first
+    open), the two hypotheses give different exit codes, so the answer is
+    decisive rather than assumed.
+
+    **Measured answer: reachable, and silent.** Filed as F-1 (§D6) -- not
+    fixed here, since fixing it means editing `soffice_office.py`, which is
+    both `src/**` and one of `PDF-53`'s seven files.
+
+    RED (the zip branch, D3): change the operand's leading bytes away from
+    `PK\\x03\\x04` -> the control no longer reaches `zipfile.is_zipfile` and
+    the message assertion below fails.
+    RED (the `OSError` answer, D4): delete `soffice_office.py`'s
+    `except OSError: return` in a scratch worktree -> the depth-1 cell stops
+    exiting 0 (it raises instead, or a caller further up turns it into a
+    traceback -- either is a `PDF-53` defect to REPORT, never to fix here).
+
+    **§Sequencing note.** `PDF-63` lands FIRST, `PDF-53` second, one push
+    (drive-first, X-715.1). At `PDF-63`'s own commit `soffice_office.py`
+    carries no container triage at all -- there is nothing for this arm to
+    drive yet -- so it SKIPS, visibly and by name, rather than asserting a
+    behaviour that does not exist on that tree (the `test_ac16_…` interpreter-
+    availability precedent: "skips visibly with a reason and never passes
+    silently"). It runs, and asserts in full, once `PDF-53`'s diff lands.
+    """
+    _skip_as_root()
+    adapter_source = (SRC_ROOT / "pdf_tooling" / "adapters" / "soffice_office.py").read_text()
+    if "ensure_source_loadable" not in adapter_source:
+        pytest.skip(
+            "PDF-63 lands before PDF-53 in this push (drive-first, decision.md §11.5, "
+            "X-715.1); soffice_office.py's container triage does not exist at this commit, "
+            "so there is nothing for this arm to drive yet"
+        )
+
+    def _pk_claim_operand(directory: Path) -> Path:
+        target = directory / "operand.docx"
+        # `PK\x03\x04` claims a ZIP container; the trailing bytes are not one,
+        # so `zipfile.is_zipfile` returns False -- E5's "malformed zip" shape.
+        target.write_bytes(b"PK\x03\x04" + b"not a real zip container, only its magic bytes\n")
+        return target
+
+    site_pattern = re.compile(r"^pdf_tooling/adapters/soffice_office\.py:\d+$")
+
+    control_dir = tmp_path / "control"
+    control_dir.mkdir()
+    control_operand = _pk_claim_operand(control_dir)
+    control = seams.drive_cell(
+        argv=_convert_dry_argv(control_operand, control_dir),
+        operand=control_operand,
+        workdir=control_dir,
+        depth=None,
+        race=seams.RACE_UNREADABLE,
+    )
+    assert control.exit_code == 1, (
+        f"the un-raced control should refuse the malformed zip container: "
+        f"exit={control.exit_code} stdout={control.stdout[:300]} stderr={control.stderr[:300]}"
+    )
+    assert "not a loadable office document (malformed zip container)" in (
+        control.stdout + control.stderr
+    ), f"the container-refusal message drifted: {control.stdout[:300]} {control.stderr[:300]}"
+    control_sites = [str(row.get("first_party", "")) for row in control.channel(seams.CHANNEL_READ)]
+    in_module = [site for site in control_sites if site_pattern.match(site)]
+    assert len(set(in_module)) == 2, (
+        f"the control must open the operand at exactly two DISTINCT sites inside this adapter "
+        f"-- the head-read site and `zipfile.is_zipfile`'s own open -- got {control_sites}"
+    )
+
+    raced_dir = tmp_path / "depth-1"
+    raced_dir.mkdir()
+    raced_operand = _pk_claim_operand(raced_dir)
+    raced = seams.drive_cell(
+        argv=_convert_dry_argv(raced_operand, raced_dir),
+        operand=raced_operand,
+        workdir=raced_dir,
+        depth=seams.FIRST_ORDINAL,
+        race=seams.RACE_UNREADABLE,
+    )
+    reads = raced.channel(seams.CHANNEL_READ)
+    flipped = [row for row in reads if row.get("flipped")]
+    assert flipped, f"the depth-1 cell never raced the operand: {reads}"
+    assert flipped[0]["ordinal"] == seams.FIRST_ORDINAL, flipped
+    assert site_pattern.match(str(flipped[0]["first_party"])), flipped
+    assert raced.exit_code == 0, (
+        f"depth {seams.FIRST_ORDINAL}: the `OSError` catch answer flipped -- expected exit 0 "
+        f"(silent, reachable) but got exit {raced.exit_code}: "
+        f"stdout={raced.stdout[:300]} stderr={raced.stderr[:300]}"
+    )
+    envelope = raced.envelope
+    assert envelope is not None, f"depth {seams.FIRST_ORDINAL}: no parsable `-o json` envelope"
+    items = envelope.get("items")
+    assert items and all(item.get("ok") is True for item in items), (
+        f"depth {seams.FIRST_ORDINAL}: expected every item ok=True (the catch's silent return), "
+        f"got {items}"
     )
 
 
