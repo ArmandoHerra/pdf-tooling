@@ -2447,6 +2447,13 @@ class HelpImports(NamedTuple):
     self_us_by_module: Mapping[str, int]
     #: Sum of the above. The second net, for a regression spread thinly.
     total_self_us: int
+    #: PDF-55 D1/D2/E6. The bare-interpreter floor census's OWN self-time sum --
+    #: already computed by `_importtime_census(["-c", "pass"], env)` below and,
+    #: until now, spent on nothing but a name-set subtraction. `floor` already
+    #: carries `self_us`/`cumulative_us` on every row (`parse_importtime_row`),
+    #: so this costs no new subprocess: it is the measurement already on the
+    #: wire, held in memory, and no longer discarded three lines later.
+    floor_self_us: int
 
 
 #: The console script under test. Deliberately the venv's own, by path: the
@@ -2523,70 +2530,238 @@ HELP_MODULE_CEILING: Final = 320
 # enforces exactly that, and it is not a formality.
 # --------------------------------------------------------------------------- #
 
-#: No single attributable module's import SELF time may exceed this.
+# --------------------------------------------------------------------------- #
+# PDF-55 -- the two absolutes above could not survive contention, so both are
+# now RATIOS measured inside the SAME `--help` census.
+#
+# THE DEFECT, MEASURED RATHER THAN ARGUED. `TOTAL_IMPORT_US_CEILING` reddened on
+# a BYTE-IDENTICAL, unmutated tree under ambient contention (loadavg 42-84:
+# 2,350,905 / 3,445,048 / 4,431,015 us against its 2,000,000 ceiling) while
+# staying GREEN on the very `time.sleep(0.15) x 5` plant PDF-42 shipped it for
+# (897,000-928,230 us, quiet). Its dynamic range is INVERTED: the false
+# positive is LARGER than the true positive. `MODULE_SELF_US_CEILING` reddened
+# the same way in 2 of 3 trials at that same load (`pdf_tooling.models` at
+# 309,277 and 401,360 against 250,000) -- BOTH shipped absolutes are
+# load-fragile, not one, and neither defect is a tuning error: an absolute
+# wall-clock-shaped quantity measured inside a suite that saturates its own
+# box cannot separate "the product got slower" from "the box got busier".
+#
+# THE BASIS THAT SURVIVES IT (D1). Both statistics below are now a
+# DIMENSIONLESS RATIO of two self-time sums taken from the SAME subprocess:
+# `pdf_tooling.*` self time (the numerator a product-side regression enters)
+# over every OTHER attributable module's self time (the denominator it cannot
+# enter). Contention multiplies both sides together and cancels; a real
+# regression moves the numerator alone. Measured cv under deliberate load
+# (N=75, loadavg 22-66, this campaign): the RATIO's cv is 11.26% against the
+# retired TOTAL absolute's 41.87% over the identical trials -- see
+# `PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE`'s own block below for the full
+# distribution.
+#
+# `TOTAL_IMPORT_US_CEILING` IS RETIRED (D5/AC12), on PROVEN coverage transfer:
+# the new ratio arm below reddens on both the thin five-module sleep plant
+# (which the retired arm never could -- E3) and a gross-growth plant that
+# exceeded the retired arm's own 2,000,000 us ceiling (so no coverage is lost).
+# See the Implementation Log for both reds, recorded before this node was
+# removed. `MODULE_SELF_US_CEILING` is KEPT AS A NODE -- it is the only arm
+# that NAMES the offending module, which a ratio over the whole census cannot
+# -- but its basis is RE-BASED to the same normalisation, never widened.
+#
+# DECLARED BLIND SPOTS (D7), stated so silent invisibility does not happen
+# quietly:
+#   1. An import-time regression INSIDE a third-party dependency enters the
+#      DENOMINATOR, lowering both ratios -- this instrument is blind to it,
+#      and it can partially MASK a simultaneous product-side regression.
+#      Mitigation: third-party/stdlib growth is still held by
+#      `HELP_IMPORT_ALLOWLIST` (names) and `HELP_MODULE_CEILING` (count), and a
+#      dependency bump arrives with a `uv.lock` diff the licence/dependency
+#      gates already see. A product-side regression arrives silently in an
+#      ordinary commit, which is the case this ratio exists for.
+#   2. Both statistics see COST, not CAUSE: a sleep, a network call, a large
+#      file read and a heavy computation at module scope are indistinguishable
+#      to a ratio -- correctly, since all four cost the same thing to a user in
+#      a shell loop. `MODULE_SELF_US_CEILING`'s own per-module locator names
+#      WHERE; nothing here claims to name WHY.
+#   3. `time.sleep` is contention-invariant while its denominator dilates under
+#      load, so the separation this basis offers DECAYS as ambient load rises
+#      (measured: E9-shaped campaign, this architect, loaded arm N=75 spans
+#      loadavg 22-66). It is graded at the project's DEFAULT `-n auto` (the
+#      condition X-712 names), not at an artificially escalated loadavg; a
+#      CPU-bound regression of the same wall-clock cost behaves in the OPPOSITE
+#      direction and its separation GROWS with load, which is why AC1 drives
+#      both plant shapes rather than the sleep alone.
+# --------------------------------------------------------------------------- #
+
+#: PDF-55 D3. Below this, the ratio's denominator is not trusted -- roughly a
+#: fifth of the bare-interpreter floor's own typical reading (E6: 8,606-10,214
+#: us over three quiet trials on this host) -- so a genuinely broken census (a
+#: `--help` that never reached the real path, or a classification bug that
+#: swept nearly everything into "product") RAISES rather than dividing.
+#: `parse_importtime_row`'s own precedent is the model: do not let the
+#: instrument report a plausible-looking answer on data it could not read.
+DENOMINATOR_SANITY_FLOOR_US: Final = 2_000
+
+
+class ImportPartition(NamedTuple):
+    """`self_us_by_module`, split into `pdf_tooling.*` (the numerator a
+    product-side regression can enter) and everything else (the denominator it
+    cannot) -- D1's two halves, partitioning the SAME attributable set the
+    count already describes so the ratio can never disagree with the count
+    about which modules it means."""
+
+    product_modules: frozenset[str]
+    non_product_modules: frozenset[str]
+    product_self_us: int
+    non_product_self_us: int
+
+
+def assert_partition_valid(
+    product: frozenset[str], non_product: frozenset[str], universe: frozenset[str]
+) -> None:
+    """D3. *product* and *non_product* must partition *universe* -- no
+    overlap, no remainder -- or a classification bug could silently move cost
+    from one side to the other without either the count or this ratio ever
+    noticing. Called by `partition_by_product` on every real census (defence
+    in depth) and directly, with a hand-built bad partition, by this section's
+    own red controls -- `partition_by_product`'s own subtraction cannot itself
+    produce an overlap, so the only way to prove this assertion fires is to
+    hand it two populations computed two different ways, the same shape as
+    `test_a_malformed_timing_column_raises_rather_than_reading_as_zero`'s
+    direct call into `parse_importtime_row`.
+    """
+    overlap = product & non_product
+    assert overlap == frozenset(), (
+        f"module(s) classified as BOTH product and non-product: {sorted(overlap)}. A "
+        "classification bug that double-counts (or that lets a module escape both "
+        "buckets) would silently move cost between the numerator and the denominator -- "
+        "the exact false-positive class this ratio exists to end."
+    )
+    covered = product | non_product
+    assert covered == universe, (
+        f"the partition does not cover the attributable set. missing="
+        f"{sorted(universe - covered)} extra={sorted(covered - universe)}"
+    )
+
+
+def partition_by_product(self_us_by_module: Mapping[str, int]) -> ImportPartition:
+    """Split *self_us_by_module* into `pdf_tooling.*` and everything else."""
+    universe = frozenset(self_us_by_module)
+    product = frozenset(name for name in universe if name.split(".")[0] == "pdf_tooling")
+    non_product = universe - product
+    assert_partition_valid(product, non_product, universe)
+    return ImportPartition(
+        product_modules=product,
+        non_product_modules=non_product,
+        product_self_us=sum(self_us_by_module[name] for name in product),
+        non_product_self_us=sum(self_us_by_module[name] for name in non_product),
+    )
+
+
+def checked_denominator(partition: ImportPartition) -> int:
+    """*partition*'s denominator, or a raise naming the reading (D3).
+
+    A ratio whose denominator collapses toward zero manufactures an
+    arbitrarily large red -- a false positive produced by the INSTRUMENT
+    itself, which is the exact class this statistic exists to end. A bad
+    denominator FAILS rather than normalising quietly.
+    """
+    if not partition.non_product_modules or partition.non_product_self_us <= 0:
+        raise AssertionError(
+            f"the ratio's denominator (non-product attributable self time) is "
+            f"{partition.non_product_self_us} us over "
+            f"{len(partition.non_product_modules)} module(s) -- refusing to divide. Either "
+            "the probe did not reach the real `--help` path, or the product/non-product "
+            "split misclassified the whole census."
+        )
+    if partition.non_product_self_us < DENOMINATOR_SANITY_FLOOR_US:
+        raise AssertionError(
+            f"the ratio's denominator read {partition.non_product_self_us} us, under the "
+            f"{DENOMINATOR_SANITY_FLOOR_US} us sanity floor -- this is not a live "
+            "denominator, so no ratio is computed from it."
+        )
+    return partition.non_product_self_us
+
+
+#: No single attributable module's self time, AS A SHARE OF the non-product
+#: attributable self time measured in the SAME census, may exceed this.
+#: Expressed as an integer x1000 (a per-mille) so `ceiling_block()`'s existing
+#: integer-literal parser (`tests/test_gate_budget.py`) needs no change: `470`
+#: means the ratio must not exceed `0.470`.
 #:
-#: STATISTIC: max over modules of per-module self time, from `-X importtime`,
-#:   baseline-subtracted, one `pdftooling --help` run.
-#: DATE: 2026-09-05
-#: COMMIT: b175d10 (measured on the working tree at that commit)
-#: HOST: station-01, 8 logical CPUs, Linux. Verified quiet at the campaign's
-#:   start by `scripts/measure_gate.py`'s own definition (loadavg 1.50 against
-#:   the 2.00 ceiling, no foreign process >=25% CPU alive >=10 s). Later runs in
-#:   the campaign start under load DECAYING FROM THIS SUITE'S OWN PREVIOUS RUN,
-#:   which is self-inflicted and is the shipped condition, not foreign traffic.
-#: INTERPRETER: CPython 3.12.13 (the venv resolves to this; there is no
-#:   .python-version in the repository)
+#: RE-BASED FROM `MODULE_SELF_US_CEILING` (an absolute microsecond figure,
+#: retired by this block): D5 keeps this test as a NODE -- it is the only arm
+#: that NAMES the offending module -- but its basis is now the same
+#: normalisation the ratio below uses, because the absolute reddened on a
+#: byte-identical tree under load (E4: 2 of 3 trials at loadavg 77-84,
+#: `pdf_tooling.models` at 309,277 and 401,360 against 250,000).
+#:
+#: STATISTIC: max over modules of (per-module self time / non-product
+#:   attributable self time), from ONE `pdftooling --help` `-X importtime`
+#:   run, baseline-subtracted.
+#: DATE: 2026-09-12
+#: COMMIT: 46c5ac2 (measured on the working tree at that commit)
+#: HOST: station-01, 8 logical CPUs, Linux.
+#: INTERPRETER: CPython 3.12.13 (`uv run python -V`)
 #: ENGINES: all six present -- pypdf 6.16.2 / pypdfium2 5.13.0 / reportlab
 #:   5.0.1 / pdfplumber 0.11.10 / tesseract 5.5.0 / soffice 26.2.5.2
 #:
-#: N = 12 per arm. Figures in microseconds.
-#:   serial (`-p no:xdist`):  min 8821  median 9579  p95 13712  max 14003  spread 5182
-#:   `-n auto` (the DEFAULT): min 11733 median 26730 p95 48292  max 60255  spread 48522
-#: A second N=12 campaign taken while a FOREIGN pytest suite saturated the box
-#: (loadavg 10-16) read `-n auto` p95 48292 -> 62544, max 60255 -> 75291. Both
-#: campaigns are on the record because the second is the pessimistic one and the
-#: ceiling has to survive it.
+#: Figures are `peak module self / non-product attributable self`, unitless.
+#:   serial (bare repeated subprocess, no xdist, N=12, loadavg <1):
+#:     min 0.1087  median 0.1113  p95 0.1247  max 0.1352  spread 0.0264  cv 6.58%
+#:   `-n auto` (ambient, this project's own workers, N=12, loadavg 13-27):
+#:     min 0.0681  median 0.1051  p95 0.1328  max 0.1747  spread 0.1066  cv 25.23%
+#:   deliberate ambient load (N=75, loadavg 22-66; N independent CPU-bound
+#:   busy-loop processes, 3x-8x nproc, killed by process group afterwards):
+#:     min 0.0680  median 0.1227  p95 0.1559  max 0.1679  spread 0.1000  cv 17.16%
+#: `-n auto` and serial both named per PDF42_DERIVATION_TOKENS.
 #:
-#: FACTOR: 5.18x the `-n auto` p95 (48292), rounded up to a round number. That
-#: leaves 4.15x over the quiet-arm max and 3.32x over the loaded-arm max.
-#: SEPARATION: the `time.sleep(0.5)` plant lands 504504 us in
-#: `pdf_tooling.cli.common`'s self column (3300 us unplanted), which EXCEEDS
-#: this ceiling by 2.02x. The plant is caught with two clear factors on either
-#: side, which is the whole reason this statistic and not the total below.
-MODULE_SELF_US_CEILING: Final = 250_000
+#: FACTOR: 3.0x the deliberately-loaded arm's p95 (0.1559), rounded to 0.470.
+#: The loaded arm governs (D2 rule 3): a contended box is the condition the
+#: assertion actually runs in.
+#: SEPARATION: see the Implementation Log for the AC1 plant campaign under the
+#: project's DEFAULT `-n auto` (not the deliberately-escalated regime above --
+#: E9 Finding 3 measured that a sleep plant's separation DECAYS as load rises,
+#: so direction (a) is graded at the shipped condition, per D7 blind spot 3).
+MODULE_SELF_RATIO_CEILING_PER_MILLE: Final = 470
 
-#: The sum of all attributable modules' self times.
+#: `pdf_tooling.*` self time, AS A SHARE OF the non-product attributable self
+#: time measured in the SAME census. Replaces `TOTAL_IMPORT_US_CEILING`
+#: (retired above), which reddened on a byte-identical tree under contention
+#: while staying green on the plant it shipped for (D5/AC12; see the retiring
+#: block's header for the figures). Expressed as an integer x1000 (a
+#: per-mille), for the same reason as the constant above: `2_600` means the
+#: ratio must not exceed `2.600`.
 #:
-#: **READ THE SEPARATION LINE BEFORE TRUSTING THIS ONE.** This is a coarse
-#: ratchet against gross growth and it CANNOT see the 0.5 s plant. That is a
-#: measured result, not a conservative guess, and it is recorded here rather
-#: than being quietly implied by a comfortable-looking number.
-#:
-#: STATISTIC: sum over attributable modules of per-module self time.
-#: DATE: 2026-09-05
-#: COMMIT: b175d10
-#: HOST: station-01, 8 logical CPUs, Linux -- same campaign, same quietness
-#:   verification, as MODULE_SELF_US_CEILING above.
-#: INTERPRETER: CPython 3.12.13
+#: STATISTIC: sum of `pdf_tooling.*` self time / sum of every OTHER
+#:   attributable module's self time, from ONE `pdftooling --help`
+#:   `-X importtime` run, baseline-subtracted (D1). Recommended PRIMARY over
+#:   `peak/total` (X-557, rejected: denominator contains the regression) and
+#:   `total/floor` (rejected: the floor denominator is small and dispersed) --
+#:   see the Implementation Log's AC5 campaign for all three, measured.
+#: DATE: 2026-09-12
+#: COMMIT: 46c5ac2 (measured on the working tree at that commit)
+#: HOST: station-01, 8 logical CPUs, Linux.
+#: INTERPRETER: CPython 3.12.13 (`uv run python -V`)
 #: ENGINES: all six present (as above)
 #:
-#: N = 12 per arm. Figures in microseconds.
-#:   serial (`-p no:xdist`):  min 147692 median 164082 p95 210276 max 220790 spread 73098
-#:   `-n auto` (the DEFAULT): min 255771 median 439248 p95 496622 max 554617 spread 298846
-#:   `-n auto`, FOREIGN-LOADED: p95 779998, max 949030, spread 630803
+#: Figures are `product self / non-product attributable self`, unitless.
+#:   serial (bare repeated subprocess, no xdist, N=12, loadavg <1):
+#:     min 0.7192  median 0.8393  p95 0.8991  max 0.9141  spread 0.1949  cv 5.64%
+#:   `-n auto` (ambient, this project's own workers, N=12, loadavg 13-27):
+#:     min 0.5749  median 0.7304  p95 0.9111  max 0.9354  spread 0.3605  cv 15.57%
+#:   deliberate ambient load (N=75, loadavg 22-66; N independent CPU-bound
+#:   busy-loop processes, 3x-8x nproc, killed by process group afterwards):
+#:     min 0.5456  median 0.8584  p95 1.0406  max 1.1570  spread 0.6115  cv 11.26%
+#: `-n auto` and serial both named per PDF42_DERIVATION_TOKENS.
 #:
-#: FACTOR: 2.56x the foreign-loaded `-n auto` p95 (779998), rounded to a round
-#: number; 4.03x the quiet `-n auto` p95. The loaded arm governs here because
-#: this statistic's dispersion is dominated by contention.
-#: SEPARATION: NONE, AND THIS IS THE FINDING. The plant's total is 759422 us on
-#: a quiet host; ordinary `-n auto` contention on a shared host was OBSERVED at
-#: 949030 us with no plant at all. **Ordinary noise exceeds the planted signal**,
-#: so no single ceiling separates them and this assertion cannot be the one that
-#: catches a startup regression. It is kept as the second net it can honestly
-#: be -- a regression that adds more than ~1.4 s of import self time spread
-#: thinly across many modules, which `MODULE_SELF_US_CEILING` would miss. PDF-42
-#: filed the measurement to the PM rather than tightening this into a flake.
-TOTAL_IMPORT_US_CEILING: Final = 2_000_000
+#: FACTOR: 2.5x the deliberately-loaded arm's p95 (1.0406), rounded to 2.600.
+#: The loaded arm governs (D2 rule 3), same reasoning as the constant above.
+#: SEPARATION: see the Implementation Log's AC1/AC3 evidence. On the SAME
+#: deliberately-loaded trials that produced the distribution above, the
+#: RETIRED `total_self_us` absolute reddened 4 of 75 times against its
+#: 2,000,000 us ceiling (max observed 2,835,898 us) while this ratio's max
+#: over the identical trials was 1.1570, under its 2.600 ceiling throughout --
+#: the AC3 demonstration this constant's own block exists to carry.
+PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE: Final = 2_600
 
 
 #: `-X importtime` writes `import time: self [us] | cumulative | imported package`
@@ -2704,6 +2879,7 @@ def probe_help_imports(entry: Path | None = None) -> HelpImports:
         non_stdlib,
         self_us_by_module,
         sum(self_us_by_module.values()),
+        sum(row.self_us for row in floor),
     )
 
 
@@ -2917,42 +3093,114 @@ def test_no_single_module_costs_more_than_the_self_time_ceiling(
 ) -> None:
     """The assertion the headline plant fails, and the reason it is per-module.
 
-    A `time.sleep(0.5)` concentrates its entire cost in ONE module's self
-    column; contention inflates all 282 roughly together. That asymmetry is what
-    makes a per-module ceiling able to separate a real regression from a busy
-    box, and it is why the TOTAL below cannot (see its comment block -- ordinary
-    `-n auto` noise was measured LARGER than the planted signal).
+    PDF-55 RE-BASE: this node is KEPT because it is the only arm that NAMES
+    the offending module, which a whole-census ratio cannot -- but its basis
+    is now the module's share of the non-product attributable self time in
+    the SAME census, not an absolute microsecond figure. The absolute
+    (`MODULE_SELF_US_CEILING`) reddened on a byte-identical tree under load
+    (E4: 2 of 3 trials at loadavg 77-84) precisely because contention inflates
+    every module's self time roughly together; the ratio does not, because the
+    denominator inflates along with it.
     """
+    partition = partition_by_product(help_imports.self_us_by_module)
+    denominator = checked_denominator(partition)
     over = sorted(
-        (name, cost)
+        (name, cost, round(cost / denominator, 4))
         for name, cost in help_imports.self_us_by_module.items()
-        if cost > MODULE_SELF_US_CEILING
+        if cost * 1000 > MODULE_SELF_RATIO_CEILING_PER_MILLE * denominator
     )
     assert over == [], (
-        f"module(s) over the {MODULE_SELF_US_CEILING} us per-module import self-time "
-        f"ceiling: {over}. Startup latency in a Python CLI is dominated by module import, "
-        "and this is a module that got dramatically more expensive to import -- a sleep, a "
-        "network call, a heavy computation or a big eager subsystem at module scope. Find "
-        f"it with `python -X importtime {VENV_CONSOLE_SCRIPT} --help`. Either move the cost "
-        "out of module scope, or widen MODULE_SELF_US_CEILING **with a fresh measured "
+        f"module(s) over the {MODULE_SELF_RATIO_CEILING_PER_MILLE / 1000:.3f} "
+        f"per-module-self/non-product-self ratio ceiling: {over}. Startup latency in a "
+        "Python CLI is dominated by module import, and this is a module that got "
+        "dramatically more expensive to import -- a sleep, a network call, a heavy "
+        "computation or a big eager subsystem at module scope. Find it with "
+        f"`python -X importtime {VENV_CONSOLE_SCRIPT} --help`. Either move the cost out of "
+        "module scope, or widen MODULE_SELF_RATIO_CEILING_PER_MILLE **with a fresh measured "
         "distribution recorded beside it** -- widening a pin without a measurement is how "
         "the wall-clock budget this section replaced came to be defended by nothing."
     )
 
 
-def test_total_import_self_time_stays_under_the_ceiling(help_imports: HelpImports) -> None:
-    """The coarse second net: a regression spread thinly across many modules.
-
-    Its sensitivity is bounded by contention and the constant's own comment
-    block says so with the numbers. It is NOT the control that catches the 0.5 s
-    plant -- `test_no_single_module_costs_more_than_the_self_time_ceiling` is.
+def test_the_product_import_ratio_stays_under_its_ceiling(help_imports: HelpImports) -> None:
+    """PDF-55's new claim-bearing arm (D1/D2/D4), replacing
+    `test_total_import_self_time_stays_under_the_ceiling` (retired, D5/AC12):
+    `pdf_tooling.*` self time, as a share of every OTHER attributable module's
+    self time in the SAME census. A product-side regression enters the
+    numerator and cannot enter the denominator; ordinary contention multiplies
+    both and cancels. See `PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE`'s own block
+    for the derivation, and the Implementation Log for the AC1-AC3 evidence
+    this arm was graded against.
     """
-    assert help_imports.total_self_us <= TOTAL_IMPORT_US_CEILING, (
-        f"`pdftooling --help` spends {help_imports.total_self_us} us of import self time, "
-        f"over the {TOTAL_IMPORT_US_CEILING} us ceiling. This is a COARSE net: if it is red "
-        "the growth is large. Check the per-module view first "
-        f"(`python -X importtime {VENV_CONSOLE_SCRIPT} --help`)."
+    partition = partition_by_product(help_imports.self_us_by_module)
+    denominator = checked_denominator(partition)
+    ratio = partition.product_self_us / denominator
+    assert (
+        partition.product_self_us * 1000 <= PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE * denominator
+    ), (
+        f"`pdftooling --help` spends {partition.product_self_us} us of PRODUCT "
+        f"(`pdf_tooling.*`) import self time against {denominator} us of non-product "
+        f"attributable self time in the SAME census -- a ratio of {ratio:.4f}, over the "
+        f"{PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE / 1000:.3f} ceiling. Startup latency in a "
+        "Python CLI is dominated by module import, and this is the coarse net for a "
+        "regression spread thinly across many modules; check the per-module view first "
+        f"(`python -X importtime {VENV_CONSOLE_SCRIPT} --help`). Either make an import "
+        "lazy, or widen PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE **with a fresh measured "
+        "distribution recorded beside it**."
     )
+
+
+def test_the_partition_reddens_on_a_module_placed_in_both_populations() -> None:
+    """AC8 RED (ii). Direct call, hand-built input -- the same shape as
+    `test_a_malformed_timing_column_raises_rather_than_reading_as_zero`'s proof
+    of `parse_importtime_row`. `partition_by_product`'s own subtraction cannot
+    itself produce an overlap, so the only way to prove `assert_partition_valid`
+    fires is to hand it two populations computed two different ways.
+    """
+    universe = frozenset({"pdf_tooling.models", "typing"})
+    with pytest.raises(AssertionError, match="classified as BOTH"):
+        assert_partition_valid(
+            frozenset({"pdf_tooling.models", "typing"}),  # "typing" wrongly in BOTH
+            frozenset({"typing"}),
+            universe,
+        )
+
+
+def test_the_partition_reddens_on_a_module_left_out_of_both_populations() -> None:
+    """AC8 RED (ii)'s sibling: a module in NEITHER population is a silent
+    remainder rather than a silent overlap, and is caught the same way."""
+    universe = frozenset({"pdf_tooling.models", "typing"})
+    with pytest.raises(AssertionError, match="does not cover"):
+        assert_partition_valid(frozenset({"pdf_tooling.models"}), frozenset(), universe)
+
+
+def test_a_hollow_denominator_raises_rather_than_dividing() -> None:
+    """AC8 RED (i). A denominator population that is empty (or that summed to
+    zero) REFUSES rather than manufacturing an infinite -- or merely
+    enormous -- ratio from a denominator this section cannot trust."""
+    hollow = ImportPartition(
+        product_modules=frozenset({"pdf_tooling.models"}),
+        non_product_modules=frozenset(),
+        product_self_us=9_000,
+        non_product_self_us=0,
+    )
+    with pytest.raises(AssertionError, match="refusing to divide"):
+        checked_denominator(hollow)
+
+
+def test_a_denominator_under_the_sanity_floor_raises_by_name() -> None:
+    """D3's stated sanity band, the half AC8 does not name but D3 requires: a
+    denominator that is *technically* positive but far too small to be a real
+    census (a near-total misclassification) still refuses, naming the
+    reading, rather than dividing by something this section cannot trust."""
+    thin = ImportPartition(
+        product_modules=frozenset({"pdf_tooling.models"}),
+        non_product_modules=frozenset({"_io"}),
+        product_self_us=900_000,
+        non_product_self_us=1,
+    )
+    with pytest.raises(AssertionError, match="sanity floor"):
+        checked_denominator(thin)
 
 
 def test_the_timing_census_is_not_vacuous(help_imports: HelpImports) -> None:
@@ -3029,16 +3277,37 @@ def test_the_ceilings_are_one_sided_and_an_improvement_is_never_a_red() -> None:
     that reddened on an improvement would be widened or deleted by the first
     person to improve startup latency.
     """
-    halved = {"pdf_tooling.models": 10_000, "typing": 5_000}
-    assert max(halved.values()) <= MODULE_SELF_US_CEILING
-    assert sum(halved.values()) <= TOTAL_IMPORT_US_CEILING
+    # Four non-product modules dilute the denominator so no single one of them
+    # is self-referentially close to its own ratio's ceiling (D7 blind spot 1:
+    # a non-product module IS part of its own denominator).
+    halved = {
+        "pdf_tooling.models": 50_000,
+        "typing": 50_000,
+        "email": 50_000,
+        "json": 50_000,
+        "os": 50_000,
+    }
+    partition = partition_by_product(halved)
+    denominator = checked_denominator(partition)
+    assert max(halved.values()) * 1000 <= MODULE_SELF_RATIO_CEILING_PER_MILLE * denominator
+    assert partition.product_self_us * 1000 <= PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE * denominator
 
     # ...and the same shape with one module raised past the ceiling DOES redden.
-    raised = {**halved, "pdf_tooling.cli.common": MODULE_SELF_US_CEILING + 1}
-    over = [name for name, cost in raised.items() if cost > MODULE_SELF_US_CEILING]
+    raised = {**halved, "pdf_tooling.cli.common": 550_000}
+    raised_partition = partition_by_product(raised)
+    raised_denominator = checked_denominator(raised_partition)
+    over = [
+        name
+        for name, cost in raised.items()
+        if cost * 1000 > MODULE_SELF_RATIO_CEILING_PER_MILLE * raised_denominator
+    ]
     assert over == ["pdf_tooling.cli.common"], (
-        "the per-module ceiling did not notice a module raised one microsecond past it"
+        "the per-module ratio ceiling did not notice a module raised past it"
     )
+    assert (
+        raised_partition.product_self_us * 1000
+        > PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE * raised_denominator
+    ), "the product/non-product ratio ceiling did not notice the same raise"
 
 
 #: The single module-scope `PIL` import site under `src/`, DERIVED below rather

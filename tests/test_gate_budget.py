@@ -491,10 +491,14 @@ SECTION_SIX_BANNER: Final = "Section 6 -- what `pdftooling --help` IMPORTS"
 #: invisible. A transcribed roster cannot notice a member it never listed, and
 #: -- `d933b5abdd`, one level in -- it equally cannot notice a member that
 #: stopped being COLLECTED while its `def` stayed in the text.
+#: PDF-55 D4/AC14 adds `test_the_product_import_ratio_stays_under_its_ceiling`,
+#: the new claim-bearing arm that replaces
+#: `test_total_import_self_time_stays_under_the_ceiling` (retired, D5/AC12).
 SECTION_SIX_CLAIM_BEARING: Final = (
     "test_help_imports_no_third_party_package_outside_the_pin",
     "test_help_import_count_stays_under_the_ceiling",
     "test_the_help_import_census_is_not_vacuous",
+    "test_the_product_import_ratio_stays_under_its_ceiling",
 )
 
 #: The ONLY admissible precondition: the venv's console script is not there, so
@@ -1742,8 +1746,16 @@ def test_removing_one_alternative_from_the_matcher_reddens_its_case(dropped: str
 # is how the wall-clock budget Section 6 replaced came to be defended by nothing.
 # --------------------------------------------------------------------------- #
 
-#: The two PDF-42 ceilings, in the file that defines them.
-PDF42_CEILINGS: Final = ("MODULE_SELF_US_CEILING", "TOTAL_IMPORT_US_CEILING")
+#: The two ceilings, in the file that defines them. PDF-55 D5 re-based both:
+#: `MODULE_SELF_US_CEILING` -> `MODULE_SELF_RATIO_CEILING_PER_MILLE` (kept as a
+#: node, re-derived) and `TOTAL_IMPORT_US_CEILING` -> retired, replaced by
+#: `PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE` (a new arm, not a rename) -- this
+#: tuple tracks the constants that actually exist at HEAD and does not
+#: reference either retired absolute.
+PDF42_CEILINGS: Final = (
+    "MODULE_SELF_RATIO_CEILING_PER_MILLE",
+    "PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE",
+)
 
 #: Beyond EVIDENCE_TOKENS/DISTRIBUTION_TOKENS: D2 requires the multiplier to be
 #: written down and the plant separation to be stated, because "p95 times a
@@ -1800,16 +1812,16 @@ def test_a_ceiling_whose_block_loses_a_field_reddens(tmp_path: Path, stripped: s
     exists to stop accepting.
     """
     original = IMPORT_BOUNDARIES.read_text()
-    _, block = ceiling_block(original, "MODULE_SELF_US_CEILING")
+    _, block = ceiling_block(original, "MODULE_SELF_RATIO_CEILING_PER_MILLE")
     assert stripped in block, (
         f"{stripped!r} is not in the live block, so removing it proves nothing"
     )
 
     kept = [line for line in block.splitlines() if stripped not in line]
     scratch = tmp_path / "planted.py"
-    scratch.write_text("\n".join(kept) + "\nMODULE_SELF_US_CEILING: Final = 250_000\n")
+    scratch.write_text("\n".join(kept) + "\nMODULE_SELF_RATIO_CEILING_PER_MILLE: Final = 470\n")
 
-    _, damaged = ceiling_block(scratch.read_text(), "MODULE_SELF_US_CEILING")
+    _, damaged = ceiling_block(scratch.read_text(), "MODULE_SELF_RATIO_CEILING_PER_MILLE")
     required = EVIDENCE_TOKENS + DISTRIBUTION_TOKENS + PDF42_DERIVATION_TOKENS
     assert [token for token in required if token not in damaged], (
         f"stripping every line mentioning {stripped!r} left a block the guard still accepts; "
