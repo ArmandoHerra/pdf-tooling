@@ -1,18 +1,89 @@
 {
   "_meta": {
+    "arms": [
+      "json",
+      "ndjson_line",
+      "error_json"
+    ],
     "assertion": "SUPERSET, per leaf, per arm -- never equality",
-    "generated_at_commit": "d03bee3ca226a18c42814ad15cfddb7cecdb97a5",
-    "generated_at_tag": "v0.2.0",
-    "generated_before_any_edit": true,
+    "failure_arm_leaves_covered": [
+      "compose",
+      "compress",
+      "convert",
+      "create",
+      "decrypt",
+      "delete",
+      "encrypt",
+      "extract",
+      "info",
+      "linearize",
+      "merge",
+      "meta get",
+      "meta set",
+      "ocr",
+      "permissions",
+      "rasterize",
+      "reorder",
+      "repair",
+      "rotate",
+      "split",
+      "stamp",
+      "tables",
+      "text",
+      "watermark"
+    ],
+    "failure_arm_leaves_uncovered": [],
+    "failure_arm_population": [
+      "compose",
+      "compress",
+      "convert",
+      "create",
+      "decrypt",
+      "delete",
+      "encrypt",
+      "extract",
+      "info",
+      "linearize",
+      "merge",
+      "meta get",
+      "meta set",
+      "ocr",
+      "permissions",
+      "rasterize",
+      "reorder",
+      "repair",
+      "rotate",
+      "split",
+      "stamp",
+      "tables",
+      "text",
+      "watermark"
+    ],
+    "generated_at_commit": "49dec59a902a28051f9af830de2fd4e4f9b91419",
+    "generated_at_describe": "v0.3.1-7-g49dec59",
+    "generated_at_tag": null,
+    "generated_from_a_tree_with_no_src_change": true,
     "leaves_covered": 26,
     "leaves_discovered": 26,
     "leaves_uncovered": [],
-    "regenerate": "PDF_TOOLKIT_ENVELOPE_REGISTER_REGENERATE=1 uv run pytest tests/test_envelope_contract.py -k register",
+    "regenerate": "PDF_TOOLKIT_ENVELOPE_REGISTER_REGENERATE=1 uv run pytest tests/test_envelope_contract.py -k register -p no:randomly",
     "regenerating_this_file_to_make_a_red_go_green_is_forbidden": "See TESTING.md. A rename or a removal is the ONLY thing a superset assertion can catch, and it is caught by this file being older than the change. The sanctioned ways to make it green are (a) an ADDITION, which is already a superset and needs no regeneration at all, or (b) a PM-approved schema_version increment (models.py SCHEMA_VERSION), which is not an engineer's call.",
-    "spec": "PDF-39"
+    "spec": "PDF-54"
   },
   "leaves": {
     "compose": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -38,6 +109,18 @@
       ]
     },
     "compress": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -62,6 +145,18 @@
       ]
     },
     "convert": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -86,6 +181,18 @@
       ]
     },
     "create": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -111,6 +218,18 @@
       ]
     },
     "decrypt": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -136,6 +255,18 @@
       ]
     },
     "delete": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -163,10 +294,14 @@
     "doctor": {
       "json": [
         "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
         "ports",
         "schema_version",
         "strict",
-        "verb"
+        "verb",
+        "warnings"
       ],
       "ndjson_line": [
         "adapter",
@@ -182,6 +317,18 @@
       ]
     },
     "encrypt": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -207,6 +354,18 @@
       ]
     },
     "extract": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -232,11 +391,27 @@
       ]
     },
     "info": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "documents",
         "dry_run",
+        "duration_ms",
+        "exit_code",
+        "items",
         "schema_version",
-        "verb"
+        "verb",
+        "warnings"
       ],
       "ndjson_line": [
         "dry_run",
@@ -260,6 +435,18 @@
       ]
     },
     "linearize": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -284,6 +471,18 @@
       ]
     },
     "merge": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -308,30 +507,60 @@
       ]
     },
     "meta get": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "disagreements",
         "dry_run",
+        "duration_ms",
+        "exit_code",
         "info",
         "path",
         "residual_surfaces",
         "schema_version",
         "verb",
+        "warnings",
         "xmp",
         "xmp_raw"
       ],
       "ndjson_line": [
         "disagreements",
         "dry_run",
+        "duration_ms",
+        "exit_code",
         "info",
         "path",
         "residual_surfaces",
         "schema_version",
         "verb",
+        "warnings",
         "xmp",
         "xmp_raw"
       ]
     },
     "meta set": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -357,6 +586,18 @@
       ]
     },
     "ocr": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -382,6 +623,18 @@
       ]
     },
     "permissions": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -407,6 +660,18 @@
       ]
     },
     "rasterize": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -431,6 +696,18 @@
       ]
     },
     "reorder": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -456,6 +733,18 @@
       ]
     },
     "repair": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -480,6 +769,18 @@
       ]
     },
     "rotate": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -505,6 +806,18 @@
       ]
     },
     "split": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -529,6 +842,18 @@
       ]
     },
     "stamp": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -554,6 +879,18 @@
       ]
     },
     "tables": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -583,6 +920,18 @@
       ]
     },
     "text": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",
@@ -632,6 +981,18 @@
       ]
     },
     "watermark": {
+      "error_json": {
+        "error": [
+          "code",
+          "kind",
+          "message",
+          "path"
+        ],
+        "top": [
+          "error",
+          "schema_version"
+        ]
+      },
       "json": [
         "dry_run",
         "duration_ms",

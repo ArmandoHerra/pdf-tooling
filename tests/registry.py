@@ -93,6 +93,7 @@ __all__ = [
     "derive_password_file_pairs",
     "discover_groups",
     "discover_verbs",
+    "no_input_population",
     "operand_metavar",
     "operand_metavars",
     "out_dir_batch_verbs",
@@ -147,6 +148,17 @@ class VerbSpec:
     This is what excludes ``split`` from the ``--out-dir`` batch population
     BY DERIVATION rather than by a literal: a future ``split`` that grew a
     variadic operand would enter the population with zero author action."""
+
+    takes_positional_argument: bool = False
+    """PDF-54 D2 -- whether this verb declares a positional ``argument``
+    parameter, of ANY type. Broader than ``takes_input_paths`` on purpose:
+    that predicate is typed to ``click.Path`` and ``merge``'s own operand is
+    ``str``-typed, so it fails it and would silently drop ``merge`` from any
+    population built on it (measured, PDF-54 E12 -- the predicate that reads
+    like the right one is the biased one). This is the failure-arm
+    population's own denominator (`no_input_population()` below); `doctor`
+    and `version` decline no positional operand and are correctly excluded
+    from both predicates."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +220,31 @@ class Invocation:
     which is what keeps `engines-present`'s own
     ``scripts/assert_skips.py --expect-zero`` green because the rows RAN, not
     because they vanished."""
+    no_input_build: Callable[[object, Path], list[str]] | None = None
+    """PDF-54 D3's failure-arm population seed, on the identical precedent
+    ``destructive_build`` already set: ``build`` cannot be trusted to reach
+    ``kind == "no_input"`` on a merely-swapped operand, because several
+    verbs need MORE than a nonexistent path before the no-input check ever
+    runs -- Click's own required-option enforcement fires first. Measured
+    (PDF-54 E13): a bare ``<verb> <missing>`` reaches ``kind: "usage"`` on
+    ``merge`` (``-O``/``--output`` is required), ``rasterize`` (accepts
+    ``--out-dir``, never ``--output``), ``reorder`` and ``stamp`` (each
+    needs its own required flag before the operand is ever inspected). A
+    generic "swap the operand" helper would freeze the wrong ``kind`` on
+    those leaves while looking green everywhere else -- exactly B-047's
+    shape, on this design's own failure arm rather than its bulk one.
+
+    ``None`` is the default. Every leaf the live command tree declares a
+    positional ``argument`` for (``no_input_population()`` below, never
+    ``VerbSpec.takes_input_paths`` -- see its own docstring) must supply
+    one; ``tests/test_envelope_contract.py``'s anti-lapse arm fails the
+    suite, naming the leaf, when one does not. Each row points its operand
+    at a path that does not exist under the test's OWN ``tmp_path`` and
+    never creates it -- HC-2's corpus contract applies here exactly as it
+    does to ``destructive_build``: no row ever names a real-document sample
+    from the samples fixture, and a row's OTHER required flags may still use
+    the generated `corpus` fixture (e.g. `stamp`'s `--from`), because that
+    flag is not the operand under test."""
 
 
 def _dotted_to_path(dotted: str) -> Path | None:
@@ -280,6 +317,18 @@ def _takes_input_paths(cmd: object) -> bool:
     return any(
         getattr(param, "param_type_name", None) == "argument"
         and getattr(getattr(param, "type", None), "name", None) == "path"
+        for param in cmd.params  # type: ignore[attr-defined]
+    )
+
+
+def _takes_positional_argument(cmd: object) -> bool:
+    """PDF-54 D2 -- a positional ``argument`` of ANY type, never narrowed to
+    ``click.Path`` the way :func:`_takes_input_paths` is. See
+    ``VerbSpec.takes_positional_argument``'s own docstring for why the two
+    predicates must stay independent rather than one being expressed as a
+    special case of the other."""
+    return any(
+        getattr(param, "param_type_name", None) == "argument"
         for param in cmd.params  # type: ignore[attr-defined]
     )
 
@@ -380,11 +429,29 @@ def discover_verbs(root: object | None = None) -> tuple[VerbSpec, ...]:
                 is_mutating=mutating,
                 consumes=consumes,
                 variadic_operands=_has_variadic_operand(cmd),
+                takes_positional_argument=_takes_positional_argument(cmd),
             )
         )
 
     _walk(group, ())
     return tuple(found)
+
+
+def no_input_population(root: object | None = None) -> tuple[str, ...]:
+    """PDF-54 D2 -- every leaf with a no-input failure arm to reach, DERIVED
+    from `VerbSpec.takes_positional_argument`, never from `takes_input_paths`
+    (`click.Path`-typed, silently drops `merge` -- E12) and never from a
+    typed list. `doctor` and `version` decline no positional operand and are
+    correctly excluded. A verb registered tomorrow joins this population
+    with zero author action, mirroring `discover_verbs()`'s own "no skip
+    list, ever" contract."""
+    return tuple(
+        sorted(
+            verb.name
+            for verb in discover_verbs(root)
+            if not verb.is_group and verb.takes_positional_argument
+        )
+    )
 
 
 def out_dir_batch_verbs(root: object | None = None) -> tuple[str, ...]:
@@ -967,6 +1034,291 @@ def _convert_invocation(corpus: object, tmp_path: Path) -> list[str]:
     ]
 
 
+# --------------------------------------------------------------------------- #
+# PDF-54 -- the failure arm's own invocation population, one purpose-built
+# `no_input_build` per `no_input_population()` member (D3), on the identical
+# precedent `destructive_build` already set for C13's bulk arm.
+#
+# Every row points its operand at a path that does NOT exist under the
+# test's own `tmp_path` and never creates it (HC-2). Everything past the
+# operand is copied from that verb's own `build()` counterpart, because
+# Click's required-option enforcement runs BEFORE the no-input check ever
+# does -- measured (E13): a bare `<verb> <missing>` reaches `kind: "usage"`,
+# never `"no_input"`, on `merge` (missing `-O`/`--output`), `rasterize`
+# (accepts `--out-dir`, never `--output`), `reorder` and `stamp` (each
+# needs its own required flag first). A shared "just swap the operand"
+# helper would freeze the wrong `kind` on exactly those four leaves while
+# looking green on the other twenty -- this is why the field is purpose-built
+# per leaf rather than a fallback onto `build`.
+# --------------------------------------------------------------------------- #
+
+
+def _missing_path(tmp_path: Path, filename: str) -> Path:
+    """A path under *tmp_path* a `no_input_build` row points at and never
+    creates. One place stating the invariant (HC-2) rather than twenty-four."""
+    return tmp_path / filename
+
+
+def _compose_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-compose.jpg")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-compose-out.pdf"),
+    ]
+
+
+def _compress_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-compress.pdf")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-compress-out.pdf"),
+    ]
+
+
+def _convert_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """Engine-independent, like `_convert_invocation` is not: the no-input
+    check fires before engine resolution ever runs (E8, measured with the
+    OfficeConverter binary genuinely hidden from `PATH`), so this row needs
+    no `soffice`."""
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-convert.txt")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-convert-out.pdf"),
+    ]
+
+
+def _create_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-create.txt")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-create-out.pdf"),
+    ]
+
+
+def _decrypt_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """`--password-file` must resolve as a real file (Click's own option
+    validation) or the run would reach `kind: "usage"` before the operand is
+    ever inspected -- the file's CONTENT is irrelevant to this arm, only its
+    existence, so it is a fresh throwaway, never a corpus original."""
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-decrypt.pdf")),
+        "--password-file",
+        str(_password_file(tmp_path, "pdf54-no-input-decrypt.pw", "pdf54-probe-pw")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-decrypt-out.pdf"),
+    ]
+
+
+def _delete_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-delete.pdf")),
+        "--pages",
+        "1",
+        "-O",
+        str(tmp_path / "pdf54-no-input-delete-out.pdf"),
+    ]
+
+
+def _encrypt_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """Same reasoning as `_decrypt_no_input_build`, for `--owner-password-file`."""
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-encrypt.pdf")),
+        "--owner-password-file",
+        str(_password_file(tmp_path, "pdf54-no-input-encrypt.pw", "pdf54-probe-pw")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-encrypt-out.pdf"),
+    ]
+
+
+def _extract_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-extract.pdf")),
+        "--pages",
+        "1,2",
+        "-O",
+        str(tmp_path / "pdf54-no-input-extract-out.pdf"),
+    ]
+
+
+def _info_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """PDF-51's own arm: `info` now returns the run-scoped error envelope on
+    a nonexistent input, matching its twenty-one path-taking siblings."""
+    del corpus
+    return [str(_missing_path(tmp_path, "pdf54-no-input-info.pdf"))]
+
+
+def _linearize_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-linearize.pdf")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-linearize-out.pdf"),
+    ]
+
+
+def _merge_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """E13's own first trap: `merge <missing>` alone reaches `kind: "usage"`
+    ("merge requires -O/--output"), never the operand check -- `merge`'s
+    `-O` is REQUIRED and Click enforces it before the callback body (where
+    the no-input check lives) ever runs. `merge`'s operand is `str`-typed
+    (E12), not `click.Path`, so a nonexistent string is fine syntactically;
+    `merge`'s own code performs the existence check itself."""
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-merge.pdf")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-merge-out.pdf"),
+    ]
+
+
+def _meta_get_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [str(_missing_path(tmp_path, "pdf54-no-input-meta-get.pdf"))]
+
+
+def _meta_set_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-meta-set.pdf")),
+        "--title",
+        "pdf54-no-input-probe",
+        "-O",
+        str(tmp_path / "pdf54-no-input-meta-set-out.pdf"),
+    ]
+
+
+def _ocr_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """`ocr` requires exactly one of `--output`/`--out-dir`/`--in-place`
+    (`cli/cmd_ocr.py`'s own usage message) before the operand is ever
+    inspected -- `-O` here, same shape `_ocr_invocation` uses. No
+    `--skip-text-pages` needed: the no-input check fires before any engine
+    is ever demanded (E8), so this row is engine-independent for free."""
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-ocr.pdf")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-ocr-out.pdf"),
+    ]
+
+
+def _permissions_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [str(_missing_path(tmp_path, "pdf54-no-input-permissions.pdf"))]
+
+
+def _rasterize_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """E13's second trap: `rasterize <missing> -O out.pdf` reaches
+    `kind: "usage"` ("rasterize does not accept --output") -- `rasterize`
+    consumes `--out-dir`/`--name`, never `--output` (Design §D10), and this
+    row must not guess `-O` the way a shared swap helper would."""
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-rasterize.pdf")),
+        "--out-dir",
+        str(tmp_path / "pdf54-no-input-rasterize-out"),
+    ]
+
+
+def _repair_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-repair.pdf")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-repair-out.pdf"),
+    ]
+
+
+def _reorder_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """E13's third trap: `reorder <missing> --order 1 -O out.pdf` reaches
+    `kind: "usage"` ("No such option: --order") -- `reorder`'s page spec is
+    `--pages`, matching `_reorder_invocation`'s own row, never `--order`."""
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-reorder.pdf")),
+        "--pages",
+        "last,1",
+        "-O",
+        str(tmp_path / "pdf54-no-input-reorder-out.pdf"),
+    ]
+
+
+def _rotate_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-rotate.pdf")),
+        "--pages",
+        "1",
+        "--angle",
+        "90",
+        "-O",
+        str(tmp_path / "pdf54-no-input-rotate-out.pdf"),
+    ]
+
+
+def _split_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-split.pdf")),
+        "--each-page",
+        "--out-dir",
+        str(tmp_path / "pdf54-no-input-split-out"),
+    ]
+
+
+def _stamp_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    """E13's fourth trap: `stamp <missing> --text hi -O out.pdf` reaches
+    `kind: "usage"` ("No such option: --text") -- `stamp` has no `--text`
+    flag at all; its required flag is `--from <existing PDF>`, matching
+    `_stamp_invocation`'s own row. `--from`'s value is not the operand under
+    test, so it is read from the generated `corpus` fixture exactly as
+    `_stamp_invocation` already does -- HC-2 governs the OPERAND, not every
+    incidental flag value a required option demands."""
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-stamp.pdf")),
+        "--from",
+        str(corpus.path("single_page")),  # type: ignore[attr-defined]
+        "-O",
+        str(tmp_path / "pdf54-no-input-stamp-out.pdf"),
+    ]
+
+
+def _tables_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-tables.pdf")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-tables-out.csv"),
+    ]
+
+
+def _text_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-text.pdf")),
+        "-O",
+        str(tmp_path / "pdf54-no-input-text-out.txt"),
+    ]
+
+
+def _watermark_no_input_build(corpus: object, tmp_path: Path) -> list[str]:
+    del corpus
+    return [
+        str(_missing_path(tmp_path, "pdf54-no-input-watermark.pdf")),
+        "--text",
+        "pdf54-no-input-probe",
+        "-O",
+        str(tmp_path / "pdf54-no-input-watermark-out.pdf"),
+    ]
+
+
 #: Every verb `discover_verbs()` can find on the live tree. `version` and
 #: `doctor` take no positional arguments; `info`/`merge` need one existing
 #: PDF; `split` needs one PDF plus a mode flag; `rasterize` needs one PDF (no
@@ -980,17 +1332,31 @@ def _convert_invocation(corpus: object, tmp_path: Path) -> list[str]:
 INVOCATIONS: Final[dict[str, Invocation]] = {
     "version": Invocation(build=lambda corpus, tmp_path: []),
     "doctor": Invocation(build=lambda corpus, tmp_path: []),
-    "info": Invocation(build=_info_invocation),
-    "merge": Invocation(build=_merge_invocation, destructive=False),
-    "split": Invocation(build=_split_invocation, destructive=False),
-    "rasterize": Invocation(build=_rasterize_invocation, destructive=False),
-    "compose": Invocation(build=_compose_invocation, destructive=False),
-    "create": Invocation(build=_create_invocation, destructive=False),
+    "info": Invocation(build=_info_invocation, no_input_build=_info_no_input_build),
+    "merge": Invocation(
+        build=_merge_invocation, destructive=False, no_input_build=_merge_no_input_build
+    ),
+    "split": Invocation(
+        build=_split_invocation, destructive=False, no_input_build=_split_no_input_build
+    ),
+    "rasterize": Invocation(
+        build=_rasterize_invocation, destructive=False, no_input_build=_rasterize_no_input_build
+    ),
+    "compose": Invocation(
+        build=_compose_invocation, destructive=False, no_input_build=_compose_no_input_build
+    ),
+    "create": Invocation(
+        build=_create_invocation, destructive=False, no_input_build=_create_no_input_build
+    ),
     # PDF-11. Both are read verbs toward their INPUT and producing verbs toward
     # their destination, so both are `is_mutating` (they reach the write
     # chokepoint) and both land in C15's PRODUCING population.
-    "text": Invocation(build=_text_invocation, destructive=False),
-    "tables": Invocation(build=_tables_invocation, destructive=False),
+    "text": Invocation(
+        build=_text_invocation, destructive=False, no_input_build=_text_no_input_build
+    ),
+    "tables": Invocation(
+        build=_tables_invocation, destructive=False, no_input_build=_tables_no_input_build
+    ),
     # PDF-12. `compress`/`repair`/`linearize` are all producing, single- or
     # multi-target verbs over `StructureEngine`. B-079/B-076: `compress` is
     # the one PDF-12 verb whose confirmation gate is now wired AND whose
@@ -1005,15 +1371,28 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
         build=_compress_invocation,
         destructive=True,
         destructive_build=_compress_destructive_invocation,
+        no_input_build=_compress_no_input_build,
     ),
-    "repair": Invocation(build=_repair_invocation, destructive=False),
-    "linearize": Invocation(build=_linearize_invocation, destructive=False),
+    "repair": Invocation(
+        build=_repair_invocation, destructive=False, no_input_build=_repair_no_input_build
+    ),
+    "linearize": Invocation(
+        build=_linearize_invocation, destructive=False, no_input_build=_linearize_no_input_build
+    ),
     # PDF-13. `encrypt`/`decrypt` are single-target producing verbs;
     # `permissions` is NON-PRODUCING and its row names no destination, which
     # is why it is absent from C11/C15 rather than skipped by them.
-    "encrypt": Invocation(build=_encrypt_invocation, destructive=False),
-    "decrypt": Invocation(build=_decrypt_invocation, destructive=False),
-    "permissions": Invocation(build=_permissions_invocation, destructive=False),
+    "encrypt": Invocation(
+        build=_encrypt_invocation, destructive=False, no_input_build=_encrypt_no_input_build
+    ),
+    "decrypt": Invocation(
+        build=_decrypt_invocation, destructive=False, no_input_build=_decrypt_no_input_build
+    ),
+    "permissions": Invocation(
+        build=_permissions_invocation,
+        destructive=False,
+        no_input_build=_permissions_no_input_build,
+    ),
     # PDF-08. All four are producing, multi-input-capable verbs over
     # `StructureEngine`. `destructive=False` like every other producing verb:
     # the registered invocation is a single input writing to `-O`, which is
@@ -1029,20 +1408,36 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
     # `test_the_pdf_08_destructive_routing_claim_names_a_test_that_exists`
     # parses the node id out of this very comment and fails when it stops
     # resolving.
-    "extract": Invocation(build=_extract_invocation, destructive=False),
-    "delete": Invocation(build=_delete_invocation, destructive=False),
-    "rotate": Invocation(build=_rotate_invocation, destructive=False),
-    "reorder": Invocation(build=_reorder_invocation, destructive=False),
+    "extract": Invocation(
+        build=_extract_invocation, destructive=False, no_input_build=_extract_no_input_build
+    ),
+    "delete": Invocation(
+        build=_delete_invocation, destructive=False, no_input_build=_delete_no_input_build
+    ),
+    "rotate": Invocation(
+        build=_rotate_invocation, destructive=False, no_input_build=_rotate_no_input_build
+    ),
+    "reorder": Invocation(
+        build=_reorder_invocation, destructive=False, no_input_build=_reorder_no_input_build
+    ),
     # PDF-14. `meta get` is NON-PRODUCING, same shape as `permissions`.
     # `meta set`/`watermark`/`stamp` are single-target producing verbs over
     # `StructureEngine` (+ `ComposeEngine` for `watermark`'s text layer);
     # none is destructive, matching every other producing verb's own note
     # above -- a single input writing to `-O` is neither bulk nor
     # destructive, so C13 has nothing to refuse.
-    "meta get": Invocation(build=_meta_get_invocation, destructive=False),
-    "meta set": Invocation(build=_meta_set_invocation, destructive=False),
-    "watermark": Invocation(build=_watermark_invocation, destructive=False),
-    "stamp": Invocation(build=_stamp_invocation, destructive=False),
+    "meta get": Invocation(
+        build=_meta_get_invocation, destructive=False, no_input_build=_meta_get_no_input_build
+    ),
+    "meta set": Invocation(
+        build=_meta_set_invocation, destructive=False, no_input_build=_meta_set_no_input_build
+    ),
+    "watermark": Invocation(
+        build=_watermark_invocation, destructive=False, no_input_build=_watermark_no_input_build
+    ),
+    "stamp": Invocation(
+        build=_stamp_invocation, destructive=False, no_input_build=_stamp_no_input_build
+    ),
     # PDF-15. `ocr` is multi-input, page-addressing, and `--in-place`-capable
     # (the `compress` shape, D11.1) -- `destructive=True`, joining C13's
     # population `compress` already seeded (Amendment 1: the arm is shown to
@@ -1057,11 +1452,13 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
         build=_ocr_invocation,
         destructive=True,
         destructive_build=_ocr_destructive_invocation,
+        no_input_build=_ocr_no_input_build,
     ),
     "convert": Invocation(
         build=_convert_invocation,
         destructive=False,
         requires_engine="OfficeConverter",
+        no_input_build=_convert_no_input_build,
     ),
 }
 

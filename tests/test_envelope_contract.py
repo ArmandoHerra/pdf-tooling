@@ -74,13 +74,42 @@ THE TWO HAZARDS THIS MODULE IS DESIGNED AGAINST
    reads the value out of the CLI's real stdout, through ``run_cli()``, and
    compares it to ``models.SCHEMA_VERSION``. It never compares the constant to
    itself.
+
+PDF-54 — THE FAILURE ARM, AND WHY IT IS A NEW ARM RATHER THAN A FIFTH MEMBER
+-----------------------------------------------------------------------------
+Every member above is measured on a run that **succeeds**. The error
+envelope — the shape a consumer actually branches into — was frozen nowhere:
+``kind = "no_input"`` (``errors.py``) appeared in no test assertion at all
+before this extension. PDF-54 adds :data:`FAILURE_ARM` to the register
+(:const:`no_input_population` supplies the denominator, DERIVED from a
+positional-``argument`` predicate and never from ``VerbSpec.takes_input_paths``,
+which is ``click.Path``-typed and silently drops ``merge``), asserts
+kind-independence once from ``errors.py``'s own class tree rather than as a
+per-(leaf × kind) matrix, and repairs the regeneration node so the register's
+own ``_meta`` is DERIVED FROM GIT at the moment of regeneration rather than
+preserved from ``PDF-39``'s original run. It is not a fifth member of the
+table above: it freezes a different envelope entirely (the one the base
+exception class renders, never :class:`OperationResult`), so it gets its own
+arm key rather than a manufactured pair with ``json``/``ndjson_line``.
+
+A NOTE ON A FROZEN NAME THIS FILE DOES NOT RE-SPELL
+------------------------------------------------------
+D4's kind-independence walk needs the base exception class object, imported
+once (``errors.py``) and aliased immediately to ``_BASE_ERROR`` — every
+other reference below uses the alias. ``tests/test_rename_completeness.py``
+freezes that class's own name's tree-wide occurrence count byte-for-byte
+outside ``changelog.md``; the one import line is the floor a legitimate new
+caller cannot go below, and is recorded as a finding in this spec's
+Implementation Log rather than resolved by editing that count.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -94,7 +123,9 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
 from pdf_tooling.adapters.pypdf_structure import _PERMISSION_BITS  # noqa: E402
+from pdf_tooling.errors import PdfToolkitError as _BASE_ERROR  # noqa: E402
 from pdf_tooling.models import SCHEMA_VERSION  # noqa: E402
+from pdf_tooling.output.json import render_error_json  # noqa: E402
 from pdf_tooling.ports.structure import (  # noqa: E402
     ALWAYS_GRANTED_TOKENS,
     PERMISSION_TOKEN_MAP,
@@ -105,12 +136,37 @@ from registry import (  # noqa: E402
     REPO_ROOT,
     Invocation,
     discover_verbs,
+    no_input_population,
     rerun_hint,
     run_cli,
 )
 
 REGISTER_PATH: Final[Path] = REPO_ROOT / "tests" / "golden" / "envelope_keys.json"
 README: Final[Path] = REPO_ROOT / "README.md"
+TESTING_MD: Final[Path] = REPO_ROOT / "TESTING.md"
+
+#: PDF-54 D1 -- the register's failure arm, recommended spelling: never
+#: confusable with a success arm, listed in `_meta.arms`, asserted by its own
+#: loop iteration below. `render_error_json` serves it byte-identically to
+#: `-o json` and `-o ndjson` (E3), so there is no `error_ndjson` sibling.
+FAILURE_ARM: Final[str] = "error_json"
+
+#: PDF-54 E5/E10 -- the `_meta.spec` this cycle's regeneration is authorised
+#: under (D6/TESTING.md case 3).
+REGENERATING_SPEC: Final[str] = "PDF-54"
+
+#: X-709 ruling 3 — the single sentence that makes the register worth
+#: having, quoted verbatim from `tests/golden/envelope_keys.json` at
+#: `89a4f1d` and asserted BYTE-IDENTICAL by `test_ac9_the_forbidden_clause_
+#: survives_byte_identical` below. It never changes across a regeneration.
+FORBIDDEN_CLAUSE: Final[str] = (
+    "See TESTING.md. A rename or a removal is the ONLY thing a superset "
+    "assertion can catch, and it is caught by this file being older than "
+    "the change. The sanctioned ways to make it green are (a) an ADDITION, "
+    "which is already a superset and needs no regeneration at all, or (b) "
+    "a PM-approved schema_version increment (models.py SCHEMA_VERSION), "
+    "which is not an engineer's call."
+)
 
 #: The env var that regenerates :data:`REGISTER_PATH`. **Deliberately NOT
 #: `--update-golden`**: that flag is aimed at ordinary goldens and a regenerated
@@ -217,6 +273,78 @@ def observe_envelope_keys(verb: str, corpus: object, tmp_root: Path) -> Observat
     )
 
 
+@dataclass(frozen=True)
+class FailureObservation:
+    """One leaf's no-input failure envelope — PDF-54 D1/D3.
+
+    Measured on `-o json` only, deliberately: D1/E3 found `render_error_json`
+    serves `-o json` and `-o ndjson` BYTE-IDENTICALLY on the failure path, so
+    a second run would freeze the same shape twice under two names and prove
+    nothing an `-o json` run does not already prove.
+    """
+
+    verb: str
+    payload: dict[str, Any] | None
+    kind: str | None
+    returncode: int
+    argv: tuple[str, ...]
+
+    def register_entry(self) -> dict[str, list[str]] | None:
+        """The TWO key sets D1 rules the arm freezes — the envelope's own
+        top level, and the nested `error` object, independently. Freezing
+        only the container would freeze nothing: `error`'s key set IS the
+        published failure contract (the base exception class's `to_dict()`)."""
+        if self.payload is None:
+            return None
+        error = self.payload.get("error")
+        return {
+            "top": sorted(self.payload),
+            "error": sorted(error) if isinstance(error, dict) else [],
+        }
+
+
+def observe_failure_envelope(verb: str, corpus: object, tmp_root: Path) -> FailureObservation:
+    """Run *verb*'s purpose-built `no_input_build` once, on `-o json`.
+
+    Deliberately NOT gated on `_require_engine()` (AC5/E8): the no-input
+    check fires before any engine is ever demanded, on every leaf, so
+    skipping this observation on a lean host would cover fewer leaves than
+    the register claims and be green about the gap.
+    """
+    invocation: Invocation = INVOCATIONS[verb]
+    build = invocation.no_input_build
+    if build is None:
+        return FailureObservation(verb=verb, payload=None, kind=None, returncode=-1, argv=())
+    slug = verb.replace(" ", "_")
+    run_dir = tmp_root / f"{slug}-no-input"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    argv = build(corpus, run_dir)
+    result = run_cli(verb, "-o", "json", *argv, cwd=run_dir)
+    payload = _parse_object(result.stdout)
+    kind: str | None = None
+    if payload is not None:
+        error = payload.get("error")
+        if isinstance(error, dict):
+            raw_kind = error.get("kind")
+            kind = raw_kind if isinstance(raw_kind, str) else None
+    return FailureObservation(
+        verb=verb, payload=payload, kind=kind, returncode=result.returncode, argv=tuple(argv)
+    )
+
+
+def failure_arm_population() -> tuple[str, ...]:
+    """PDF-54 D2 — every leaf with a no-input failure arm to reach.
+
+    `no_input_population()` supplies the denominator, DERIVED from a
+    positional-`argument` predicate of ANY type and never from
+    `VerbSpec.takes_input_paths` (`click.Path`-typed, silently drops `merge`
+    — E12). Kept as its own function, mirroring `invocable_leaves()`'s own
+    shape, so the population is computed once and re-used rather than
+    re-derived per call site.
+    """
+    return no_input_population()
+
+
 def invocable_leaves() -> tuple[str, ...]:
     """Every discovered leaf the harness can build an argv for, sorted.
 
@@ -280,7 +408,23 @@ def envelope(corpus, tmp_path_factory) -> Callable[[str], Observation]:
     return read
 
 
+@pytest.fixture(scope="session")
+def failure_envelope(corpus, tmp_path_factory) -> Callable[[str], FailureObservation]:
+    """A memoized `verb -> FailureObservation` reader — PDF-54's sibling to
+    `envelope` above, on the identical memoization rationale (`-n auto`)."""
+    root = tmp_path_factory.mktemp("no-input-contract")
+    cache: dict[str, FailureObservation] = {}
+
+    def read(verb: str) -> FailureObservation:
+        if verb not in cache:
+            cache[verb] = observe_failure_envelope(verb, corpus, root)
+        return cache[verb]
+
+    return read
+
+
 LEAVES = invocable_leaves()
+FAILURE_LEAVES = failure_arm_population()
 
 
 def test_the_leaf_population_is_not_empty() -> None:
@@ -1063,21 +1207,76 @@ def test_ac17_the_schema_version_is_still_one() -> None:
 
 
 def load_register() -> dict[str, dict[str, list[str] | None]]:
-    """The frozen per-leaf key register, generated at `d03bee3` before any of
-    PDF-39's edits. A register generated AFTER the work asserts nothing."""
+    """The frozen per-leaf key register. A register generated AFTER the work
+    asserts nothing, which is why its provenance is asserted separately by
+    `test_the_register_exists_and_declares_where_it_came_from` rather than
+    trusted from this function's own read."""
     return dict(json.loads(REGISTER_PATH.read_text())["leaves"])
 
 
+def load_register_document() -> dict[str, Any]:
+    """The WHOLE register file, `_meta` included — PDF-54's own reader,
+    beside `load_register()`'s `leaves`-only one (kept for the callers that
+    only ever wanted that)."""
+    return json.loads(REGISTER_PATH.read_text())
+
+
 def test_the_register_exists_and_declares_where_it_came_from() -> None:
-    """The register's own provenance, asserted. `qa-sentinel`'s re-run
-    instruction is to check this file's git history first: it must have been
-    committed by the `[PDF-39]` commit and its content must derive from
-    `d03bee3`, not from the post-change tree. That is the one way this spec's
-    headline criterion could be silently vacuous."""
-    meta = json.loads(REGISTER_PATH.read_text())["_meta"]
-    assert meta["generated_at_commit"].startswith("d03bee3"), meta
-    assert meta["generated_before_any_edit"] is True
+    """The register's own provenance, asserted.
+
+    PDF-54 AC6/D5 — no longer a hard-pinned commit literal. `d03bee3` was
+    the ONE-TIME anchor `PDF-39` generated the register at; hard-pinning it
+    forever would make every future HONEST regeneration (this spec's own,
+    and `PDF-57`'s after it, D9) fail a test that exists to prove the
+    register is trustworthy. What is asserted instead is the SHAPE every
+    regeneration must produce: a commit that resolves in this repository, a
+    tag that is either absent or real, and an `arms` list that names every
+    arm the file actually carries — never a second sha literal, which would
+    only move the rot to the next regeneration (E5).
+
+    `qa-sentinel`'s re-run instruction is to check this file's git history
+    first: it must have been written by the `[PDF-54]` commit (or, later,
+    `PDF-57`'s — D9 clause 1), and `generated_at_commit` must be an ancestor
+    of, or equal to, that commit.
+
+    Skipped, not asserted, while a regeneration is IN PROGRESS in this same
+    `-k register` invocation (`test_regenerating_the_register` is the one
+    test that writes this file, and `-n auto` gives no ordering guarantee
+    between xdist workers): this test's job is to grade the COMMITTED,
+    STABLE file, and a register mid-rewrite is not yet either.
+    """
+    if os.environ.get(REGENERATE_ENV) == "1":
+        pytest.skip(f"{REGENERATE_ENV}=1 -- grading the committed file, not one mid-regeneration")
+    meta = load_register_document()["_meta"]
+
+    commit = meta["generated_at_commit"]
+    assert (
+        isinstance(commit, str)
+        and len(commit) == 40
+        and all(c in "0123456789abcdef" for c in commit)
+    ), f"_meta.generated_at_commit {commit!r} is not a 40-character hex string"
+    resolved = subprocess.run(["git", "cat-file", "-e", commit], cwd=REPO_ROOT, capture_output=True)
+    assert resolved.returncode == 0, (
+        f"_meta.generated_at_commit {commit!r} does not resolve in this repository -- "
+        f"a hard-coded sha that never rotted would still have to pass THIS check"
+    )
+
+    tag = meta.get("generated_at_tag")
+    if tag is not None:
+        known = subprocess.run(
+            ["git", "tag", "--list", tag], cwd=REPO_ROOT, capture_output=True, text=True
+        )
+        assert known.stdout.strip() == tag, (
+            f"_meta.generated_at_tag {tag!r} is not a tag `git tag --list` knows -- "
+            f"no tag may be invented (X-703)"
+        )
+    assert "generated_at_describe" in meta, "_meta.generated_at_describe is missing"
     assert meta["assertion"].startswith("SUPERSET")
+    arms = meta.get("arms")
+    assert isinstance(arms, list) and FAILURE_ARM in arms, (
+        f"_meta.arms is {arms!r}; it must list every arm the register carries, "
+        f"including {FAILURE_ARM!r}"
+    )
 
 
 @pytest.mark.e2e
@@ -1154,6 +1353,438 @@ def test_ac19_the_register_covers_every_leaf_the_harness_can_invoke() -> None:
     )
 
 
+# --------------------------------------------------------------------------- #
+# PDF-54 — the failure arm. Extends the register to the error envelope, the
+# arm a consumer actually branches on and the one nothing froze before this.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_failure_arm_population_is_not_empty() -> None:
+    """The anti-lapse assertion for :data:`FAILURE_LEAVES`, mirroring
+    `test_the_leaf_population_is_not_empty` above."""
+    assert len(FAILURE_LEAVES) >= 20, (
+        f"the failure-arm population walk found {len(FAILURE_LEAVES)}; every "
+        f"parameterized guard below would pass vacuously"
+    )
+
+
+def test_ac2_the_failure_arm_population_is_derived_and_includes_merge() -> None:
+    """AC2. RED: build the population from `VerbSpec.takes_input_paths` —
+    the arm fails naming `merge` as the leaf that would have been dropped
+    (E12: `takes_input_paths` is `click.Path`-typed and `merge`'s own
+    operand is declared `str`)."""
+    from_takes_input_paths = {spec.name for spec in discover_verbs() if spec.takes_input_paths}
+    from_positional_argument = set(FAILURE_LEAVES)
+
+    only_in_positional = from_positional_argument - from_takes_input_paths
+    only_in_typed_path = from_takes_input_paths - from_positional_argument
+    assert only_in_positional == {"merge"} and not only_in_typed_path, (
+        f"the two predicates disagree on {sorted(only_in_positional | only_in_typed_path)}, "
+        f"not exactly on `merge` alone — `takes_input_paths` is `click.Path`-typed and "
+        f"silently drops any verb whose operand is declared `str` (E12)"
+    )
+
+    every_leaf = {spec.name for spec in discover_verbs() if not spec.is_group}
+    excluded = every_leaf - from_positional_argument
+    assert excluded == {"doctor", "version"}, (
+        f"the failure-arm population excludes {sorted(excluded)}; it must exclude "
+        f"exactly `doctor` and `version`, the two leaves with no positional operand"
+    )
+
+
+@pytest.mark.parametrize("verb", FAILURE_LEAVES)
+def test_ac3_every_failure_arm_population_member_supplies_a_no_input_build(verb: str) -> None:
+    """AC3's anti-lapse half, modelled on the shipped
+    `test_a_destructive_row_supplies_its_own_bulk_argv`
+    (`tests/test_cli_contract.py`) on the identical `destructive_build`
+    precedent. RED: delete one row's `no_input_build` and this fails naming
+    it."""
+    assert INVOCATIONS[verb].no_input_build is not None, (
+        f"tests/registry.py::INVOCATIONS[{verb!r}] declares a positional operand "
+        f"but has no `no_input_build`. `build`'s shared shape cannot be trusted to "
+        f"reach `kind=no_input` on every leaf — several verbs need MORE than a "
+        f"nonexistent path before the no-input check ever runs (E13). Add a "
+        f"purpose-built row (PDF-54 D3)."
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", FAILURE_LEAVES)
+def test_ac3_the_no_input_build_reaches_kind_no_input(verb: str, failure_envelope) -> None:
+    """AC3's kind assertion, per leaf. RED: replace `merge`'s `no_input_build`
+    with a bare operand swap (drop `-O`) — this fails naming `merge`,
+    `"usage"` and `"no_input"`, reproducing E13's own measured trap live."""
+    observed = failure_envelope(verb)
+    assert observed.payload is not None, (
+        f"{verb}: the no-input invocation produced no parseable envelope. Repro: "
+        f"{rerun_hint([verb, '-o', 'json', *observed.argv])}"
+    )
+    assert observed.kind == "no_input", (
+        f"{verb}: the no-input invocation reached kind={observed.kind!r}, not "
+        f"'no_input'. A purpose-built `no_input_build` must supply every flag the "
+        f"verb requires BEFORE the no-input check runs, exactly as its ordinary "
+        f"`build` does (E13). Repro: {rerun_hint([verb, '-o', 'json', *observed.argv])}"
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", FAILURE_LEAVES)
+def test_ac4_the_failure_arm_is_a_superset_of_the_frozen_cells(verb: str, failure_envelope) -> None:
+    """AC4. RED, two directions: fold the failure keys into the `json` arm —
+    every SUCCESSFUL leaf then fails AC18's superset assertion demanding
+    `error`. RED, second direction: delete `path` from the base exception
+    class's `to_dict()` in a scratch tree — this fails naming `path`.
+    """
+    register = load_register()
+    frozen = register[verb].get(FAILURE_ARM)
+    assert frozen is not None, (
+        f"{verb} has no {FAILURE_ARM!r} cell in the register — extend it (PDF-54 D1)"
+    )
+    live = failure_envelope(verb).register_entry()
+    assert live is not None, f"{verb}: the live no-input run produced no parseable envelope"
+    for level in ("top", "error"):
+        lost = sorted(set(frozen[level]) - set(live[level]))
+        assert not lost, (
+            f"{verb} [{FAILURE_ARM}.{level}]: published key(s) {lost} are GONE. A "
+            f"rename or removal of a published failure-envelope key is a "
+            f"`schema_version` increment coupled to a major version bump (D5), and "
+            f"that is the PM's call. Do NOT regenerate the register."
+        )
+
+
+def test_ac4_the_failure_arm_never_shares_the_json_arm() -> None:
+    """AC4's structural half. RED: fold `error_json` into `json` in a
+    scratch tree — every successful leaf's `json` cell would then have to
+    carry `error`, which no successful envelope does, and AC18 fails on all
+    of them (D1's own reasoning: freeze the union and every success red;
+    freeze the intersection and nothing but `schema_version` is asserted)."""
+    document = load_register_document()
+    arms = document["_meta"].get("arms")
+    assert isinstance(arms, list) and FAILURE_ARM in arms, (
+        f"_meta.arms {arms!r} does not list {FAILURE_ARM!r}"
+    )
+    for verb, cells in document["leaves"].items():
+        if FAILURE_ARM not in cells:
+            continue
+        assert set(cells[FAILURE_ARM]) == {"top", "error"}, (
+            f"{verb}'s {FAILURE_ARM} cell has keys {sorted(cells[FAILURE_ARM])}, not "
+            f"exactly {{'top', 'error'}} — D1 freezes both levels independently"
+        )
+        assert "error" not in (cells.get("json") or []), (
+            f"{verb}'s `json` arm carries a top-level `error` key — the failure arm "
+            f"has been folded into the success arm, which D1/AC4 forbid"
+        )
+
+
+#: The two system binaries any registered invocation depends on
+#: (`ports/__init__.py`'s `_BINARY_HINTS`: `OcrEngine` -> tesseract,
+#: `OfficeConverter` -> soffice). `convert` is the only failure-arm member
+#: declaring `requires_engine` at all; the other binary is included anyway
+#: because AC5's claim is about the CHECK, not about any one verb's declared
+#: dependency, and E8 measured both.
+_KNOWN_ENGINE_BINARIES: Final[tuple[str, ...]] = ("tesseract", "soffice")
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("binary", _KNOWN_ENGINE_BINARIES)
+def test_ac5_the_failure_arm_population_is_identical_with_engines_hidden(
+    binary: str, corpus, tmp_path: Path
+) -> None:
+    """AC5. RED: gate the failure-arm observation on `_require_engine()` —
+    the population shrinks with *binary* genuinely absent from `PATH` and
+    this fails naming the skipped leaves. `Invocation.requires_engine` is
+    scoped to reaching exit 0 (its own docstring); the failure arm never
+    does (E8).
+
+    Hides *binary* with `helpers.engine_hiding.hidden_engine_env` — the
+    shared, already-shipped instrument every other engine-absence test in
+    this suite uses (`tests/integration/test_or7_engine_absent.py`,
+    `test_or7_bulk_destructive.py`) — never the pytest-process-only
+    `conftest.py` shim, which mutates the CURRENT interpreter's `PATH` for
+    collection-time `requires()` skips and has no effect on a subprocess
+    `run_cli()` spawns with its own `env=`.
+    """
+    from helpers.engine_hiding import hidden_engine_env
+
+    env = hidden_engine_env(binary, tmp_path=tmp_path)
+    root = tmp_path / "hidden-runs"
+    root.mkdir()
+    covered: list[str] = []
+    for verb in FAILURE_LEAVES:
+        build = INVOCATIONS[verb].no_input_build
+        assert build is not None
+        run_dir = root / verb.replace(" ", "_")
+        run_dir.mkdir()
+        argv = build(corpus, run_dir)
+        result = run_cli(verb, "-o", "json", *argv, cwd=run_dir, env=env)
+        payload = _parse_object(result.stdout)
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict) and error.get("kind") == "no_input":
+            covered.append(verb)
+    missing = sorted(set(FAILURE_LEAVES) - set(covered))
+    assert not missing, (
+        f"leaf/leaves {missing} lost their no-input failure arm with {binary!r} hidden "
+        f"— gating the observation on engine resolution would cover fewer leaves on a "
+        f"lean host and be green about it (E8)"
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", FAILURE_LEAVES)
+def test_ac10_dry_run_mirrors_the_real_run_on_the_failure_arm(
+    verb: str, corpus, tmp_path: Path
+) -> None:
+    """AC10 — OR-7 / X-185, BOTH observables, on the failure arm this spec
+    freezes. RED: hard-code a `0` exit on one verb's dry-run path in a
+    scratch tree — the arm fails naming the verb and both codes. Measured
+    green at `89a4f1d` with no work at all (E3); this criterion is by
+    preservation."""
+    build = INVOCATIONS[verb].no_input_build
+    assert build is not None
+    dry_dir = tmp_path / "dry"
+    dry_dir.mkdir()
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    dry = run_cli(verb, "--dry-run", *build(corpus, dry_dir), "-o", "json", cwd=dry_dir)
+    real = run_cli(verb, *build(corpus, real_dir), "-o", "json", cwd=real_dir)
+    assert dry.returncode == real.returncode, (
+        f"{verb}: --dry-run exited {dry.returncode}, the real run exited {real.returncode}"
+    )
+    dry_payload = _parse_object(dry.stdout)
+    real_payload = _parse_object(real.stdout)
+    assert dry_payload is not None and real_payload is not None, (dry.stdout, real.stdout)
+    assert sorted(dry_payload) == sorted(real_payload), (
+        f"{verb}: --dry-run's failure envelope shape is {sorted(dry_payload)}, the real "
+        f"run's is {sorted(real_payload)}. OR-7 binds the SHAPE as well as the code."
+    )
+    dry_error = dry_payload.get("error")
+    real_error = real_payload.get("error")
+    assert isinstance(dry_error, dict) and isinstance(real_error, dict)
+    assert sorted(dry_error) == sorted(real_error), (
+        f"{verb}: the nested `error` key sets disagree between --dry-run "
+        f"({sorted(dry_error)}) and the real run ({sorted(real_error)})"
+    )
+
+
+def _walk_error_subclasses(root: type = _BASE_ERROR) -> tuple[type, ...]:
+    """The base exception class and every subclass, walked recursively.
+    Never a typed list of seven strings (D4) — a class added tomorrow joins
+    this walk with zero author action."""
+    found: list[type] = [root]
+    for sub in root.__subclasses__():
+        found.extend(_walk_error_subclasses(sub))
+    return tuple(found)
+
+
+def _instantiate_for_kind_check(cls: type) -> _BASE_ERROR:  # type: ignore[valid-type]
+    """A throwaway instance of *cls*, with a synthetic value for every
+    constructor argument it declares beyond one carrying a default.
+
+    Structural, never a per-class special case: :class:`PageRangeError` is
+    the one subclass with a wider constructor than the base
+    (`spec`/`token`/`column`/`reason`), and this reads its signature rather
+    than naming it, so a future subclass with a novel constructor is
+    covered with zero author action — the same "no skip list, ever" shape
+    `discover_verbs()` already commits to.
+    """
+    signature = inspect.signature(cls.__init__)
+    kwargs: dict[str, Any] = {}
+    for name, parameter in signature.parameters.items():
+        if name == "self" or parameter.default is not inspect.Parameter.empty:
+            continue
+        if parameter.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        kwargs[name] = 1 if parameter.annotation in (int, "int") else "pdf54-kind-probe"
+    return cls(**kwargs)
+
+
+def test_d4_every_error_kind_renders_the_same_key_sets() -> None:
+    """D4 — kind-independence, asserted ONCE from `errors.py`'s own class
+    tree, never as a per-(leaf × kind) matrix. RED: rename `kind` to
+    `category`, or remove `path`, from the base exception class's
+    `to_dict()` in a scratch tree — every class in the tree fails together,
+    naming the class and the lost key (AC17's two plants).
+    """
+    frozen: list[str] | None = None
+    frozen_owner: str | None = None
+    for cls in _walk_error_subclasses():
+        instance = _instantiate_for_kind_check(cls)
+        rendered = json.loads(render_error_json(instance.to_dict()))
+        keys = sorted(rendered.get("error", {}))
+        if frozen is None:
+            frozen, frozen_owner = keys, cls.__name__
+            continue
+        assert keys == frozen, (
+            f"{cls.__name__} (kind={instance.kind!r}) renders error keys {keys}, which "
+            f"disagree with {frozen_owner}'s {frozen} — the shape must not vary by kind"
+        )
+
+
+def test_ac9_the_forbidden_clause_survives_byte_identical() -> None:
+    """AC9. RED: change one character and this fails. X-709 ruling 3 — it is
+    the single sentence that makes the instrument worth having, and it
+    survives every regeneration this spec performs untouched."""
+    meta = load_register_document()["_meta"]
+    assert meta["regenerating_this_file_to_make_a_red_go_green_is_forbidden"] == FORBIDDEN_CLAUSE
+
+
+def _derive_meta(existing: dict[str, Any], *, spec_id: str) -> dict[str, Any]:
+    """PDF-54 D5/AC7 — `_meta` is DERIVED FROM GIT at the moment of
+    regeneration, never preserved from a prior run. This is the repair: at
+    `89a4f1d` the regenerate node rewrote `leaves` and never touched `_meta`
+    at all (E5), so any regeneration, by anyone, at any commit, left the
+    file claiming `d03bee3` over key sets measured elsewhere. Calling this on
+    every regeneration is what keeps that from recurring at `PDF-57` (D9).
+    """
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    describe = subprocess.run(
+        ["git", "describe", "--tags", "--always"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    pointed_at_head = subprocess.run(
+        ["git", "tag", "--points-at", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tag = pointed_at_head.splitlines()[0] if pointed_at_head else None
+
+    meta = dict(existing)
+    meta["generated_at_commit"] = commit
+    meta["generated_at_describe"] = describe
+    meta["generated_at_tag"] = tag
+    meta["spec"] = spec_id
+    meta.pop("generated_before_any_edit", None)
+    meta["generated_from_a_tree_with_no_src_change"] = True
+    meta["arms"] = ["json", "ndjson_line", FAILURE_ARM]
+    meta["regenerate"] = (
+        f"{REGENERATE_ENV}=1 uv run pytest tests/test_envelope_contract.py "
+        "-k register -p no:randomly"
+    )
+    return meta
+
+
+def test_ac7_derive_meta_rewrites_provenance_rather_than_preserving_it() -> None:
+    """AC7, always-run (never gated behind `REGENERATE_ENV`, unlike the real
+    regeneration below): the derivation is exercised directly against a
+    synthetic STALE `_meta`, proving the mechanism rewrites provenance on
+    every call rather than carrying the old value forward. RED, and it is
+    the point of the criterion: before this spec, `test_regenerating_the_
+    register` rewrote `leaves` and never touched `_meta` at all — run it on
+    any commit and the file would still claim `d03bee3` over key sets
+    measured elsewhere (E5).
+    """
+    stale = {
+        "generated_at_commit": "d03bee3ca226a18c42814ad15cfddb7cecdb97a5",
+        "generated_at_tag": "v0.2.0",
+        "generated_before_any_edit": True,
+        "assertion": "SUPERSET, per leaf, per arm -- never equality",
+        "spec": "PDF-39",
+    }
+    derived = _derive_meta(stale, spec_id=REGENERATING_SPEC)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert derived["generated_at_commit"] == head, (
+        "the derivation did not overwrite the stale commit with the live HEAD"
+    )
+    assert derived["generated_at_commit"] != stale["generated_at_commit"]
+    assert derived["spec"] == REGENERATING_SPEC
+    assert "generated_before_any_edit" not in derived
+    assert derived["generated_from_a_tree_with_no_src_change"] is True
+    assert FAILURE_ARM in derived["arms"]
+
+
+def test_ac14_the_registers_own_meta_publishes_failure_arm_coverage() -> None:
+    """AC14. RED: a covered list narrower than the derived population — the
+    published-coverage arm fails naming the gap. Coverage lives in the
+    artifact itself (D2) rather than in the Implementation Log (B-270 /
+    X-511), so a verifier can read it at any later commit without the
+    engineer's context.
+
+    Skipped while a regeneration is in progress in this same `-k register`
+    invocation, on the identical rationale
+    `test_the_register_exists_and_declares_where_it_came_from` states in
+    full above."""
+    if os.environ.get(REGENERATE_ENV) == "1":
+        pytest.skip(f"{REGENERATE_ENV}=1 -- grading the committed file, not one mid-regeneration")
+    meta = load_register_document()["_meta"]
+    population = set(FAILURE_LEAVES)
+
+    published_population = set(meta.get("failure_arm_population", ()))
+    assert published_population == population, (
+        f"_meta.failure_arm_population {sorted(published_population)} does not match "
+        f"the live derived population {sorted(population)}"
+    )
+    covered = set(meta.get("failure_arm_leaves_covered", ()))
+    assert covered == population, (
+        f"_meta.failure_arm_leaves_covered {sorted(covered)} is narrower than the "
+        f"derived population {sorted(population)} — a register that covers fewer "
+        f"leaves than it claims passes while asserting less"
+    )
+    assert meta.get("failure_arm_leaves_uncovered") == [], meta.get("failure_arm_leaves_uncovered")
+
+    assert meta.get("leaves_covered") == len(LEAVES)
+    assert meta.get("leaves_discovered") == len(LEAVES) + len(uninvocable_leaves())
+    assert meta.get("leaves_uncovered") == list(uninvocable_leaves())
+
+
+def _envelope_register_section(text: str) -> str:
+    """TESTING.md's `## The envelope key register` section, isolated to its
+    own heading boundary, so AC15/AC16 grade the section rather than the
+    whole document."""
+    start = text.index("## The envelope key register")
+    rest = text[start + len("## The envelope key register") :]
+    end = rest.find("\n## ")
+    return text[
+        start : start + len("## The envelope key register") + (end if end != -1 else len(rest))
+    ]
+
+
+def test_ac15_testing_md_documents_exactly_three_sanctioned_register_cases() -> None:
+    """AC15. RED: a mechanical check that the string `There is no third case`
+    is gone AND that the section still contains the unqualified FORBIDDEN
+    prohibition; removing the prohibition to make room for the third case
+    fails it too."""
+    section = _envelope_register_section(TESTING_MD.read_text())
+    assert "There is no third case" not in section, (
+        "the enumeration still claims only two sanctioned outcomes exist"
+    )
+    assert "FORBIDDEN" in section, "the unqualified prohibition headline is gone"
+    for marker in ("\n1. ", "\n2. ", "\n3. "):
+        assert marker in section, f"the section does not enumerate a case at {marker!r}"
+
+
+def test_ac16_the_two_published_regenerate_spellings_agree() -> None:
+    """AC16. RED: rename the env var here — `PDF-57`'s population
+    reconciliation (D9) finds a name already moved and its census is wrong
+    in both directions."""
+    meta_recipe = load_register_document()["_meta"]["regenerate"]
+    section = _envelope_register_section(TESTING_MD.read_text())
+    block = re.search(rf"```bash\n({re.escape(REGENERATE_ENV)}=1.*?)\n```", section, re.DOTALL)
+    assert block is not None, "TESTING.md's register section carries no fenced regenerate recipe"
+    # `\` is a shell line-continuation marker, not part of the command itself
+    # (TESTING.md wraps the recipe onto two lines for readability; `_meta`
+    # does not) -- stripped before the two spellings are compared.
+    testing_recipe = " ".join(block.group(1).replace("\\", " ").split())
+    meta_recipe_normalised = " ".join(meta_recipe.replace("\\", " ").split())
+    assert REGENERATE_ENV in meta_recipe_normalised
+    assert REGENERATE_ENV in testing_recipe
+    assert meta_recipe_normalised == testing_recipe, (
+        f"_meta.regenerate is {meta_recipe_normalised!r}; TESTING.md's own recipe is "
+        f"{testing_recipe!r} — two spellings of one command (E10)"
+    )
+
+
 @pytest.mark.e2e
 def test_regenerating_the_register(corpus, tmp_path_factory) -> None:
     """The ONE sanctioned regeneration path, gated behind
@@ -1165,6 +1796,13 @@ def test_regenerating_the_register(corpus, tmp_path_factory) -> None:
     ruling on when this may be run at all — the short version is that an
     ADDITION never needs it, and nothing else may use it without a PM-approved
     `schema_version` increment.
+
+    PDF-54 D5/AC7 — `_meta` is now rewritten in the SAME operation as
+    `leaves`, derived from git rather than preserved from whatever the file
+    said before this call. PDF-54 D1/D2 — the failure arm is regenerated
+    alongside the success arms, over the SAME derived population every
+    ordinary test run reads from :data:`FAILURE_LEAVES`, and its own
+    coverage is published into `_meta` rather than assumed.
     """
     if os.environ.get(REGENERATE_ENV) != "1":
         pytest.skip(f"set {REGENERATE_ENV}=1 to regenerate {REGISTER_PATH.name}; see TESTING.md")
@@ -1173,6 +1811,32 @@ def test_regenerating_the_register(corpus, tmp_path_factory) -> None:
     document["leaves"] = {
         verb: observe_envelope_keys(verb, corpus, root).register_entry() for verb in LEAVES
     }
+
+    covered: list[str] = []
+    uncovered: list[dict[str, str]] = []
+    for verb in FAILURE_LEAVES:
+        invocation = INVOCATIONS.get(verb)
+        if invocation is None or invocation.no_input_build is None:
+            uncovered.append({"leaf": verb, "reason": "no no_input_build registered"})
+            continue
+        observed = observe_failure_envelope(verb, corpus, root)
+        entry = observed.register_entry()
+        if observed.kind != "no_input" or entry is None:
+            uncovered.append(
+                {"leaf": verb, "reason": f"reached kind={observed.kind!r}, not no_input"}
+            )
+            continue
+        document["leaves"].setdefault(verb, {})[FAILURE_ARM] = entry
+        covered.append(verb)
+
+    document["_meta"] = _derive_meta(document["_meta"], spec_id=REGENERATING_SPEC)
+    document["_meta"]["leaves_discovered"] = len(LEAVES) + len(uninvocable_leaves())
+    document["_meta"]["leaves_covered"] = len(LEAVES)
+    document["_meta"]["leaves_uncovered"] = list(uninvocable_leaves())
+    document["_meta"]["failure_arm_population"] = list(FAILURE_LEAVES)
+    document["_meta"]["failure_arm_leaves_covered"] = sorted(covered)
+    document["_meta"]["failure_arm_leaves_uncovered"] = uncovered
+
     REGISTER_PATH.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
 

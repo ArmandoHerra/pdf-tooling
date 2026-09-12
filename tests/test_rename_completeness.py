@@ -426,7 +426,16 @@ def test_reverting_one_import_grows_its_remainder_bucket_by_one() -> None:
 #: this spec's own entry legitimately added; a value BELOW its floor is a
 #: rewritten landed entry, which changelog.md's own third rule forbids.
 FROZEN_ENV_COUNT: Final[int] = 146
-FROZEN_CLASS_COUNT: Final[int] = 116
+#: X-717 -- bumped 116 -> 117. PDF-54's kind-independence assertion imports
+#: the base exception class to walk its subclass tree; every other
+#: reference was minimized away (aliased on import, reworded elsewhere), and
+#: the import statement is the irreducible residue -- the 38th instance of
+#: an already-sanctioned pattern 37 of this figure's own occurrences already
+#: are (`tests/` importing/annotating against the base class for a
+#: type-level need), not a new kind of occurrence. SHORT-LIVED BY DESIGN:
+#: `PDF-57` retires this spelling entirely and rewrites this census, so this
+#: figure does not survive that item.
+FROZEN_CLASS_COUNT: Final[int] = 117
 FROZEN_RESIDUE_COUNT: Final[int] = 30  # the dot-prefix (29) + its scratch sibling (1)
 FROZEN_NOUN_COUNT: Final[int] = 5  # 2 + 2 + 1, the three common-noun spellings summed
 CHANGELOG_ENV_FLOOR: Final[int] = 14

@@ -246,20 +246,23 @@ sentence that said so outlived the first golden by three specs — see
 
 ## The envelope key register — `tests/golden/envelope_keys.json`
 
+**Regenerating this file to make a red go green is FORBIDDEN.**
 `tests/golden/envelope_keys.json` is **not an ordinary golden**, does **not**
 respond to `--update-golden`, and is the only evidence this repository holds
 that no public key has been renamed or removed. It freezes, per invocable
-leaf, the sorted top-level `-o json` key set and the sorted key set of an
-`-o ndjson` line, **as measured at `d03bee3` (= tag `v0.2.0`)**, and
-`tests/test_envelope_contract.py` asserts that every live envelope is a
-**superset** of it.
+leaf, the sorted top-level `-o json` key set, the sorted key set of an
+`-o ndjson` line, and — since PDF-54 — a single failure arm, `error_json`
+(`_meta.arms` lists every arm the file carries): the sorted top-level and
+nested `error`-object key sets a failed run publishes. `render_error_json`
+serves that shape identically to `-o json` and `-o ndjson`, so it is a single
+arm, never a manufactured pair. `tests/test_envelope_contract.py` asserts that
+every live envelope is a **superset** of what is frozen, on every arm.
 
 Superset and not equality, deliberately. An addition is a strict superset; a
 rename or a removal is not. So additive change stays free and destructive
 change stops.
 
-**Regenerating this file to make a red go green is FORBIDDEN.** These are the
-only sanctioned outcomes when the guard reddens:
+These are the only sanctioned outcomes when the guard reddens:
 
 1. **You added a key.** Then nothing needs regenerating — an addition already
    satisfies a superset assertion, and if it does not, you did not add a key.
@@ -267,11 +270,23 @@ only sanctioned outcomes when the guard reddens:
    `schema_version` increment coupled to a major version bump, it is the
    project manager's decision and never an engineer's, and the register is
    regenerated only after that decision has been taken.
+3. **A spec approved by the project manager widens what the register
+   covers.** Extending the register to a new arm, or re-generating it because
+   a prior wave corrected a shape the register would otherwise freeze wrong,
+   is sanctioned **only as the named deliverable of an approved spec, at a
+   wave gate, with the spec ID recorded in `_meta.spec`**. It is never
+   available to an engineer who has met a red. A red is a measurement; this
+   case is a decision taken before the work started.
 
-There is no third case. If the register reddens on a leaf nobody predicted,
-that is information: record it, file it, and escalate. **A register generated
-after the work asserts nothing**, which is why the register was generated before
-any of `PDF-39`'s edits and why its provenance is asserted by
+If the register reddens on a leaf nobody predicted, that is information:
+record it, file it, and escalate. **A register generated after the work
+asserts nothing**, which is why the register carries its own provenance
+rather than a comment beside it: `_meta.generated_at_commit` (a full commit
+hash that must resolve in this repository), `_meta.generated_at_describe`
+(`git describe --tags --always`) and `_meta.generated_at_tag` (the exact tag,
+or `null` when the commit carries none, never invented) are all
+DERIVED BY THE GENERATOR at the moment of regeneration, never hand-edited or
+carried forward from a prior run, and asserted by
 `test_the_register_exists_and_declares_where_it_came_from`.
 
 The sanctioned regeneration path, once a decision authorises it:
@@ -287,11 +302,17 @@ not a failure of the run: a regeneration you cannot perform silently is the
 point. Review `git diff tests/golden/envelope_keys.json` before committing —
 every key that DISAPPEARS from that diff is a public-API removal.
 
-The register's coverage is published rather than claimed:
-`test_ac19_the_register_covers_every_leaf_the_harness_can_invoke` compares it
-against `tests/registry.py::discover_verbs()`, so a register narrower than the
-live command tree is a failure and never a silent pass. A leaf the harness
-cannot invoke is reported by name, never quietly dropped from the population.
+The register's coverage is published rather than claimed, on both arms:
+`test_ac19_the_register_covers_every_leaf_the_harness_can_invoke` compares the
+success side against `tests/registry.py::discover_verbs()`, and
+`_meta.failure_arm_population` / `_meta.failure_arm_leaves_covered` /
+`_meta.failure_arm_leaves_uncovered` (each uncovered leaf naming its own
+reason) publish the failure side the same way — DERIVED from every discovered
+leaf whose live command declares a positional operand, of any type, never
+from a typed list and never from the narrower predicate that silently drops a
+`str`-typed operand. A register narrower than either population is a failure
+and never a silent pass; a leaf neither side can invoke is reported by name,
+never quietly dropped from the population.
 
 ## The working-tree guard
 
