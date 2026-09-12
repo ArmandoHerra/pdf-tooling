@@ -51,6 +51,7 @@ from pdf_tooling.ops.document_password import (
     NO_PASSWORD,
     PasswordResolver,
     PasswordSource,
+    password_detail,
     predict_password_refusal,
 )
 from pdf_tooling.ops.pagerange import ALL_PAGES_TOKEN, parse
@@ -159,6 +160,12 @@ def _dry_run_result(
     detail = plan.detail()
     if refusal is not None and plan.refusal is None:
         detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+    # PDF-52 (`d01c9d52fb`): the pair rides along on every arm of this dry
+    # tier -- including the refusal arm just above (D2's boundary arm ii).
+    # A dry run never reads the secret, so `verified` is unconditionally
+    # `False` here. Shared by `watermark` and `stamp` (this is their one
+    # dry-run helper).
+    detail = {**detail, **password_detail([password], verified=False)}
     item = ItemResult(
         input=str(source),
         output=str(target),

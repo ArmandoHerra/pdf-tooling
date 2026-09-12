@@ -38,7 +38,7 @@ no new capability are introduced here; this module is orchestration only.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -52,6 +52,7 @@ __all__ = [
     "NO_PASSWORD",
     "PasswordResolver",
     "PasswordSource",
+    "password_detail",
     "predict_password_refusal",
     "unresolvable_password_error",
 ]
@@ -209,3 +210,29 @@ def predict_password_refusal(
     if facts.encrypted and not facts.unlocked:
         return AuthError(f"a password is required to {verb} this document; {PASSWORD_HINT}")
     return None
+
+
+def password_detail(sources: Sequence[PasswordSource], *, verified: bool) -> dict[str, object]:
+    """The source labels, plus the honest statement of what was NOT checked.
+
+    ``password_verified`` is ``False`` for every dry run by construction: a
+    dry run does not read the secret, so it cannot know. Stating that in the
+    payload is what keeps the preview from reading like success.
+
+    PDF-52 (`d01c9d52fb`) moved this here FROM ``ops/crypto.py``, where it
+    was ``_password_detail`` and module-private -- the identical move
+    :func:`unresolvable_password_error` already made for the identical
+    reason: the six ``predict_password_refusal`` call sites this spec adds
+    the disclosure to (``metadata.py``, ``optimize.py``, ``overlay.py``) are
+    ops modules that already reach ``safety.atomic.AtomicWriter`` on their
+    own account (they write), so importing this function from here rather
+    than from ``crypto.py`` adds no edge ``tests/registry.py::is_mutating``
+    did not already have -- and it keeps the one-way rule this module's own
+    docstring states (``ops/crypto.py`` depends on this module, never the
+    reverse) true for this name too. ``ops/crypto.py`` imports it back FROM
+    here, exactly as it already does for :class:`PasswordSource` and
+    :func:`unresolvable_password_error`.
+    """
+    detail: dict[str, object] = {source.key: source.source for source in sources}
+    detail["password_verified"] = verified
+    return detail

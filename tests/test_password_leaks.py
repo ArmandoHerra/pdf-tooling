@@ -1592,3 +1592,99 @@ def test_b068_rendered_help_names_no_password_flag_outside_the_registry(verb: st
         if flag not in PASSWORD_FILE_FLAGS
     ]
     assert offenders == [], f"`{verb} --help` names {offenders}, outside PASSWORD_FILE_FLAGS"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-52 (`d01c9d52fb`/`0f230317ef`) -- AC-C5, D6: the derived shape x tty
+# sweep, EXTENDED to reach the two new surfaces this spec adds (the dry
+# payload's `password_source`/`password_verified` pair, and the adapter's
+# own DEBUG record) -- never a second enumeration (E9/X-157:
+# `output_shape_states()`/`tty_modes()`/`run_cli_with_pty()` are IMPORTED,
+# unedited, above). Grades NEITHER `d01c9d52fb` nor `0f230317ef` --
+# necessary for both, sufficient for neither (D1/B-118); its own test node
+# is prefixed `test_pdf52_c*` for the same reason every node in
+# `tests/test_password_file_contract.py` is.
+# --------------------------------------------------------------------------- #
+
+#: E2's own eight-member premise population, reached by BOTH new surfaces:
+#: arm A's payload pair on six of them, arm B's log record on five (three
+#: already logged both facts). Pinned as a literal here -- this file does
+#: not import `test_password_file_contract.py` (which owns the structural
+#: derivation, one-way), exactly the same shape `VERBS`/`HONOURED_FLOOR`/
+#: `OTHER_OBSERVED` above already take.
+_PDF52_PREMISE_VERBS: Final[tuple[str, ...]] = (
+    "compress",
+    "decrypt",
+    "linearize",
+    "meta set",
+    "permissions",
+    "repair",
+    "stamp",
+    "watermark",
+)
+
+
+def test_pdf52_c5_the_planted_secret_never_reaches_stdout_stderr_or_the_payload(
+    corpus: Any, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """D6/AC-C5: a wrong-but-resolvable PLANTED sentinel password, over the
+    eight premise verbs, under TWO sub-arms (DRY, which exercises arm A's
+    payload pair -- a dry run never resolves the secret, so NEITHER log
+    fires, only the payload key -- and REAL, which exercises arm B's log
+    record instead) x THREE stream arms each -- plain pipes, a REAL pty on
+    stderr (arm B's own sink), and a REAL pty on stdout with NO `-o` flag
+    at all (the sixth shape the earlier defect escaped through, E9). The
+    sentinel, and every substring of it >= 4 characters, must appear ZERO
+    times in stdout, stderr OR the rendered payload. Each sub-arm FIRST
+    asserts its own record exists (non-vacuity: it must not pass because
+    the disclosure was silently off), then sweeps for the secret."""
+    root = tmp_path_factory.mktemp("pdf52-c5")
+    pw_path = root / "planted-password-file.txt"
+    pw_path.write_text(PW_SENTINEL, encoding="utf-8")
+    pw_path.chmod(0o600)
+
+    proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
+    substrings = [PW_SENTINEL, *(PW_SENTINEL[i : i + 4] for i in range(len(PW_SENTINEL) - 3))]
+
+    def _assert_clean(haystack: str, *, where: str) -> None:
+        for needle in substrings:
+            assert needle not in haystack, (
+                f"{where} leaked a sentinel substring ({len(needle)} chars): {needle!r}"
+            )
+
+    for verb in _PDF52_PREMISE_VERBS:
+        verb_dir = root / verb.replace(" ", "_")
+        verb_dir.mkdir()
+        argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, verb_dir))
+        base = [*argv, "--password-file", str(pw_path), "-vv"]
+        verb_tokens = verb.split()
+
+        for mode, tail, non_vacuity in (
+            ("dry", [*base, "--dry-run"], "password_verified"),
+            ("real", base, "password resolved from"),
+        ):
+            plain = run_cli(verb, *tail, "-o", "json", env=_clean_env())
+            haystack = plain.stdout if non_vacuity == "password_verified" else plain.stderr
+            assert non_vacuity in haystack, (
+                f"{verb}/{mode}: no {non_vacuity!r} record -- this control cannot pass "
+                f"because the disclosure was silently off ({plain.stdout!r}, {plain.stderr!r})"
+            )
+            _assert_clean(plain.stdout, where=f"{verb}/{mode}/plain/stdout")
+            _assert_clean(plain.stderr, where=f"{verb}/{mode}/plain/stderr")
+
+            # MANDATORY pty arm 1 -- stderr, arm B's own sink, where
+            # `color_enabled()` takes its OTHER branch.
+            pty_stderr = run_cli_with_pty(
+                *verb_tokens, *tail, "-o", "json", pty_stream="stderr", env=_clean_env()
+            )
+            _assert_clean(pty_stderr.stdout, where=f"{verb}/{mode}/pty-stderr/stdout")
+            _assert_clean(pty_stderr.stderr, where=f"{verb}/{mode}/pty-stderr/stderr")
+
+            # MANDATORY pty arm 2 -- stdout, NO -o flag at all:
+            # `auto_format()` resolves TABLE here, the shape a hand-written
+            # enumeration missed before `run_cli_with_pty` existed (E9).
+            pty_stdout = run_cli_with_pty(
+                *verb_tokens, *tail, pty_stream="stdout", env=_clean_env()
+            )
+            _assert_clean(pty_stdout.stdout, where=f"{verb}/{mode}/pty-stdout-no-flag/stdout")
+            _assert_clean(pty_stdout.stderr, where=f"{verb}/{mode}/pty-stdout-no-flag/stderr")

@@ -69,6 +69,7 @@ from pdf_tooling.ops.document_password import (
     NO_PASSWORD,
     PasswordResolver,
     PasswordSource,
+    password_detail,
     predict_password_refusal,
 )
 from pdf_tooling.ops.pagerange import parse
@@ -349,6 +350,11 @@ def compress_run(
         detail = plan.detail()
         if refusal is not None and plan.refusal is None:
             detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        # PDF-52 (`d01c9d52fb`): the pair rides along on every arm of this dry
+        # tier -- including the refusal arm just above (D2's boundary arm ii).
+        # A dry run never reads the secret, so `verified` is unconditionally
+        # `False` here, for the whole batch's single global slot.
+        detail = {**detail, **password_detail([password], verified=False)}
         # The dry run classifies every operand through the SAME guard the real
         # run uses (OR-7 / X-185): an unreadable input predicts its own exit
         # code AND its own envelope shape, rather than the preview claiming a
@@ -540,6 +546,11 @@ def repair_run(
         detail = plan.detail()
         if refusal is not None and plan.refusal is None:
             detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        # PDF-52 (`d01c9d52fb`): the pair rides along on every arm of
+        # this dry tier -- including the refusal arm just above (D2's
+        # boundary arm ii). A dry run never reads the secret, so
+        # `verified` is unconditionally `False` here.
+        detail = {**detail, **password_detail([password], verified=False)}
         item = ItemResult(
             input=str(source),
             output=str(target),
@@ -640,6 +651,11 @@ def linearize_run(
         detail = plan.detail()
         if refusal is not None and plan.refusal is None:
             detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        # PDF-52 (`d01c9d52fb`): the pair rides along on every arm of
+        # this dry tier -- including the refusal arm just above (D2's
+        # boundary arm ii). A dry run never reads the secret, so
+        # `verified` is unconditionally `False` here.
+        detail = {**detail, **password_detail([password], verified=False)}
         item = ItemResult(
             input=str(source),
             output=str(target),

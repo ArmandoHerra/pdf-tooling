@@ -88,7 +88,11 @@ from pdf_tooling.errors import (
 )
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult
-from pdf_tooling.ops.document_password import PasswordSource, unresolvable_password_error
+from pdf_tooling.ops.document_password import (
+    PasswordSource,
+    password_detail,
+    unresolvable_password_error,
+)
 from pdf_tooling.ports.structure import (
     ALWAYS_GRANTED_TOKENS,
     PERMISSION_TOKENS,
@@ -155,18 +159,6 @@ _NOT_ENCRYPTED: Final[str] = "document is not encrypted; nothing to decrypt"
 # type the OTHER way -- this module now depends on the shared one, never the
 # reverse -- is what breaks that path.
 # --------------------------------------------------------------------------- #
-
-
-def _password_detail(sources: Sequence[PasswordSource], *, verified: bool) -> dict[str, object]:
-    """The source labels, plus the honest statement of what was NOT checked.
-
-    ``password_verified`` is ``False`` for every dry run by construction: a
-    dry run does not read the secret, so it cannot know. Stating that in the
-    payload is what keeps the preview from reading like success.
-    """
-    detail: dict[str, object] = {source.key: source.source for source in sources}
-    detail["password_verified"] = verified
-    return detail
 
 
 # --------------------------------------------------------------------------- #
@@ -344,7 +336,7 @@ def encrypt_run(
         document_refusal=document_refusal,
         passwords=passwords,
     )
-    detail = {**plan.detail(), **_password_detail(passwords, verified=False)}
+    detail = {**plan.detail(), **password_detail(passwords, verified=False)}
     detail["algorithm"] = ALGORITHM_RC4128 if legacy else ALGORITHM_AES256
     detail["allow"] = sorted(allow)
 
@@ -412,7 +404,7 @@ def encrypt_run(
             f"{backup_path} is an UNENCRYPTED copy of the original; delete it if you do not want it"
         )
 
-    item_detail = {**_password_detail(passwords, verified=True)}
+    item_detail = {**password_detail(passwords, verified=True)}
     item_detail["algorithm"] = ALGORITHM_RC4128 if legacy else ALGORITHM_AES256
     item_detail["allow"] = sorted(allow)
     item_detail["always_granted"] = list(ALWAYS_GRANTED_TOKENS)
@@ -471,7 +463,7 @@ def decrypt_run(
         document_refusal=document_refusal,
         passwords=[password],
     )
-    detail = {**plan.detail(), **_password_detail([password], verified=False)}
+    detail = {**plan.detail(), **password_detail([password], verified=False)}
 
     if policy.dry_run:
         if plan.refusal is not None:
@@ -534,7 +526,7 @@ def decrypt_run(
                 bytes_before=bytes_before,
                 bytes_after=bytes_after,
                 duration_ms=int((time.monotonic() - started) * 1000),
-                detail=_password_detail([password], verified=True),
+                detail=password_detail([password], verified=True),
             ),
         ),
         warnings=(),
@@ -582,7 +574,7 @@ def permissions_run(
                     bytes_before=source.stat().st_size,
                     bytes_after=None,
                     duration_ms=0,
-                    detail={"would_exit": 0, **_password_detail([password], verified=False)},
+                    detail={"would_exit": 0, **password_detail([password], verified=False)},
                 ),
             ),
             warnings=(),
@@ -617,7 +609,7 @@ def permissions_run(
 
     detail: dict[str, object] = {
         **facts.to_dict(),
-        **_password_detail([password], verified=facts.unlocked and password.resolvable),
+        **password_detail([password], verified=facts.unlocked and password.resolvable),
         "always_granted": list(ALWAYS_GRANTED_TOKENS),
         "vocabulary": list(PERMISSION_TOKENS),
         "advisory": True,

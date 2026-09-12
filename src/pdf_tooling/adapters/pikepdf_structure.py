@@ -120,6 +120,30 @@ def _password_refusal(password: Secret | None, *, verb: str) -> AuthError:
     return AuthError(f"the supplied password did not unlock this document; {PASSWORD_HINT}")
 
 
+def _log_password_verification(password: Secret | None, *, verified: bool) -> None:
+    """PDF-52 (`0f230317ef`) -- the DEBUG record ``pypdf_structure.py:366``'s
+    ``_unlock_with_password`` already ships, at this file's own unlock sites:
+    the resolution SOURCE (``password.source``, safe-to-log by construction)
+    and whether it verified, as one record, emitted at the point the outcome
+    becomes known.
+
+    A no-op when nothing was ever supplied: there is no source to name and
+    nothing was checked, so there is nothing to disclose -- mirrors
+    ``_unlock_with_password``'s own ``password is None`` branch, which
+    raises before it would ever log.
+
+    The ONE seam every one of this adapter's unlock sites -- ``compress``,
+    ``repair``, ``linearize``, ``read_encryption``, ``decrypt`` -- calls, so
+    a verb added on top of any of them inherits the record for free (D4):
+    none of the five call sites decides whether to log by its own verb name,
+    only by whether a secret reached the engine call at all.
+    """
+    if password is None:
+        return
+    logger = get_logger("adapters.pikepdf")
+    logger.debug("password resolved from %s; password_verified: %s", password.source, verified)
+
+
 class PikepdfStructureAdapter:
     """The pikepdf-backed ``StructureEngine`` secondary."""
 
@@ -172,6 +196,7 @@ class PikepdfStructureAdapter:
             with pikepdf.Pdf.open(
                 io.BytesIO(data), password=password.reveal() if password is not None else ""
             ) as pdf:
+                _log_password_verification(password, verified=True)
                 before = _structural_facts(pdf)
                 out_buffer = io.BytesIO()
                 pdf.save(
@@ -182,6 +207,7 @@ class PikepdfStructureAdapter:
                     normalize_content=False,
                 )
         except pikepdf.PasswordError as error:
+            _log_password_verification(password, verified=False)
             raise _password_refusal(password, verb="compress") from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not open PDF for compression: {error}") from error
@@ -221,9 +247,11 @@ class PikepdfStructureAdapter:
                 attempt_recovery=True,
             )
         except pikepdf.PasswordError as error:
+            _log_password_verification(password, verified=False)
             raise _password_refusal(password, verb="repair") from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not recover this document: {error}") from error
+        _log_password_verification(password, verified=True)
 
         try:
             page_count_before = len(pdf.pages)
@@ -272,9 +300,11 @@ class PikepdfStructureAdapter:
             with pikepdf.Pdf.open(
                 io.BytesIO(data), password=password.reveal() if password is not None else ""
             ) as pdf:
+                _log_password_verification(password, verified=True)
                 out_buffer = io.BytesIO()
                 pdf.save(out_buffer, linearize=True)
         except pikepdf.PasswordError as error:
+            _log_password_verification(password, verified=False)
             raise _password_refusal(password, verb="linearize") from error
         except pikepdf.PdfError as error:
             raise FailureError(f"could not open PDF for linearization: {error}") from error
@@ -327,9 +357,12 @@ class PikepdfStructureAdapter:
         try:
             pdf = pikepdf.Pdf.open(io.BytesIO(data), password=password.reveal() if password else "")
         except pikepdf.PasswordError:
-            # Encrypted, and this credential is not the one. Nothing about the
-            # attempt is logged: not the password, not its length, not its
-            # source -- the caller owns the (safe) source label.
+            # Encrypted, and this credential is not the one. Not the password
+            # and not its length reach any sink -- only the caller's own
+            # (safe) source label and the boolean outcome, via PDF-52's
+            # `_log_password_verification` (`0f230317ef`), which is itself a
+            # no-op when *password* is ``None`` (nothing was ever offered).
+            _log_password_verification(password, verified=False)
             return EncryptionFacts(
                 encrypted=True,
                 unlocked=False,
@@ -353,6 +386,11 @@ class PikepdfStructureAdapter:
                     granted=tuple(PERMISSION_TOKENS),
                     permissions_readable=True,
                 )
+            # Genuinely encrypted, and it opened -- the credential (or the
+            # document's own empty owner password) actually verified, unlike
+            # the plain-document branch just above where nothing needed
+            # checking at all.
+            _log_password_verification(password, verified=True)
             info = pdf.encryption
             method = _CFM_BY_STREAM_METHOD.get(info.stream_method.name)
             algorithm = (
@@ -454,9 +492,11 @@ class PikepdfStructureAdapter:
 
         try:
             with pikepdf.Pdf.open(io.BytesIO(data), password=password.reveal()) as pdf:
+                _log_password_verification(password, verified=True)
                 out_buffer = io.BytesIO()
                 pdf.save(out_buffer)
         except pikepdf.PasswordError as error:
+            _log_password_verification(password, verified=False)
             raise AuthError(
                 "the supplied password did not open this document",
                 redacted=True,

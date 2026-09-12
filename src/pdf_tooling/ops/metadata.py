@@ -44,6 +44,7 @@ from pdf_tooling.ops.document_password import (
     NO_PASSWORD,
     PasswordResolver,
     PasswordSource,
+    password_detail,
     predict_password_refusal,
 )
 from pdf_tooling.ports.structure import MetadataFacts, require_structure
@@ -239,6 +240,11 @@ def meta_set_run(
         detail = plan.detail()
         if refusal is not None and plan.refusal is None:
             detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        # PDF-52 (`d01c9d52fb`): the pair rides along on every arm of this dry
+        # tier -- including the two just above, where a filesystem or password
+        # refusal is already predicted (D2's boundary arm ii). A dry run never
+        # reads the secret, so `verified` is unconditionally `False` here.
+        detail = {**detail, **password_detail([password], verified=False)}
         item = ItemResult(
             input=str(source),
             output=str(target),

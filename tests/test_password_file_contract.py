@@ -17,6 +17,14 @@ never inferred -- AC4). D4's structural predicate
 (`pdf_tooling.cli.common.honours_password_file`) is reconciled against this
 BEHAVIOURAL result: the two instruments are independent on purpose, and a
 disagreement is a BLOCKER (D4.3), never a tie broken here.
+
+PDF-52 -- the missing `AC14`/`AC17` arms, added here as this module's own
+home for them (D1's own instruction: this file is where `PDF-37`'s missing
+disclosure criteria belong). Every new node below is prefixed
+`test_pdf52_a*` (`d01c9d52fb`, the dry-run PAYLOAD disclosure),
+`test_pdf52_b*` (`0f230317ef`, the verification-outcome LOG record) or
+`test_pdf52_c*` (shared rails, grading NEITHER row) so `-k pdf52_a` and
+`-k pdf52_b` each grade exactly one ledger row, independently (D1).
 """
 
 from __future__ import annotations
@@ -37,9 +45,12 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from registry import (  # noqa: E402
     INVOCATIONS,
+    _dotted_to_path,
     _module_dotted_name,
     discover_verbs,
+    output_shape_states,
     run_cli,
+    run_cli_with_pty,
 )
 from test_password_leaks import (  # noqa: E402
     _clean_env,
@@ -736,3 +747,892 @@ def test_ac18_the_refusal_tier_mirrors_dry_and_real(verb: str) -> None:
 # the flag, exactly as `test_password_file_contract.py`'s own PR record
 # states), and that is the closure this criterion actually took.
 # --------------------------------------------------------------------------- #
+
+
+# =========================================================================== #
+# PDF-52 -- the missing AC14/AC17 arms.
+#
+# Group A (`test_pdf52_a*`) grades `d01c9d52fb` (high, the dry-run PAYLOAD
+# disclosure) and ONLY that row. Group B (`test_pdf52_b*`) grades
+# `0f230317ef` (medium, the verification-outcome LOG record) and ONLY that
+# row. Group C (`test_pdf52_c*`) grades NEITHER row -- necessary for both,
+# sufficient for neither (D1/B-118). `-k pdf52_a`, `-k pdf52_b` and
+# `-k pdf52_c` each select exactly one group.
+# =========================================================================== #
+
+_PDF52_WRONG_PASSWORD: Final[str] = "pdf-52-contract-wrong-password"
+
+
+class _PdfPlainOperandProxy:
+    """The mirror of `_EncryptedOperandProxy`: every `corpus.path(name)` call
+    returns the SAME plaintext fixture, so a verb's own registered
+    `INVOCATIONS[verb].build(...)` argv operates on an unencrypted document
+    wherever it would normally have used one (D2's boundary arm i, AC-A4)."""
+
+    def __init__(self, plain_path: Path) -> None:
+        self._plain_path = plain_path
+
+    def path(self, name: str) -> Path:
+        del name
+        return self._plain_path
+
+
+def _pdf52_ops_module_call_graph(module_path: Path) -> dict[str, frozenset[str]]:
+    """`{function_name: {names it calls directly}}`, for every function
+    defined in *module_path* -- built once per module so a caller can
+    resolve TRANSITIVE reachability (`watermark_run` calls the module's
+    shared `_dry_run_result`, which is what actually calls
+    `predict_password_refusal` -- neither `watermark_run` nor `stamp_run`
+    names that function directly)."""
+    tree = ast.parse(module_path.read_text(), filename=str(module_path))
+    graph: dict[str, frozenset[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            called = {
+                inner.func.id
+                for inner in ast.walk(node)
+                if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
+            }
+            graph[node.name] = frozenset(called)
+    return graph
+
+
+def _pdf52_reaches(graph: dict[str, frozenset[str]], start: str, target: str) -> bool:
+    """Bounded BFS over *graph* (the same style `tests/registry.py::
+    reaches_atomic_writer` already uses for an analogous transitive-import
+    walk) -- 4 hops is generous for this product's shallow ops-layer call
+    depth."""
+    seen: set[str] = set()
+    frontier = {start}
+    for _ in range(4):
+        if target in frontier:
+            return True
+        next_frontier: set[str] = set()
+        for name in frontier:
+            if name in seen:
+                continue
+            seen.add(name)
+            next_frontier |= graph.get(name, frozenset())
+        frontier = next_frontier
+    return target in frontier
+
+
+def _pdf52_cli_module_imported_ops_names(dotted_cli_module: str) -> dict[str, str]:
+    """Every name *dotted_cli_module* (a CLI callback module, as
+    `_verb_module_map()` already resolves it) imports FROM a
+    `pdf_tooling.ops.*` submodule, mapped to which submodule it came from
+    -- e.g. `{"meta_get_run": "metadata"}`. Read via `ast.ImportFrom`, never
+    a hand-typed verb -> module table."""
+    path = _dotted_to_path(dotted_cli_module)
+    if path is None:
+        return {}
+    tree = ast.parse(path.read_text(), filename=str(path))
+    found: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith("pdf_tooling.ops.")
+        ):
+            submodule = node.module.removeprefix("pdf_tooling.ops.")
+            for alias in node.names:
+                found[alias.asname or alias.name] = submodule
+    return found
+
+
+def _pdf52_honoured_verbs_structural() -> frozenset[str]:
+    """The 20-member HONOURED population (E1/AC-B1), via the SAME structural
+    predicate `test_ac1_the_structural_predicate_agrees_with_the_behavioural_
+    probe` already uses -- consumed here, not re-typed."""
+    from pdf_tooling.cli.common import honours_password_file
+
+    module_by_verb = _verb_module_map()
+    return frozenset(
+        verb for verb, mod in module_by_verb.items() if mod and honours_password_file(mod)
+    )
+
+
+#: `ops/crypto.py`'s own two premise members: `decrypt_run`/`permissions_run`
+#: never call `predict_password_refusal` at all (D2/E2's own citation of
+#: `crypto.py:474`/`:585` -- `_plan`'s resolvability loop, and
+#: `permissions_run`'s direct early return, neither of which opens the
+#: document). These are FUNCTION identifiers, never verb-name literals
+#: (`decrypt`/`permissions` are the verb names; `_run` is a Python
+#: convention, not one of the 26 display strings `discover_verbs()`
+#: returns) -- `_string_constants_compared_to_verb_names`'s own walk (AC-C1)
+#: does not match either.
+_PDF52_CRYPTO_PREMISE_FUNCTIONS: Final[frozenset[str]] = frozenset(
+    {"decrypt_run", "permissions_run"}
+)
+
+
+def _pdf52_premise_verbs_structural() -> frozenset[str]:
+    """AC-A1's first instrument -- the 8-member premise population (E2),
+    structural and verb-name-literal-free: for every HONOURED verb, look at
+    the SPECIFIC `ops.*` function its own CLI module imports (function
+    granularity, not module granularity -- `meta_get_run`/`meta_set_run`
+    share `ops/metadata.py`, and only one of the two reaches
+    `predict_password_refusal`), and mark it premise when either
+
+    * that function TRANSITIVELY reaches a call to
+      `predict_password_refusal`, over the module's own call graph (the six
+      `PDF-37`-tier verbs -- `compress`, `linearize`, `meta set`, `repair`,
+      `stamp`, `watermark`; `overlay.py` serves `watermark`/`stamp` through
+      ONE shared helper, `_dry_run_result`, which is why this is a call-
+      GRAPH reachability check rather than a direct-call one -- neither
+      `watermark_run` nor `stamp_run` names `predict_password_refusal`
+      itself), or
+    * that function IS `ops/crypto.py`'s `decrypt_run`/`permissions_run`
+      (D2/E2) -- `encrypt_run` is excluded automatically because `encrypt`
+      is REFUSED rather than HONOURED (E6/Non-goals), never because this
+      function names it.
+
+    No verb NAME is ever typed as a literal in this function.
+    """
+    honoured = _pdf52_honoured_verbs_structural()
+    module_by_verb = _verb_module_map()
+    graph_by_submodule: dict[str, dict[str, frozenset[str]]] = {}
+    premise: set[str] = set()
+    for verb in honoured:
+        cli_module = module_by_verb.get(verb)
+        if cli_module is None:
+            continue
+        imported = _pdf52_cli_module_imported_ops_names(cli_module)
+        for name, submodule in imported.items():
+            if submodule == "crypto" and name in _PDF52_CRYPTO_PREMISE_FUNCTIONS:
+                premise.add(verb)
+                break
+            ops_path = SRC / "ops" / f"{submodule}.py"
+            if not ops_path.is_file():
+                continue
+            if submodule not in graph_by_submodule:
+                graph_by_submodule[submodule] = _pdf52_ops_module_call_graph(ops_path)
+            graph = graph_by_submodule[submodule]
+            if name in graph and _pdf52_reaches(graph, name, "predict_password_refusal"):
+                premise.add(verb)
+                break
+    return frozenset(premise)
+
+
+def test_pdf52_c0_the_premise_instrument_agrees_with_e2s_own_count() -> None:
+    """Non-vacuity guard for the guard above: the structural instrument must
+    find exactly 8, and it must be the SAME 8 E2 measured -- if this drifts,
+    every AC-A* criterion below is grading the wrong population, silently.
+    Not itself one of the 24 acceptance criteria; a guard for the guard, in
+    the same spirit as `test_ac2_the_scan_is_not_vacuous` above."""
+    premise = _pdf52_premise_verbs_structural()
+    assert premise == frozenset(
+        {
+            "compress",
+            "linearize",
+            "meta set",
+            "repair",
+            "stamp",
+            "watermark",
+            "decrypt",
+            "permissions",
+        }
+    ), sorted(premise)
+
+
+# --------------------------------------------------------------------------- #
+# Arm A fixture -- every HONOURED verb, dry AND real, against a
+# resolvable-but-wrong password (E2's own behavioural instrument).
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class _Pdf52DryArm:
+    verb: str
+    dry_returncode: int
+    dry_payload: dict[str, Any] | None
+    real_returncode: int
+
+
+@pytest.fixture(scope="module")
+def pdf52_dry_wrong_probe(
+    corpus: Any, tmp_path_factory: pytest.TempPathFactory
+) -> dict[str, _Pdf52DryArm]:
+    """Every HONOURED verb, ONE probe each: `--dry-run` AND the real run,
+    both against a RESOLVABLE-BUT-WRONG `--password-file`, on the SAME
+    encrypted operand every other fixture in this file uses
+    (`_EncryptedOperandProxy`, never a hand-assembled argv -- X-243). E2's
+    own behavioural instrument: dry rc 0 marks the PREMISE population (D2
+    never predicts correctness); dry rc 6 marks a verb that already opens
+    the document at dry time and therefore already verifies (E2's "other
+    twelve")."""
+    proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
+    root = tmp_path_factory.mktemp("pdf52-dry-wrong")
+    pw_wrong = root / "pw-wrong.txt"
+    pw_wrong.write_text(_PDF52_WRONG_PASSWORD, encoding="utf-8")
+    pw_wrong.chmod(0o600)
+
+    honoured = sorted(_pdf52_honoured_verbs_structural())
+
+    def _probe(verb: str) -> tuple[str, _Pdf52DryArm]:
+        verb_dir = root / verb.replace(" ", "_")
+        verb_dir.mkdir()
+
+        dry_dir = verb_dir / "dry"
+        dry_dir.mkdir()
+        dry_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, dry_dir))
+        dry = run_cli(
+            verb,
+            *dry_argv,
+            "--password-file",
+            str(pw_wrong),
+            "--dry-run",
+            "-o",
+            "json",
+            env=_clean_env(),
+        )
+        try:
+            dry_payload = json.loads(dry.stdout)
+        except (json.JSONDecodeError, ValueError):
+            dry_payload = None
+
+        real_dir = verb_dir / "real"
+        real_dir.mkdir()
+        real_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, real_dir))
+        real = run_cli(
+            verb, *real_argv, "--password-file", str(pw_wrong), "-o", "json", env=_clean_env()
+        )
+        return verb, _Pdf52DryArm(
+            verb=verb,
+            dry_returncode=dry.returncode,
+            dry_payload=dry_payload,
+            real_returncode=real.returncode,
+        )
+
+    with ThreadPoolExecutor(max_workers=min(8, len(honoured))) as pool:
+        observations = dict(pool.map(_probe, honoured))
+    return observations
+
+
+# --------------------------------------------------------------------------- #
+# Group A -- `d01c9d52fb` (high): the dry-run payload states its own limit.
+# --------------------------------------------------------------------------- #
+
+
+def test_pdf52_a1_the_premise_population_is_derived_and_agrees_with_the_probe(
+    pdf52_dry_wrong_probe: dict[str, _Pdf52DryArm],
+) -> None:
+    """AC-A1: the structural instrument (above) and the BEHAVIOURAL probe
+    (dry rc 0 on a resolvable-but-wrong password) are independent on
+    purpose. A disagreement is a BLOCKER, never a tie broken here."""
+    structural = _pdf52_premise_verbs_structural()
+    behavioural = frozenset(
+        verb for verb, arm in pdf52_dry_wrong_probe.items() if arm.dry_returncode == 0
+    )
+    disagreement = structural.symmetric_difference(behavioural)
+    assert not disagreement, (
+        f"BLOCKER: structural and behavioural premise instruments disagree on "
+        f"{sorted(disagreement)} -- structural={sorted(structural)}, "
+        f"behavioural={sorted(behavioural)}"
+    )
+    assert len(structural) == 8, (
+        f"the premise population is {len(structural)}, not 8: {sorted(structural)}"
+    )
+
+
+def test_pdf52_a2_every_premise_verb_states_password_verified_in_the_dry_payload(
+    pdf52_dry_wrong_probe: dict[str, _Pdf52DryArm],
+) -> None:
+    """AC-A2: on EVERY premise verb, the dry `detail` carries
+    `password_verified: false` (identity, not truthiness) and
+    `password_source`. RED, free and required: at HEAD before this spec's
+    edits, this failed on exactly the six E2 named."""
+    premise = _pdf52_premise_verbs_structural()
+    missing: dict[str, dict[str, object]] = {}
+    for verb in sorted(premise):
+        arm = pdf52_dry_wrong_probe[verb]
+        payload = arm.dry_payload
+        assert payload is not None, f"{verb}: dry -o json did not parse"
+        items = payload.get("items")
+        assert isinstance(items, list) and items, f"{verb}: no items in dry payload: {payload}"
+        detail = items[0].get("detail")
+        assert isinstance(detail, dict), f"{verb}: detail is not a dict: {detail!r}"
+        if detail.get("password_verified") is not False or "password_source" not in detail:
+            missing[verb] = detail
+    assert missing == {}, (
+        f"the following premise verb(s) do not state password_verified is False (identity) "
+        f"and password_source in their dry payload: {missing}"
+    )
+
+
+def test_pdf52_a3_the_two_pre_existing_emitters_are_byte_unchanged(
+    pdf52_dry_wrong_probe: dict[str, _Pdf52DryArm],
+) -> None:
+    """AC-A3: `decrypt` and `permissions` render the SAME `detail` shape
+    before and after this spec -- the criterion that stops arm A from
+    becoming README.md's schema_version item 4."""
+    expected_keys = {"would_exit", "password_source", "password_verified"}
+    for verb in ("decrypt", "permissions"):
+        detail = pdf52_dry_wrong_probe[verb].dry_payload["items"][0]["detail"]
+        assert set(detail) == expected_keys, (
+            f"{verb}'s dry detail key set changed: {sorted(detail)} != {sorted(expected_keys)}"
+        )
+        assert detail["would_exit"] == 0
+        assert detail["password_verified"] is False
+        assert isinstance(detail["password_source"], str) and detail["password_source"].startswith(
+            "file:"
+        )
+
+
+def test_pdf52_a4_the_boundary_arms_are_ruled_not_discovered(
+    corpus: Any, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """AC-A4: D2's three ruled boundary arms, over the DERIVED premise
+    population -- (i) plaintext operand, no flag: the pair appears with
+    `password_source: null`; (ii) encrypted, no password available,
+    non-TTY: `would_exit: 6` / `planned_refusal: AuthError` AND the pair
+    ride together; (iii) a REAL run of any premise verb gains NO new
+    payload key -- the roadmap's named risk, caught by a test."""
+    from corpus import ENCRYPTED_PASSWORD
+
+    premise = sorted(_pdf52_premise_verbs_structural())
+    plain_proxy = _PdfPlainOperandProxy(corpus.path("single_page"))
+    enc_proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
+    root = tmp_path_factory.mktemp("pdf52-a4")
+
+    for verb in premise:
+        verb_dir = root / verb.replace(" ", "_")
+        verb_dir.mkdir()
+
+        # (i) plaintext operand, no password flag at all. `decrypt`
+        # predicts its OWN, unrelated exit 4 here ("nothing to decrypt") --
+        # a different tier entirely (D2's ladder) -- so this arm checks the
+        # DISCLOSURE PAIR, never the exit code, which is D7's business, not
+        # arm A's.
+        i_dir = verb_dir / "i"
+        i_dir.mkdir()
+        argv = _strip_password_file_flags(INVOCATIONS[verb].build(plain_proxy, i_dir))
+        result = run_cli(verb, *argv, "--dry-run", "-o", "json", env=_clean_env())
+        payload = json.loads(result.stdout)
+        assert "items" in payload, (verb, "i", payload)
+        detail = payload["items"][0]["detail"]
+        assert detail.get("password_source") is None, (verb, "i", detail)
+        assert detail.get("password_verified") is False, (verb, "i", detail)
+
+        # (ii) encrypted operand, no password available, non-TTY, no flag,
+        # no env. `permissions`'s OWN dry branch never has a resolvability
+        # tier to predict at all -- it is "non-producing", declares no
+        # filesystem tier, and its own docstring states the reason ("there
+        # is nothing to predict" beyond the plan itself) -- so it ALWAYS
+        # answers `would_exit: 0` here, unedited by this spec, and the
+        # `would_exit`/`planned_refusal` checks below are skipped for it
+        # alone. The disclosure pair itself is asserted for every verb,
+        # `permissions` included.
+        ii_dir = verb_dir / "ii"
+        ii_dir.mkdir()
+        argv = _strip_password_file_flags(INVOCATIONS[verb].build(enc_proxy, ii_dir))
+        result = run_cli(verb, *argv, "--dry-run", "-o", "json", env=_clean_env())
+        detail = json.loads(result.stdout)["items"][0]["detail"]
+        if verb != "permissions":
+            assert detail.get("would_exit") == 6, (verb, "ii", detail)
+            assert detail.get("planned_refusal") == "AuthError", (verb, "ii", detail)
+        assert detail.get("password_verified") is False, (verb, "ii", detail)
+        assert detail.get("password_source") is None, (verb, "ii", detail)
+
+        # (iii) real run, CORRECT password: gains no NEW payload key.
+        # `decrypt`/`permissions` are the two PRE-EXISTING frozen carriers
+        # (E6/AC-C3) -- their real path has ALWAYS emitted the key,
+        # unedited by this spec -- so this arm is scoped to the six that
+        # did not have it before (E2/E4's payload-deficit set).
+        if verb in ("decrypt", "permissions"):
+            continue
+        iii_dir = verb_dir / "iii"
+        iii_dir.mkdir()
+        pw_correct = verb_dir / "pw-correct.txt"
+        pw_correct.write_text(ENCRYPTED_PASSWORD, encoding="utf-8")
+        pw_correct.chmod(0o600)
+        argv = _strip_password_file_flags(INVOCATIONS[verb].build(enc_proxy, iii_dir))
+        result = run_cli(
+            verb, *argv, "--password-file", str(pw_correct), "-o", "json", env=_clean_env()
+        )
+        assert result.returncode == 0, (verb, "iii", result.stdout, result.stderr)
+        detail = json.loads(result.stdout)["items"][0].get("detail") or {}
+        assert "password_verified" not in detail, (verb, "iii", detail)
+        assert not any(k.endswith("password_source") for k in detail), (verb, "iii", detail)
+
+
+@pytest.mark.parametrize(
+    "shape", output_shape_states(), ids=lambda s: s.value if s is not None else "none"
+)
+def test_pdf52_a5_the_disclosure_is_present_under_every_derived_output_state(
+    shape: object, corpus: Any, tmp_path: Path
+) -> None:
+    """AC-A5: the disclosure is asserted under EVERY derived output state,
+    not only `-o json`. `table` renders the Python `repr()` of `detail`
+    (measured, not assumed -- see the module note below): a JSON-shaped
+    substring search passes on json/ndjson and FALSE-REDS on table for a
+    correct binary -- X-206's own class of control, rebuilt here on purpose
+    to prove the shape-aware assertion is necessary."""
+    from pdf_tooling.output import OutputFormat
+
+    verb = sorted(_pdf52_premise_verbs_structural())[0]
+    proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
+    pw_wrong = tmp_path / "pw-wrong.txt"
+    pw_wrong.write_text(_PDF52_WRONG_PASSWORD, encoding="utf-8")
+    pw_wrong.chmod(0o600)
+    argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, tmp_path))
+    tail = [*argv, "--password-file", str(pw_wrong), "--dry-run"]
+    if shape is not None:
+        tail += ["-o", shape.value]
+    result = run_cli(verb, *tail, env=_clean_env())
+    assert result.returncode == 0, (verb, shape, result.stdout, result.stderr)
+
+    if shape is OutputFormat.TABLE:
+        assert "'password_verified': False" in result.stdout, (
+            f"table renders Python repr, not JSON -- a '\"password_verified\": false' "
+            f"substring search would have false-reported RED here: {result.stdout!r}"
+        )
+        return
+    if shape is OutputFormat.NDJSON:
+        detail = json.loads(result.stdout)["detail"]
+    else:  # JSON, or no -o flag at all (auto_format() picks JSON off a non-TTY stdout)
+        detail = json.loads(result.stdout)["items"][0]["detail"]
+    assert detail.get("password_verified") is False, (verb, shape, detail)
+    assert "password_source" in detail, (verb, shape, detail)
+
+
+def test_pdf52_a6_the_correctness_tier_is_still_not_predicted(
+    pdf52_dry_wrong_probe: dict[str, _Pdf52DryArm],
+) -> None:
+    """AC-A6: the X-89 carve-out SURVIVES, and this criterion's RED is a
+    fix. Every premise verb reports dry 0 / real 6 on a wrong-but-resolvable
+    password, with the dry payload stating `password_verified: false`. A
+    dry run that predicted 6 here would have read the secret to do it --
+    citing `ops/crypto.py:44-53` and X-89, that is a regression, not an
+    improvement, however green the rest of the suite looks."""
+    premise = _pdf52_premise_verbs_structural()
+    for verb in sorted(premise):
+        arm = pdf52_dry_wrong_probe[verb]
+        assert arm.dry_returncode == 0, (
+            f"{verb}: dry run predicted exit {arm.dry_returncode} on a wrong-but-resolvable "
+            f"password -- re-committing X-89 (ops/crypto.py:44-53): the preview read the "
+            f"secret to predict this"
+        )
+        assert arm.real_returncode == 6, f"{verb}: real run did not exit 6: {arm.real_returncode}"
+        detail = arm.dry_payload["items"][0]["detail"]
+        assert detail.get("password_verified") is False, (verb, detail)
+
+
+def test_pdf52_a7_the_ledgers_own_stimulus_reproduces_with_the_disclosure_present(
+    pdf52_dry_wrong_probe: dict[str, _Pdf52DryArm],
+) -> None:
+    """AC-A7: `d01c9d52fb`'s own recorded repro -- a PDF-37-tier verb,
+    encrypted operand, resolvable-but-wrong `--password-file`, `--dry-run
+    -o json` -- reports `ok: true, exit_code: 0` WITH `password_verified:
+    false` now present, while the real run still exits 6 `kind: auth`.
+    The representative verb is read off the derived premise population
+    (sorted, first), never a hand-typed literal."""
+    verb = sorted(_pdf52_premise_verbs_structural())[0]
+    arm = pdf52_dry_wrong_probe[verb]
+    item = arm.dry_payload["items"][0]
+    assert item["ok"] is True
+    assert item["exit_code"] == 0
+    assert item["detail"]["password_verified"] is False
+    assert arm.real_returncode == 6
+
+
+# --------------------------------------------------------------------------- #
+# Arm B fixture -- every HONOURED verb, `-vv`, correct AND wrong password
+# (E3's own method).
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class _Pdf52LogArm:
+    verb: str
+    correct_stdout: str
+    correct_stderr: str
+    wrong_stdout: str
+    wrong_stderr: str
+
+
+@pytest.fixture(scope="module")
+def pdf52_verbose_log_probe(
+    corpus: Any, tmp_path_factory: pytest.TempPathFactory
+) -> dict[str, _Pdf52LogArm]:
+    """Every HONOURED verb, `-vv`, against the SAME encrypted operand, once
+    with the correct password and once with a wrong-but-resolvable one --
+    E3's own method, re-driven structurally over the derived population
+    rather than a list written in this file."""
+    from corpus import ENCRYPTED_PASSWORD
+
+    proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
+    root = tmp_path_factory.mktemp("pdf52-vv")
+    pw_correct = root / "pw-correct.txt"
+    pw_correct.write_text(ENCRYPTED_PASSWORD, encoding="utf-8")
+    pw_correct.chmod(0o600)
+    pw_wrong = root / "pw-wrong.txt"
+    pw_wrong.write_text(_PDF52_WRONG_PASSWORD, encoding="utf-8")
+    pw_wrong.chmod(0o600)
+
+    honoured = sorted(_pdf52_honoured_verbs_structural())
+
+    def _probe(verb: str) -> tuple[str, _Pdf52LogArm]:
+        verb_dir = root / verb.replace(" ", "_")
+        verb_dir.mkdir()
+
+        correct_dir = verb_dir / "correct"
+        correct_dir.mkdir()
+        correct_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, correct_dir))
+        correct = run_cli(
+            verb,
+            *correct_argv,
+            "--password-file",
+            str(pw_correct),
+            "-vv",
+            "-o",
+            "json",
+            env=_clean_env(),
+        )
+
+        wrong_dir = verb_dir / "wrong"
+        wrong_dir.mkdir()
+        wrong_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, wrong_dir))
+        wrong = run_cli(
+            verb,
+            *wrong_argv,
+            "--password-file",
+            str(pw_wrong),
+            "-vv",
+            "-o",
+            "json",
+            env=_clean_env(),
+        )
+        return verb, _Pdf52LogArm(
+            verb=verb,
+            correct_stdout=correct.stdout,
+            correct_stderr=correct.stderr,
+            wrong_stdout=wrong.stdout,
+            wrong_stderr=wrong.stderr,
+        )
+
+    with ThreadPoolExecutor(max_workers=min(8, len(honoured))) as pool:
+        observations = dict(pool.map(_probe, honoured))
+    return observations
+
+
+# --------------------------------------------------------------------------- #
+# Group B -- `0f230317ef` (medium): every honoured verb logs BOTH facts.
+# --------------------------------------------------------------------------- #
+
+
+def test_pdf52_b1_the_honoured_population_is_derived_and_is_the_denominator() -> None:
+    """AC-B1: quantified over `honours_password_file` on the live Typer
+    tree (E1) -- not over a list in this file and not over
+    `HONOURED_FLOOR`, which is a DEFECT floor, not a contract."""
+    honoured = _pdf52_honoured_verbs_structural()
+    assert len(honoured) == 20, sorted(honoured)
+
+
+def test_pdf52_b2_every_honoured_verb_logs_the_source_and_the_verification_outcome(
+    pdf52_verbose_log_probe: dict[str, _Pdf52LogArm],
+) -> None:
+    """AC-B2: EVERY honoured verb emits at least one DEBUG record carrying
+    BOTH facts, at `-vv` with the correct password. Presence-of-both,
+    never a count (D3). RED, free and required: at HEAD before this spec's
+    edits, this failed on exactly the five E3 named."""
+    missing: dict[str, dict[str, bool]] = {}
+    for verb, arm in sorted(pdf52_verbose_log_probe.items()):
+        has_source = "password resolved from" in arm.correct_stderr
+        has_outcome = "password_verified" in arm.correct_stderr
+        if not (has_source and has_outcome):
+            missing[verb] = {"source": has_source, "outcome": has_outcome}
+    assert missing == {}, (
+        f"the following honoured verb(s) do not log BOTH facts at -vv with the correct "
+        f"password: {missing}"
+    )
+
+
+def test_pdf52_b3_a_wrong_password_logs_verification_false(
+    pdf52_verbose_log_probe: dict[str, _Pdf52LogArm],
+) -> None:
+    """AC-B3: the outcome is logged on the FAILING side too, and the two
+    are distinguishable -- a disclosure that says "verified" whichever way
+    it went is the byte-identical-message defect rebuilt on the log
+    surface."""
+    failures: dict[str, dict[str, object]] = {}
+    for verb, arm in sorted(pdf52_verbose_log_probe.items()):
+        wrong_has_false = "password_verified: False" in arm.wrong_stderr
+        correct_has_true = "password_verified: True" in arm.correct_stderr
+        identical = arm.wrong_stderr == arm.correct_stderr
+        if not wrong_has_false or not correct_has_true or identical:
+            failures[verb] = {
+                "wrong_logs_false": wrong_has_false,
+                "correct_logs_true": correct_has_true,
+                "records_identical": identical,
+            }
+    assert failures == {}, (
+        f"the following honoured verb(s) do not distinguish a wrong password's logged "
+        f"outcome from a correct one's: {failures}"
+    )
+
+
+def test_pdf52_b4_the_record_is_the_same_under_a_stderr_pty(corpus: Any, tmp_path: Path) -> None:
+    """AC-B4: the record survives `color_enabled()`'s `isatty()` branch
+    IDENTICALLY IN CONTENT, driven through `registry.run_cli_with_pty()`
+    (imported, never re-implemented -- E9/X-157). `decrypt` is picked as
+    the representative verb: single-word (this function does not tokenize
+    a multi-word verb the way `run_cli` does) and one of the five verbs
+    arm B's fix reaches directly."""
+    from corpus import ENCRYPTED_PASSWORD
+
+    verb = "decrypt"
+    proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
+    pw_correct = tmp_path / "pw-correct.txt"
+    pw_correct.write_text(ENCRYPTED_PASSWORD, encoding="utf-8")
+    pw_correct.chmod(0o600)
+    argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, tmp_path))
+    result = run_cli_with_pty(
+        verb,
+        *argv,
+        "--password-file",
+        str(pw_correct),
+        "-vv",
+        "-o",
+        "json",
+        pty_stream="stderr",
+        env=_clean_env(),
+    )
+    assert "password resolved from" in result.stderr, result.stderr
+    assert "password_verified: True" in result.stderr, result.stderr
+
+
+def test_pdf52_b5_the_ledgers_own_stimulus_reproduces_20_of_20(
+    pdf52_verbose_log_probe: dict[str, _Pdf52LogArm],
+) -> None:
+    """AC-B5: `0f230317ef`'s own recorded method, re-driven -- `-vv`,
+    correct password, all twenty honoured verbs, counting BOTH facts.
+    Pre-fix this was 15/20 (E3); post-fix it is 20/20."""
+    honoured = _pdf52_honoured_verbs_structural()
+    assert set(pdf52_verbose_log_probe) == honoured
+    both = {
+        verb
+        for verb, arm in pdf52_verbose_log_probe.items()
+        if "password resolved from" in arm.correct_stderr
+        and "password_verified" in arm.correct_stderr
+    }
+    assert both == honoured, (
+        f"only {len(both)}/{len(honoured)} honoured verbs emit BOTH facts at -vv with the "
+        f"correct password; missing: {sorted(honoured - both)}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Group C -- shared rails. Grade NEITHER row.
+# --------------------------------------------------------------------------- #
+
+
+def test_pdf52_c1_no_hand_typed_verb_list_decides_either_disclosure() -> None:
+    """AC-C1: the EXISTING `test_ac2_...` walk (`_string_constants_compared_
+    to_verb_names`, unedited, X-157) already covers every module under
+    `src/pdf_tooling/` -- including the ones this spec edits -- since it
+    walks `SRC.rglob('*.py')` rather than a fixed file list. Re-run here,
+    under its own `pdf52_c` node, so `-k pdf52_c` grades it too."""
+    verb_names = _verb_name_literals()
+    offenders: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        offenders.extend(_string_constants_compared_to_verb_names(path, verb_names))
+    assert not offenders, offenders
+
+
+def test_pdf52_c2_a_synthetic_new_verb_inherits_both_disclosures(
+    corpus: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-C2: a throwaway call site, never the real registry (D4.2/HC-4):
+    proves arm A's seam (`predict_password_refusal` + `password_detail`)
+    and arm B's seam (`_log_password_verification`) are reachable by ANY
+    caller under a made-up verb name that is not one of the 26 real ones
+    -- neither seam decides anything by verb name, so a verb added
+    tomorrow inherits both for free."""
+    import pdf_tooling.adapters.pikepdf_structure as pikepdf_mod
+    from pdf_tooling.adapters.pikepdf_structure import _log_password_verification
+    from pdf_tooling.ops.document_password import (
+        PasswordSource,
+        password_detail,
+        predict_password_refusal,
+    )
+    from pdf_tooling.secret import Secret
+
+    synthetic_verb = "pdf52-synthetic-verb"
+    assert synthetic_verb not in {v.name for v in discover_verbs()}
+
+    # Arm A -- a made-up dry branch, built exactly like the six real ones
+    # (D2): a resolvable-but-wrong PasswordSource against a genuinely
+    # encrypted operand.
+    encrypted_path = corpus.path("encrypted_aes256")
+    label = "file:/synthetic/wrong.txt"
+    wrong = PasswordSource(
+        slot="password", source=label, read=lambda: Secret("wrong", source=label)
+    )
+    refusal = predict_password_refusal(encrypted_path, password=wrong, verb=synthetic_verb)
+    assert refusal is None, "a resolvable password must never be predicted wrong (X-89)"
+    detail = password_detail([wrong], verified=False)
+    assert detail == {"password_source": label, "password_verified": False}
+
+    # Arm B -- the adapter's own log seam, called directly under the same
+    # made-up verb name; the no-op branch proves "nothing offered" skips,
+    # and a real Secret proves the record fires.
+    caught: list[tuple[str, bool]] = []
+
+    class _RecordingLogger:
+        def debug(self, _fmt: str, source: str, verified: bool) -> None:
+            caught.append((source, verified))
+
+    monkeypatch.setattr(pikepdf_mod, "get_logger", lambda name: _RecordingLogger())
+    secret = Secret("irrelevant", source=label)
+    _log_password_verification(None, verified=True)
+    assert caught == [], "a no-op call (password=None) must not log anything"
+    _log_password_verification(secret, verified=True)
+    assert caught == [(label, True)]
+
+
+def test_pdf52_c3_the_published_meaning_is_unchanged(corpus: Any, tmp_path: Path) -> None:
+    """AC-C3: `decrypt`/`permissions`/`encrypt` keep `password_verified`'s
+    exact published meaning -- re-verified here without editing
+    `tests/integration/test_crypto_roundtrip.py:720`/`:867`, which this
+    spec does not touch and which must pass UNCHANGED."""
+    from corpus import ENCRYPTED_PASSWORD
+
+    encrypted = corpus.path("encrypted_aes256")
+    pw_wrong = tmp_path / "pw-wrong.txt"
+    pw_wrong.write_text(_PDF52_WRONG_PASSWORD, encoding="utf-8")
+    pw_wrong.chmod(0o600)
+
+    decrypt_result = run_cli(
+        "decrypt",
+        str(encrypted),
+        "-O",
+        str(tmp_path / "d.pdf"),
+        "--password-file",
+        str(pw_wrong),
+        "--dry-run",
+        "-o",
+        "json",
+        env=_clean_env(),
+    )
+    decrypt_detail = json.loads(decrypt_result.stdout)["items"][0]["detail"]
+    assert decrypt_detail["password_verified"] is False
+
+    permissions_result = run_cli(
+        "permissions",
+        str(encrypted),
+        "--password-file",
+        str(pw_wrong),
+        "--dry-run",
+        "-o",
+        "json",
+        env=_clean_env(),
+    )
+    permissions_detail = json.loads(permissions_result.stdout)["items"][0]["detail"]
+    assert permissions_detail["password_verified"] is False
+
+    text_src = tmp_path / "src.txt"
+    text_src.write_text("pdf52 c3\n", encoding="utf-8")
+    plain_src = tmp_path / "plain.pdf"
+    create_result = run_cli("create", str(text_src), "-O", str(plain_src), env=_clean_env())
+    assert create_result.returncode == 0, create_result.stderr
+    pw_owner = tmp_path / "owner.txt"
+    pw_owner.write_text(ENCRYPTED_PASSWORD, encoding="utf-8")
+    pw_owner.chmod(0o600)
+    encrypt_result = run_cli(
+        "encrypt",
+        str(plain_src),
+        "--owner-password-file",
+        str(pw_owner),
+        "--allow",
+        "all",
+        "-O",
+        str(tmp_path / "e.pdf"),
+        "--dry-run",
+        "-o",
+        "json",
+        env=_clean_env(),
+    )
+    encrypt_detail = json.loads(encrypt_result.stdout)["items"][0]["detail"]
+    assert encrypt_detail["password_verified"] is False
+
+
+def test_pdf52_c4_no_real_success_payload_gained_a_disclosure_key(
+    pdf52_verbose_log_probe: dict[str, _Pdf52LogArm],
+) -> None:
+    """AC-C4: no REAL success payload of a verb that lacked the key at
+    `89a4f1d` gained it. The roadmap's named risk, caught by a test rather
+    than by review: `decrypt`/`permissions` are excluded (they legitimately
+    carry it), every OTHER honoured verb's real, correct-password payload
+    is checked."""
+    frozen_carriers = {"decrypt", "permissions"}
+    leaked: dict[str, list[str]] = {}
+    for verb, arm in sorted(pdf52_verbose_log_probe.items()):
+        if verb in frozen_carriers:
+            continue
+        try:
+            payload = json.loads(arm.correct_stdout)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        items = payload.get("items")
+        if not (isinstance(items, list) and items):
+            continue
+        detail = items[0].get("detail")
+        if not isinstance(detail, dict):
+            continue
+        offending = sorted(
+            k for k in detail if k == "password_verified" or k.endswith("password_source")
+        )
+        if offending:
+            leaked[verb] = offending
+    assert leaked == {}, f"a REAL success payload gained a disclosure key: {leaked}"
+
+
+def test_pdf52_c5_the_never_echo_policy_was_not_over_applied(
+    pdf52_verbose_log_probe: dict[str, _Pdf52LogArm],
+) -> None:
+    """AC-C6 (this file's own `c5` slot -- `c` nodes are not required to
+    mirror the spec's AC numbers 1:1, only to grade Group C): the source
+    LABEL (a `--password-file` PATH) is safe-to-log and must still appear;
+    the secret VALUE must never appear, on either arm. `X-403` clause 2 --
+    over-redacting the path is also a defect, not a safer failure mode."""
+    from corpus import ENCRYPTED_PASSWORD
+
+    for verb, arm in sorted(pdf52_verbose_log_probe.items()):
+        assert ENCRYPTED_PASSWORD not in arm.correct_stderr, f"{verb}: leaked the secret value"
+        assert _PDF52_WRONG_PASSWORD not in arm.wrong_stderr, f"{verb}: leaked the secret value"
+        assert "pw-correct.txt" in arm.correct_stderr, (
+            f"{verb}: the safe-to-log --password-file path was redacted: {arm.correct_stderr!r}"
+        )
+
+
+def test_pdf52_c6_the_two_arms_populations_do_not_nest() -> None:
+    """AC-C7: E4's own table (measured at `89a4f1d`, this spec's Evidence
+    section), asserted rather than merely diagrammed -- neither deficit is
+    a subset of the other, and their union is exactly the derived premise
+    population (E2)."""
+    payload_deficit_at_89a4f1d = frozenset(
+        {"compress", "linearize", "repair", "meta set", "stamp", "watermark"}
+    )
+    log_deficit_at_89a4f1d = frozenset(
+        {"compress", "linearize", "repair", "decrypt", "permissions"}
+    )
+    assert payload_deficit_at_89a4f1d - log_deficit_at_89a4f1d == {"meta set", "stamp", "watermark"}
+    assert log_deficit_at_89a4f1d - payload_deficit_at_89a4f1d == {"decrypt", "permissions"}
+    assert not payload_deficit_at_89a4f1d <= log_deficit_at_89a4f1d
+    assert not log_deficit_at_89a4f1d <= payload_deficit_at_89a4f1d
+    assert payload_deficit_at_89a4f1d | log_deficit_at_89a4f1d == _pdf52_premise_verbs_structural()
+
+
+def test_pdf52_c7_the_partition_did_not_move() -> None:
+    """AC-C9: `HONOURED_FLOOR` still holds its twenty members and not
+    `encrypt`; `IGNORED_DEFECT_BASELINE` is still `frozenset()`;
+    `OTHER_OBSERVED` is still the six. This spec changes no verb's class."""
+    from test_password_leaks import HONOURED_FLOOR, IGNORED_DEFECT_BASELINE, OTHER_OBSERVED
+
+    assert _pdf52_honoured_verbs_structural() == HONOURED_FLOOR
+    assert "encrypt" not in HONOURED_FLOOR
+    assert IGNORED_DEFECT_BASELINE == frozenset()
+    assert OTHER_OBSERVED == frozenset(
+        {"compose", "convert", "create", "doctor", "encrypt", "version"}
+    )
