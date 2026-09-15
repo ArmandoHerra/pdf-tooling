@@ -41,24 +41,42 @@ THE PLANNING SEAM, AND ITS HONEST ABSENCE STORY
 -----------------------------------------------
 The specs and their roster live OUTSIDE this repository, in the maintainer's
 planning tree. :func:`planning_dir` resolves it through
-``PDF_TOOLING_PLANNING_DIR`` and the arms that read it **skip with a reason
-naming the resolved path** when it is absent — never a pass. CI checks out this
-repository alone, so in CI those arms skip and their real enforcement is local,
-``make docs-gate`` and the ``qa-sentinel``. That is stated here rather than
-discovered later; *a control that cannot be run must be visible as skipped,
-never silently absent* (X-153).
+``PDF_TOOLING_PLANNING_DIR``, and since `PDF-70` **that variable is the ONLY
+resolution path**: unset or empty resolves to ``None`` and the arms that read it
+**skip with a reason naming the variable** — never a pass.
+
+**What `PDF-70` removed, and why it was not cosmetic.** Until `PDF-70` an unset
+variable fell back to ``REPO_ROOT.parent.parent / "ai_plans" / REPO_ROOT.name``,
+so the ordinary local condition resolved into a **sibling repository this
+product does not own** and nine arms then asserted against its contents. The
+variable was therefore a no-op on a maintainer host — set and unset reached the
+same tree — and a ``qa-sentinel`` writing a bare ``YYYY-MM-DD_HHMMSS`` run
+directory over there could redden this product's gate without touching this
+product. Enforcement is now **declared**, via the variable, rather than
+**inherited from the filesystem layout**. The enforced configuration loses
+nothing: with the variable set, those arms run and assert exactly as before.
+
+:func:`vacuous_fixture_sweep_and_sha` is the one consumer that must NEVER skip,
+and it absorbs the ``None`` differently — see its own docstring.
+
+CI checks out this repository alone, so in CI those arms skip and their real
+enforcement is local, ``make docs-gate`` and the ``qa-sentinel``. That is stated
+here rather than discovered later; *a control that cannot be run must be visible
+as skipped, never silently absent* (X-153).
 """
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from types import MappingProxyType
+from typing import Final, NamedTuple
 
 import pytest
 
@@ -534,6 +552,151 @@ def test_the_cardinal_backstop_can_see_a_planted_claim(tmp_path: Path) -> None:
     )
 
 
+# --------------------------------------------------------------------------- #
+# PDF-70 — THE RATIFICATION LEDGER: the missing DOWNWARD half of the ratchet
+# --------------------------------------------------------------------------- #
+#
+# WHAT WAS ACTUALLY BROKEN, WHICH IS NOT WHAT IT LOOKED LIKE. The measured arm
+# below (`test_the_unregistered_cardinal_residue_does_not_grow`) is `<=` and
+# always was, so paying documented debt DOWN never reddened. The defect was one
+# step further in and sharper: improvement was not punished, it was
+# **unrewardable**. A document whose residue dropped 30 -> 26 kept a ceiling of
+# 30, silently re-acquired four cardinals at no cost, and the only way to
+# re-tighten was to edit a constant frozen by an equality — the one act this
+# product's instrument culture forbids. The gap between arm and constant is
+# SLACK: invisible, free to re-fill, and monotonically accumulating. **So the
+# instrument decayed quietly every time the product got better.**
+#
+# WHAT REPLACED THE `== 171` LITERAL, AND WHY IT IS STRICTLY STRONGER. The
+# ceiling is no longer a separately-writable constant; it is the newest record
+# of an append-only ledger, and the verifier walks consecutive records PER KEY.
+# An upward movement still requires everything X-715 required and now names the
+# missing field when it is absent. A downward movement is ordinary and needs no
+# ruling — that is the whole deliverable. The literal it replaces was blind to a
+# COMPENSATING SWAP (one key -1, another +1, total unchanged), which is the exact
+# act the sibling instrument's comment at `tests/test_read_seams.py:629-630`
+# claims to catch and never could. The per-key walk catches it regardless of the
+# total, so this is a STRENGTHENING with one deliberate relaxation.
+#
+# A RATIFICATION CANNOT FABRICATE AN IMPROVEMENT, and no second oracle is
+# invented to check that it does not (D3). Tighten a ceiling without paying the
+# debt and the measured arm reds naming the document and every offending line.
+# The ledger RECORDS; the arm MEASURES. A second measurement that could disagree
+# with the first would be worse than none.
+
+
+class _DocsRatification(NamedTuple):
+    """One recorded movement of the guarded-document residue ceiling.
+
+    Immutable, and `ceilings` is a read-only view rather than a mutable dict
+    shared with the live ceiling (D1): a record that could be edited in place
+    would re-open the hole this ledger closes.
+    """
+
+    date: str
+    spec: str
+    #: "genesis" | "down" | "up" — and the verifier holds it to the movement it
+    #: actually describes, so the field cannot disagree with the diff.
+    direction: str
+    ceilings: Mapping[str, int]
+    reason: str
+    #: The PM ruling id (X-NNN) authorising an UPWARD key movement. Structurally
+    #: absent for a tightening — that asymmetry IS the spec.
+    ruling: str = ""
+
+
+_RATIFICATION_DATE: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_RATIFICATION_DIRECTIONS: Final = ("genesis", "down", "up")
+
+
+def docs_ratification_complaints(ledger: Sequence[_DocsRatification]) -> list[str]:
+    """Every rule violation in *ledger*, per key. Empty means ACCEPTED.
+
+    PURE OVER ITS PARAMETER, following `sweep_class_runs_with_verdict`'s rule
+    (E7.3): a synthetic ledger drives this exactly as the real one does, which
+    is what turns "we observed the refusal once" into a standing arm that runs
+    on every execution. It RETURNS complaints rather than raising so the
+    refusing direction can be asserted as ordinarily as the accepting one — and
+    both are required, because a verifier that accepts everything and a verifier
+    that rejects everything each pass exactly half the arms (the `PDF-44`
+    blindfold lesson).
+
+    DUPLICATED, KNOWINGLY, as `read_seam_ratification_complaints` in
+    `tests/test_read_seams.py` (D5). It is deliberately NOT imported across test
+    modules: cross-test-module coupling is already a filed defect on this
+    product (I-12 piece 3, carrier `B-308`), and adding a fresh instance of a
+    defect while deferring its fix would be indefensible. A shared support module
+    is the other option and is rejected here because `B-308`'s own work may well
+    establish the right home — at which point consolidating is a two-line
+    follow-up against a decided location rather than a guess made now.
+    """
+    complaints: list[str] = []
+    if not ledger:
+        return ["the ratification ledger is EMPTY: the live ceiling has no record behind it"]
+
+    for index, record in enumerate(ledger):
+        where = f"[{index}] {record.spec} ({record.date})"
+        if not _RATIFICATION_DATE.fullmatch(record.date):
+            complaints.append(f"{where}: date is not YYYY-MM-DD")
+        if not record.spec.strip():
+            complaints.append(f"{where}: no allocating spec id")
+        if not record.reason.strip():
+            complaints.append(
+                f"{where}: no reason — a ratification carrying no evidence is an edit "
+                f"wearing a record's clothes"
+            )
+        if record.direction not in _RATIFICATION_DIRECTIONS:
+            complaints.append(
+                f"{where}: direction {record.direction!r} is not one of "
+                f"{list(_RATIFICATION_DIRECTIONS)}"
+            )
+        if (record.direction == "genesis") != (index == 0):
+            complaints.append(f"{where}: direction 'genesis' belongs to record 0 and to no other")
+        if index and record.date < ledger[index - 1].date:
+            complaints.append(f"{where}: dated before its predecessor {ledger[index - 1].date}")
+
+    for index in range(1, len(ledger)):
+        previous, current = ledger[index - 1], ledger[index]
+        where = f"[{index}] {current.spec} ({current.date})"
+        for key in sorted(set(previous.ceilings) | set(current.ceilings)):
+            before = previous.ceilings.get(key)
+            after = current.ceilings.get(key)
+            if before == after:
+                continue
+            if after is not None and (before is None or after > before):
+                # An ADDED key is this case with `before` absent, which is exactly
+                # the act X-715 licensed once and no more.
+                shown = "absent" if before is None else before
+                if current.direction != "up":
+                    complaints.append(
+                        f"{where}: {key} RAISED {shown} -> {after} in a record declaring "
+                        f"direction={current.direction!r}; an upward movement must declare "
+                        f"direction='up'"
+                    )
+                if not current.ruling.strip():
+                    complaints.append(
+                        f"{where}: {key} RAISED {shown} -> {after} with NO ruling. X-715's "
+                        f"fourth condition — the PM rules it explicitly, on the record — is "
+                        f"not satisfiable without a ruling id in the diff"
+                    )
+                if key not in current.reason:
+                    complaints.append(
+                        f"{where}: {key} RAISED {shown} -> {after} but the reason does not "
+                        f"name the key; a raise is justified per key or not at all"
+                    )
+            else:
+                # D2 row 2 — THE WHOLE POINT OF PDF-70. No ruling is required, and
+                # a fabricated tightening is caught by the measured arm, not here.
+                shown = "removed" if after is None else after
+                if current.direction != "down":
+                    complaints.append(
+                        f"{where}: {key} LOWERED {before} -> {shown} in a record declaring "
+                        f"direction={current.direction!r}; a tightening must declare "
+                        f"direction='down' so it is recorded rather than furtive"
+                    )
+    return complaints
+
+
 #: The residue by document, with every D2 subtraction applied. Measured at
 #: `7afdb1a` with this instrument: 26 / 7 / 6 / 120 = **159**. Measured at this
 #: spec's landing: 30 / 7 / 6 / 128 = **171** — the growth is this spec's own
@@ -553,12 +716,36 @@ def test_the_cardinal_backstop_can_see_a_planted_claim(tmp_path: Path) -> None:
 #: ruling, and what ships instead is the instrument (self-tested above) plus
 #: this frozen ceiling, so the debt is visible at its exact size and cannot
 #: grow silently while the decision is outstanding.
-RESIDUE_CEILING: dict[str, int] = {
-    "README.md": 30,
-    "CLAUDE.md": 7,
-    "CONTRIBUTING.md": 6,
-    "TESTING.md": 128,
-}
+DOCS_RESIDUE_LEDGER: Final[tuple[_DocsRatification, ...]] = (
+    _DocsRatification(
+        date="2026-09-06",
+        spec="PDF-30",
+        direction="genesis",
+        ceilings=MappingProxyType(
+            {
+                "README.md": 30,
+                "CLAUDE.md": 7,
+                "CONTRIBUTING.md": 6,
+                "TESTING.md": 128,
+            }
+        ),
+        reason=(
+            "GENESIS. The residue measured at PDF-30's landing with the self-tested "
+            "backstop above: 30 / 7 / 6 / 128 = 171, against 159 for the same four "
+            "documents at 7afdb1a. Both are far past D2's escalation threshold of 40, "
+            "so the span is a PM decision and the number is RECORDED, not chosen. "
+            "PDF-70 transcribes this record byte-identically in value and pays no "
+            "debt down: every figure here is the figure that was live before it."
+        ),
+    ),
+)
+
+#: The LIVE ceiling: the newest record's mapping, and nothing else. There is no
+#: separately-writable literal left to edit, which is the load-bearing property
+#: of D1 -- a ceiling cannot move unless a record moves with it. AC3 asserts
+#: this structurally, by `ast`, because a comment saying so would be exactly the
+#: decoration this design exists to replace.
+RESIDUE_CEILING: Final[Mapping[str, int]] = DOCS_RESIDUE_LEDGER[-1].ceilings
 
 
 @pytest.mark.parametrize("doc", GUARDED_DOCS)
@@ -579,12 +766,306 @@ def test_the_residue_ceiling_is_frozen_and_covers_every_guarded_document() -> No
     """The anti-lapse assertion on the ceiling itself: a ceiling that silently
     grew, or that stopped covering a document, would make the arm above vacuous."""
     assert set(RESIDUE_CEILING) == set(GUARDED_DOCS)
-    assert sum(RESIDUE_CEILING.values()) == 171, (
-        "171 is the total measured at PDF-30's landing, against 159 for the same "
-        "four documents at 7afdb1a with this same instrument. Both are far past "
-        "D2's escalation threshold of 40, so the number is a PM decision on the "
-        "guarded span, not an edit made here to reach green"
+    assert docs_ratification_complaints(DOCS_RESIDUE_LEDGER) == [], (
+        "the guarded-document ratification ledger does not verify. PDF-70 replaced "
+        "the frozen `sum(...) == 171` literal with this per-key walk, which is "
+        "strictly stronger in both respects that matter: it catches a COMPENSATING "
+        "SWAP the total never could, and it names the key, both values and the "
+        "missing field instead of reporting only that a total moved. Lowering a "
+        "ceiling is ORDINARY — append a record with direction='down' and a reason, "
+        "no ruling needed. RAISING one still needs everything X-715 required, and "
+        "raising one to reach green is anti-gaming and a decision for the PM"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-70 — the ratification verifier, self-tested in BOTH directions
+# --------------------------------------------------------------------------- #
+#
+# Neither half establishes anything alone, and this product has paid for that
+# lesson once already (`PDF-44`): a verifier that accepts everything passes the
+# real-ledger arm above and fails nothing here; a verifier that rejects
+# everything passes every arm below and fails the one above. Both are required,
+# and they are driven on SYNTHETIC ledgers because the verifier is pure over its
+# parameter (D4) — so the real ledger is never mutated to prove a point.
+
+
+def _synthetic(
+    direction: str, ceilings: dict[str, int], *, ruling: str = "", reason: str = "synthetic"
+) -> _DocsRatification:
+    return _DocsRatification(
+        date="2026-09-15",
+        spec="PDF-70",
+        direction=direction,
+        ceilings=MappingProxyType(dict(ceilings)),
+        reason=reason,
+        ruling=ruling,
+    )
+
+
+def _genesis(ceilings: dict[str, int]) -> _DocsRatification:
+    return _DocsRatification(
+        date="2026-09-14",
+        spec="PDF-70",
+        direction="genesis",
+        ceilings=MappingProxyType(dict(ceilings)),
+        reason="synthetic genesis",
+    )
+
+
+def test_a_downward_ratification_is_accepted_with_no_ruling() -> None:
+    """AC4 — THE DELIVERABLE, and the single criterion four later specs wait on.
+
+    Paying documented debt down is ordinary. It is recorded, so it is not
+    furtive, and it needs no PM ruling — a tightening cannot make the product
+    worse, and requiring a ruling for it is what made the instrument decay.
+
+    RED: require a ruling for a downward movement and this arm fires.
+    """
+    ledger = (_genesis({"CONTRIBUTING.md": 6}), _synthetic("down", {"CONTRIBUTING.md": 5}))
+    assert docs_ratification_complaints(ledger) == [], (
+        "a recorded tightening with a reason and NO ruling must be accepted; this "
+        "is the downward half of the ratchet PDF-70 exists to build"
+    )
+
+
+def test_an_unruled_upward_movement_is_refused_naming_the_key_and_both_values() -> None:
+    """AC5 — X-715's fourth condition, mechanized for the first time.
+
+    RED: drop the ruling requirement and this arm fires. Its other half —
+    the SAME movement WITH a ruling being accepted — is the test below, and
+    neither half alone proves anything: one shows only that the arm fires, the
+    other only that it stopped firing.
+    """
+    ledger = (_genesis({"CONTRIBUTING.md": 6}), _synthetic("up", {"CONTRIBUTING.md": 7}))
+    complaints = docs_ratification_complaints(ledger)
+    assert complaints, "an unruled raise must be REFUSED"
+    joined = " ".join(complaints)
+    assert "CONTRIBUTING.md" in joined, joined
+    assert "6" in joined and "7" in joined, joined
+    assert "ruling" in joined, f"the missing field must be named: {joined}"
+
+
+def test_a_ruled_upward_movement_is_accepted_so_the_x715_path_still_works() -> None:
+    """AC5's other half (case b′). PDF-70 does not narrow the upward path; it
+    leaves it exactly where X-715 left it and only makes the fourth condition
+    checkable. An arm that refused every raise would have replaced one broken
+    ratchet with another."""
+    ledger = (
+        _genesis({"CONTRIBUTING.md": 6}),
+        _synthetic(
+            "up",
+            {"CONTRIBUTING.md": 7},
+            ruling="X-999",
+            reason="synthetic: CONTRIBUTING.md gains one structurally unobservable site",
+        ),
+    )
+    assert docs_ratification_complaints(ledger) == []
+
+
+def test_the_compensating_swap_is_refused_per_key_regardless_of_the_total() -> None:
+    """AC7 — the property the sibling instrument's comment claimed and never had.
+
+    `tests/test_read_seams.py:629-630` said a frozen TOTAL means "a shrink in one
+    module cannot silently pay for a growth in another". It means the opposite: a
+    frozen total catches NET movement and is structurally blind to COMPENSATING
+    movement. Driven against the pre-PDF-70 constant, this exact pair left the
+    total unchanged and the old guard accepted it — recorded in PDF-70's
+    Implementation Log. The per-key walk refuses it, naming the raised key.
+
+    RED: collapse the walk back onto a total and this arm goes green again.
+    """
+    ledger = (
+        _genesis({"alpha.md": 4, "bravo.md": 3}),
+        _synthetic("down", {"alpha.md": 3, "bravo.md": 4}),
+    )
+    complaints = docs_ratification_complaints(ledger)
+    assert complaints, "a compensating swap must be REFUSED even though the total is unchanged"
+    joined = " ".join(complaints)
+    assert "bravo.md" in joined, f"the RAISED key must be named: {joined}"
+    assert sum(ledger[0].ceilings.values()) == sum(ledger[1].ceilings.values()), (
+        "the fixture is only meaningful while the two totals agree"
+    )
+
+
+def test_a_record_whose_direction_disagrees_with_its_movement_is_refused() -> None:
+    """AC/D4 case (e). The `direction` field is not decoration: a record may not
+    say "down" while a key rose, or the field would document the intention
+    instead of the diff."""
+    ledger = (_genesis({"CONTRIBUTING.md": 6}), _synthetic("down", {"CONTRIBUTING.md": 7}))
+    joined = " ".join(docs_ratification_complaints(ledger))
+    assert "direction='down'" in joined, joined
+
+
+@pytest.mark.parametrize(
+    ("label", "ledger"),
+    (
+        ("empty", ()),
+        ("no genesis", (_synthetic("down", {"a.md": 1}),)),
+        ("genesis twice", (_genesis({"a.md": 1}), _genesis({"a.md": 1}))),
+        (
+            "reasonless",
+            (_genesis({"a.md": 1}), _synthetic("down", {"a.md": 0}, reason="  ")),
+        ),
+        (
+            "undated",
+            (_genesis({"a.md": 1}), _synthetic("down", {"a.md": 0})._replace(date="soon")),
+        ),
+    ),
+)
+def test_a_malformed_ledger_is_refused(label: str, ledger: object) -> None:
+    """The structural half. A ledger nobody can read is not a record."""
+    assert docs_ratification_complaints(ledger), label  # type: ignore[arg-type]
+
+
+def test_an_added_key_is_treated_as_an_upward_movement_from_absent() -> None:
+    """Gaining a key is how X-715's one licensed concession actually happened, so
+    it is held to the upward rules rather than slipping in as a new mapping."""
+    ledger = (_genesis({"a.md": 1}), _synthetic("up", {"a.md": 1, "b.md": 2}))
+    joined = " ".join(docs_ratification_complaints(ledger))
+    assert "b.md" in joined and "ruling" in joined, joined
+
+
+def _ceiling_binding_value(module_path: Path) -> ast.expr:
+    """The right-hand side of the ONE module-level `RESIDUE_CEILING = ...`.
+
+    `ast`, not a regex and not a comment — the convention
+    `tests/test_import_boundaries.py` already uses for questions about what the
+    source actually binds.
+    """
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    bindings: list[ast.expr] = []
+    for node in tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and getattr(node.target, "id", None) == "RESIDUE_CEILING"
+        ):
+            if node.value is not None:
+                bindings.append(node.value)
+        elif isinstance(node, ast.Assign) and any(
+            getattr(target, "id", None) == "RESIDUE_CEILING" for target in node.targets
+        ):
+            bindings.append(node.value)
+    assert len(bindings) == 1, (
+        f"{module_path.name} binds RESIDUE_CEILING {len(bindings)} times at module level; "
+        "exactly one binding is allowed, or 'the ceiling' stops naming one thing"
+    )
+    return bindings[0]
+
+
+def test_the_docs_ceiling_is_the_newest_ledger_record_not_a_writable_literal() -> None:
+    """AC3 — without this, the ledger is documentation and the constant is still
+    freely editable, which is the entire hole PDF-70 closes.
+
+    RED: re-introduce a hand-written `dict` literal beside the ledger — the
+    exact shape the constant had before this spec — and this arm fires naming
+    the file.
+    """
+    value = _ceiling_binding_value(Path(__file__))
+    assert not isinstance(value, ast.Dict), (
+        "RESIDUE_CEILING is bound to a literal `dict` display again. The live "
+        "ceiling must BE the newest ratification record's mapping, so that moving "
+        "it is impossible without appending a record — a separately-writable "
+        "literal beside the ledger makes the ledger decoration"
+    )
+    assert isinstance(value, ast.Attribute) and value.attr == "ceilings", ast.dump(value)
+    subscript = value.value
+    assert isinstance(subscript, ast.Subscript), ast.dump(value)
+    assert getattr(subscript.value, "id", None) == "DOCS_RESIDUE_LEDGER", ast.dump(value)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-70 D6 — the planning seam resolves through the VARIABLE, and nowhere else
+# --------------------------------------------------------------------------- #
+
+
+def test_planning_dir_resolves_only_through_the_declared_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC10. Unset and empty both answer `None`; set answers the declared path.
+
+    Before PDF-70 the unset case answered
+    `<repo>/../../ai_plans/<repo-name>` — a path inside a DIFFERENT repository —
+    which is what made this product's green depend on a tree it does not own.
+
+    RED: restore the fallback and the first two assertions fire.
+    """
+    monkeypatch.delenv(PLANNING_DIR_ENV, raising=False)
+    assert planning_dir() is None, (
+        "an unset variable must resolve to None, not to a computed sibling path"
+    )
+
+    monkeypatch.setenv(PLANNING_DIR_ENV, "")
+    assert planning_dir() is None, "an EMPTY variable is not a declaration either"
+
+    monkeypatch.setenv(PLANNING_DIR_ENV, str(tmp_path))
+    assert planning_dir() == tmp_path
+
+
+def test_an_undeclared_planning_tree_skips_with_the_censused_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC13. The skip is VISIBLE and its reason still leads with the string
+    `scripts/assert_skips.py`'s `planning-directory-absent` class matches, so the
+    census is unchanged and no new class is introduced."""
+    monkeypatch.delenv(PLANNING_DIR_ENV, raising=False)
+    with pytest.raises(BaseException) as caught:  # noqa: PT011 — pytest.skip's own
+        require_planning_dir()
+    assert type(caught.value).__name__ == "Skipped", type(caught.value).__name__
+    reason = str(getattr(caught.value, "msg", caught.value))
+    assert reason.startswith(SKIP_PLANNING_ABSENT), reason
+    assert PLANNING_DIR_ENV in reason, reason
+
+
+def test_the_vacuous_sweep_fixture_never_routes_through_the_skipping_helper() -> None:
+    """AC11 — and it is a STRUCTURAL arm on purpose, because the failure it
+    guards is silent.
+
+    `vacuous_fixture_sweep_and_sha` feeds a test that is NOT planning-gated and
+    must not newly become so. An engineer changing `planning_dir()`'s return type
+    and updating only `require_planning_dir()` would naturally route this through
+    the skipping helper — at which point
+    `test_the_known_issues_section_survives_the_vacuous_rendering` SKIPS, the
+    suite stays green, and an arm has gone quiet. A behavioural arm cannot catch
+    that: under the mutant it would skip too. This one reads the source and reds.
+
+    RED: route the function through `require_planning_dir()` — the exact mutant —
+    and this arm fires naming the call.
+    """
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"), filename=__file__)
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "vacuous_fixture_sweep_and_sha"
+    ]
+    assert len(functions) == 1
+    called = {
+        node.func.id
+        for node in ast.walk(functions[0])
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    skipping = {"require_planning_dir"} & called
+    assert skipping == set(), (
+        f"vacuous_fixture_sweep_and_sha calls {sorted(skipping)}, which SKIPS. It must "
+        "never skip: the vacuous-rendering test it feeds is not gated on the planning "
+        "tree and must not newly become so (X-153 — a skipped arm is not agreement)"
+    )
+    attribute_calls = {
+        node.func.attr
+        for node in ast.walk(functions[0])
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert "skip" not in attribute_calls, "it must not call pytest.skip directly either"
+
+
+def test_the_vacuous_sweep_fixture_answers_the_synthetic_literal_when_undeclared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC11's behavioural half. With no planning tree declared it returns the
+    obviously-synthetic pointer that could never be mistaken for a real one —
+    and it RETURNS, rather than skipping."""
+    monkeypatch.delenv(PLANNING_DIR_ENV, raising=False)
+    assert vacuous_fixture_sweep_and_sha() == ("1999-01-01_000000", "0000000")
 
 
 # --------------------------------------------------------------------------- #
@@ -642,26 +1123,52 @@ SKIP_PLANNING_ABSENT = "planning directory absent"
 SKIP_SHALLOW_CLONE = "shallow clone"
 
 
-def planning_dir() -> Path:
-    """The resolved planning tree, existing or not.
+def planning_dir() -> Path | None:
+    """The planning tree the operator DECLARED, or ``None``. PDF-70 D6.
 
-    The plan-dir name is **derived from the repository directory name**, never
-    hardcoded. The layer invariant is ``apps/<name> == repo name ==
-    ai_plans/<name>``, so ``REPO_ROOT.name`` is the one token that is correct on
-    BOTH sides of a repository rename — which is what removes the flag day. A
-    hardcoded literal here is correct on the day it is written and wrong at the
-    next rename, and its failure mode is the expensive one: ``require_planning_dir``
-    below SKIPS rather than fails, so every arm that depends on it goes quiet
-    while the suite stays green. A skipped arm is not agreement.
+    ``None`` is a real answer and not a failure: it means nobody said where the
+    maintainer's planning tree is, so no arm may assert against one.
+
+    **The `../../` fallback this function used to end with is GONE, and its
+    removal is the item.** It returned ``REPO_ROOT.parent.parent / "ai_plans" /
+    REPO_ROOT.name`` — a directory in a **sibling repository this product does
+    not own** — so on a maintainer host the ordinary unset condition silently
+    reached that tree and nine arms asserted against its contents. Two
+    consequences, both measured rather than supposed: the variable was a no-op
+    locally (set and unset produced identical results, so the "enforced"
+    configuration was never actually distinguishable from the unenforced one),
+    and a ``qa-sentinel`` writing a bare ``YYYY-MM-DD_HHMMSS`` run directory over
+    there reddened this product's gate without touching this product — which is
+    why every recent sweep has had to name its run directories ``verify-*``.
+
+    The enforcement did not disappear; it MOVED, from accidental to declared.
+    With the variable set, every arm runs and asserts exactly as before. With it
+    unset they skip **visibly, with a reason**, `make docs-gate` prints the class
+    count, and ``DOCS_GATE_STRICT=1`` turns that into an exit code for the
+    cadence that can see both trees. A skipped arm is not agreement (X-153).
     """
     override = os.environ.get(PLANNING_DIR_ENV)
     if override:
         return Path(override)
-    return REPO_ROOT.parent.parent / "ai_plans" / REPO_ROOT.name
+    return None
 
 
 def require_planning_dir() -> Path:
+    """The declared planning tree, or a SKIP naming why there is none.
+
+    Nine call sites. Their assertions are untouched by PDF-70; what changed is
+    only *when* they skip. The reason string still leads with
+    :data:`SKIP_PLANNING_ABSENT`, so `scripts/assert_skips.py`'s existing
+    ``planning-directory-absent`` class keeps matching and no census changes.
+    """
     root = planning_dir()
+    if root is None:
+        pytest.skip(
+            f"{SKIP_PLANNING_ABSENT}: {PLANNING_DIR_ENV} is not set, so no planning "
+            "tree has been declared (set it to the maintainer's planning tree). "
+            "This arm is enforced locally, by `make docs-gate` and by the "
+            "qa-sentinel; CI checks out this repository alone."
+        )
     if not (root / "specs" / "SPEC-INDEX.md").is_file():
         pytest.skip(
             f"{SKIP_PLANNING_ABSENT}: no specs/SPEC-INDEX.md under {root} "
@@ -1093,7 +1600,7 @@ def vacuous_fixture_sweep_and_sha() -> tuple[str, str]:
     function never skips, because the vacuous-rendering test it feeds is
     not gated on the planning tree and must not newly become so."""
     root = planning_dir()
-    if (root / "specs" / "SPEC-INDEX.md").is_file():
+    if root is not None and (root / "specs" / "SPEC-INDEX.md").is_file():
         sweeps = sweep_class_runs_with_verdict(root / "qa" / "runs")
         if sweeps:
             newest = sweeps[-1]

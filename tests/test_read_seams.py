@@ -34,6 +34,7 @@ response is to FILE it, never to widen a ceiling or weaken the drive.
 
 from __future__ import annotations
 
+import ast
 import collections
 import json
 import os
@@ -42,8 +43,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final
+from types import MappingProxyType
+from typing import Final, NamedTuple
 
 import pytest
 from PIL import Image
@@ -59,43 +62,194 @@ SEAMS_MODULE: Final = REPO_ROOT / "tests" / "seams.py"
 # FROZEN CEILINGS. Measured at the working commit; recorded, not invented.
 # --------------------------------------------------------------------------- #
 
+
 #: Static read seams the drive never reaches, per module -- **undriven, therefore
 #: unproven**. Not a build failure on sight: the drive covers `compose` and
 #: `compress`, and pretending it covers every branch of every verb would make the
 #: instrument lie. It is COUNTED, and the count MAY NOT GROW (X-421).
-RESIDUE_CEILING: Final[dict[str, int]] = {
-    "pdf_tooling/adapters/pdfplumber_text.py": 1,
-    "pdf_tooling/adapters/pikepdf_structure.py": 10,
-    "pdf_tooling/adapters/pypdf_structure.py": 7,
-    #: X-715 -- the ONE entry this constant is licensed to gain, and no other.
-    #: (a) THE CLASS: `:120` is `handle.read(...)` on an ALREADY-OPEN handle, a
-    #: read-shaped call that cannot raise the `open` audit event this observer
-    #: hooks -- structurally unobservable, not undriven, under any verb, race
-    #: or depth. (b) THE CONTROL: `ops/compose.py:538` is observed and `:539`
-    #: is residual under the identical two-line idiom, in a module the drive
-    #: DOES reach, absorbed by that module's own frozen ceiling of `2` (E3) --
-    #: the same concession, at the same size, for the same structural reason.
-    #: (c) FORWARD-LOOKING BY ONE COMMIT: at `PDF-63`'s own commit the adapter
-    #: carries no read-shaped site at all, so this key is inert here and
-    #: registers a site arriving in the next commit of the same push (X-715.1).
-    #: `1`, not `2`: `:119` IS observable and IS driven by the `convert/
-    #: office-dry` cell below, and the value must not cover it -- a `2` would
-    #: let a future engineer delete that cell and stay green, which is the act
-    #: this constant exists to forbid (X-715, decision.md §11).
-    "pdf_tooling/adapters/soffice_office.py": 1,
-    "pdf_tooling/adapters/tesseract_ocr.py": 2,
-    "pdf_tooling/cli/cmd_create.py": 2,
-    "pdf_tooling/cli/common.py": 1,
-    "pdf_tooling/cli/password.py": 1,
-    "pdf_tooling/ops/compose.py": 2,
-    "pdf_tooling/ops/crypto.py": 4,
-    "pdf_tooling/ops/document_password.py": 3,
-    "pdf_tooling/ops/metadata.py": 1,
-    "pdf_tooling/ops/office.py": 1,
-    "pdf_tooling/ops/optimize.py": 3,
-    "pdf_tooling/safety/_faults.py": 1,
-    "pdf_tooling/safety/atomic.py": 4,
-}
+class _ReadSeamRatification(NamedTuple):
+    """One recorded movement of the undriven-read-seam residue ceiling.
+
+    Immutable, and `ceilings` is a read-only view rather than a mutable dict
+    shared with the live ceiling (PDF-70 D1).
+    """
+
+    date: str
+    spec: str
+    #: "genesis" | "down" | "up"
+    direction: str
+    ceilings: Mapping[str, int]
+    reason: str
+    #: The PM ruling id (X-NNN) authorising an UPWARD key movement. X-715 is the
+    #: only one this constant has ever been granted.
+    ruling: str = ""
+
+
+_RATIFICATION_DATE: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_RATIFICATION_DIRECTIONS: Final = ("genesis", "down", "up")
+
+
+def read_seam_ratification_complaints(ledger: Sequence[_ReadSeamRatification]) -> list[str]:
+    """Every rule violation in *ledger*, per key. Empty means ACCEPTED.
+
+    PURE OVER ITS PARAMETER (PDF-70 D4), so synthetic ledgers drive it in-process
+    on every run and the real ledger is never mutated to prove a point. It
+    RETURNS complaints rather than raising so the refusing direction is as
+    ordinary to assert as the accepting one.
+
+    **This is the arm that finally delivers what `:629-630` claimed.** The
+    `sum(...) == 44` literal it replaced was an anti-lapse guard on the
+    constant's TOTAL, and its own comment said the total existed "so a shrink in
+    one module cannot silently pay for a growth in another" — which is precisely
+    the act a frozen total cannot see. A COMPENSATING SWAP (`crypto.py` 4 -> 3,
+    `optimize.py` 3 -> 4) leaves the total at 44 and the old guard accepted it;
+    that was driven against the pre-PDF-70 constant and recorded in PDF-70's
+    Implementation Log. The residual strength of the old guard was that such a
+    swap had to be funded out of genuine SLACK, because shrinking a ceiling below
+    its measured count reds that module's own arm — so the guard was exactly as
+    strong as the absence of slack, and slack is precisely what accumulates as
+    the product improves. This walk is per key and needs no slack argument.
+
+    DUPLICATED, KNOWINGLY, as `docs_ratification_complaints` in
+    `tests/test_docs_antirot.py` (D5). It is deliberately NOT imported across
+    test modules: cross-test-module coupling is already a filed defect on this
+    product (I-12 piece 3, carrier `B-308`), and adding a fresh instance of a
+    defect while deferring its fix would be indefensible. Consolidating is a
+    two-line follow-up once `B-308` decides the shared home.
+    """
+    complaints: list[str] = []
+    if not ledger:
+        return ["the ratification ledger is EMPTY: the live ceiling has no record behind it"]
+
+    for index, record in enumerate(ledger):
+        where = f"[{index}] {record.spec} ({record.date})"
+        if not _RATIFICATION_DATE.fullmatch(record.date):
+            complaints.append(f"{where}: date is not YYYY-MM-DD")
+        if not record.spec.strip():
+            complaints.append(f"{where}: no allocating spec id")
+        if not record.reason.strip():
+            complaints.append(
+                f"{where}: no reason — a ratification carrying no evidence is an edit "
+                f"wearing a record's clothes"
+            )
+        if record.direction not in _RATIFICATION_DIRECTIONS:
+            complaints.append(
+                f"{where}: direction {record.direction!r} is not one of "
+                f"{list(_RATIFICATION_DIRECTIONS)}"
+            )
+        if (record.direction == "genesis") != (index == 0):
+            complaints.append(f"{where}: direction 'genesis' belongs to record 0 and to no other")
+        if index and record.date < ledger[index - 1].date:
+            complaints.append(f"{where}: dated before its predecessor {ledger[index - 1].date}")
+
+    for index in range(1, len(ledger)):
+        previous, current = ledger[index - 1], ledger[index]
+        where = f"[{index}] {current.spec} ({current.date})"
+        for key in sorted(set(previous.ceilings) | set(current.ceilings)):
+            before = previous.ceilings.get(key)
+            after = current.ceilings.get(key)
+            if before == after:
+                continue
+            if after is not None and (before is None or after > before):
+                # An ADDED key is this case with `before` absent -- exactly the act
+                # X-715 licensed once, for `soffice_office.py`, and no other.
+                shown = "absent" if before is None else before
+                if current.direction != "up":
+                    complaints.append(
+                        f"{where}: {key} RAISED {shown} -> {after} in a record declaring "
+                        f"direction={current.direction!r}; an upward movement must declare "
+                        f"direction='up'"
+                    )
+                if not current.ruling.strip():
+                    complaints.append(
+                        f"{where}: {key} RAISED {shown} -> {after} with NO ruling. X-715's "
+                        f"fourth condition — the PM rules it explicitly, on the record — is "
+                        f"not satisfiable without a ruling id in the diff. Raising a ceiling "
+                        f"is anti-gaming; drive the seam or FILE it"
+                    )
+                if key not in current.reason:
+                    complaints.append(
+                        f"{where}: {key} RAISED {shown} -> {after} but the reason does not "
+                        f"name the key; a raise is justified per key or not at all"
+                    )
+            else:
+                # PDF-70 D2 row 2 -- ORDINARY, and no ruling is required. A
+                # fabricated tightening is caught by the measured `grew` arm, not
+                # here: the ledger RECORDS, the arm MEASURES, and a second oracle
+                # that could disagree with the first would be worse than none.
+                shown = "removed" if after is None else after
+                if current.direction != "down":
+                    complaints.append(
+                        f"{where}: {key} LOWERED {before} -> {shown} in a record declaring "
+                        f"direction={current.direction!r}; a tightening must declare "
+                        f"direction='down' so it is recorded rather than furtive"
+                    )
+    return complaints
+
+
+#: PDF-70 D1 -- THE RATIFICATION LEDGER, append-only. The live ceiling below is
+#: the NEWEST record's mapping, never a separately-writable literal, so a ceiling
+#: cannot move without a record moving with it (AC3 asserts that structurally, by
+#: `ast`). Values here are byte-identical to the pre-PDF-70 constant: PDF-70 pays
+#: no debt down, it only builds the path by which debt CAN be paid down.
+READ_SEAM_RESIDUE_LEDGER: Final[tuple[_ReadSeamRatification, ...]] = (
+    _ReadSeamRatification(
+        date="2026-09-12",
+        spec="PDF-63",
+        direction="genesis",
+        ceilings=MappingProxyType(
+            {
+                "pdf_tooling/adapters/pdfplumber_text.py": 1,
+                "pdf_tooling/adapters/pikepdf_structure.py": 10,
+                "pdf_tooling/adapters/pypdf_structure.py": 7,
+                #: X-715 -- the ONE entry this constant is licensed to gain, and no other.
+                #: (a) THE CLASS: `:120` is `handle.read(...)` on an ALREADY-OPEN handle, a
+                #: read-shaped call that cannot raise the `open` audit event this observer
+                #: hooks -- structurally unobservable, not undriven, under any verb, race
+                #: or depth. (b) THE CONTROL: `ops/compose.py:538` is observed and `:539`
+                #: is residual under the identical two-line idiom, in a module the drive
+                #: DOES reach, absorbed by that module's own frozen ceiling of `2` (E3) --
+                #: the same concession, at the same size, for the same structural reason.
+                #: (c) FORWARD-LOOKING BY ONE COMMIT: at `PDF-63`'s own commit the adapter
+                #: carries no read-shaped site at all, so this key is inert here and
+                #: registers a site arriving in the next commit of the same push (X-715.1).
+                #: `1`, not `2`: `:119` IS observable and IS driven by the `convert/
+                #: office-dry` cell below, and the value must not cover it -- a `2` would
+                #: let a future engineer delete that cell and stay green, which is the act
+                #: this constant exists to forbid (X-715, decision.md §11).
+                "pdf_tooling/adapters/soffice_office.py": 1,
+                "pdf_tooling/adapters/tesseract_ocr.py": 2,
+                "pdf_tooling/cli/cmd_create.py": 2,
+                "pdf_tooling/cli/common.py": 1,
+                "pdf_tooling/cli/password.py": 1,
+                "pdf_tooling/ops/compose.py": 2,
+                "pdf_tooling/ops/crypto.py": 4,
+                "pdf_tooling/ops/document_password.py": 3,
+                "pdf_tooling/ops/metadata.py": 1,
+                "pdf_tooling/ops/office.py": 1,
+                "pdf_tooling/ops/optimize.py": 3,
+                "pdf_tooling/safety/_faults.py": 1,
+                "pdf_tooling/safety/atomic.py": 4,
+            }
+        ),
+        ruling="X-715",
+        reason=(
+            "GENESIS. The undriven read-seam residue as measured by this module's "
+            "own sweep, 16 modules totalling 44. Every entry is legacy population "
+            "recorded at its exact size; the one entry the constant was ever "
+            "LICENSED to gain is pdf_tooling/adapters/soffice_office.py, granted by "
+            "X-715 (decision.md §11) under all four of its conditions, whose class, "
+            "control (ops/compose.py:538 observed / :539 residual) and "
+            "forward-looking-by-one-commit reasoning are carried verbatim on that "
+            "entry above. PDF-70 transcribes this record without moving a value."
+        ),
+    ),
+)
+
+#: The LIVE ceiling: the newest record's mapping, and nothing else. No
+#: separately-writable literal survives, which is the load-bearing property --
+#: a ceiling cannot move unless a record moves with it.
+RESIDUE_CEILING: Final[Mapping[str, int]] = READ_SEAM_RESIDUE_LEDGER[-1].ceilings
 
 #: The scoped METADATA population -- `ops/**` plus `safety/paths.py`, the two
 #: layers that hold an operand path. The UNSCOPED census over `src/` is published
@@ -625,10 +779,243 @@ def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow
         f"a module joined the residue with no ceiling entry: "
         f"{sorted(set(counts) - set(RESIDUE_CEILING))}"
     )
-    assert sum(RESIDUE_CEILING.values()) == 44, (
-        "the residue ceiling's TOTAL is frozen too, so a shrink in one module cannot silently "
-        "pay for a growth in another -- 44 under X-715's one registered entry (decision.md §11)"
+    assert read_seam_ratification_complaints(READ_SEAM_RESIDUE_LEDGER) == [], (
+        "the read-seam ratification ledger does not verify. PDF-70 replaced the frozen "
+        "`sum(...) == 44` literal with a PER-KEY walk, which is what this guard's own "
+        "comment always claimed to be: a frozen TOTAL catches NET movement and is "
+        "structurally blind to COMPENSATING movement, so a shrink in one module COULD "
+        "silently pay for a growth in another whenever the shrinking module had slack. "
+        "Lowering a ceiling is now ORDINARY -- append a record with direction='down' "
+        "and a reason, no ruling needed. RAISING one still needs everything X-715 "
+        "required; raising it to reach green is anti-gaming -- drive the seam or FILE it"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-70 -- the ratification verifier, self-tested in BOTH directions
+# --------------------------------------------------------------------------- #
+#
+# The arm above asserts the verifier ACCEPTS the real, landed ledger. The arms
+# below assert it REFUSES the movements X-715 forbids. Neither half establishes
+# anything alone -- a verifier that accepts everything passes the arm above, a
+# verifier that rejects everything passes every arm below -- and this product has
+# already paid once for trusting a one-sided control (`PDF-44`).
+
+
+def _rs_synthetic(
+    direction: str, ceilings: dict[str, int], *, ruling: str = "", reason: str = "synthetic"
+) -> _ReadSeamRatification:
+    return _ReadSeamRatification(
+        date="2026-09-15",
+        spec="PDF-70",
+        direction=direction,
+        ceilings=MappingProxyType(dict(ceilings)),
+        reason=reason,
+        ruling=ruling,
+    )
+
+
+def _rs_genesis(ceilings: dict[str, int]) -> _ReadSeamRatification:
+    return _ReadSeamRatification(
+        date="2026-09-14",
+        spec="PDF-70",
+        direction="genesis",
+        ceilings=MappingProxyType(dict(ceilings)),
+        reason="synthetic genesis",
+    )
+
+
+def test_a_downward_read_seam_ratification_is_accepted_with_no_ruling() -> None:
+    """PDF-70 AC4 -- the deliverable, on this instrument.
+
+    An engineer who DRIVES a seam has made the product better and must be able
+    to record the tightening without a PM ruling. Before PDF-70 the only way to
+    re-tighten was to edit a constant frozen by an equality, so the reward for
+    driving a seam was an act the instrument culture forbids -- and the ceiling
+    silently kept the headroom instead.
+
+    RED: require a ruling for a downward movement and this arm fires.
+    """
+    ledger = (
+        _rs_genesis({"pdf_tooling/ops/crypto.py": 4}),
+        _rs_synthetic("down", {"pdf_tooling/ops/crypto.py": 3}),
+    )
+    assert read_seam_ratification_complaints(ledger) == []
+
+
+def test_an_unruled_read_seam_raise_is_refused_naming_the_module_and_both_values() -> None:
+    """PDF-70 AC5. X-715's fourth condition, mechanized: an upward movement is
+    structurally impossible without a ruling id in the diff.
+
+    RED: drop the ruling requirement and this arm fires. Its other half is the
+    test below."""
+    ledger = (
+        _rs_genesis({"pdf_tooling/ops/optimize.py": 3}),
+        _rs_synthetic("up", {"pdf_tooling/ops/optimize.py": 4}),
+    )
+    complaints = read_seam_ratification_complaints(ledger)
+    assert complaints, "an unruled raise must be REFUSED"
+    joined = " ".join(complaints)
+    assert "pdf_tooling/ops/optimize.py" in joined, joined
+    assert "3" in joined and "4" in joined, joined
+    assert "ruling" in joined, f"the missing field must be named: {joined}"
+
+
+def test_a_ruled_read_seam_raise_is_accepted_so_x715s_own_path_still_works() -> None:
+    """PDF-70 AC5 case (b'). X-715 is APPLIED here, never amended: the path it
+    opened for `soffice_office.py` is exactly as available after PDF-70 as
+    before, and an arm that refused every raise would have swapped one broken
+    ratchet for another."""
+    ledger = (
+        _rs_genesis({"pdf_tooling/ops/optimize.py": 3}),
+        _rs_synthetic(
+            "up",
+            {"pdf_tooling/ops/optimize.py": 4},
+            ruling="X-999",
+            reason=(
+                "synthetic: pdf_tooling/ops/optimize.py gains one structurally "
+                "unobservable site, with a control"
+            ),
+        ),
+    )
+    assert read_seam_ratification_complaints(ledger) == []
+
+
+def test_the_compensating_swap_is_refused_per_module_regardless_of_the_total() -> None:
+    """PDF-70 AC7 -- THE act this instrument's own comment claimed to catch.
+
+    `crypto.py` 4 -> 3 and `optimize.py` 3 -> 4 leaves the total at 44. Driven
+    against the pre-PDF-70 constant, `sum(RESIDUE_CEILING.values()) == 44`
+    evaluated TRUE and the old guard accepted the swap -- recorded in PDF-70's
+    Implementation Log. The old guard's only residual strength was that the swap
+    had to be funded out of genuine slack in the shrinking module, because
+    shrinking a ceiling below its measured count reds that module's own `grew`
+    arm; so it was exactly as strong as the ABSENCE of slack, and slack is
+    precisely what accumulates every time the product improves.
+
+    RED: collapse this walk back onto a total and this arm goes green again.
+    """
+    ledger = (
+        _rs_genesis({"pdf_tooling/ops/crypto.py": 4, "pdf_tooling/ops/optimize.py": 3}),
+        _rs_synthetic("down", {"pdf_tooling/ops/crypto.py": 3, "pdf_tooling/ops/optimize.py": 4}),
+    )
+    assert sum(ledger[0].ceilings.values()) == sum(ledger[1].ceilings.values()), (
+        "the fixture is only meaningful while the two totals agree"
+    )
+    complaints = read_seam_ratification_complaints(ledger)
+    assert complaints, "a compensating swap must be REFUSED even though the total is unchanged"
+    joined = " ".join(complaints)
+    assert "pdf_tooling/ops/optimize.py" in joined, f"the RAISED module must be named: {joined}"
+
+
+def test_a_read_seam_record_whose_direction_disagrees_with_its_movement_is_refused() -> None:
+    """PDF-70 D4 case (e)."""
+    ledger = (
+        _rs_genesis({"pdf_tooling/ops/crypto.py": 4}),
+        _rs_synthetic("down", {"pdf_tooling/ops/crypto.py": 5}),
+    )
+    joined = " ".join(read_seam_ratification_complaints(ledger))
+    assert "direction='down'" in joined, joined
+
+
+@pytest.mark.parametrize(
+    ("label", "ledger"),
+    (
+        ("empty", ()),
+        ("no genesis", (_rs_synthetic("down", {"m.py": 1}),)),
+        ("genesis twice", (_rs_genesis({"m.py": 1}), _rs_genesis({"m.py": 1}))),
+        ("reasonless", (_rs_genesis({"m.py": 1}), _rs_synthetic("down", {"m.py": 0}, reason=" "))),
+        ("bad direction", (_rs_genesis({"m.py": 1}), _rs_synthetic("sideways", {"m.py": 0}))),
+    ),
+)
+def test_a_malformed_read_seam_ledger_is_refused(label: str, ledger: object) -> None:
+    assert read_seam_ratification_complaints(ledger), label  # type: ignore[arg-type]
+
+
+def test_a_newly_added_module_key_is_held_to_the_upward_rules() -> None:
+    """The act X-715 licensed ONCE. A key appearing is an upward movement from
+    absent, not a free new mapping -- otherwise the one concession X-715 granted
+    could be repeated silently by anyone."""
+    ledger = (
+        _rs_genesis({"pdf_tooling/ops/crypto.py": 4}),
+        _rs_synthetic("up", {"pdf_tooling/ops/crypto.py": 4, "pdf_tooling/ops/office.py": 2}),
+    )
+    joined = " ".join(read_seam_ratification_complaints(ledger))
+    assert "pdf_tooling/ops/office.py" in joined and "ruling" in joined, joined
+
+
+def test_the_read_seam_ceiling_is_the_newest_ledger_record_not_a_writable_literal() -> None:
+    """PDF-70 AC3, on this module. Without it the ledger is documentation and the
+    constant is still freely editable.
+
+    RED: re-introduce a hand-written `dict` literal beside the ledger -- the
+    exact shape this constant had before PDF-70 -- and this arm fires.
+    """
+    module_path = Path(__file__)
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    bindings: list[ast.expr] = []
+    for node in tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and getattr(node.target, "id", None) == "RESIDUE_CEILING"
+        ):
+            if node.value is not None:
+                bindings.append(node.value)
+        elif isinstance(node, ast.Assign) and any(
+            getattr(target, "id", None) == "RESIDUE_CEILING" for target in node.targets
+        ):
+            bindings.append(node.value)
+    assert len(bindings) == 1, (
+        f"{module_path.name} binds RESIDUE_CEILING {len(bindings)} times at module level"
+    )
+    value = bindings[0]
+    assert not isinstance(value, ast.Dict), (
+        "RESIDUE_CEILING is bound to a literal `dict` display again. The live ceiling "
+        "must BE the newest ratification record's mapping, so moving it is impossible "
+        "without appending a record"
+    )
+    assert isinstance(value, ast.Attribute) and value.attr == "ceilings", ast.dump(value)
+    subscript = value.value
+    assert isinstance(subscript, ast.Subscript), ast.dump(value)
+    assert getattr(subscript.value, "id", None) == "READ_SEAM_RESIDUE_LEDGER", ast.dump(value)
+
+
+def test_x715s_reasoning_survives_the_refactor_onto_the_genesis_record() -> None:
+    """PDF-70 AC9. X-715.4's lesson, applied to X-715 itself: *an amendment
+    scoped by location loses what was not enumerated.* PDF-70 moved this
+    constant into a ledger record, and the danger of any such move is that the
+    surrounding justification is dropped as incidental.
+
+    What must survive is not the number -- the number is asserted elsewhere --
+    but the four conditions, the CLASS, and above all the CONTROL: that
+    `ops/compose.py:538` is observed while `:539` is residual under the identical
+    idiom, which is the evidence that the concession is structural rather than a
+    ceiling raised to reach green.
+
+    RED, mechanical: delete the comment block from the genesis entry, or blank
+    the record's reason, and this arm fires.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    entry = source.index('"pdf_tooling/adapters/soffice_office.py"')
+    preceding = source[:entry].rsplit('"pdf_tooling/adapters/pypdf_structure.py"', 1)[-1]
+    for needle in (
+        "X-715",
+        "THE CLASS",
+        "THE CONTROL",
+        "ops/compose.py:538",
+        ":539",
+        "FORWARD-LOOKING BY ONE COMMIT",
+        "decision.md",
+    ):
+        assert needle in preceding, (
+            f"X-715's justification for the soffice_office.py entry lost {needle!r} in "
+            "the PDF-70 refactor; an amendment scoped by location loses what was not "
+            "enumerated (X-715.4)"
+        )
+
+    genesis = READ_SEAM_RESIDUE_LEDGER[0]
+    assert genesis.ruling == "X-715", genesis.ruling
+    assert "X-715" in genesis.reason and "compose.py:538" in genesis.reason, genesis.reason
 
 
 # --------------------------------------------------------------------------- #
