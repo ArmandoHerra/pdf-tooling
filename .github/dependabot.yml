@@ -42,9 +42,29 @@ updates:
       actions-all:
         patterns: ["*"]
 
-  # NOTE: Dependabot PRs are not DCO-signed. That is a second reason a required
-  # DCO status check stays out of scope this cycle (the first is HC-3: direct
-  # pushes to main are how the next fourteen specs land).
+  # CORRECTED (PDF-60, 2026-09-15): both clauses this comment used to make
+  # were measured false. `gh api repos/ArmandoHerra/pdf-tooling/pulls/{n}/
+  # commits --jq '.[] | .commit.message | test("Signed-off-by:")'`, re-run at
+  # implementation HEAD against every open Dependabot pull request that day
+  # (#2, #5, #6, #7 -- the PR numbers move as they close and reopen; a fixed
+  # roster was never the point), showed EVERY one carrying the trailer. The
+  # spec that drove this correction measured the same true fact three days
+  # earlier against a different, now-closed roster (#2, #3, #4) -- so
+  # Dependabot DOES sign off; the first clause was wrong regardless of which
+  # PRs happen to be open when you check.
+  # And `enforce_admins: false` (same probe, against
+  # .../branches/main/protection) means a required status check never blocks
+  # the maintainer's own direct pushes to main, so HC-3 was never a real
+  # second reason either. Neither premise kept a DCO check out of scope --
+  # `.github/workflows/dco.yml` now exists. One real consequence survives and
+  # is why the engine exempts bots by identity rather than by email: the
+  # trailer's email (`support@github.com`) does NOT match the commit author's
+  # GitHub-asserted no-reply address, so a check written to compare emails
+  # literally would block every dependency update forever. `scripts/
+  # dco_check.py` reads `.author.type == "Bot"` -- GitHub's own resolution of
+  # the account -- never the commit's self-reported bytes, which is the
+  # difference between an exemption and a bypass on a public repository that
+  # accepts fork pull requests.
 
   # --- PDF-16 appends the npm ecosystem block for /website here (PLAN §11.1.4). ---
   # PDF-16 APPENDS. It must fail loudly if this file is absent, never create it

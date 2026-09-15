@@ -53,6 +53,27 @@ make test-e2e     # only the subprocess-level CLI tests
 
 `make help` lists every target.
 
+## What must be green before a merge
+
+Every check below must pass, derived from `ci.yml`'s own job names plus `dco` from `dco.yml` — never transcribed by hand, and reconciled by a test so this list cannot silently drift from what actually runs:
+
+```
+lint
+typecheck
+test
+engines-present
+without-engines
+sast
+vulncheck
+secret-scan
+docs-gate
+license-gate
+build
+dco
+```
+
+The `test` entry above reports a check per matrix leg — a Python version crossed with a runner, not a bare name — so the merge gate watches more entries than this list shows. And changing the CI job set or its matrix means the branch protection's required contexts must be regenerated from the live check-run API: a stale required context that can never report blocks a merge forever, which is worse than requiring nothing at all.
+
 ## What a change must not do
 
 - **Add anything under AGPL, GPL or LGPL to the call graph** — not as an import, not as an optional extra, not as a `subprocess` fallback. This is a licence-compatibility rule, not a preference, and it is checked in CI.

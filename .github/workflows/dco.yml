@@ -1,0 +1,64 @@
+---
+# PDF-60. `CONTRIBUTING.md:13` has claimed, since before this repository had
+# a test suite this size, that "commits without the trailer are rejected."
+# Nothing rejected them. This workflow is that instrument, and it is a
+# SEPARATE FILE from `ci.yml`, deliberately (D2):
+#
+#   * `ci.yml` runs in five trigger contexts that carry no pull request (a
+#     `main` push, the weekly schedule, `workflow_dispatch`, and being CALLED
+#     by `release.yml` and `deploy-website.yml`). A DCO job folded in there
+#     would have to no-op in four of five contexts, which is a check that
+#     mostly reports success for having done nothing.
+#   * A twelfth `ci.yml` job would move six frozen coordinates across
+#     `tests/test_gate_parity.py` and `tests/test_gate_budget.py` that this
+#     cycle's `PDF-59` is the sole claimant of (`decision.md` §4.1). This file
+#     moves none of them — the engine (`scripts/dco_check.py`) is exercised
+#     entirely offline by `tests/test_merge_gate.py`.
+#
+# `pull_request`, NEVER `pull_request_target` — the latter runs the BASE
+# branch's workflow with a WRITABLE token against untrusted head code, and
+# nothing here needs that: the check reads PR metadata through a read-only
+# API call and needs no secret beyond the ambient, read-scoped token below.
+#
+# No `concurrency` group is declared. `ci.yml`'s `cancel-in-progress: true`
+# on pull requests exists so a re-push does not pay for a stale run twice;
+# here it would instead defeat PDF-60 D7's measurement, which depends on
+# every push producing its OWN complete, readable `dco` run.
+name: DCO
+
+"on":
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco:
+    name: dco
+    # PDF-60 D7 bound: DERIVATION PENDING. The rule (this file's own D7) needs
+    # five green `dco` JOB runs from a throwaway draft pull request to compute
+    # `3 x p95`, and that measurement needs a push to the live repository —
+    # out of reach for this pass (see this spec's Implementation Log: AC10 is
+    # an open BLOCKER, not a silent fabrication). The floor below is the SAME
+    # 5-minute floor `ci.yml`'s header applies to its seven short jobs, which
+    # this job's own work (one API call, one stdlib script) resembles far more
+    # than it resembles any of `ci.yml`'s longer jobs — a defensible interim
+    # bound, not a derived one. Re-derive per D7 and replace this comment in
+    # the SAME commit once the throwaway PR has run.
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Fetch the pull request's commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits" \
+            --paginate > "${RUNNER_TEMP}/dco-commits.json"
+      - name: Run the DCO check
+        run: |
+          python3 scripts/dco_check.py \
+            --input "${RUNNER_TEMP}/dco-commits.json" \
+            --declared-count "${{ github.event.pull_request.commits }}"
