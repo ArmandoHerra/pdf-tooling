@@ -439,7 +439,11 @@ BARE_REMAINDER: Final[dict[str, int]] = {
     "tests/acceptance/audit_pdf_09.py": 2,
     "perf/README.md": 1,
     "perf/gate-timings.jsonl": 4,
-    "README.md": 3,
+    # PDF-62 D8 -- 3 -> 4. The migration note's console-scripts row quotes
+    # the old no-separator spelling once (the hyphenated sibling is
+    # described by shape, never spelled, to stay out of `test_brand_
+    # surfaces.py`'s frozen class E -- Scope > Out).
+    "README.md": 4,
     "pyproject.toml": 0,
     "src/pdf_tooling/__init__.py": 1,
     "src/pdf_tooling/cli/main.py": 1,
@@ -554,7 +558,13 @@ def test_reverting_one_import_grows_its_remainder_bucket_by_one() -> None:
 #: about). A value BELOW this means a frozen `tests/acceptance/` audit file
 #: was swept; a value ABOVE it means the old prefix drifted back into the
 #: live tree post-rename.
-FROZEN_ENV_COUNT: Final[int] = 18
+#:
+#: PDF-62 D8 -- 18 -> 20. The migration note quotes BOTH old env-var names
+#: once each, in `README.md`'s own `## Upgrading to 1.0.0` section: a note
+#: that cannot name the old name cannot tell anyone what to change (E7). The
+#: `== assertion` below was driven RED at 20 before this comment moved it
+#: (Implementation Log records the observed drift).
+FROZEN_ENV_COUNT: Final[int] = 20
 #: PDF-57 D4 -- INVERTED. `PDF-48`/X-717 froze this figure at 117 (bumped
 #: from 116 for `PDF-54`'s own import, "SHORT-LIVED BY DESIGN: PDF-57
 #: retires this spelling entirely and rewrites this census" -- that
@@ -563,7 +573,11 @@ FROZEN_ENV_COUNT: Final[int] = 18
 #: this item's own HEAD via `_count(SPELL_CLASS, scope=".",
 #: exclude="changelog.md")`, itemized per path in the Implementation Log
 #: (never spelled literally in a comment -- same self-match hazard as above).
-FROZEN_CLASS_COUNT: Final[int] = 4
+#:
+#: PDF-62 D8 -- 4 -> 5. The migration note quotes the old exception name
+#: once, in the same README section, for the same reason as `FROZEN_ENV_
+#: COUNT` above.
+FROZEN_CLASS_COUNT: Final[int] = 5
 FROZEN_RESIDUE_COUNT: Final[int] = 30  # the dot-prefix (29) + its scratch sibling (1)
 FROZEN_NOUN_COUNT: Final[int] = 5  # 2 + 2 + 1, the three common-noun spellings summed
 CHANGELOG_ENV_FLOOR: Final[int] = 14

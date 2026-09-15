@@ -54,6 +54,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -2134,3 +2135,706 @@ def test_pdf61_the_one_way_guard_fails_if_the_biconditional_reappears() -> None:
         "reintroducing the pre-fix clause into a scratch copy of the "
         "docstring must be caught by at least one biconditional pattern"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-62 -- one migration note for the one breaking release.
+#
+# The hazard here is not completeness, it is truth (the spec's own
+# Objective). Every claim below is re-derived FROM THE TREE by its own
+# `derive()` callable (Direction A, D5) or is a stated, reasoned exclusion
+# (Direction B, D6) -- never transcribed from this spec's own tables, which
+# is exactly the failure mode `PDF-32` proved out first and this cycle keeps
+# closing.
+#
+# SELF-MATCH DISCIPLINE. `tests/test_rename_completeness.py`'s own module
+# docstring already names the hazard this section is careful never to
+# repeat: a literal old-stem spelling written whole on one line, anywhere in
+# THIS file's source, would add a fresh, unenumerated occurrence to that
+# module's frozen census (`FROZEN_ENV_COUNT` / `FROZEN_CLASS_COUNT` /
+# `BARE_REMAINDER`) in a file neither registry expects to carry one. Every
+# old spelling this section needs for a COMPARISON (never for the README
+# text itself, which is a different file and is EXPECTED to carry them) is
+# therefore ASSEMBLED from small fragments -- never spelled whole on one
+# line, exactly like `SPELL_BARE` and `test_brand_surfaces.py`'s `NEEDLE`.
+# --------------------------------------------------------------------------- #
+
+MIGRATION_HEADING = "## Upgrading to 1.0.0"
+EXIT_CODES_HEADING = "## Exit codes"
+
+PROVENANCE_PATTERN = re.compile(r"Re-derived at `([0-9a-f]{7,40})` on `(\d{4}-\d{2}-\d{2})`\.?\s*$")
+
+MIGRATION_BOUNDING_SENTENCE_ANCHOR = "the published exit-code table is unchanged"
+
+
+def _migration_section_body_of(text: str) -> str:
+    """Pure text-level extraction, mirroring `_known_issues_body_of` exactly
+    (D5's own instruction to reuse the house idiom rather than rebuild it).
+    Used both by `migration_section_body()` against the real, populated
+    README.md and directly by the vacuous-rendering test (AC13) against a
+    synthetic `tmp_path` document."""
+    assert MIGRATION_HEADING in text, f"document carries no {MIGRATION_HEADING!r} section"
+    after = text.split(MIGRATION_HEADING, 1)[1]
+    return after.split("\n## ", 1)[0]
+
+
+def migration_section_body() -> str:
+    return _migration_section_body_of(read("README.md"))
+
+
+@dataclass(frozen=True)
+class MigrationRow:
+    """One row of the migration note (D5). `derive` re-derives the row's own
+    claim FROM THE TREE and raises on disagreement -- it is never a value
+    compared externally, because the only way to catch a WRONG quoted value
+    is for the derivation itself to hold the comparison."""
+
+    spec_id: str
+    anchor: str
+    derive: Callable[[], None]
+    note: str
+
+
+# --- Row 1: the deprecated console scripts (PDF-58). ------------------------ #
+
+
+def _declared_console_scripts() -> frozenset[str]:
+    import tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    return frozenset(pyproject["project"]["scripts"])
+
+
+def _assert_console_scripts_removed(declared: frozenset[str]) -> None:
+    # Assembled, never spelled whole on one line -- see the module-section
+    # docstring above.
+    old_bare = "pdf" + "toolkit"
+    old_hyphen = "pdf" + "-" + "toolkit"
+    assert declared == frozenset({"pdftooling", "pdf-tooling"}), (
+        f"[project.scripts] declares {sorted(declared)}, expected exactly the two surviving names"
+    )
+    assert old_bare not in declared and old_hyphen not in declared, (
+        f"a removed console-script name is still declared: {sorted(declared)}"
+    )
+
+
+def _derive_migration_console_scripts() -> None:
+    _assert_console_scripts_removed(_declared_console_scripts())
+
+
+# --- Row 2: the two password environment variables (PDF-57). ---------------- #
+
+
+def _new_password_env_names() -> tuple[str, str]:
+    from pdf_tooling.cli import password as _password
+
+    return _password.ENV_PASSWORD, _password.ENV_OWNER_PASSWORD
+
+
+def _assert_env_var_names(new_password: str, new_owner: str) -> None:
+    assert new_password == "PDF_TOOLING_PASSWORD", (
+        f"the row's quoted new spelling is {new_password!r}, not what "
+        "pdf_tooling.cli.password.ENV_PASSWORD reads"
+    )
+    assert new_owner == "PDF_TOOLING_OWNER_PASSWORD", (
+        f"the row's quoted new spelling is {new_owner!r}, not what "
+        "pdf_tooling.cli.password.ENV_OWNER_PASSWORD reads"
+    )
+
+
+def _assert_old_env_prefix_absent() -> None:
+    old_prefix = "PDF" + "_" + "TOOLKIT"
+    proc = subprocess.run(
+        ["git", "grep", "--untracked", "-c", old_prefix, "--", "src/"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 1, (
+        f"the old env-var prefix still appears under src/: {proc.stdout.strip()}"
+    )
+
+
+def _derive_migration_env_vars() -> None:
+    _assert_env_var_names(*_new_password_env_names())
+    _assert_old_env_prefix_absent()
+
+
+# --- Row 3: the public base exception (PDF-57). ------------------------------ #
+
+
+def _new_exception_name() -> str:
+    from pdf_tooling import errors as _errors
+
+    return _errors.PdfToolingError.__name__
+
+
+def _assert_exception_name(name: str) -> None:
+    assert name == "Pdf" + "Tooling" + "Error", (
+        f"the row's quoted new class name is {name!r}, not what "
+        "pdf_tooling.errors.PdfToolingError.__name__ reads"
+    )
+    import inspect
+
+    from pdf_tooling.cli import main as _main
+
+    main_source = inspect.getsource(_main)
+    assert f"except {name} as error" in main_source, (
+        f"{name} is not the name main.py catches -- main.py's own docstring promises "
+        f"exactly one `except {name}`"
+    )
+
+
+def _assert_old_exception_name_absent() -> None:
+    old_name = "Pdf" + "Toolkit" + "Error"
+    proc = subprocess.run(
+        ["git", "grep", "--untracked", "-c", old_name, "--", "src/"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 1, f"{old_name} still appears under src/: {proc.stdout.strip()}"
+
+
+def _derive_migration_exception_class() -> None:
+    _assert_exception_name(_new_exception_name())
+    _assert_old_exception_name_absent()
+
+
+# --- Row 4: `info`'s no-input failure shape (PDF-51). ------------------------ #
+
+
+def _info_probe_result() -> tuple[int, dict[str, object]]:
+    import json
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pdf_tooling",
+            "info",
+            "/nonexistent/pdf-62-probe.pdf",
+            "-o",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    payload: dict[str, object] = json.loads(result.stdout)
+    return result.returncode, payload
+
+
+def _assert_info_shape(code: int, payload: dict[str, object]) -> None:
+    assert code == 4, f"expected exit 4, got {code}"
+    assert "error" in payload, f"top-level 'error' key missing: {sorted(payload)}"
+    assert "documents" not in payload, f"'documents' key unexpectedly present: {sorted(payload)}"
+
+
+def _derive_migration_info_shape() -> None:
+    _assert_info_shape(*_info_probe_result())
+
+
+#: E3's own probe of the pre-`PDF-51` shape, frozen verbatim as a historical
+#: literal fixture -- a live run cannot reproduce a shape the tree no longer
+#: emits, by construction.
+PDF62_PRE_FIX_INFO_PAYLOAD: dict[str, object] = {
+    "schema_version": 1,
+    "verb": "info",
+    "documents": [
+        {
+            "path": "/nonexistent/nope.pdf",
+            "error": {"code": 4, "kind": "no_input", "message": "no such file"},
+        }
+    ],
+    "items": [],
+    "exit_code": 4,
+}
+
+
+def test_ac5_the_info_row_rejects_the_pre_fix_shape() -> None:
+    """AC5's own RED: E3's frozen pre-`PDF-51` probe must fail the shape
+    assertion -- or the guard would not have caught the defect PDF-51 fixed."""
+    with pytest.raises(AssertionError, match="documents"):
+        _assert_info_shape(4, PDF62_PRE_FIX_INFO_PAYLOAD)
+
+
+# --- Row 5: `convert --dry-run`'s exit-code prediction (PDF-53). ------------- #
+
+
+def _office_converter_available() -> bool:
+    from pdf_tooling.ports import resolve
+
+    return bool(resolve("OfficeConverter").available)
+
+
+def _dry_run_prediction_result() -> tuple[int, int]:
+    """(real exit code, dry-run exit code) over a batch of one convertible
+    and one corrupt operand -- the same office-container-triage shape
+    `tests/test_batch_continuation.py`'s
+    `test_ac10_corrupt_arm_dry_run_mirrors_the_real_run` drives for
+    `convert` specifically (PDF-53's own AC6)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        good = root / "good.txt"
+        good.write_text("hello\nworld\n")
+        corrupt = root / "corrupt.docx"
+        corrupt.write_bytes(b"PK\x03\x04 this is not an office document at all\n")
+
+        def _run(dry_run: bool, out_name: str) -> int:
+            args = [
+                sys.executable,
+                "-m",
+                "pdf_tooling",
+                "convert",
+                str(good),
+                str(corrupt),
+                "--out-dir",
+                str(root / out_name),
+                "-o",
+                "json",
+            ]
+            if dry_run:
+                args.append("--dry-run")
+            proc = subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+            return proc.returncode
+
+        return _run(False, "real"), _run(True, "dry")
+
+
+def _assert_dry_run_prediction(real_code: int, dry_code: int) -> None:
+    assert dry_code == 1, f"expected the preview to predict exit 1, got {dry_code}"
+    assert dry_code == real_code, (
+        f"the preview predicted exit {dry_code}, the real run over the same "
+        f"failing batch exited {real_code}"
+    )
+
+
+def _derive_migration_dry_run_exit_code() -> None:
+    if not _office_converter_available():
+        pytest.skip(
+            "convert --dry-run's prediction row needs the OfficeConverter engine "
+            "(LibreOffice); not present"
+        )
+    _assert_dry_run_prediction(*_dry_run_prediction_result())
+
+
+# --- The bounding sentence: schema_version, the exit-code table, the verb count. #
+
+
+def _readme_exit_codes() -> set[int]:
+    text = read("README.md")
+    after = text.split(EXIT_CODES_HEADING, 1)[1]
+    body = after.split("\n## ", 1)[0]
+    return {int(match) for match in re.findall(r"^\|\s*(\d+)\s*\|", body, re.MULTILINE)}
+
+
+def _assert_exit_code_table_agrees(readme_codes: set[int], module_codes: tuple[int, ...]) -> None:
+    assert readme_codes == set(module_codes), (
+        f"README's Exit codes table names {sorted(readme_codes)}, "
+        f"cli/exit_codes.py declares {sorted(module_codes)}"
+    )
+
+
+def _historical_verb_count() -> int | None:
+    """The count of `.command(name=...)` registrations at `v0.3.1`, or
+    `None` if the tag is unreachable (a shallow clone without tags) -- X-153:
+    a control that cannot run must skip visibly, never silently pass."""
+    proc = subprocess.run(
+        ["git", "show", "v0.3.1:src/pdf_tooling/cli/main.py"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    return len(re.findall(r"\.command\(name=", proc.stdout))
+
+
+def _derive_migration_bounding_sentence() -> None:
+    from pdf_tooling.cli import exit_codes as _exit_codes
+    from pdf_tooling.models import SCHEMA_VERSION
+
+    assert SCHEMA_VERSION == 1, f"SCHEMA_VERSION is {SCHEMA_VERSION}, not 1"
+    _assert_exit_code_table_agrees(_readme_exit_codes(), _exit_codes.ALL_EXIT_CODES)
+
+    registry_module = _tests_module("registry")
+    live_count = len(registry_module.discover_verbs())
+    historical_count = _historical_verb_count()
+    if historical_count is None:
+        pytest.skip(
+            "the v0.3.1 tag is unreachable in this clone (shallow checkout); the "
+            "verb-count-did-not-shrink arm needs it and cannot run here"
+        )
+    assert live_count >= historical_count, (
+        f"discover_verbs() reports {live_count} verbs, fewer than v0.3.1's {historical_count}"
+    )
+
+
+def test_the_migration_bounding_sentence_is_re_derivable() -> None:
+    """D5's sixth derivation -- the bounding sentence, not tied to any one
+    spec_id: `SCHEMA_VERSION` equals what the sentence names, the exit-code
+    table's code set agrees with `cli/exit_codes.py`, and `discover_verbs()`
+    reports no fewer verbs than v0.3.1 did."""
+    body = migration_section_body()
+    count = body.count(MIGRATION_BOUNDING_SENTENCE_ANCHOR)
+    assert count == 1, (
+        f"the bounding-sentence anchor {MIGRATION_BOUNDING_SENTENCE_ANCHOR!r} occurs "
+        f"{count} time(s) in the section, expected exactly 1"
+    )
+    _derive_migration_bounding_sentence()
+
+
+def test_the_migration_bounding_sentence_derivation_can_fail() -> None:
+    """The bounding sentence's RED: a fabricated code set must disagree, or
+    this comparison guards nothing."""
+    with pytest.raises(AssertionError, match="declares"):
+        _assert_exit_code_table_agrees({0, 1, 2}, (0, 1, 2, 3, 4, 5, 6))
+
+
+# --- The registry itself, D5's three load-bearing properties. --------------- #
+
+MIGRATION_ROWS: tuple[MigrationRow, ...] = (
+    MigrationRow(
+        spec_id="PDF-58",
+        anchor="command not found",
+        derive=_derive_migration_console_scripts,
+        note="limb (a) -- the old command stops resolving at all",
+    ),
+    MigrationRow(
+        spec_id="PDF-57",
+        anchor="the password is silently unread",
+        derive=_derive_migration_env_vars,
+        note="limb (a), the highest-consequence row -- an unrecognised name is not an error",
+    ),
+    MigrationRow(
+        spec_id="PDF-57",
+        anchor="PdfToolingError",
+        derive=_derive_migration_exception_class,
+        note="limb (a) -- caught and imported by name",
+    ),
+    MigrationRow(
+        spec_id="PDF-51",
+        anchor="no `documents` key",
+        derive=_derive_migration_info_shape,
+        note="limb (b) -- the exit code is unchanged, only the payload shape moves",
+    ),
+    MigrationRow(
+        spec_id="PDF-53",
+        anchor="predicts the real run's own exit code",
+        derive=_derive_migration_dry_run_exit_code,
+        note="limb (b), engine-gated -- LibreOffice absent skips, never passes",
+    ),
+)
+
+
+def test_every_migration_row_is_re_derivable_from_the_tree() -> None:
+    """AC3. Non-empty registry; every anchor occurs exactly once in the
+    section; every spec_id names a real allocated id (a changelog entry
+    exists for it); and every row's derive() runs and agrees."""
+    assert MIGRATION_ROWS, "the registry is empty; every check below would pass vacuously"
+    body = migration_section_body()
+    changelog_module = _tests_module("test_changelog_history")
+    for row in MIGRATION_ROWS:
+        count = body.count(row.anchor)
+        assert count == 1, (
+            f"{row.spec_id}: anchor {row.anchor!r} occurs {count} time(s) in the "
+            "section, expected exactly 1"
+        )
+        assert changelog_module.entries_for(row.spec_id), (
+            f"{row.spec_id} names no changelog entry; not a real allocated id"
+        )
+        row.derive()
+
+
+def test_the_migration_row_derivations_can_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC3's RED, one per row, each observed rather than assumed. Every
+    corruption below is an in-memory substitution of the ONE seam the real
+    `derive()` reads through -- never a disk write to a tracked file (HC-4's
+    restore idiom is for a plant that must land on disk; none of these four
+    needs one, and `monkeypatch` reverts automatically at teardown)."""
+    this_module = sys.modules[__name__]
+
+    # (a) a surviving old console script.
+    monkeypatch.setattr(
+        this_module,
+        "_declared_console_scripts",
+        lambda: frozenset({"pdftooling", "pdf-tooling", "pdf" + "toolkit"}),
+    )
+    with pytest.raises(AssertionError, match="expected exactly the two surviving names"):
+        _derive_migration_console_scripts()
+
+    # (b) a wrong env-var spelling.
+    with pytest.raises(AssertionError, match="quoted new spelling"):
+        _assert_env_var_names("PDF_TOOLING_PASSWROD", "PDF_TOOLING_OWNER_PASSWORD")
+
+    # (c) a wrong exception name.
+    with pytest.raises(AssertionError, match="quoted new class name"):
+        _assert_exception_name("Pdf" + "Tooling" + "Errror")
+
+    # (d) a wrong exit code.
+    with pytest.raises(AssertionError, match="expected exit 4"):
+        _assert_info_shape(5, {"error": {}})
+
+
+def test_ac4_the_env_var_row_reds_on_a_planted_old_occurrence() -> None:
+    """AC4's second RED: a NEW untracked file under `src/`, deleted in a
+    `finally` regardless of outcome. Never a mutation of a TRACKED file, so
+    HC-4's restore idiom (`git show HEAD:<path> > <path>`) does not apply
+    here at all -- a plant that was never tracked is restored by deletion."""
+    scratch = REPO_ROOT / "src" / "pdf_tooling" / "_pdf62_scratch_probe.py"
+    assert not scratch.exists(), "a stray scratch probe was already on disk"
+    old_prefix = "PDF" + "_" + "TOOLKIT"
+    try:
+        scratch.write_text(f"# {old_prefix}_PASSWORD\n")
+        with pytest.raises(AssertionError, match="still appears"):
+            _assert_old_env_prefix_absent()
+    finally:
+        scratch.unlink(missing_ok=True)
+
+
+def test_ac6_the_console_script_row_survives_a_locally_built_wheel() -> None:
+    """AC6. The entry-point oracle is a locally built wheel, never PyPI
+    (X-703, B-250)."""
+    import zipfile
+
+    result = subprocess.run(
+        ["make", "build"], cwd=REPO_ROOT, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, f"make build failed: {result.stderr}"
+    wheels = sorted((REPO_ROOT / "dist").glob("*.whl"), key=lambda p: p.stat().st_mtime)
+    assert wheels, "make build produced no wheel in dist/"
+    with zipfile.ZipFile(wheels[-1]) as zf:
+        entry_name = next(name for name in zf.namelist() if name.endswith("entry_points.txt"))
+        entry_text = zf.read(entry_name).decode()
+    entry_pattern = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)\s*=", re.MULTILINE)
+    wheel_scripts = frozenset(match.group(1) for match in entry_pattern.finditer(entry_text))
+    _assert_wheel_scripts_match(wheel_scripts)
+
+
+def _assert_wheel_scripts_match(wheel_scripts: frozenset[str]) -> None:
+    declared = _declared_console_scripts()
+    assert wheel_scripts == declared == frozenset({"pdftooling", "pdf-tooling"}), (
+        f"wheel entry_points.txt declares {sorted(wheel_scripts)}, "
+        f"[project.scripts] declares {sorted(declared)}"
+    )
+
+
+def test_ac6_the_wheel_oracle_reds_on_a_mismatched_declaration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC6's RED: a `[project.scripts]` that declared a removed name would
+    disagree with the wheel's own `entry_points.txt` -- proven without
+    rebuilding the wheel twice, by monkeypatching the ONE seam the real arm
+    reads `[project.scripts]` through."""
+    this_module = sys.modules[__name__]
+    monkeypatch.setattr(
+        this_module,
+        "_declared_console_scripts",
+        lambda: frozenset({"pdftooling", "pdf-tooling", "pdf" + "toolkit"}),
+    )
+    with pytest.raises(AssertionError):
+        _assert_wheel_scripts_match(frozenset({"pdftooling", "pdf-tooling"}))
+
+
+def test_ac7_the_dry_run_row_skips_rather_than_passes_when_the_engine_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC7/X-153. Simulated engine absence must SKIP the derivation, never
+    silently pass it -- a skipped arm is never recorded as agreement."""
+    this_module = sys.modules[__name__]
+    monkeypatch.setattr(this_module, "_office_converter_available", lambda: False)
+    with pytest.raises(pytest.skip.Exception, match="OfficeConverter"):
+        _derive_migration_dry_run_exit_code()
+
+
+# --- Direction B: coverage over the DECLARED population (D6). --------------- #
+
+#: Every spec in this cycle whose landing could plausibly break a `0.3.1`
+#: consumer. Membership is a DECLARATION, not a derivation -- see the
+#: residual D6 states rather than hides.
+BREAKING_CANDIDATES: Final[frozenset[str]] = frozenset(
+    {"PDF-50", "PDF-51", "PDF-52", "PDF-53", "PDF-57", "PDF-58", "PDF-59"}
+)
+
+#: A candidate deliberately absent from the note, with the D3 limb it
+#: fails. A candidate in NEITHER this register nor `MIGRATION_ROWS` is a
+#: FAILURE (AC8).
+NOT_A_MIGRATION_ITEM: Final[dict[str, str]] = {
+    "PDF-50": (
+        "the 0.3.1 behaviour was a traceback on stdout; nothing could have been "
+        "successfully branching on it, so this is a repair from unusable to usable, "
+        "not a break in a working contract."
+    ),
+    "PDF-52": (
+        "an added key (`password_verified`); README's own enumeration says addition "
+        "never moves `schema_version`, and a name-reading consumer survives it "
+        "unchanged."
+    ),
+    "PDF-59": (
+        "a packaging classifier only (Alpha to Production/Stable); it changes no "
+        "invocation, no payload and no exit code, so it fails both limbs of D3's test."
+    ),
+}
+
+
+def test_every_declared_breaking_candidate_is_named_or_registered() -> None:
+    """AC8. Coverage over the DECLARED population: every candidate that
+    landed a changelog entry (`entries_for()`) is either a migration row or
+    a stated exclusion. Silence is a failure."""
+    changelog_module = _tests_module("test_changelog_history")
+    row_ids = {row.spec_id for row in MIGRATION_ROWS}
+    unaccounted = [
+        spec_id
+        for spec_id in sorted(BREAKING_CANDIDATES)
+        if changelog_module.entries_for(spec_id)
+        and spec_id not in row_ids
+        and spec_id not in NOT_A_MIGRATION_ITEM
+    ]
+    assert unaccounted == [], (
+        f"{unaccounted} landed a changelog entry but appears in neither "
+        "MIGRATION_ROWS nor NOT_A_MIGRATION_ITEM"
+    )
+
+
+def test_the_coverage_register_reds_when_an_id_is_dropped_from_both() -> None:
+    """AC8's RED: remove one landed id from both registers."""
+    changelog_module = _tests_module("test_changelog_history")
+    row_ids = {row.spec_id for row in MIGRATION_ROWS}
+    victim = next(iter(NOT_A_MIGRATION_ITEM))
+    exclusions_without_victim = {k: v for k, v in NOT_A_MIGRATION_ITEM.items() if k != victim}
+    unaccounted = [
+        spec_id
+        for spec_id in sorted(BREAKING_CANDIDATES)
+        if changelog_module.entries_for(spec_id)
+        and spec_id not in row_ids
+        and spec_id not in exclusions_without_victim
+    ]
+    assert unaccounted == [victim]
+
+
+def _check_not_a_migration_item(register: dict[str, str], row_ids: set[str]) -> None:
+    changelog_module = _tests_module("test_changelog_history")
+    for spec_id, reason in register.items():
+        assert changelog_module.entries_for(spec_id), f"{spec_id} names no changelog entry"
+        assert reason.strip(), f"{spec_id} has an empty reason"
+        assert spec_id not in row_ids, f"{spec_id} is both a row and an exclusion"
+
+
+def test_the_not_a_migration_item_register_is_frozen_and_reasoned() -> None:
+    """AC9. Frozen size, every key a real allocated id, every value
+    non-empty, and no overlap with MIGRATION_ROWS."""
+    assert len(NOT_A_MIGRATION_ITEM) == 3
+    _check_not_a_migration_item(NOT_A_MIGRATION_ITEM, {row.spec_id for row in MIGRATION_ROWS})
+
+
+def test_the_not_a_migration_item_register_reds() -> None:
+    """AC9's two REDs: an empty reason, and an id that is also a row."""
+    row_ids = {row.spec_id for row in MIGRATION_ROWS}
+
+    empty_reason = dict(NOT_A_MIGRATION_ITEM)
+    empty_reason["PDF-50"] = ""
+    with pytest.raises(AssertionError, match="empty reason"):
+        _check_not_a_migration_item(empty_reason, row_ids)
+
+    overlapping = dict(NOT_A_MIGRATION_ITEM)
+    overlapping[next(iter(row_ids))] = "a manufactured overlap, for the RED only"
+    with pytest.raises(AssertionError, match="both a row"):
+        _check_not_a_migration_item(overlapping, row_ids)
+
+
+# --- D7: no unmasked cardinal in the section itself. ------------------------- #
+
+
+def test_the_migration_section_carries_no_unmasked_cardinal() -> None:
+    """AC10. Mirrors `test_the_known_issues_section_carries_no_count` (D7):
+    enumerate, never count. Masked the same way `cardinal_residue` masks --
+    code spans first, then the structured-reference family -- because the
+    section is free to use `4` and `1.0.0` the way the rest of this file
+    does; what may not survive is a BARE cardinal in prose."""
+    body = migration_section_body()
+    masked = _blank(body, code_spans(body))
+    for pattern in (*STRUCTURED_REFERENCE, EXIT_CODE):
+        masked = _blank(masked, [match.span() for match in pattern.finditer(masked)])
+    residue = [match.group(0) for match in CANDIDATE.finditer(masked)]
+    assert residue == [], f"the migration section carries an unmasked cardinal: {residue}"
+
+
+def test_the_migration_section_cardinal_criterion_can_fail() -> None:
+    """AC10's RED, on a scratch body -- never the real section."""
+    poisoned = migration_section_body() + "\n\nThere are three breaking changes.\n"
+    masked = _blank(poisoned, code_spans(poisoned))
+    for pattern in (*STRUCTURED_REFERENCE, EXIT_CODE):
+        masked = _blank(masked, [match.span() for match in pattern.finditer(masked)])
+    residue = [match.group(0) for match in CANDIDATE.finditer(masked)]
+    assert residue == ["three"]
+
+
+# --- AC1: the section exists, in the ruled place, and is commit-anchored. --- #
+
+
+def test_the_migration_section_exists_and_is_commit_anchored() -> None:
+    """AC1. Exactly one `## Upgrading to 1.0.0` heading, positioned between
+    `## Getting Started`'s content and `## What exists today`, and its body
+    ends with a commit-anchored provenance line (PDF-30 D4)."""
+    text = read("README.md")
+    heading_count = text.count(MIGRATION_HEADING)
+    assert heading_count == 1, (
+        f"README.md carries the migration heading {heading_count} time(s), expected exactly 1"
+    )
+    getting_started = text.index("## Getting Started")
+    what_exists_today = text.index("## What exists today")
+    migration = text.index(MIGRATION_HEADING)
+    assert getting_started < migration < what_exists_today, (
+        "the migration section must sit between '## Getting Started' and '## What exists today'"
+    )
+    body = migration_section_body().rstrip()
+    assert PROVENANCE_PATTERN.search(body), (
+        "the section's body does not end with a commit-anchored provenance line"
+    )
+
+
+def test_the_commit_anchor_check_fails_if_the_provenance_line_is_missing() -> None:
+    """AC1's RED, on a scratch body -- never the real section."""
+    poisoned = migration_section_body().rsplit("Re-derived at", 1)[0].rstrip()
+    assert PROVENANCE_PATTERN.search(poisoned) is None
+
+
+# --- AC13: the section degrades conditionally, never by deletion. ----------- #
+
+
+def _vacuous_migration_fixture() -> str:
+    return (
+        f"{MIGRATION_HEADING}\n\n"
+        "`1.0.0` introduces no breaking change for a `0.3.1` consumer.\n\n"
+        "Re-derived at `0000000` on `1999-01-01`.\n\n"
+        "## What exists today\n\n"
+        "placeholder body\n"
+    )
+
+
+def test_the_migration_section_survives_the_vacuous_rendering(tmp_path: Path) -> None:
+    """AC13. D9's own degrade-honestly rule: if nothing breaking landed, the
+    heading survives and reads the no-breaking-change sentence rather than
+    being deleted -- checked on a synthetic `tmp_path` document sliced with
+    the SAME extractor the populated state above uses."""
+    vacuous = _vacuous_migration_fixture()
+    scratch = tmp_path / "README.md"
+    scratch.write_text(vacuous)
+
+    assert MIGRATION_HEADING in vacuous, "the heading must survive the vacuous rendering"
+    body = _migration_section_body_of(scratch.read_text())
+    assert "introduces no breaking change" in body
+
+
+def test_the_vacuous_rendering_extractor_fails_if_the_heading_is_deleted() -> None:
+    """AC13's RED."""
+    without_heading = _vacuous_migration_fixture().replace(MIGRATION_HEADING, "## Nothing here")
+    with pytest.raises(AssertionError):
+        _migration_section_body_of(without_heading)

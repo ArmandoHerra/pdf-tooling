@@ -59,6 +59,22 @@ uv run pdftooling --help
 
 `uv sync` installs the runtime stack *and* the development tooling, so there is no separate bootstrap step.
 
+## Upgrading to 1.0.0
+
+A `0.3.1` invocation, script or import that relied on any of the following stops working, or observes a different shape, at `1.0.0`; nothing else in this file's contract moved.
+
+| In 0.3.1 | In 1.0.0 | What to change |
+|---|---|---|
+| the deprecated `pdftoolkit` console script (and its hyphenated sibling) | removed — the shell reports command not found | use `pdftooling` or `pdf-tooling` |
+| `PDF_TOOLKIT_PASSWORD` / `PDF_TOOLKIT_OWNER_PASSWORD` | `PDF_TOOLING_PASSWORD` / `PDF_TOOLING_OWNER_PASSWORD` | rename the variable anywhere a script or CI job sets it — an unrecognised name is not an error, so the password is silently unread and the run exits `6` |
+| `PdfToolkitError` as the public base exception | `PdfToolingError` | update any `except`/`import` naming the old class |
+| `info` on a nonexistent input nested the failure inside `documents[0].error` | the same input returns a top-level `error` key and no `documents` key | read `error` at the top level; the exit code stays `4` |
+| `convert --dry-run` over a batch containing an item the real run fails on predicted a clean batch | the preview now predicts the real run's own exit code and per-item `ok` | do not trust a `--dry-run` result captured before the upgrade |
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+
+Re-derived at `78941e1` on `2026-09-15`.
+
 ## What exists today
 
 The CLI spine, the output contract and the exit-code contract are in place end-to-end, and every verb named at the top of this file — structure, raster, compose, text, optimize, crypto and overlay operations alike — is shipped behind them, not merely specified.
