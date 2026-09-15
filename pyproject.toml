@@ -59,10 +59,6 @@ all = ["weasyprint>=69.0,<70"]
 [project.scripts]
 pdftooling  = "pdf_tooling.cli.main:main"
 pdf-tooling = "pdf_tooling.cli.main:main"
-# Deprecated, REMOVED at v1.0.0. Behaviour and exit codes are identical; the
-# only difference is one line on stderr naming the new command.
-pdftoolkit  = "pdf_tooling.cli.deprecated:main_pdftoolkit"
-pdf-toolkit = "pdf_tooling.cli.deprecated:main_pdf_toolkit"
 
 [project.urls]
 Homepage = "https://github.com/ArmandoHerra/pdf-tooling"

@@ -3,7 +3,7 @@
 The distribution is ``pdf-tooling``; the import package is ``pdf_tooling``; the
 console script is ``pdftooling``. ``pdf-tooling`` is a supported alias, and
 the deprecated ``pdftoolkit``/``pdf-toolkit`` aliases from before `PDF-48`
-remain until ``v1.0.0`` (see README's Naming section).
+are removed at ``v1.0.0`` (see README's Naming section).
 
 This module deliberately imports nothing at module scope. ``__version__`` is
 resolved lazily from *distribution metadata* so that importing the package —

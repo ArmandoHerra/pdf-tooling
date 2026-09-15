@@ -124,23 +124,27 @@ NON_WEBSITE_BRAND: Final[frozenset[str]] = frozenset(
 
 
 def _is_console_script_alias(path: str, _line: int, text: str) -> bool:
-    """Class E. PDF-48. The alias is PUBLISHED, pinned, and DEPRECATED behind
-    a `v1.0.0` window -- dropping it before then is a breaking change, not a
-    rename (`tests/test_cli_spine.py`).
+    """Class E. PDF-48, narrowed by PDF-58. The alias was PUBLISHED, pinned,
+    and DEPRECATED behind a `v1.0.0` window; PDF-58 is the removal that
+    window promised, and it removed `src/pdf_tooling/cli/deprecated.py`
+    outright -- the file no longer exists, so it is dropped from this set
+    (D4's own rule: a path silently left in a membership set is
+    indistinguishable from a path that was never there, which is exactly
+    the failure this narrowing avoids by being explicit).
 
-    Post-PDF-48 every remaining hyphenated-needle occurrence in these four
-    sites is about the alias, its deprecation window, or (`pyproject.toml`)
-    its shim target -- the old "This is not pdftk" section that used to
-    carry README occurrences with OTHER dispositions is gone (D4), and
-    `README.md`'s `## Naming` section is now the needle's only home there.
-    Content-sniffing sub-checks (`"pdf_tooling.cli.main:main" in text`,
-    `"console scripts are" in text`, `"Console scripts" in text`) are RETIRED:
-    E2 showed each one breaks the moment the row it was written against
-    changes shape, so path membership alone is the rule now."""
+    Post-PDF-58 every remaining hyphenated-needle occurrence in these FOUR
+    (not five) sites is about the alias's own removal, its distribution-level
+    collision reason, or its shim-target release history -- `README.md`'s
+    `## Naming` section is still the needle's only home there, and
+    `pyproject.toml` stays in the set even though it currently contributes
+    ZERO occurrences (the deprecated keys and their comment are gone): the
+    site still exists and a future deprecated-alias re-addition would need
+    to be seen by this rule again, not silently re-admitted. Content-sniffing
+    sub-checks are RETIRED (E2, unchanged by this narrowing): path membership
+    alone is the rule."""
     return path in {
         "pyproject.toml",
         "src/pdf_tooling/cli/main.py",
-        "src/pdf_tooling/cli/deprecated.py",
         "src/pdf_tooling/__init__.py",
         "README.md",
     }
@@ -220,14 +224,52 @@ RULES: Final[tuple[tuple[str, Rule], ...]] = (
 #: None of these four is the corpus/golden literal population (AC26) or a
 #: frozen `tests/acceptance/` audit line -- those are untouched and still
 #: contribute their share of the 43.
+#:
+#: PDF-58 D4/AC16 -- `E` 9 -> 5, `H` 43 -> 43 (unchanged, DERIVED not assumed).
+#: Re-derived at this spec's own HEAD via a path-scoped occurrence count of
+#: the needle (never spelled here -- see the module docstring's own rule,
+#: which this derivation is careful not to break the way an earlier draft of
+#: it did).
+#:
+#: `E`. `_is_console_script_alias`'s path set narrows from FIVE sites to FOUR:
+#: `src/pdf_tooling/cli/deprecated.py` is `git rm`-ed outright and can no
+#: longer carry an occurrence, so it drops out of the membership set itself
+#: (D4) rather than being left in at zero. The four surviving sites carry
+#: FIVE occurrences, not nine -- `README.md:24,30,40` (three: the "why the
+#: names differ" collision clause, which E4 keeps live; the removal statement
+#: that replaces the old deprecation-window paragraph; and the
+#: release-history sentence naming the two console-script aliases as
+#: history), `src/pdf_tooling/__init__.py:5` (one: the module docstring's
+#: corrected removed-at-v1.0.0 clause), and `src/pdf_tooling/cli/main.py:78`
+#: (one: the `PROG_NAME` pin comment's corrected note that the deprecated
+#: pair used to share the pin). `pyproject.toml` stays IN the membership set
+#: (D4) but now contributes ZERO occurrences -- the two deprecated keys and
+#: their two-line comment are deleted outright, not reworded. DRIVEN RED:
+#: restore either deprecated `pyproject.toml` key (reverting one superseded
+#: occurrence) -> class E is 6, off by exactly one, and
+#: `test_the_post_state_counts_hold[E]` names it.
+#:
+#: `H`. Same recipe scoped to `tests/`: 43 before this spec's edits, 43 after.
+#: NOT a coincidence left underived -- `tests/test_cli_spine.py` loses exactly
+#: one occurrence (the old four-key declaration arm's frozen-set literal,
+#: which spelled both the old bare and old hyphenated alias names alongside
+#: the two canonical ones; now a two-key set with no old-name spelling left
+#: in it) and gains exactly one (the new
+#: `test_the_deprecated_console_scripts_are_absent_from_the_environment`'s
+#: absence-probe loop, which names the same two old spellings as the
+#: aliases it asserts are now gone). The seven frozen corpus/golden literal
+#: occurrences in the same file (AC26) and every `tests/acceptance/` audit
+#: line are untouched and still contribute their share of the 43. DRIVEN
+#: RED: delete the new absence arm's old-spelling loop entry instead of the
+#: old declaration arm's -- class H drops to 42 and the arm names it.
 EXPECTED_EXACT: Final[dict[str, int]] = {
     "A": 0,  # website brand text ......... all 17 moved
     "B": 0,  # website asset paths ........ all 3 moved with the rename
     "C": 0,  # non-website brand text ..... 0, unchanged (shadowed by E's broader rule now)
     "D": 0,  # licence-adjacent ........... all 7 moved
-    "E": 9,  # console-script alias ....... deprecated, v1.0.0 removal (D1); was 6, see derivation
+    "E": 5,  # console-script alias ....... PDF-58 removal; narrowed to 4 sites, see derivation
     "F": 0,  # README contract prose ...... RETIRED -- the paragraph it matched is gone (D5)
-    "H": 43,  # tests/ .................... FROZEN pop. minus 4 alias-identity edits, see derivation
+    "H": 43,  # tests/ .................... unchanged: PDF-58 -1/+1 net zero, see derivation
     "I": 12,  # perf/ ...................... FROZEN, recorded measurements
 }
 EXPECTED_FLOOR: Final[dict[str, int]] = {"G": 15}

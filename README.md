@@ -19,26 +19,25 @@ citing any of them should cite the table rather than the prose around it.
 | Repository | `pdf-tooling` |
 | Import package | `pdf_tooling` |
 | Console script | `pdftooling` |
-| Aliases | `pdf-tooling`, plus deprecated `pdftoolkit` and `pdf-toolkit` until `v1.0.0` |
+| Aliases | `pdf-tooling` |
 
 **Why the names differ.** The PyPI distribution is `pdf-tooling` because `pdf-toolkit`
 sits too close to names already on PyPI, and the distribution called `pdftoolkit` there
 is an unrelated GPL-3.0 project that is not this software. The repository followed the
 distribution; the import package and the console script followed it in turn, once the
-deprecation window below made moving a published surface safe.
+deprecated aliases below made moving a published surface safe.
 
-**The deprecation window.** `pdftoolkit` and `pdf-toolkit` remain installed and fully
-functional through `v1.0.0` — same behaviour, same exit codes — each printing one line
-on stderr naming `pdftooling` as the replacement. The distribution named `pdftoolkit` on
-PyPI is an unrelated GPL-3.0 project; this project's deprecated `pdftoolkit` console
-script — and this warning with it — is removed at `v1.0.0`.
+**The deprecated console scripts.** `pdftoolkit` and `pdf-toolkit` were migration
+aliases for `pdftooling`/`pdf-tooling` — same behaviour, same exit codes — each
+printing one line on stderr naming the replacement. Both are removed at `v1.0.0`.
 
 **Release history, so the install lines above can be read against it.** `v0.1.0` was
 git-install-only and was never published to PyPI under either name; `v0.1.1` is the
 first published release, as `pdf-tooling`; `v0.2.0` is the first published under the
 renamed repository; `v0.3.0` is the first release to ship the renamed `pdftooling`
-console script and `pdf_tooling` import package, with `pdftoolkit`/`pdf-toolkit`/
-`pdf_toolkit` deprecated behind it.
+console script and the `pdf_tooling` import package. The old `pdf_toolkit` import
+package was renamed away entirely at that release, not kept as an alias. `pdftoolkit`
+and `pdf-toolkit` shipped as deprecated console-script aliases from that same release.
 
 ## Getting Started
 

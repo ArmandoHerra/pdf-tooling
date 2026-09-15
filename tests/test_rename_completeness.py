@@ -283,36 +283,46 @@ def test_dropping_an_expected_spelling_reddens_the_reconciliation() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# AC4 -- the line-vs-occurrence trap, re-recorded (F2). `git grep -Ioc`
-# silently drops `-o` and counts matching LINES; a census that used it would
-# undercount whenever one line carries a spelling twice, with a success exit
-# code. The brief's own `README.md` instance (23 occurrences over 20 lines
-# at authoring time, since re-measured at HEAD as 26 over 22 -- both figures
-# recorded in the Implementation Log) closed once PDF-48's rename left no
-# README line repeating the no-separator spelling twice. The trap is
-# demonstrated here on the site PDF-48 itself introduces one: `pyproject.
-# toml`'s deprecated-shim declaration line names the no-separator spelling
-# once as the key and once inside its shim function's name.
+# AC4/AC15 -- the line-vs-occurrence trap, RE-HOMED by PDF-58 (D5, disposition
+# 1). `git grep -Ioc` silently drops `-o` and counts matching LINES; a census
+# that used it would undercount whenever one line carries a spelling twice,
+# with a success exit code. The brief's own `README.md` instance (23
+# occurrences over 20 lines at authoring time, since re-measured at HEAD as 26
+# over 22) closed once PDF-48's rename left no README line repeating the
+# no-separator spelling twice; PDF-48 then re-homed it onto `pyproject.
+# toml:64`'s deprecated-shim declaration line, which named the no-separator
+# spelling once as the key and once inside its shim function's name. PDF-58
+# REMOVES that exact line (D7) -- E6(a)'s free red, observed BEFORE this arm
+# was touched (AC14) -- so the trap re-homes again, this time onto a carrier
+# PDF-58 does not move: `tests/unit/test_tempnames.py`'s residue-prefix
+# predicate-rejection fixture list repeats the no-separator spelling twice on
+# one line (`"...-abc"`, `".....abc"` -- both built from the same stem), and
+# is untouched by this spec (Out 5's frozen residue-prefix namespace). Live
+# double-occurrence carriers at PDF-58's own HEAD, offered as candidates and
+# not as the only answer: `changelog.md:110`, `:229` (x2), `:437`.
 # --------------------------------------------------------------------------- #
 
 
 def test_the_line_vs_occurrence_trap_is_still_live() -> None:
-    """AC4/F2. The occurrence census and a naive line census of the SAME
+    """AC4/F2/AC15. The occurrence census and a naive line census of the SAME
     spelling over the SAME file disagree whenever a line carries the
-    spelling more than once -- which `pyproject.toml`'s deprecated-shim
-    script declaration now does for the no-separator spelling (D2). If they
-    ever agree, this note is stale and must be re-derived, not carried
-    forward -- exactly as happened to the brief's own `README.md` instance."""
-    occ = _git("grep", "-Ion", "--", SPELL_BARE, "--", "pyproject.toml")
+    spelling more than once -- which `tests/unit/test_tempnames.py`'s
+    residue-prefix rejection fixture now does for the no-separator spelling,
+    re-homed here by PDF-58 after removing `pyproject.toml`'s deprecated-shim
+    line (this note's PDF-48 carrier). If they ever agree, this note is
+    stale and must be re-derived, not carried forward -- exactly as happened
+    to the brief's own `README.md` instance and then to `pyproject.toml`'s."""
+    target = "tests/unit/test_tempnames.py"
+    occ = _git("grep", "-Ion", "--", SPELL_BARE, "--", target)
     occ_count = len([line for line in occ.stdout.splitlines() if line])
     # `-Ioc` silently drops `-o` and prints one "<path>:<count>" line
     # counting matching LINES, not occurrences -- X-420's own trap,
     # reproduced here on purpose rather than avoided, to demonstrate the
     # SAME undercount a `-Ioc` reader would silently accept.
-    line_count_proc = _git("grep", "-Ioc", "--", SPELL_BARE, "--", "pyproject.toml")
+    line_count_proc = _git("grep", "-Ioc", "--", SPELL_BARE, "--", target)
     line_count = int(line_count_proc.stdout.strip().rpartition(":")[2] or "0")
     assert occ_count > line_count, (
-        f"pyproject.toml's occurrence count ({occ_count}) no longer exceeds its "
+        f"{target}'s occurrence count ({occ_count}) no longer exceeds its "
         f"line count ({line_count}) for the no-separator spelling -- the "
         "line-vs-occurrence trap this note records has closed and must be "
         "re-derived, not asserted from memory"
@@ -343,10 +353,33 @@ CHANGELOG_FLOOR: Final[dict[str, int]] = {
 #: The underscore-separated spelling's remainder. `.gitleaksignore` carries a
 #: historical gitleaks fingerprint keyed on a past commit+path pair (frozen,
 #: like changelog history -- rewriting the path would desync the fingerprint
-#: from the history it describes); `README.md`/`pyproject.toml` each carry
-#: one deprecated-shim mention (D2/D5); `test_cli_spine.py` carries the two
-#: deprecated-shim target strings in its four-key AC5 arm. `changelog.md`
-#: is NOT here -- it is a floor (`CHANGELOG_FLOOR`, above).
+#: from the history it describes); `README.md` carries the corrected
+#: release-history sentence's one historical mention of the old import
+#: package (PDF-58 E3/AC11 -- it is named as HISTORY, never paired with a
+#: deprecation verb); `test_cli_spine.py` carries the one frozen occurrence
+#: inside `test_the_import_package_is_now_pdf_tooling`'s own docstring
+#: (AC13, byte-unchanged). `changelog.md` is NOT here -- it is a floor
+#: (`CHANGELOG_FLOOR`, above).
+#:
+#: PDF-58 D2/AC17 -- `src/pdf_tooling/cli/deprecated.py` (was 2) LOSES its row
+#: outright: `git rm` removed the file, so it can carry no occurrence, ever
+#: again, and a registry that kept it at 0 would be indistinguishable from
+#: one that forgot to look. `pyproject.toml` (was 1) and `README.md` (was 1,
+#: unchanged) are RE-STATED per the spec's own instruction rather than
+#: dropped: `pyproject.toml`'s one occurrence was the deprecated hyphenated
+#: key's shim-target string (`git rm`-ed with the rest of `[project.scripts]`'s
+#: deprecated pair, D7), now 0 and kept in the registry at that value so a
+#: future re-addition is caught rather than silently re-admitted (the same
+#: reasoning `test_brand_surfaces.py`'s `_is_console_script_alias` D4
+#: narrowing applies to class E's `pyproject.toml` membership).
+#: `tests/test_cli_spine.py` (was 2) drops to 1: the old four-key
+#: declaration arm's `set(scripts.values())` check named the deprecated
+#: hyphenated key's shim-target string once (removed with the arm's
+#: rewrite, AC1); the one remaining occurrence is the frozen docstring
+#: literal inside `test_the_import_package_is_now_pdf_tooling` (AC13).
+#: DRIVEN RED: restore `pyproject.toml`'s deprecated hyphenated key (one
+#: superseded occurrence) -> `pyproject.toml`'s found count is 1, registry
+#: says 0, `_remainder_check` names the drift.
 UNDERSCORE_REMAINDER: Final[dict[str, int]] = {
     "tests/acceptance/audit_pdf_01.py": 14,
     "tests/acceptance/audit_pdf_02.py": 11,
@@ -358,24 +391,45 @@ UNDERSCORE_REMAINDER: Final[dict[str, int]] = {
     "tests/acceptance/audit_pdf_23.py": 5,
     ".gitleaksignore": 1,
     "README.md": 1,
-    "pyproject.toml": 1,
-    "src/pdf_tooling/cli/deprecated.py": 2,
-    "tests/test_cli_spine.py": 2,
+    "pyproject.toml": 0,
+    "tests/test_cli_spine.py": 1,
 }
 
 #: The no-separator spelling's remainder. Five classes of carrier: (1)
-#: landed/recorded text (changelog, acceptance, perf); (2) the deprecated
-#: console-script alias and its shim target, spread across the sites D1/D2/D5
-#: name -- `test_cli_spine.py`'s nine cover the four-key AC5 arm (2), two
-#: historical measurement citations (D3, quoting a specific past run, never
-#: edited), and the AC6/AC7/AC8 shim-behaviour arms this item creates (5,
-#: each resolving the deprecated script by name to drive it); (3) the on-disk
+#: landed/recorded text (changelog, acceptance, perf); (2) the now-REMOVED
+#: deprecated console-script alias's residue in `test_cli_spine.py` (PDF-58
+#: re-derives this class below -- it no longer covers a live shim, only two
+#: frozen historical measurement citations plus this spec's own two new
+#: mentions of the retired names, see the derivation); (3) the on-disk
 #: residue prefix and its scratch sibling (D6d), plus the PDF-46-introduced
 #: shim-hiding directory prefix this item's Evidence section predates (F5, a
 #: NEW finding -- see the Implementation Log); (4) the frozen corpus/golden
 #: literal that embeds it (`tests/corpus.py`'s AC26 fixture password); (5)
 #: fixture content that is not a reference to the product at all.
 #: `changelog.md` is NOT here -- it is a floor (`CHANGELOG_FLOOR`, above).
+#:
+#: PDF-58 D2/AC17 -- re-derived at this spec's own HEAD.
+#: `src/pdf_tooling/cli/deprecated.py` (was 5) LOSES its row outright: the
+#: whole module is `git rm`-ed and can carry no occurrence again.
+#: `pyproject.toml` (was 2) RE-STATES to 0: the deprecated no-separator key
+#: and its shim-function-name substring inside the hyphenated key's target
+#: are both gone with `[project.scripts]`'s deprecated pair (D7); the row
+#: stays for the same re-admission-guard reason `pyproject.toml` stays in
+#: `UNDERSCORE_REMAINDER` above. `README.md` (was 6) RE-STATES to 3: the
+#: Aliases table row's mention and the retired deprecation-window warning's
+#: two mentions are deleted with the paragraphs D6 replaces (-3); the one
+#: surviving "why the names differ" collision-clause mention (E4) and the
+#: replacement removal statement's and corrected release-history sentence's
+#: one mention each are untouched or newly authored, net -3 overall (6 -> 3).
+#: `tests/test_cli_spine.py` (was 9) RE-STATES to 3: PDF-48's four-key
+#: declaration arm and the AC6/AC7/AC8 shim-behaviour arms this item created
+#: are the seven occurrences PDF-58 removes with the arms themselves (D3);
+#: the two frozen historical measurement citations (D3, quoting a specific
+#: past run, never edited) survive; PDF-58's own replacement absence-probe
+#: arm adds one new mention of the retired no-separator alias name -- net
+#: -7 removed +1 added, 9 -> 3.
+#: DRIVEN RED: delete `tests/test_cli_spine.py`'s one new mention ->
+#: its found count is 2, registry says 3, `_remainder_check` names the drift.
 BARE_REMAINDER: Final[dict[str, int]] = {
     "tests/acceptance/audit_pdf_01.py": 21,
     "tests/acceptance/audit_pdf_03.py": 1,
@@ -385,10 +439,9 @@ BARE_REMAINDER: Final[dict[str, int]] = {
     "tests/acceptance/audit_pdf_09.py": 2,
     "perf/README.md": 1,
     "perf/gate-timings.jsonl": 4,
-    "README.md": 6,
-    "pyproject.toml": 2,
+    "README.md": 3,
+    "pyproject.toml": 0,
     "src/pdf_tooling/__init__.py": 1,
-    "src/pdf_tooling/cli/deprecated.py": 5,
     "src/pdf_tooling/cli/main.py": 1,
     "src/pdf_tooling/ops/procpool.py": 2,
     "src/pdf_tooling/safety/atomic.py": 2,
@@ -404,7 +457,7 @@ BARE_REMAINDER: Final[dict[str, int]] = {
     "tests/integration/test_rasterize_cli.py": 1,
     "tests/integration/test_rasterize_signals.py": 2,
     "tests/integration/test_split_merge_atomicity.py": 2,
-    "tests/test_cli_spine.py": 9,
+    "tests/test_cli_spine.py": 3,
     "tests/test_import_boundaries.py": 5,
     "tests/unit/test_compose.py": 1,
     "tests/unit/test_tempnames.py": 3,

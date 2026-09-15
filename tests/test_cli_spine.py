@@ -1365,11 +1365,13 @@ def test_packaging_declares_the_license_and_its_license_files() -> None:
 
 
 def test_both_console_scripts_point_at_the_same_entry_point() -> None:
-    """PDF-48. The two CANONICAL spellings share one target. The two
-    deprecated spellings do NOT share it any more -- each points at its own
-    shim in `cli/deprecated.py`, which is
-    `test_the_console_script_declarations_are_exactly_the_four_key_shape`'s
-    job to pin."""
+    """PDF-48. The two CANONICAL spellings share one target. Before PDF-58
+    the two deprecated spellings did NOT share it -- each pointed at its own
+    shim in `cli/deprecated.py`. PDF-58 removes both deprecated keys and the
+    module they pointed at, so now there are only the two canonical
+    spellings left to compare, and pinning that is
+    `test_the_console_script_declarations_are_exactly_the_two_key_shape`'s
+    job."""
     project = load_pyproject()["project"]
     assert isinstance(project, dict)
     scripts = project["scripts"]
@@ -1776,26 +1778,25 @@ def test_registered_secrets_are_scrubbed_from_every_log_record() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_console_script_declarations_are_exactly_the_four_key_shape() -> None:
-    """PDF-48 AC5. `[project.scripts]` declares EXACTLY four keys with exactly
-    two distinct targets: the two canonical spellings point at `main`, and the
-    two deprecated spellings point at the two shim entry points. Dropping the
-    deprecated pair before `v1.0.0` is a breaking change to a distribution
-    that is already on PyPI, not a tidy-up folded into a later rename.
+def test_the_console_script_declarations_are_exactly_the_two_key_shape() -> None:
+    """PDF-58 AC1. `[project.scripts]` declares EXACTLY two keys, both pointed
+    at the one canonical target. Renamed and inverted from PDF-48 AC5's
+    `..._exactly_the_four_key_shape`, which pinned the two canonical spellings
+    plus the two now-removed deprecated ones -- dropping the deprecated pair
+    at `v1.0.0` is the breaking change PDF-48 promised and PDF-58 executes,
+    not a tidy-up folded into a later rename.
     """
     project = load_pyproject()["project"]
     assert isinstance(project, dict)
     scripts = project["scripts"]
-    assert set(scripts) == {"pdftooling", "pdf-tooling", "pdftoolkit", "pdf-toolkit"}, (
-        f"[project.scripts] declares {sorted(scripts)}; PDF-48 requires exactly the "
-        "two canonical spellings plus the two deprecated ones, no fewer and no more"
+    assert set(scripts) == {"pdftooling", "pdf-tooling"}, (
+        f"[project.scripts] declares {sorted(scripts)}; PDF-58 requires exactly the "
+        "two canonical spellings, no fewer and no more -- the deprecated pair is gone"
     )
     assert scripts["pdftooling"] == scripts["pdf-tooling"] == "pdf_tooling.cli.main:main"
-    assert set(scripts.values()) == {
-        "pdf_tooling.cli.main:main",
-        "pdf_tooling.cli.deprecated:main_pdftoolkit",
-        "pdf_tooling.cli.deprecated:main_pdf_toolkit",
-    }, f"a deprecated key points directly at `main`, not at its own shim: {scripts}"
+    assert set(scripts.values()) == {"pdf_tooling.cli.main:main"}, (
+        f"more than one target is declared: {scripts}"
+    )
 
 
 def test_the_alias_arms_that_pin_it_still_exist_and_still_run() -> None:
@@ -1829,13 +1830,28 @@ def test_the_import_package_is_now_pdf_tooling() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# PDF-48 D2/AC6/AC7/AC8 -- the two deprecated shims, driven.
+# PDF-58 D3/AC2/AC5/AC6/AC7 -- the two deprecated shims, REMOVED, driven.
+#
+# PDF-48 D2/AC6/AC7/AC8 shipped this section to prove the two deprecated
+# shims behaved identically to the canonical scripts during the deprecation
+# window. PDF-58 closes that window: `test_ac6_the_deprecated_alias_
+# produces_byte_identical_stdout` and `test_ac7_the_deprecated_alias_
+# matches_exit_codes_on_a_non_zero_case` tested BEHAVIOUR a shim no longer
+# has, so there is nothing left for either to invert INTO -- both are
+# replaced by the one absence arm below (D3's own "INVERTED (below)"
+# disposition for both rows) plus a dedicated three-way module-absence arm
+# for AC2. `pytest.skip` is forbidden in every arm here (AC6): the two
+# skips this section used to carry (naming the deprecated alias by name and
+# pointing at `uv sync`, twice) are REMOVED, not re-pointed -- an arm that
+# cannot answer FAILS and names why, per D3.
 # --------------------------------------------------------------------------- #
 
 
 def _deprecated_alias_path(name: str) -> Path | None:
-    """Resolve one of the two deprecated console scripts, mirroring
-    `console_script()`'s own venv-sibling-first order."""
+    """Resolve one of the two now-removed deprecated console scripts, mirroring
+    `console_script()`'s own venv-sibling-first order. KEPT and REPURPOSED by
+    PDF-58 as the absence prober below: deleting it would delete the only
+    construct that can see a stale binary left over from before the removal."""
     sibling = Path(sys.executable).parent / name
     if sibling.exists():
         return sibling
@@ -1843,90 +1859,84 @@ def _deprecated_alias_path(name: str) -> Path | None:
     return Path(found) if found else None
 
 
-@pytest.mark.e2e
-def test_ac6_the_deprecated_alias_produces_byte_identical_stdout() -> None:
-    """AC6. Byte-equality, never a substring check, over a SUCCESS path and a
-    USAGE-ERROR path, plus a `json.loads` proof the payload parses. The
-    deprecation notice is asserted present on stderr and ABSENT from stdout."""
-    alias = _deprecated_alias_path("pdftoolkit")
-    if alias is None:
-        pytest.skip("no `pdftoolkit` deprecated shim resolved; run `uv sync`.")
-    primary = console_script()
-
-    for args in (("version", "-o", "json"), ("meta", "bogus", "-o", "json")):
-        canonical = subprocess.run(
-            [*primary, *args], capture_output=True, text=True, check=False, cwd=REPO_ROOT
-        )
-        aliased = subprocess.run(
-            [str(alias), *args], capture_output=True, text=True, check=False, cwd=REPO_ROOT
-        )
-        assert aliased.stdout == canonical.stdout, (
-            f"{args}: alias stdout diverges from the canonical script byte-for-byte"
-        )
-        assert aliased.returncode == canonical.returncode, args
-        json.loads(aliased.stdout)  # must parse; a notice leaking onto stdout breaks this
-        assert "deprecated" in aliased.stderr and "pdftooling" in aliased.stderr, (
-            f"{args}: the deprecation notice is missing from the alias's stderr"
-        )
-        assert "deprecated" not in aliased.stdout, (
-            f"{args}: the deprecation notice leaked onto stdout"
-        )
-
-
-@pytest.mark.e2e
-def test_ac7_the_deprecated_alias_matches_exit_codes_on_a_non_zero_case() -> None:
-    """AC7. Exit-code equivalence asserted over BOTH a success path and a
-    usage-error (exit 2) path -- a shim ending `sys.exit(0)` would pass a
-    success-only test and is exactly what this criterion exists to catch."""
-    alias = _deprecated_alias_path("pdftoolkit")
-    if alias is None:
-        pytest.skip("no `pdftoolkit` deprecated shim resolved; run `uv sync`.")
-    primary = console_script()
-
-    success = subprocess.run(
-        [str(alias), "version"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
+def test_the_deprecated_console_scripts_are_absent_from_the_environment() -> None:
+    """PDF-58 AC5. Absence, with a POSITIVE CONTROL FIRST. An arm that only
+    asserts absence passes against a venv that was never built, a PATH that
+    resolves nothing, and a helper that returns None for the wrong reason."""
+    assert _deprecated_alias_path("pdftooling") is not None, (
+        "the CANONICAL script does not resolve either -- this environment is "
+        "stale or unbuilt, and an absence assertion over it proves nothing. "
+        "Run `uv sync --reinstall`. This arm does NOT skip."
     )
-    assert success.returncode == 0
+    for name in ("pdftoolkit", "pdf-toolkit"):
+        assert _deprecated_alias_path(name) is None, f"{name} still resolves"
 
-    canonical_usage = subprocess.run(
-        [*primary, "meta", "bogus"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
-    )
-    aliased_usage = subprocess.run(
-        [str(alias), "meta", "bogus"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
-    )
-    assert canonical_usage.returncode == 2, "the recorded measurement this criterion pins"
-    assert aliased_usage.returncode == canonical_usage.returncode == 2, (
-        f"alias usage-error exit {aliased_usage.returncode} != "
-        f"canonical {canonical_usage.returncode}"
+
+def test_the_deprecated_shim_module_is_removed_three_ways() -> None:
+    """PDF-58 AC2. `src/pdf_tooling/cli/deprecated.py` is removed with
+    `git rm`, and its absence is asserted three ways: the file does not
+    exist, `importlib.util.find_spec` cannot find it, and no module under
+    `src/` imports it. Three, because the first alone passes over a stale
+    `__pycache__` and the second alone passes over an uninstalled package."""
+    module_path = REPO_ROOT / "src" / "pdf_tooling" / "cli" / "deprecated.py"
+    assert not module_path.exists(), f"{module_path} still exists"
+
+    import importlib.util
+
+    assert importlib.util.find_spec("pdf_tooling.cli.deprecated") is None, (
+        "pdf_tooling.cli.deprecated still resolves as an importable module"
     )
 
+    importers = [
+        str(path.relative_to(REPO_ROOT))
+        for path in (REPO_ROOT / "src").rglob("*.py")
+        if "cli.deprecated" in path.read_text(encoding="utf-8")
+        or "cli/deprecated" in path.read_text(encoding="utf-8")
+    ]
+    assert not importers, f"still referenced under src/: {importers}"
 
-def test_ac8_the_deprecation_window_is_stated_in_all_four_machine_read_places() -> None:
-    """AC8. `v1.0.0` as the removal version, in a place a machine reads, in
-    all four of: the `[project.scripts]` comment, `cli/deprecated.py`'s
-    module docstring, the notice text itself, and README's Aliases row."""
+
+def test_ac6_no_inverted_deprecated_shim_arm_can_skip() -> None:
+    """PDF-58 AC6. `pytest.skip` appears in neither replacement arm's source
+    span. A skipped arm is never agreement (`scripts/assert_skips.py:58`-
+    `:66`) -- if either arm cannot answer it must FAIL and name why, never
+    skip. Scoped to the two arms' own spans, not the whole file: this
+    module's section header comment quotes PDF-48's retired skip reason
+    text for the historical record (prose, not a call), and a whole-file
+    scan would also match this very assertion's own literal describing what
+    it looks for -- the self-reference `test_brand_surfaces.py`'s module
+    docstring warns about, in a different file's clothing."""
+    spine = Path(__file__).read_text()
+    for name in (
+        "test_the_deprecated_console_scripts_are_absent_from_the_environment",
+        "test_the_deprecated_shim_module_is_removed_three_ways",
+    ):
+        start = spine.index(f"def {name}(")
+        end = spine.index("\n\n\ndef ", start)
+        span = spine[start:end]
+        assert "pytest.skip" not in span, f"{name} contains a forbidden pytest.skip"
+
+
+def test_pdf58_the_deprecation_removal_sites_are_gone_from_the_three_code_places() -> None:
+    """PDF-48 AC8, INVERTED by PDF-58. Three of the four sites PDF-48's
+    `test_ac8_the_deprecation_window_is_stated_in_all_four_machine_read_
+    places` pinned no longer exist as of this removal: the
+    `[project.scripts]` block's own two-line deprecation comment, the
+    `cli/deprecated.py` module (and its docstring and notice text with it).
+    The fourth (README naming `v1.0.0` as the removal release) is Signal 2's
+    own arm's job in `tests/test_docs_antirot.py`, not re-asserted here --
+    two instruments pinning one proposition in two places is how they
+    drift (AC13's own rule)."""
     pyproject_text = (REPO_ROOT / "pyproject.toml").read_text()
-    deprecated_text = (REPO_ROOT / "src" / "pdf_tooling" / "cli" / "deprecated.py").read_text()
-    readme_text = (REPO_ROOT / "README.md").read_text()
-
-    assert "v1.0.0" in pyproject_text.split("[project.scripts]", 1)[1].split("\n\n", 1)[0], (
-        "the [project.scripts] block's comment does not name v1.0.0"
+    scripts_block = pyproject_text.split("[project.scripts]", 1)[1].split("\n\n", 1)[0]
+    assert "v1.0.0" not in scripts_block, (
+        "[project.scripts]'s deprecation comment naming v1.0.0 is still present; "
+        "PDF-58 removes it along with the two deprecated keys"
     )
-    assert "v1.0.0" in deprecated_text, "cli/deprecated.py's module docstring does not name v1.0.0"
-
-    notice = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from pdf_tooling.cli.deprecated import _notice; _notice('pdftoolkit')",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=REPO_ROOT,
+    assert not (REPO_ROOT / "src" / "pdf_tooling" / "cli" / "deprecated.py").exists(), (
+        "cli/deprecated.py still exists; its module docstring and notice text named "
+        "v1.0.0 as the removal release and the whole module is removed by PDF-58"
     )
-    assert "v1.0.0" in notice.stderr, f"the notice text does not name v1.0.0: {notice.stderr!r}"
-    assert "v1.0.0" in readme_text, "README does not name v1.0.0 anywhere (the Aliases row)"
 
 
 def test_the_corpus_and_golden_name_strings_are_byte_identical() -> None:

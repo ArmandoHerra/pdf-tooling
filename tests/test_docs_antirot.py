@@ -1801,3 +1801,109 @@ def test_the_naming_section_records_which_release_was_first_on_pypi() -> None:
     assert "git-install-only" in body
     assert "v0.1.1" in body and "first published release" in body
     assert "v0.2.0" in body
+
+
+# --------------------------------------------------------------------------- #
+# PDF-58 Signal 2/Signal 3 -- `## Naming` says ONE removal release for the
+# now-deleted console scripts, and never revives the old import package's
+# retired spelling as a live claim.
+#
+# `_OLD_IMPORT_SPELLING` is assembled, never spelled whole, for the same
+# reason `tests/test_brand_surfaces.py` and `tests/test_rename_completeness.
+# py` assemble theirs: a literal here would inflate the very `tests/`
+# population those two modules' frozen censuses measure.
+# --------------------------------------------------------------------------- #
+
+_OLD_IMPORT_SPELLING: Final[str] = "pdf" + "_toolkit"
+
+#: AC8. Phrases that claim the deprecated console scripts still work. At
+#: least one of these matched the pre-PDF-58 section (the self-contradiction,
+#: B-281); none may match after.
+SURVIVAL_CLAIM_PATTERNS: Final[tuple[str, ...]] = (
+    "remain installed",
+    "fully functional",
+    "through `v1.0.0`",
+    "until `v1.0.0`",
+    "remain until",
+)
+
+#: AC12. Pairing the OLD import-package spelling with any of these in one
+#: sentence is a false claim -- `PDF-48` renamed that package outright; it
+#: does not exist "deprecated behind" anything, and raises
+#: `ModuleNotFoundError` today. Naming it as HISTORY (renamed/removed/moved)
+#: is permitted and is the expected end state.
+_AVAILABILITY_CLAIM_WORDS: Final[tuple[str, ...]] = (
+    "deprecated",
+    "behind it",
+    "still works",
+    "available",
+    "supported",
+)
+
+#: AC9. A release token, `vN.N.N`.
+_VERSION_TOKEN_RE: Final = re.compile(r"v\d+\.\d+\.\d+")
+#: AC9. A removal verb, case-insensitive.
+_REMOVAL_VERB_RE: Final = re.compile(r"removed|removal|dropped|no longer", re.IGNORECASE)
+
+
+def test_the_naming_section_states_no_survival_claim_for_the_deprecated_scripts() -> None:
+    """PDF-58 AC8. `## Naming`, extracted by heading boundary (never by line
+    number -- four specs edit this file across three waves), never claims
+    the deprecated console scripts still work. RED, free and pre-existing,
+    against the pre-removal section (`git show <base>:README.md`) -- it
+    quotes `remain installed and fully functional through \\`v1.0.0\\``.
+    Recorded verbatim in the Implementation Log."""
+    body = naming_section()
+    hits = [pattern for pattern in SURVIVAL_CLAIM_PATTERNS if pattern in body]
+    assert not hits, (
+        f"README.md's ## Naming section still claims the deprecated console scripts survive: {hits}"
+    )
+
+
+def test_the_naming_section_names_exactly_one_removal_release() -> None:
+    """PDF-58 AC9. Sentence-scoped over `## Naming`: the set of version
+    tokens co-occurring with a removal verb has EXACTLY one member, and the
+    section states AT LEAST one such sentence. The at-least-one half is the
+    anti-vacuity half -- a section that simply stops mentioning the old
+    names would pass a "no contradiction" check and leave a reader with the
+    deprecated scripts on PATH nothing to read about when they went."""
+    body = naming_section()
+    sentences = re.split(r"(?<=[.!?])\s+", body)
+    tokens: set[str] = set()
+    for sentence in sentences:
+        found = _VERSION_TOKEN_RE.findall(sentence)
+        if found and _REMOVAL_VERB_RE.search(sentence):
+            tokens.update(found)
+    assert tokens, (
+        "## Naming carries no sentence pairing a version token with a removal "
+        "verb -- a reader with the deprecated scripts on PATH has nothing "
+        "telling them when they went"
+    )
+    assert len(tokens) == 1, (
+        f"## Naming names {sorted(tokens)} as removal releases for the "
+        "deprecated console scripts; exactly one is required"
+    )
+
+
+def test_no_naming_sentence_pairs_the_old_import_package_with_an_availability_claim() -> None:
+    """PDF-58 AC12. The OLD import-package spelling (renamed outright at
+    `PDF-48`; `ModuleNotFoundError` today) may be named as HISTORY in
+    `## Naming` -- renamed, removed, moved -- but never paired with a word
+    that claims it is still around. A count-based check is explicitly
+    wrong here (unlike AC8's): the corrected sentence legitimately keeps
+    the old spelling once, as history, so "zero occurrences" would force
+    the true sentence out. RED, free and pre-existing, against the
+    pre-removal section -- it pairs the old spelling with "deprecated
+    behind it"."""
+    body = naming_section()
+    sentences = re.split(r"(?<=[.!?])\s+", body)
+    offenders = [
+        sentence.strip()
+        for sentence in sentences
+        if _OLD_IMPORT_SPELLING in sentence
+        and any(word in sentence.lower() for word in _AVAILABILITY_CLAIM_WORDS)
+    ]
+    assert not offenders, (
+        f"## Naming pairs the old import package's retired spelling with an "
+        f"availability/deprecation claim: {offenders}"
+    )

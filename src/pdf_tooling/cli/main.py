@@ -73,9 +73,10 @@ from pdf_tooling.cli.exit_codes import OK, USAGE
 from pdf_tooling.errors import FailureError, PdfToolingError, UsageError
 from pdf_tooling.output import OutputFormat, emit_error
 
-#: Pinned so that ``pdftooling``, ``pdf-tooling``, the deprecated
-#: ``pdftoolkit``/``pdf-toolkit`` aliases, and ``python -m pdf_tooling`` all
-#: print byte-identical help instead of five different usage lines.
+#: Pinned so that ``pdftooling``, ``pdf-tooling``, and ``python -m pdf_tooling``
+#: all print byte-identical help instead of three different usage lines. The
+#: deprecated ``pdftoolkit``/``pdf-toolkit`` aliases (`PDF-48`) were removed at
+#: `PDF-58`; they used to be part of this same pin.
 PROG_NAME = "pdftooling"
 
 HELP = """One safe command-line tool for the common PDF chores.
