@@ -140,7 +140,7 @@ Failures that are properties of the invocation rather than of an input stay run-
 - a published key's **type** changes — including `[]` becoming `null`, or a scalar becoming an object;
 - a published key's **meaning** changes while its name and type stay the same.
 
-An increment is **coupled to a major version bump**; they move together or not at all.
+An increment **requires a major version bump**; a major version bump does not require an increment.
 
 The structured shapes and the exit-code table below are **public API from v1.0.0**. Breaking either requires a major version bump and a `schema_version` increment. Pre-1.0 releases are explicitly still moving.
 

@@ -1907,3 +1907,230 @@ def test_no_naming_sentence_pairs_the_old_import_package_with_an_availability_cl
         f"## Naming pairs the old import package's retired spelling with an "
         f"availability/deprecation claim: {offenders}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-61 D5 -- the coupling is guarded, not merely corrected.
+#
+# README.md:144 stated the schema_version <-> major-version coupling as a
+# biconditional ("together or not at all"); OR-14 rules it one-way (D0). The
+# defect had a second, unnamed copy in this suite's own module docstring
+# (E3, tests/test_envelope_contract.py:42-43). This guard reads exactly two
+# named texts -- located by heading anchor and by module docstring, never by
+# line number (X-411: coordinates rot) -- and never sweeps a document.
+# --------------------------------------------------------------------------- #
+
+#: D5 assertion 1's anchor. Occurs exactly once in README.md; the section it
+#: opens runs to the NEXT `## ` heading (`## Exit codes`), the same bounding
+#: rule `_known_issues_body_of` above uses for its own `## ` heading.
+SCHEMA_VERSION_SECTION_HEADING = "### `schema_version` is `1`, and this is what would move it"
+
+
+def _schema_version_section_body_of(text: str) -> str:
+    """*text*'s `schema_version` section, bounded by the NEXT `## ` heading.
+
+    Mirrors `_known_issues_body_of`'s slicing exactly. Whether the anchor
+    occurs exactly once is checked SEPARATELY
+    (`test_pdf61_the_schema_version_section_anchor_occurs_exactly_once`)
+    rather than folded in here, which would silently return the wrong span
+    on a duplicate instead of failing.
+    """
+    after = text.split(SCHEMA_VERSION_SECTION_HEADING, 1)[1]
+    return after.split("\n## ", 1)[0]
+
+
+def schema_version_section_body() -> str:
+    return _schema_version_section_body_of(read("README.md"))
+
+
+def envelope_contract_module_docstring() -> str:
+    """`tests/test_envelope_contract.py`'s own module docstring, read through
+    the module OBJECT rather than re-parsed from source, so this guard and
+    the module it watches can never disagree about where the docstring
+    starts and ends."""
+    module = _tests_module("test_envelope_contract")
+    assert module.__doc__, "test_envelope_contract.py lost its module docstring"
+    return module.__doc__
+
+
+#: D5.4's positive control -- the pre-fix `README.md:144` text, verbatim,
+#: frozen as a historical literal fixture inside this test rather than
+#: re-read from the file, so it can never itself go stale the way E1's
+#: handed coordinate did.
+PDF61_PRE_FIX_COUPLING_LITERAL = (
+    "An increment is **coupled to a major version bump**; they move together or not at all."
+)
+
+#: The second, unnamed copy (E3) -- `tests/test_envelope_contract.py:42-43`'s
+#: pre-fix docstring clause, frozen the same way.
+PDF61_PRE_FIX_DOCSTRING_LITERAL = (
+    "An increment is coupled to a major version bump and the two move together or not at all."
+)
+
+#: D5's synthetic third fixture. E1/E3's census of both pre-fix texts is
+#: exhaustive, and neither one ever used "iff" / "if and only if" / "both or
+#: neither" wording, so the third paraphrase pattern below needs its own
+#: representative fixture to prove it can fire at all (AC9). Invented, and
+#: named as such -- never presented as something either shipped text said.
+PDF61_SYNTHETIC_IFF_PARAPHRASE = "schema_version increments if and only if the major version bumps."
+
+#: D5.3 -- at least three paraphrase patterns, not one literal. The B-106
+#: lesson, stated inside its own fix: a guard that answers "is this STRING
+#: gone" rather than "is this CLAIM gone" is the failure mode this spec
+#: exists to avoid repeating.
+PDF61_BICONDITIONAL_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"together or not at all", re.IGNORECASE),
+    re.compile(r"\bmoves?\s+together\b", re.IGNORECASE),
+    re.compile(r"\biff\b|\bif and only if\b|\bboth or neither\b", re.IGNORECASE),
+)
+
+#: D1's repair: the one-way implication, stated, with its converse EXPLICITLY
+#: denied. Matches both the bold README wording and the plain-text docstring
+#: wording -- `\**` allows, but does not require, the markdown asterisks.
+PDF61_ONE_WAY_REQUIRES_PATTERN = re.compile(
+    r"an increment\s+\**requires\**\s+a major version bump", re.IGNORECASE
+)
+PDF61_ONE_WAY_CONVERSE_DENIAL_PATTERN = re.compile(
+    r"a major version bump does not require an increment", re.IGNORECASE
+)
+
+
+def test_pdf61_the_schema_version_section_anchor_occurs_exactly_once() -> None:
+    """D5 assertion 1. An anchor that matches nothing -- or matches twice --
+    is a guard that guards nothing, so a heading rename is a hard failure
+    here, never a silent skip."""
+    count = read("README.md").count(SCHEMA_VERSION_SECTION_HEADING)
+    assert count == 1, (
+        f"README.md carries the schema_version section heading {count} time(s), expected exactly 1"
+    )
+
+
+def test_pdf61_the_anchor_check_fails_rather_than_skips_if_the_heading_changes() -> None:
+    """AC8's anchor RED, on a scratch copy -- never the real README.md.
+    Altering the heading must fail the anchor-count assertion rather than
+    silently reporting zero hits as a skip."""
+    real = read("README.md")
+    altered = real.replace(SCHEMA_VERSION_SECTION_HEADING, "### schema_version is 1, renamed")
+    assert altered != real, "the scratch mutation did not fire"
+    assert altered.count(SCHEMA_VERSION_SECTION_HEADING) == 0
+
+
+def test_pdf61_the_trigger_enumeration_still_has_exactly_four_items() -> None:
+    """AC10. D5 assertion 2, derived from inside the located span, never
+    typed. OR-14's own grounds are "the README enumerates exactly what moves
+    it ... and none applies this cycle" -- a fifth trigger appearing
+    silently would change the premise the ruling rests on. Measured at
+    `89a4f1d`: 4."""
+    bullets = re.findall(r"^- a published key", schema_version_section_body(), re.MULTILINE)
+    assert len(bullets) == 4, (
+        f"the trigger enumeration carries {len(bullets)} items, expected "
+        "exactly 4 (OR-14's own grounds); a change here changes the premise "
+        "the ruling rests on"
+    )
+
+
+def test_pdf61_the_trigger_enumeration_count_can_fail() -> None:
+    """AC10's RED, on a scratch copy of the located span -- never the real
+    README.md."""
+    real_body = schema_version_section_body()
+    poisoned = real_body.replace(
+        "- a published key's **meaning** changes while its name and type stay the same.",
+        "- a published key's **meaning** changes while its name and type "
+        "stay the same.\n- a published key gains a fifth trigger nobody named.",
+    )
+    assert poisoned != real_body, "the scratch mutation did not fire"
+    bullets = re.findall(r"^- a published key", poisoned, re.MULTILINE)
+    assert len(bullets) == 5
+
+
+def test_pdf61_the_biconditional_patterns_match_the_prefix_sentence() -> None:
+    """AC9. The defect's own text is the free positive control for the first
+    two paraphrase patterns -- a pattern set that cannot match the actual
+    shipped defect is a guard that guards nothing (B-106). Neither shipped
+    text ever used "iff" / "both or neither" wording (E1/E3's census is
+    exhaustive), so the third pattern is proven able to fire against an
+    invented, clearly-labelled synthetic fixture instead of text it never
+    matched."""
+    literal_pattern, moves_together_pattern, iff_pattern = PDF61_BICONDITIONAL_PATTERNS
+
+    assert literal_pattern.search(PDF61_PRE_FIX_COUPLING_LITERAL)
+    assert literal_pattern.search(PDF61_PRE_FIX_DOCSTRING_LITERAL)
+    assert moves_together_pattern.search(PDF61_PRE_FIX_COUPLING_LITERAL)
+    assert moves_together_pattern.search(PDF61_PRE_FIX_DOCSTRING_LITERAL)
+    assert iff_pattern.search(PDF61_SYNTHETIC_IFF_PARAPHRASE), (
+        "the iff/both-or-neither pattern must fire on its own synthetic "
+        "fixture, or it is a pattern that guards nothing"
+    )
+
+    # AC9's second RED direction: a pattern broad enough to ALSO match the
+    # REPAIRED sentence would fail the clean-section assertion below --
+    # asserted here directly rather than merely trusted from that test's
+    # own green.
+    repaired = normalise(schema_version_section_body())
+    for pattern in PDF61_BICONDITIONAL_PATTERNS:
+        assert pattern.search(repaired) is None, (
+            f"pattern {pattern.pattern!r} matches the REPAIRED section; a "
+            "pattern broad enough to do that fails the clean-section "
+            "assertion below"
+        )
+
+
+def test_pdf61_the_readme_states_the_coupling_in_one_direction_only() -> None:
+    """AC8. Locates the section by its heading anchor, asserts the one-way
+    sentence is present with its converse explicitly denied, and asserts no
+    biconditional paraphrase appears -- over the README section AND
+    `tests/test_envelope_contract.py`'s module docstring, the second named
+    copy of the same defect (E3)."""
+    assert read("README.md").count(SCHEMA_VERSION_SECTION_HEADING) == 1
+
+    texts = (
+        ("README.md's schema_version section", schema_version_section_body()),
+        ("test_envelope_contract.py's module docstring", envelope_contract_module_docstring()),
+    )
+    for label, body in texts:
+        normalised = normalise(body)
+        assert PDF61_ONE_WAY_REQUIRES_PATTERN.search(normalised), (
+            f"{label} no longer states the one-way requires-clause"
+        )
+        assert PDF61_ONE_WAY_CONVERSE_DENIAL_PATTERN.search(normalised), (
+            f"{label} states the requires-clause but not the explicit "
+            "converse denial -- a reader who has just read the public-API "
+            "sentence will otherwise supply the converse themselves, which "
+            "is how this defect was born"
+        )
+        for pattern in PDF61_BICONDITIONAL_PATTERNS:
+            match = pattern.search(normalised)
+            assert match is None, (
+                f"{label} still carries a biconditional paraphrase "
+                f"({match.group(0)!r}); OR-14 reads the coupling as a "
+                "one-way implication"
+            )
+
+
+def test_pdf61_the_one_way_guard_fails_if_the_biconditional_reappears() -> None:
+    """AC8's RED, on scratch copies -- never the real README.md or
+    `tests/test_envelope_contract.py`. Reintroducing the pre-fix clause into
+    either text must be caught by at least one biconditional pattern."""
+    real_readme_body = schema_version_section_body()
+    poisoned_readme = real_readme_body.replace(
+        "An increment **requires a major version bump**; a major version "
+        "bump does not require an increment.",
+        PDF61_PRE_FIX_COUPLING_LITERAL,
+    )
+    assert poisoned_readme != real_readme_body, "the scratch mutation did not fire"
+    assert any(p.search(normalise(poisoned_readme)) for p in PDF61_BICONDITIONAL_PATTERNS), (
+        "reintroducing the pre-fix clause into a scratch copy of the README "
+        "section must be caught by at least one biconditional pattern"
+    )
+
+    real_docstring = envelope_contract_module_docstring()
+    poisoned_docstring = real_docstring.replace(
+        "An increment requires a\nmajor version bump; a major version bump "
+        "does not require an increment.",
+        PDF61_PRE_FIX_DOCSTRING_LITERAL,
+    )
+    assert poisoned_docstring != real_docstring, "the scratch mutation did not fire"
+    assert any(p.search(normalise(poisoned_docstring)) for p in PDF61_BICONDITIONAL_PATTERNS), (
+        "reintroducing the pre-fix clause into a scratch copy of the "
+        "docstring must be caught by at least one biconditional pattern"
+    )

@@ -38,8 +38,8 @@ is exactly four things: a published key is **renamed**; a published key is
 **removed**; a published key's **type** changes (including ``[]`` -> ``null``,
 or scalar -> object); or a published key's **meaning** changes while its name
 and type stay the same. **Adding a key never triggers it.** Adding a verb, an
-item field or an output format never triggers it. An increment is coupled to a
-major version bump and the two move together or not at all.
+item field or an output format never triggers it. An increment requires a
+major version bump; a major version bump does not require an increment.
 
 The first three are mechanical, via :data:`REGISTER_PATH`: it freezes, per
 invocable leaf, the sorted top-level ``-o json`` key set and the sorted key
@@ -124,6 +124,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
+import pdf_tooling  # noqa: E402 -- PDF-61 D2/D3: __version__ and _UNKNOWN_VERSION
 from pdf_tooling.adapters.pypdf_structure import _PERMISSION_BITS  # noqa: E402
 from pdf_tooling.errors import PdfToolingError as _BASE_ERROR  # noqa: E402
 from pdf_tooling.models import SCHEMA_VERSION  # noqa: E402
@@ -1864,3 +1865,194 @@ def test_ac20_the_four_members_have_four_independent_criteria() -> None:
     assert len(set(headline.values())) == 4, "two members share a criterion"
     for member, name in headline.items():
         assert name in globals(), f"{member}'s headline criterion {name!r} does not exist"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-61 D2 -- the schema_version <-> major-version relation, mechanised.
+#
+# `README.md`'s repaired `:144` states the coupling in one direction: an
+# increment REQUIRES a major version bump; a major version bump does not
+# require an increment. Nothing before this spec related the two values in
+# code (E4) -- `test_ac17_the_schema_version_is_still_one` above is a
+# constant-to-constant pin about ONE of them. This section adds the relation
+# that pin does not carry.
+# --------------------------------------------------------------------------- #
+
+_MAJOR_VERSION_RE: Final = re.compile(r"^(\d+)")
+
+
+def major_version(version: str) -> int:
+    """The leading integer run of *version* (D2), parsed with the standard
+    library. Q5: no `packaging` import -- an unparseable version is a
+    failure, never a default."""
+    match = _MAJOR_VERSION_RE.match(version)
+    if match is None:
+        raise ValueError(f"cannot parse a major version out of {version!r}")
+    return int(match.group(1))
+
+
+def schema_version_is_bounded_by_major(schema_version: int, version: str) -> bool:
+    """D2's relation: ``SCHEMA_VERSION <= max(major(version), 1)``.
+
+    Monotone, never an equality (X-703): an equality is RED on landing at
+    `0.3.1`, and an engineer would "fix" a red-on-landing assertion by
+    bumping the version, which X-703 forbids and which would ship an
+    untagged `1.0.0`. The `max(., 1)` floor is the pre-1.0 clause made
+    mechanical: while the major is `0`, `schema_version` must be `1`.
+    """
+    return schema_version <= max(major_version(version), 1)
+
+
+#: D2's truth table, verbatim. Every cell is driven below (AC4) -- the three
+#: GREEN rows that prove the implication is one-way and the three RED rows
+#: that prove it bites.
+PDF61_TRUTH_TABLE: Final[tuple[tuple[int, str, bool, str], ...]] = (
+    (1, "0.3.1", True, "the free pre-1.0 window; OR-14"),
+    (1, "1.0.0", True, "the one-way reading; no test edit between this row and the one above"),
+    (1, "2.0.0", True, "this row is the one-way implication -- a biconditional would redden here"),
+    (2, "0.3.1", False, "an increment with no major bump to carry it"),
+    (2, "1.0.0", False, "the failure this item exists to prevent"),
+    (2, "2.0.0", True, "the sanctioned path -- the PM approved it and the major moved with it"),
+    (3, "2.0.0", False, "increments may not outrun majors"),
+)
+
+
+@pytest.mark.parametrize(
+    ("schema_version", "version", "expected", "why"),
+    PDF61_TRUTH_TABLE,
+    ids=[f"schema_version={row[0]}-version={row[1]}" for row in PDF61_TRUTH_TABLE],
+)
+def test_pdf61_the_relation_truth_table_is_driven_in_both_directions(
+    schema_version: int, version: str, expected: bool, why: str
+) -> None:
+    """AC4. Every row of D2's table. This is the criterion that grades the
+    relation itself -- a relation written too permissively or too strictly
+    fails one of the rows below rather than merely "looking plausible"."""
+    assert schema_version_is_bounded_by_major(schema_version, version) is expected, why
+
+
+def test_pdf61_the_relation_is_too_permissive_when_it_rides_on_schema_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC4(a)'s RED. `monkeypatch` swaps in a weakened relation for the
+    duration of this test only, auto-restored on teardown -- the same
+    reasoning `tests/test_cli_contract.py`'s AC10 proof states for why "a
+    manual delete/observe/restore is not needed" when a fixture can drive
+    the same red safely. Weakening the floor to `max(major, schema_version)`
+    lets an increment ride along with ITSELF instead of the major version,
+    so the two RED cells this item exists to catch stop being red."""
+
+    def too_permissive(schema_version: int, version: str) -> bool:
+        return schema_version <= max(major_version(version), schema_version)
+
+    monkeypatch.setattr(sys.modules[__name__], "schema_version_is_bounded_by_major", too_permissive)
+    assert schema_version_is_bounded_by_major(2, "0.3.1") is True, (
+        "the too-permissive mutation must flip this RED cell to green, or "
+        "this control proves nothing about the relation it stands in for"
+    )
+    assert schema_version_is_bounded_by_major(2, "1.0.0") is True, (
+        "the too-permissive mutation must flip this RED cell to green, or "
+        "this control proves nothing about the relation it stands in for"
+    )
+
+
+def test_pdf61_the_relation_is_too_strict_when_it_demands_equality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC4(b)'s RED. Tightening to `== max(major, 1)` demands equality, so
+    the GREEN cell that proves the implication is one-way -- `(1, "2.0.0")`,
+    a later major shipping with no increment -- stops being green."""
+
+    def too_strict(schema_version: int, version: str) -> bool:
+        return schema_version == max(major_version(version), 1)
+
+    monkeypatch.setattr(sys.modules[__name__], "schema_version_is_bounded_by_major", too_strict)
+    assert schema_version_is_bounded_by_major(1, "2.0.0") is False, (
+        "the too-strict mutation must flip this GREEN cell to red, or this "
+        "control proves nothing about the relation it stands in for"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-61 D3 -- the live arm. Vacuous TODAY while SCHEMA_VERSION == 1 (every
+# version string satisfies `1 <= max(major, 1)`), so its value is prospective
+# -- it fires the moment an increment ships with no major bump to carry it.
+# A prospective assertion nobody has ever seen fire is the B-080 tautology
+# family; three counter-measures carry it (D3): the truth-table arms above
+# grade the relation itself, AC5's one-time plant (recorded in this spec's
+# Implementation Log, per AC20's own "a mutation cannot be a standing test"
+# reasoning above) shows this exact arm CAN fail, and the no-literal rule
+# below proves it reads live values rather than a constant.
+# --------------------------------------------------------------------------- #
+
+
+def test_pdf61_the_schema_version_never_runs_ahead_of_the_major_version() -> None:
+    """AC5/AC6/AC7. Reads `models.SCHEMA_VERSION` and `pdf_tooling.__version__`
+    AT CALL TIME and applies D2's relation to them. No version literal
+    appears below (AC6) -- the truth-table cells above are data for the
+    HELPER, never for this arm, so a future editor cannot satisfy it with a
+    constant; `test_pdf61_the_live_arm_contains_no_version_literal` proves
+    that by reading this function's own source.
+
+    The anti-lapse rule (D3): if `__version__` resolves to
+    `pdf_tooling._UNKNOWN_VERSION`, the distribution is not installed and the
+    version half of the relation was not measured -- fail-safe for
+    correctness (E4: that under-reads the major, never over-reads it) and
+    still not a pass (X-153): a control that cannot be run is visible as
+    skipped, never silently absent. `make ci` installs the distribution, so
+    a skip here in CI is a finding, not an expected outcome.
+    """
+    live_version = pdf_tooling.__version__
+    if live_version == pdf_tooling._UNKNOWN_VERSION:
+        pytest.skip(
+            f"pdf_tooling.__version__ resolved to the sentinel {live_version!r}; "
+            "the distribution is not installed, so the version half of D2's "
+            "relation was not measured."
+        )
+    assert schema_version_is_bounded_by_major(SCHEMA_VERSION, live_version), (
+        f"SCHEMA_VERSION={SCHEMA_VERSION} outruns the major version of "
+        f"__version__={live_version!r}; an increment requires a major "
+        f"version bump, and this one shipped without it (OR-14)."
+    )
+
+
+def test_pdf61_the_live_arm_contains_no_version_literal() -> None:
+    """AC6's no-literal rule, read rather than trusted: the live arm's own
+    source is scanned for a bare semver-shaped string literal.
+    `pdf_tooling._UNKNOWN_VERSION` is referenced by NAME above, never
+    retyped, so that reference does not trip this check; a future editor
+    who hard-codes e.g. `"0.3.1"` anywhere in the arm does."""
+    source = inspect.getsource(test_pdf61_the_schema_version_never_runs_ahead_of_the_major_version)
+    literal = re.search(r"[\"']\d+\.\d+(?:\.\d+)?[\"']", source)
+    assert literal is None, (
+        f"the live arm hard-codes a version literal ({literal.group(0)!r}); "
+        "the truth-table cells above are data for the helper, never for "
+        "this arm"
+    )
+
+
+def test_pdf61_the_anti_lapse_arm_skips_rather_than_passes_when_unmeasured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC7, driven. Monkeypatches the resolution path `pdf_tooling.
+    __getattr__` reads (`importlib.metadata.version`) to the
+    `PackageNotFoundError` it raises when the distribution is not installed,
+    then directly RE-INVOKES the live arm above -- the same function, not a
+    re-implementation of its guard, so the two can never quietly disagree
+    about what "unmeasured" means."""
+    from importlib.metadata import PackageNotFoundError
+
+    def _not_installed(distribution: str) -> str:
+        raise PackageNotFoundError(distribution)
+
+    monkeypatch.setattr("importlib.metadata.version", _not_installed)
+    assert pdf_tooling.__version__ == pdf_tooling._UNKNOWN_VERSION, (
+        "the monkeypatch must force __version__ to the sentinel, or this "
+        "control proves nothing about the arm it drives"
+    )
+
+    with pytest.raises(pytest.skip.Exception) as exc_info:
+        test_pdf61_the_schema_version_never_runs_ahead_of_the_major_version()
+    assert pdf_tooling._UNKNOWN_VERSION in str(exc_info.value), (
+        "the skip must name the sentinel it fired on, not skip silently"
+    )
