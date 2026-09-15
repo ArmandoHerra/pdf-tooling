@@ -230,7 +230,7 @@ def _digest(path: Path) -> tuple[int, str]:
     return size, hasher.hexdigest()
 
 
-def _predict_name_too_long(out_dir: Path, ancestor: Path) -> None:
+def _predict_name_too_long(out_dir: Path, ancestor: Path, absolute: Path) -> None:
     """``ENAMETOOLONG``, predicted rather than performed (PDF-18 Design D4,
     implementation note 2, resolution (a)).
 
@@ -250,12 +250,26 @@ def _predict_name_too_long(out_dir: Path, ancestor: Path) -> None:
     (§D4's errno table), this tier of the *prediction* is simply not
     decidable here, exactly as X-67 already permits for password
     correctness.
+
+    **PDF-64: *geometry* and *message* deliberately use different values.**
+    *absolute* -- the byte-identical ``Path(out_dir).expanduser().absolute()``
+    expression :func:`_predict_out_dir_creation` already builds one line
+    before calling this, and the same normalization
+    :func:`~pdf_tooling.safety.paths.nearest_existing_ancestor` always
+    produces for *ancestor* -- is what the ``relative_to`` computation below
+    runs against, which is what makes it total rather than guarded: a
+    relative *out_dir* never equals an absolute *ancestor*, so computing the
+    remainder from *out_dir* itself made the ``else Path()`` branch dead and
+    ``relative_to`` raised ``ValueError`` on every relative, not-yet-existing
+    ``--out-dir``. *out_dir* -- the user's own, unmodified spelling -- stays
+    the value interpolated into the refusal's ``message`` and ``path``
+    (`atomic.py:340`'s convention: echo the path *as the user wrote it*).
     """
     try:
         limit = os.pathconf(str(ancestor), "PC_NAME_MAX")
     except (OSError, ValueError, AttributeError):
         return
-    remainder = out_dir.relative_to(ancestor) if out_dir != ancestor else Path()
+    remainder = absolute.relative_to(ancestor) if absolute != ancestor else Path()
     for part in remainder.parts:
         if len(os.fsencode(part)) > limit:
             raise DestinationUnwritableError(
@@ -312,7 +326,7 @@ def _predict_out_dir_creation(out_dir: Path) -> None:
             f"(the nearest existing directory, {ancestor}, is not writable)",
             path=str(out_dir),
         )
-    _predict_name_too_long(out_dir, ancestor)
+    _predict_name_too_long(out_dir, ancestor, absolute)
 
 
 def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:

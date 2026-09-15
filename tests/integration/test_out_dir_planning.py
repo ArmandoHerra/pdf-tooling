@@ -535,3 +535,256 @@ def test_ac15_the_fixture_actually_yields_at_least_three_targets(
         ).stdout
     )
     assert len(data["items"]) >= 3, data
+
+
+# --------------------------------------------------------------------------- #
+# PDF-64 -- the dry run crashed on a relative, not-yet-existing `--out-dir`
+# with a raw `ValueError` (0 bytes stdout, rc 1) on every one of the eleven
+# verbs in `VERBS`, while the identical argv without `--dry-run` succeeded
+# (rc 0) on all eleven (E1). AC3/AC5-AC8/AC9/AC12/AC14/AC18/AC20/AC21.
+#
+# Every cell here drives a BARE RELATIVE `--out-dir` name with `cwd` set to
+# its parent -- no `tmp_path`-rooted absolute spelling anywhere in this
+# block (AC20: an absolute spelling is exactly what let 4,450 tests stay
+# green over a two-command reproduction, E4). Built from `_out_dir_argv`'s
+# own registered invocation with only the `--out-dir` VALUE rewritten to
+# its bare relative component (`out_dir.name`) -- `_out_dir_argv` itself is
+# not modified (Design D4); its own `parent == root` guard has already run
+# against the absolute form before the relative spelling is derived.
+# --------------------------------------------------------------------------- #
+
+
+def _relative_argv(argv: list[str], absolute_out_dir: Path) -> tuple[list[str], str]:
+    """*argv* with its `--out-dir` value rewritten to the bare relative
+    component of *absolute_out_dir* -- the value, not the flag, changes."""
+    name = absolute_out_dir.name
+    index = argv.index("--out-dir")
+    return [*argv[: index + 1], name, *argv[index + 2 :]], name
+
+
+def _assert_engine_gated_refusal(dry_stdout: str, real_stdout: str, verb: str, cell: str) -> None:
+    """`convert`, `soffice` absent (Design D6): the engine-presence tier
+    refuses BEFORE the filesystem tier's own success would be observable,
+    in both modes, with the top-level `{"error": {...}}` shape rather than
+    an `items` envelope -- asserted on shape, never the exit integer alone.
+    """
+    dry_error = json.loads(dry_stdout)["error"]
+    real_error = json.loads(real_stdout)["error"]
+    assert dry_error["kind"] == real_error["kind"] == "engine_missing", (
+        f"{verb} {cell} cell (soffice absent): dry {dry_error} real {real_error}"
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", VERBS)
+def test_pdf64_a_relative_not_yet_existing_out_dir_is_predicted_not_raised(
+    verb: str, corpus: Any, tmp_path: Path
+) -> None:
+    """AC5/AC6/AC8/AC12/AC20/AC21 -- the ordinary relative cell, dry and
+    real driven together. **RED, free, pre-fix, on all eleven verbs:** rc
+    1, zero bytes of stdout, a raw `ValueError` traceback on stderr.
+    """
+    env, _roots = redirected_environment(tmp_path)
+    root = tmp_path / "ordinary"
+    root.mkdir()
+    argv, absolute_out_dir = _out_dir_argv(verb, corpus, root)
+    relative_argv, name = _relative_argv(argv, absolute_out_dir)
+    out_dir = root / name
+    expected = _C_CELL_EXPECTED.get(verb, 0)
+
+    dry, real = dry_and_real(verb, relative_argv, cwd=root, env=env)
+
+    # AC8 -- no traceback, on stdout or stderr, and a non-empty envelope.
+    combined = dry.stdout + dry.stderr
+    assert "Traceback (most recent call last)" not in combined, (
+        f"{verb}: a traceback reached the user -- {dry.stderr}"
+    )
+    assert "ValueError" not in combined, f"{verb}: a ValueError leaked -- {dry.stderr}"
+    assert dry.stdout.strip() != "", (
+        f"{verb}: the dry run produced NO STDOUT under -o json -- {dry.stderr}"
+    )
+
+    # AC5 -- the dry run agrees with the real run's own code.
+    assert dry.returncode == expected, (
+        f"{verb}: dry run exited {dry.returncode}, expected {expected} -- {dry.stdout}{dry.stderr}"
+    )
+    assert real.returncode == expected, (
+        f"{verb}: real run exited {real.returncode}, expected {expected} -- "
+        f"{real.stdout}{real.stderr}"
+    )
+
+    if expected != 0:
+        # `convert`, soffice absent (D6): the engine tier, not the
+        # filesystem tier, is what refuses -- asserted on shape.
+        _assert_engine_gated_refusal(dry.stdout, real.stdout, verb, "ordinary")
+        return
+
+    # AC6 -- both X-185 observables agree: the exit code AND the structured
+    # prediction, including the RELATIVE spelling of `output` (E7).
+    dry_item = json.loads(dry.stdout)["items"][0]
+    real_item = json.loads(real.stdout)["items"][0]
+    assert dry_item["ok"] is True, f"{verb}: predicted ok={dry_item['ok']!r}"
+    assert dry_item["exit_code"] == 0
+    assert dry_item["detail"]["would_exit"] == 0, f"{verb}: {dry_item['detail']}"
+    assert dry_item["output"] == real_item["output"], (
+        f"{verb}: dry output {dry_item['output']!r} != real output {real_item['output']!r}"
+    )
+    # `tables` (AC13's own exception, `single_page`: zero detections) never
+    # populates `output` at all -- guarded rather than asserted blindly, so
+    # this arm still pins the RELATIVE spelling for every verb that does.
+    if dry_item["output"] is not None:
+        assert not Path(dry_item["output"]).is_absolute(), (
+            f"{verb}: the predicted output was absolutized -- {dry_item['output']!r} -- "
+            "the user's own relative spelling must survive (E7/D2)"
+        )
+
+    # AC12 -- the real run actually created the directory.
+    assert out_dir.is_dir(), f"{verb}: the real run must have created {out_dir}"
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", VERBS)
+def test_pdf64_the_two_cells_that_were_already_correct_do_not_move(
+    verb: str, corpus: Any, tmp_path: Path
+) -> None:
+    """AC7 -- relative+existing and absolute+absent, spelled the SAME way
+    this spec's own ordinary cell is spelled, must answer exactly as they
+    did before this fix (E1's own third and fourth rows). **RED:** an
+    over-eager absolutization that changed the real run's `output` spelling
+    would leave these cells' own exit codes green while the spelling moved
+    -- caught here by round-tripping through the SAME assertions the
+    ordinary cell above uses.
+    """
+    env, _roots = redirected_environment(tmp_path)
+    expected = _C_CELL_EXPECTED.get(verb, 0)
+
+    # -- relative, ALREADY EXISTING -------------------------------------- #
+    existing_root = tmp_path / "existing"
+    existing_root.mkdir()
+    e_argv, e_absolute_out_dir = _out_dir_argv(verb, corpus, existing_root)
+    e_relative_argv, e_name = _relative_argv(e_argv, e_absolute_out_dir)
+    (existing_root / e_name).mkdir()
+
+    e_dry, e_real = dry_and_real(verb, e_relative_argv, cwd=existing_root, env=env)
+    assert e_dry.returncode == expected, f"{verb}: relative-existing dry moved -- {e_dry.stdout}"
+    assert e_real.returncode == expected, f"{verb}: relative-existing real moved -- {e_real.stdout}"
+    if expected == 0:
+        e_detail = prediction(e_dry.stdout, context=f"{verb} relative-existing")
+        assert e_detail["would_exit"] == 0, f"{verb}: relative-existing {e_detail}"
+    else:
+        _assert_engine_gated_refusal(e_dry.stdout, e_real.stdout, verb, "relative-existing")
+
+    # -- ABSOLUTE, absent -------------------------------------------------- #
+    absolute_root = tmp_path / "absolute"
+    absolute_root.mkdir()
+    a_argv, _a_out_dir = _out_dir_argv(verb, corpus, absolute_root)
+    a_dry, a_real = dry_and_real(verb, a_argv, cwd=absolute_root, env=env)
+    assert a_dry.returncode == expected, f"{verb}: absolute-absent dry moved -- {a_dry.stdout}"
+    assert a_real.returncode == expected, f"{verb}: absolute-absent real moved -- {a_real.stdout}"
+    if expected == 0:
+        a_detail = prediction(a_dry.stdout, context=f"{verb} absolute-absent")
+        assert a_detail["would_exit"] == 0, f"{verb}: absolute-absent {a_detail}"
+    else:
+        _assert_engine_gated_refusal(a_dry.stdout, a_real.stdout, verb, "absolute-absent")
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("verb", VERBS)
+def test_pdf64_dry_run_purity_holds_for_a_relative_out_dir(
+    verb: str, corpus: Any, tmp_path: Path
+) -> None:
+    """AC14 -- driven ALONE, never paired with the real run that would
+    create the directory: after the dry run, the parent is byte-identical
+    and the `--out-dir` itself still does not exist (`os.path.lexists`,
+    never a bare `.exists()` -- AC14's own instrument choice, because
+    `.exists()` on a too-long relative component would itself raise, see
+    the sibling test below for that cell).
+    """
+    env, roots = redirected_environment(tmp_path)
+    root = tmp_path / "purity"
+    root.mkdir()
+    argv, absolute_out_dir = _out_dir_argv(verb, corpus, root)
+    relative_argv, name = _relative_argv(argv, absolute_out_dir)
+    out_dir = root / name
+
+    before = snapshot(root, *roots)
+    dry = run_cli(verb, "--dry-run", *relative_argv, "-o", "json", cwd=root, env=env)
+    after = snapshot(root, *roots)
+
+    expected = _C_CELL_EXPECTED.get(verb, 0)
+    assert dry.returncode == expected, (
+        f"{verb}: purity-cell dry run moved -- {dry.stdout}{dry.stderr}"
+    )
+    assert_unchanged(before, after)
+    assert not os.path.lexists(out_dir), (
+        f"{verb}: --out-dir came to exist after a --dry-run alone -- {out_dir}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# AC9/AC11/AC18 -- the discriminator: a relative, not-yet-existing
+# `--out-dir` whose SOLE component exceeds `PC_NAME_MAX`. Verb-independent
+# (the tier this spec touches has no verb-specific logic at all), driven on
+# ONE verb only -- `compress`, beside the existing ABSOLUTE arm at :385,
+# never a parametrized sweep (Design D4).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.e2e
+def test_pdf64_enametoolong_relative_out_dir_is_predicted_not_raised(
+    corpus: Any, tmp_path: Path
+) -> None:
+    """AC9 -- the discriminator that separates a CORRECTED prediction from
+    a SILENCED one (E6). **RED, free, pre-fix:** the identical `ValueError`
+    the ordinary cell raises, because the crash happens computing
+    `remainder` on the FIRST statement of the length check, before the
+    length loop itself ever runs -- so a naive `except ValueError: return`
+    swallow (the AC10 mutant) would make this cell predict `would_exit: 0`
+    on an argv whose real run refuses with `1`.
+    """
+    root = tmp_path / "work"
+    root.mkdir()
+    try:
+        limit = os.pathconf(str(root), "PC_NAME_MAX")
+    except (OSError, ValueError, AttributeError):  # pragma: no cover - platform-dependent
+        pytest.skip("PC_NAME_MAX is not available on this platform")
+    too_long = "x" * (limit + 1)
+    env, _roots = redirected_environment(tmp_path)
+
+    dry, real = dry_and_real(
+        "compress", [str(corpus.path("single_page")), "--out-dir", too_long], cwd=root, env=env
+    )
+
+    combined = dry.stdout + dry.stderr
+    assert "Traceback (most recent call last)" not in combined, dry.stderr
+    assert "ValueError" not in combined, dry.stderr
+    assert dry.stdout.strip() != "", f"dry run produced NO STDOUT -- {dry.stderr}"
+
+    # The real run is the reference: it refuses with 1.
+    assert real.returncode == 1, real.stdout + real.stderr
+
+    # AC9 -- the dry run must PREDICT that refusal, not silence it.
+    dry_detail = prediction(dry.stdout, context="enametoolong relative")
+    assert dry_detail["would_exit"] == 1, f"discriminator not corrected -- {dry_detail}"
+    refusal = dry_detail["would_refuse"]
+    assert refusal["code"] == 1
+    assert refusal["kind"] == "failure"
+    assert str(limit) in refusal["message"], refusal["message"]
+    assert dry.returncode == 1
+
+    # AC18 -- the user's RELATIVE spelling survives in both message and path,
+    # never the absolutized form. This is the mutant that ships green
+    # everywhere else (D2): substituting the absolutized value wholesale
+    # would still predict `would_exit: 1` correctly but would render the
+    # message and `path` with the full absolute prefix instead of the bare
+    # relative name the user actually typed.
+    assert refusal["path"] == too_long, (
+        f"the refusal echoed {refusal['path']!r} instead of the user's own "
+        f"spelling {too_long!r} -- the absolutized value leaked into the payload"
+    )
+    assert str(root) not in refusal["message"], (
+        f"the message was absolutized -- {refusal['message']!r} contains {str(root)!r}"
+    )
+
+    # AC14 -- nothing was created.
+    assert list(root.iterdir()) == [], "neither run may have created anything under root"

@@ -42,7 +42,12 @@ import pytest
 from pdf_tooling import errors
 from pdf_tooling.cli.exit_codes import FAILURE, OK, REFUSED, USAGE
 from pdf_tooling.safety import TEMP_PREFIX, AtomicWriter, SafetyPolicy
-from pdf_tooling.safety.atomic import PlannedOutputs, plan_filesystem, plan_output_set
+from pdf_tooling.safety.atomic import (
+    PlannedOutputs,
+    _predict_out_dir_creation,
+    plan_filesystem,
+    plan_output_set,
+)
 
 TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
@@ -1411,3 +1416,64 @@ def test_ac16_an_unwritable_parent_still_answers_before_the_sidecar(tmp_path: Pa
             plan_filesystem([target], out_dir=None, policy=make_policy(in_place=True), kind="pdf")
     finally:
         parent.chmod(0o700)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-64 -- `_predict_out_dir_creation` over a RELATIVE `out_dir`, at the
+# unit level (Design D5). This is the level at which "the remainder is
+# computed from the ABSOLUTIZED path" is assertable without a subprocess,
+# and it is the arm that keeps failing if a later refactor re-introduces the
+# raw parameter while the CLI cells happen to stay green.
+# `monkeypatch.chdir` is the idiom `tests/unit/test_safety_paths.py:288`
+# already uses for the sibling function `nearest_existing_ancestor` (X-157).
+# --------------------------------------------------------------------------- #
+
+
+def test_pdf64_predict_out_dir_creation_over_a_relative_ordinary_out_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative, not-yet-existing `out_dir` must be predicted cleanly.
+
+    **RED, free, pre-fix:** `relative_to` raised `ValueError` here, because
+    the remainder was computed against the raw relative parameter instead
+    of the absolutized value this function already builds one line above
+    for its own existence test.
+    """
+    monkeypatch.chdir(tmp_path)
+    _predict_out_dir_creation(Path("new-relative-dir"))  # must not raise
+    assert not (tmp_path / "new-relative-dir").exists()
+
+
+def test_pdf64_predict_out_dir_creation_over_a_relative_over_long_out_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The discriminator (E6/AC9/AC18), at the unit level: a relative
+    `out_dir` whose sole component exceeds `PC_NAME_MAX` must still be
+    PREDICTED -- not silenced, and not raised as a bare `ValueError` --
+    and the refusal must echo the user's RELATIVE spelling, never the
+    absolutized one, in both `message` and `path` (D2).
+
+    **RED, free, pre-fix:** the identical `ValueError`, before the length
+    loop ever runs.
+    """
+    try:
+        limit = os.pathconf(str(tmp_path), "PC_NAME_MAX")
+    except (OSError, ValueError, AttributeError):  # pragma: no cover - platform-dependent
+        pytest.skip("PC_NAME_MAX is not available on this platform")
+    monkeypatch.chdir(tmp_path)
+    too_long = "x" * (limit + 1)
+
+    with pytest.raises(errors.DestinationUnwritableError) as excinfo:
+        _predict_out_dir_creation(Path(too_long))
+
+    message = str(excinfo.value)
+    path = excinfo.value.path
+    assert message.startswith(f"destination directory cannot be created: {too_long}"), message
+    assert path == too_long, (
+        f"the refusal's path was {path!r}, not the user's own spelling {too_long!r} -- "
+        "the absolutized value leaked into the payload"
+    )
+    assert str(tmp_path) not in message, (
+        f"the message was absolutized -- {message!r} contains the cwd {str(tmp_path)!r}"
+    )
+    assert not (tmp_path / too_long[:50]).exists()
