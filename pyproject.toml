@@ -13,7 +13,7 @@ license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES"]
 authors = [{ name = "Armando Herra" }]
 keywords = ["pdf", "cli", "merge", "split", "ocr", "rasterize"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: End Users/Desktop",
@@ -192,6 +192,26 @@ source = ["pdf_tooling"]
 # the `core = "sysmon"` line below should be revisited together.
 branch = false
 core = "sysmon"
+# PDF-59 Arm B (ledger `afdb3fceab`, backlog `B-087`/`B-148`, operator ruling
+# OR-17: Python 3.11 STAYS SUPPORTED). `core = "sysmon"` above is unconditional
+# and PRESERVED BY CONSTRUCTION -- this key changes what coverage.py WARNS
+# about, never which core it selects. On < 3.12, `sys.monitoring` does not
+# exist (PEP 669), so core.py falls back and calls `warn(..., slug="no-sysmon")`
+# -- and because `patch = ["subprocess"]` below propagates the measured
+# environment into every CLI child, that `CoverageWarning` landed as the FIRST
+# LINE of every measured subprocess's stderr on 3.11, breaking
+# `tests/test_usage_envelope.py`'s empty-stderr contract 97 ways (re-measured
+# at implementation HEAD: 145 failures under xdist's -n auto worker split,
+# rc 2 -- see this spec's Implementation Log for the full before/after).
+# `disable_warnings` is coverage.py's own key for exactly this (`config.py`'s
+# `run:disable_warnings`), silences ONLY the named slug, and reads no
+# differently than `core` above -- on 3.12+ the warning never fires in the
+# first place, so this line is inert there and the sysmon speedup this whole
+# block measures is untouched (verified: PDF-59 AC9). It does not blind
+# `tests/test_coverage_policy.py`'s branch-support expiry probe either --
+# that probe invokes coverage.py with `--rcfile=` empty, so it never reads
+# this file's `[tool.coverage.run]` table at all.
+disable_warnings = ["no-sysmon"]
 # The suite drives the CLI through subprocess.run (the only way exit codes and
 # non-TTY posture are real -- see tests/registry.py, tests/test_doctor.py,
 # tests/test_info.py). Without this, coverage.py measures the parent pytest

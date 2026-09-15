@@ -38,6 +38,8 @@ import tomllib
 from pathlib import Path
 from typing import Any, Final
 
+import pytest
+
 from acceptance._model import RedKind
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
@@ -716,3 +718,289 @@ def test_red_kind_is_a_str_enum_and_the_closed_vocabulary_is_disjoint_from_it() 
     reasons = {r.lower() for r in REASON_VOCAB}
     red_kinds = {k.value.lower() for k in RedKind}
     assert reasons.isdisjoint(red_kinds), (reasons, red_kinds)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-59 Arm A (D2/AC1-AC3/AC5/AC6) -- the maturity classifier's ruled
+# MONOTONE relation (OR-16), not an equality, plus the version-oracle tie.
+# Home: this module, sole claimant this cycle (D2). Additive only -- nothing
+# above this line is touched, and `_PDF02_EXPECTED_JOBS` is untouched.
+# --------------------------------------------------------------------------- #
+
+PYPROJECT_PATH: Final[Path] = REPO_ROOT / "pyproject.toml"
+
+_DEV_STATUS_PREFIX: Final[str] = "Development Status :: "
+_FORBIDDEN_ALPHA: Final[str] = "Development Status :: 3 - Alpha"
+_REQUIRED_STABLE: Final[str] = "Development Status :: 5 - Production/Stable"
+_DEV_STATUS_RANK: Final[re.Pattern[str]] = re.compile(r"^Development Status :: (\d+) - ")
+
+
+def load_pyproject() -> dict[str, Any]:
+    with PYPROJECT_PATH.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+def maturity_relation_problems(classifiers: list[str], version: str) -> list[str]:
+    """PDF-59 D2 / operator ruling OR-16 -- the RULED relation is MONOTONE,
+    not an equality (`major == 1` <=> `5 - Production/Stable` is the
+    FORBIDDEN shape X-705 names by name). Returns problems; an empty list
+    means the relation holds.
+
+    Pure: takes already-parsed data as arguments and reads no filesystem and
+    calls no `uv`-backed target, so a version PLANT is just a Python
+    argument -- it can never re-sync a venv against a planted distribution
+    and contaminate a later measurement (HC-4).
+
+    Three independently-checkable clauses (D2):
+      1. "Development Status :: 3 - Alpha" is forbidden UNCONDITIONALLY, at
+         any version, from this commit forward.
+      2. A maturity classifier below "5 - Production/Stable" is forbidden
+         once the version's major is >= 1.
+      3. Exactly one "Development Status ::" classifier must be present --
+         the vacuity guard. Zero is an absent claim, not a safe one (a
+         "no forbidden string" implementation would pass VACUOUSLY against
+         an empty block); two or more is an ambiguity PyPI would resolve
+         arbitrarily.
+    """
+    problems: list[str] = []
+    entries = [c for c in classifiers if c.startswith(_DEV_STATUS_PREFIX)]
+    if len(entries) != 1:
+        problems.append(
+            f"exactly one {_DEV_STATUS_PREFIX!r} classifier is required (clause 3, "
+            f"the vacuity guard); found {len(entries)}: {entries}"
+        )
+        return problems  # clauses 1/2 need exactly one entry to read
+    entry = entries[0]
+    if entry == _FORBIDDEN_ALPHA:
+        problems.append(
+            f"{_FORBIDDEN_ALPHA!r} is forbidden unconditionally, at any version (clause 1, OR-16)"
+        )
+    try:
+        major = int(version.split(".", 1)[0])
+    except (ValueError, IndexError):
+        problems.append(f"cannot parse a major version out of {version!r}")
+        return problems
+    if major >= 1:
+        rank_match = _DEV_STATUS_RANK.match(entry)
+        if rank_match is None:
+            problems.append(f"cannot parse a maturity rank out of {entry!r} (clause 2)")
+        elif int(rank_match.group(1)) < 5:
+            problems.append(
+                f"version major is {major} (>= 1) but the maturity classifier is "
+                f"{entry!r}; OR-16 forbids anything below {_REQUIRED_STABLE!r} once "
+                "the major version is >= 1 (clause 2)"
+            )
+    return problems
+
+
+def test_pdf59_ac1_the_maturity_classifier_is_5_production_stable() -> None:
+    """PDF-59 AC1. Both census recipes from the spec's E2 are re-run here so
+    the transition is OBSERVED, not merely asserted: at `89a4f1d` these same
+    two recipes returned `pyproject.toml:16` reading `3 - Alpha`, one hit,
+    repo-wide, and it was the declaration itself -- no test, no gate, no
+    release step read it. This test is the instrument B-276 said did not
+    exist.
+
+    The recipe below excludes THIS MODULE by name, not by omission: this
+    file is the census's own instrument (D2 -- "the deliverable is the
+    instrument"), so once it exists it necessarily contains the phrase in
+    its own constants and docstrings. Scanning it would make the recipe
+    count its own existence -- the exact self-reference this module's own
+    docstring already warns against for `independent_derive_from_ci`
+    (X-183/X-198: assert on a computed value, never on a literal the
+    assertion itself spells out)."""
+    classifiers = load_pyproject()["project"]["classifiers"]
+    entries = [c for c in classifiers if c.startswith(_DEV_STATUS_PREFIX)]
+    assert entries == [_REQUIRED_STABLE], entries
+
+    _SELF = "tests/test_gate_parity.py"
+    grep = subprocess.run(
+        ["/usr/bin/grep", "-rn", "Development Status", "tests", "pyproject.toml", "Makefile"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    hits = [
+        line
+        for line in grep.stdout.splitlines()
+        if line.strip() and not line.startswith(f"{_SELF}:")
+    ]
+    assert len(hits) == 1, hits
+    assert "5 - Production/Stable" in hits[0], hits
+
+    # `git grep -n "3 - Alpha"` is a TRACKED-file scan, so it cannot see
+    # this module's own forbidden-string CONSTANT until the commit that adds
+    # it lands -- excluded by name here for the same reason as the `/usr/bin/grep`
+    # census above (this module names the forbidden string on purpose, as
+    # the thing it asserts against; that is not a live occurrence of it).
+    # `changelog.md` is excluded by the SAME established precedent this file
+    # already carries for a different claim (`test_no_claim_site_asserts_
+    # local_equals_ci`): it is a historical record that must be free to QUOTE
+    # a past claim verbatim while correcting it -- this spec's own [PDF-59]
+    # entry does exactly that, naming `3 - Alpha` as the string OR-16
+    # replaced. A doc guard that reddens on a phrase quoted AS the thing
+    # being corrected is self-defeating (X-183/X-198's generalization).
+    _CHANGELOG = "changelog.md"
+    alpha = subprocess.run(
+        [
+            "git",
+            "grep",
+            "-n",
+            "3 - Alpha",
+            "--",
+            ".",
+            f":(exclude){_SELF}",
+            f":(exclude){_CHANGELOG}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # `git grep` exits 1 when no line matches -- that is the desired outcome.
+    assert alpha.returncode == 1, (alpha.returncode, alpha.stdout)
+    assert alpha.stdout == ""
+
+
+def test_pdf59_ac2_ac3_the_seven_cell_relation_table() -> None:
+    """PDF-59 D2/AC2/AC3 -- all seven cells, driven against the SAME function
+    with no edit between calls (AC2's whole point: the assertion must survive
+    the version bump with no test edit, X-703/X-705). The
+    `major-0/4-Beta` cell is the DISCRIMINATOR: GREEN under the ruled
+    monotone relation, RED under the forbidden equality form
+    (`major == 1` <=> `5 - Production/Stable`) -- this single cell is what
+    proves the shape actually written."""
+    data = load_pyproject()
+    real_classifiers = data["project"]["classifiers"]
+    real_version = data["project"]["version"]
+    base = [c for c in real_classifiers if not c.startswith(_DEV_STATUS_PREFIX)]
+
+    def with_entry(entry: str | None) -> list[str]:
+        return base + ([entry] if entry else [])
+
+    beta = "Development Status :: 4 - Beta"
+    cases: tuple[tuple[str, list[str], str, bool], ...] = (
+        ("landing-state", real_classifiers, real_version, True),
+        ("post-tag-state", with_entry(_REQUIRED_STABLE), "1.0.0", True),
+        ("pre-spec-tree", with_entry(_FORBIDDEN_ALPHA), real_version, False),
+        ("major-1-alpha", with_entry(_FORBIDDEN_ALPHA), "1.0.0", False),
+        ("major-1-beta", with_entry(beta), "1.0.0", False),
+        ("discriminator-major-0-beta", with_entry(beta), real_version, True),
+        ("vacuity-no-classifier", with_entry(None), real_version, False),
+    )
+    for label, classifiers, version, expect_green in cases:
+        problems = maturity_relation_problems(classifiers, version)
+        if expect_green:
+            assert problems == [], f"{label}: expected GREEN, got {problems}"
+        else:
+            assert problems != [], f"{label}: expected RED, got none"
+
+
+def test_pdf59_ac3_proof_the_equality_shape_would_miss_the_discriminator() -> None:
+    """The discriminator, isolated. `equality_shape` below is the FORBIDDEN
+    per-bucket equality X-705 names: exactly `3 - Alpha` at major 0, exactly
+    `5 - Production/Stable` once major >= 1, nothing else acceptable either
+    side -- a careless literal translation of "the old value at major 0, the
+    new value once tagged" that never considers a THIRD classifier. It
+    reports the `major-0/4-Beta` cell as a violation (expected `3 - Alpha`
+    at major 0, got `4 - Beta`) and it reports the LANDING cell itself
+    (major 0, `5 - Production/Stable`) as a violation too -- matching D2's
+    own account of why the naive equality is red on landing. The RULED
+    monotone relation (clause 2 only forbids below-5 once major >= 1)
+    reports the Beta cell clean. This test fails if
+    `maturity_relation_problems` is ever rewritten as this forbidden shape.
+    """
+    beta_at_major_0 = maturity_relation_problems(["Development Status :: 4 - Beta"], "0.3.1")
+    assert beta_at_major_0 == [], beta_at_major_0
+
+    def equality_shape(classifiers: list[str], version: str) -> list[str]:
+        major = int(version.split(".", 1)[0])
+        entry = next(c for c in classifiers if c.startswith(_DEV_STATUS_PREFIX))
+        expected = _REQUIRED_STABLE if major >= 1 else _FORBIDDEN_ALPHA
+        if entry != expected:
+            return [f"equality form: at major={major} expected {expected!r}, got {entry!r}"]
+        return []
+
+    assert equality_shape(["Development Status :: 4 - Beta"], "0.3.1") != []
+    # The landing cell itself is ALSO red under the forbidden shape (D2: "the
+    # naive equality is red on landing") -- the discriminator is not the only
+    # divergence, it is the CHEAPEST one to check.
+    assert equality_shape([_REQUIRED_STABLE], "0.3.1") != []
+
+
+def test_pdf59_ac5_pdf02_expected_jobs_is_unmoved_by_this_spec() -> None:
+    """PDF-59 AC5 -- a non-vacuity pin on the boundary itself: this spec adds
+    no hunk inside `_PDF02_EXPECTED_JOBS`'s span, and the eleven-member tuple
+    (re-derived, not the brief's stale "ten") is exactly what it was before
+    this section was appended."""
+    assert len(_PDF02_EXPECTED_JOBS) == 11, _PDF02_EXPECTED_JOBS
+    assert _PDF02_EXPECTED_JOBS == (
+        "lint",
+        "typecheck",
+        "test",
+        "engines-present",
+        "without-engines",
+        "sast",
+        "vulncheck",
+        "secret-scan",
+        "docs-gate",
+        "license-gate",
+        "build",
+    )
+
+
+def version_tie_verdict(pyproject_version: str, installed_version: str) -> str:
+    """PDF-59 AC6 / D2's second, independent assertion -- the `PDF-30` AC25
+    rule applied here: the assertion is made by a DIFFERENT consumer than the
+    one that computes it. `pyproject.toml`'s `version` key is static and
+    always current in the tree; `pdf_tooling.__version__` is resolved LAZILY
+    from distribution metadata (`src/pdf_tooling/__init__.py`) and can lag
+    the tree between an edit and a re-sync.
+
+    Returns "match", "skip-unknown" (never a pass), or a mismatch message.
+    """
+    from pdf_tooling import _UNKNOWN_VERSION
+
+    if installed_version == _UNKNOWN_VERSION:
+        return "skip-unknown"
+    if installed_version == pyproject_version:
+        return "match"
+    return (
+        f"pdf_tooling.__version__ ({installed_version!r}) != pyproject.toml's "
+        f"version ({pyproject_version!r})"
+    )
+
+
+def test_pdf59_ac6_the_version_oracles_are_tied() -> None:
+    """PDF-59 AC6. `tests/test_cli_spine.py:489` already imports
+    `__version__`, so the skip branch below will not fire in practice on an
+    installed checkout -- it exists so an uninstalled tree fails LOUDLY
+    rather than quietly reporting a `0`-major string for the wrong reason."""
+    from pdf_tooling import __version__ as installed_version
+
+    pyproject_version = load_pyproject()["project"]["version"]
+    verdict = version_tie_verdict(pyproject_version, installed_version)
+    if verdict == "skip-unknown":
+        pytest.skip(
+            "pdf_tooling.__version__ resolved to _UNKNOWN_VERSION -- the package is "
+            "not installed in this interpreter, so the tie cannot be checked here "
+            "(never a pass)"
+        )
+    assert verdict == "match", verdict
+
+
+def test_pdf59_ac6_proof_a_differing_installed_version_reddens() -> None:
+    verdict = version_tie_verdict("1.0.0", "0.3.1")
+    assert verdict not in ("match", "skip-unknown"), verdict
+    assert "0.3.1" in verdict and "1.0.0" in verdict, verdict
+
+
+def test_pdf59_ac6_proof_an_unknown_installed_version_skips_rather_than_passes() -> None:
+    from pdf_tooling import _UNKNOWN_VERSION
+
+    assert version_tie_verdict("1.0.0", _UNKNOWN_VERSION) == "skip-unknown"
+
+
+def test_pdf59_ac6_proof_a_matching_version_passes() -> None:
+    assert version_tie_verdict("0.3.1", "0.3.1") == "match"
