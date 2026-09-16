@@ -106,6 +106,71 @@ make gate-timing GATE_TIMING_ARGS="--target help-startup --cache-state n/a"
 that measures itself on every run pays the cost of the measurement on every run,
 and the measurement is only meaningful on a quiet host anyway.
 
+## The `branch-true` pair — measured once, out of band, and never a gate
+
+`[tool.coverage.run] branch = false` is set for a measured reason (the comment
+above it in `pyproject.toml` carries the numbers), so the coverage figure this
+product publishes is a **line** figure — and a line figure is a weaker claim than
+it reads, because a line inside an `if` counts as covered the moment either arm
+of it runs once. `PDF-73` measured the branch half **once**, out of band, on a
+maintainer host, and the result is a *pair* of records here:
+
+| Record | What it is |
+|---|---|
+| `target: "cover"`, `variant: "branch-true"` | branch tracking forced by `--cov-branch` **on the command line of that single run**, with a nominal `--cov-fail-under=1` so a low result could not destroy its own measurement. A floor of `0` also works but suppresses pytest-cov's full-precision `Total coverage:` line, which drops the recorded `coverage_pct` to whole percent |
+| `target: "cover"`, `variant: "default"` | the line half, taken at the **same `commit`, `host`, `cache_state` and `engines`**, in the same sitting |
+
+**Nothing in `pyproject.toml` or the `Makefile` changed to take it.**
+`branch = false` is byte-unchanged and the floor the `cover` recipe declares
+still measures lines. **A `branch-true` record is not a gate, a target or a
+floor**: no target in this repository fails because the branch total is what it
+is, and a sweep that reports it as "below target" has invented a target nobody
+wrote. Re-enabling branch coverage is a separate and still-open question, argued
+where the setting lives.
+
+**The `branch-true` record's `coverage_pct` is NOT branch coverage, and this is
+the trap this section exists to disarm.** Under branch mode coverage.py's
+terminal `TOTAL` row reports a **combined** line-and-branch figure in its
+`Cover` column — `(covered_lines + covered_branches) / (num_statements +
+num_branches)` — and that is the number `scripts/measure_gate.py` parses into
+`coverage_pct`. It reads far higher than branch coverage does: at `PDF-73`'s
+landing the combined figure was 93.29 % while branch coverage was 85.86 % and
+line coverage 95.15 %. The schema has **no branch-only field**, so the
+branch-only figure lives in `perf/branch-partials.md`'s totals table
+(`percent_branches_covered`), generated from the run's own JSON report. Quoting a
+`branch-true` record's `coverage_pct` as "branch coverage" overstates it by
+several points — and a record whose meaning changes with its `variant` is a
+schema defect this item **filed rather than patched**, because
+`scripts/measure_gate.py` was frozen for the measurement.
+
+**One `branch-true` observation carries `quiet: false` and is deliberately
+retained.** The first attempt at this measurement ran to completion but was
+contended mid-run by unrelated processes on the host, so THE RULE above makes it
+an observation and not a baseline. It is kept for the same reason the other
+`quiet: false` record is kept — a trend file that quietly drops its own
+inconvenient rows is the thing this directory exists to replace — and any reader
+selecting the pair must filter on `quiet: true`, which is what
+`tests/test_docs_antirot.py`'s reader does.
+
+**Read the two halves as a pair or not at all.** Rule 1 below already forbids
+comparing across `variant`; the corollary is that a `branch-true` record is
+comparable *only* to a `default` record sharing its `commit`, `host`,
+`cache_state` and `engines`. The **gap** between the halves is the only claim the
+pair makes, and it is a claim about that commit on that host. Absolute totals
+move with engine presence alone, so a re-measurement on another box must take
+**both** halves there and compare **gap to gap** — never its own branch total
+against a published one.
+
+**The retained partial-branch list is `perf/branch-partials.md`**, generated from
+the same run's own JSON coverage report and sorted by **descending
+partial-branch count, with the module path as the tiebreaker** — it exists to be
+read from the top as a work queue. It carries the `branch-true` record's
+provenance in its own header, field for field; a list whose header disagrees with
+its record is a list about a different run, so regenerate it rather than annotate
+it. `TESTING.md` quotes the pair as a **derived** figure, recomputed from these
+records by `tests/test_docs_antirot.py`, so the prose cannot drift from the
+records silently.
+
 ## How to READ this file
 
 1. **Never compare across differing `target`, `cache_state`, `engines` or

@@ -68,6 +68,7 @@ as skipped, never silently absent* (X-153).
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 import subprocess
@@ -76,7 +77,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Final, NamedTuple
+from typing import Any, Final, NamedTuple
 
 import pytest
 
@@ -337,6 +338,167 @@ def documented_target(name: str) -> str:
     return f"make {name}"
 
 
+# --------------------------------------------------------------------------- #
+# PDF-73 — the out-of-band branch-coverage pair
+# --------------------------------------------------------------------------- #
+#
+# `[tool.coverage.run] branch = false` is set for a measured reason, so the
+# coverage figure this product publishes is a LINE figure -- a weaker claim than
+# it reads, because a line inside an `if` counts as covered the moment either arm
+# of it runs once. PDF-73 measured the branch half ONCE, out of band, with
+# `--cov-branch` forced on the command line of a single run, and published the
+# pair. What follows binds TESTING.md's prose to the artefacts that measured it.
+#
+# THESE ARE NAMED MODULE-LEVEL READERS, NOT INLINE LAMBDA BODIES, and that is a
+# coordination choice rather than a style one: a later spec quoting this pair can
+# call them instead of re-parsing the artefacts a second way, which would leave
+# two parsers to keep in agreement.
+#
+# WHY THE BRANCH FIGURE IS NOT READ OUT OF THE RECORD'S `coverage_pct`, WHICH IS
+# THE ONE THING A LATER READER WILL WANT TO "SIMPLIFY". Under branch mode
+# coverage.py's terminal `TOTAL` row reports a COMBINED line-and-branch figure in
+# its `Cover` column -- `(covered_lines + covered_branches) / (num_statements +
+# num_branches)` -- and that is the number `scripts/measure_gate.py` parses into
+# `coverage_pct`. It is NOT branch coverage and it reads far higher: at this
+# spec's landing the combined figure was 93.29% while branch coverage was 85.86%.
+# The `PDF-29` record schema has no branch-only field, so the branch-only figure
+# is read from `perf/branch-partials.md`, which is generated from the same run's
+# own JSON report and carries that run's provenance in its own header. The header
+# is asserted against the record below, so the two artefacts cannot drift apart.
+
+#: The `PDF-29` trend file. Newest record last is the file's own convention.
+GATE_TIMINGS = REPO_ROOT / "perf" / "gate-timings.jsonl"
+
+#: The retained partial-branch list, generated from the branch run's JSON report.
+BRANCH_PARTIALS = REPO_ROOT / "perf" / "branch-partials.md"
+
+#: A `| `key` | `value` |` row of `perf/branch-partials.md`. The file is
+#: generated, so the shape is stable; a row that stops matching is a regenerated
+#: file that changed shape, and the assertions below name the missing key.
+_PARTIALS_FIELD = re.compile(r"^\| `([A-Za-z_]+)` \| `([^`]+)` \|$", re.MULTILINE)
+
+
+def gate_timing_records() -> tuple[dict[str, Any], ...]:
+    """Every record in `perf/gate-timings.jsonl`, oldest first."""
+    assert GATE_TIMINGS.is_file(), (
+        "perf/gate-timings.jsonl is missing. It is the PDF-29 trend file and the only "
+        "place a measured figure in these documents is anchored; restore it rather "
+        "than re-deriving the numbers from prose."
+    )
+    records: list[dict[str, Any]] = []
+    for number, line in enumerate(GATE_TIMINGS.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise AssertionError(
+                f"perf/gate-timings.jsonl line {number} is not JSON ({exc}). The file is "
+                f"append-only and machine-written; it is never hand-edited."
+            ) from exc
+    return tuple(records)
+
+
+def coverage_measurement(variant: str) -> dict[str, Any]:
+    """The newest ``target: "cover"`` record carrying *variant*, and quiet.
+
+    ASSERTS rather than raising a bare lookup error, and the distinction is
+    load-bearing: ``cardinal_residue`` calls ``derive()`` for every entry
+    registered against the document it is scanning, so an opaque ``IndexError``
+    here would surface as an unexplained failure of TESTING.md's residue arm
+    instead of naming the file and the variant that are actually missing.
+
+    ``quiet: false`` records are skipped rather than merely reported, because
+    `perf/README.md`'s one rule is that such a record is admissible as an
+    OBSERVATION and inadmissible as a BASELINE -- and a documented figure is a
+    baseline claim.
+    """
+    hits = [
+        record
+        for record in gate_timing_records()
+        if record.get("target") == "cover"
+        and record.get("variant") == variant
+        and record.get("quiet") is True
+    ]
+    assert hits, (
+        f'perf/gate-timings.jsonl carries no quiet `target: "cover"` record with '
+        f'`variant: "{variant}"`. Take one under the PDF-29 protocol -- '
+        f"`uv run python scripts/measure_gate.py --target cover --variant {variant} "
+        f"--baseline` -- on a host it can verify quiet, and never by hand-editing "
+        f"the trend file."
+    )
+    return hits[-1]
+
+
+def branch_partials_fields() -> dict[str, str]:
+    """Every ``| `key` | `value` |`` row of `perf/branch-partials.md`.
+
+    The branch-only percentage lives here rather than in the record because the
+    `PDF-29` schema has no field for it and the record's `coverage_pct` is the
+    COMBINED figure under branch mode (see this section's header comment).
+    """
+    assert BRANCH_PARTIALS.is_file(), (
+        "perf/branch-partials.md is missing. It is the retained partial-branch list "
+        "PDF-73 generated from the branch run's own JSON report, and the only "
+        "committed source of the branch-only percentage this document quotes."
+    )
+    fields = dict(_PARTIALS_FIELD.findall(BRANCH_PARTIALS.read_text()))
+    for key in ("commit", "percent_statements_covered", "percent_branches_covered"):
+        assert key in fields, (
+            f"perf/branch-partials.md carries no `{key}` row. Regenerate it from the "
+            f"branch run's JSON coverage report rather than annotating it by hand."
+        )
+    return fields
+
+
+def branch_and_line_coverage_span() -> str:
+    """TESTING.md's line/branch pair, rendered from the artefacts that measured it.
+
+    The pair is only a pair AT A SHARED COMMIT, and this is where that is
+    enforced -- across the line record, the branch record and the partials list,
+    all three. A branch total subtracted from a line total taken at some other
+    commit is precisely the incommensurable trend `perf/` exists to replace.
+    """
+    branch = coverage_measurement("branch-true")
+    line = coverage_measurement("default")
+    partials = branch_partials_fields()
+
+    assert branch["commit"] == line["commit"], (
+        'the newest quiet `target: "cover"` records do not share a commit, so they '
+        f"are not a pair: `branch-true` at {branch['commit']} against `default` at "
+        f"{line['commit']}. Re-measure BOTH halves at a single commit rather than "
+        "quoting a gap between runs that never saw the same tree."
+    )
+    assert partials["commit"] == branch["commit"], (
+        f"perf/branch-partials.md was generated at {partials['commit']} but the "
+        f"`branch-true` record it belongs to was measured at {branch['commit']}. A "
+        f"list whose header disagrees with its record is a list about a different "
+        f"run: regenerate it, do not annotate it."
+    )
+    for field in ("cache_state", "engines"):
+        assert branch[field] == line[field], (
+            f"the pair disagrees on `{field}` ({branch[field]!r} against "
+            f"{line[field]!r}), so the halves are not comparable -- perf/README.md "
+            f"forbids comparing across it."
+        )
+
+    line_pct = round(float(line["coverage_pct"]), 2)
+    branch_pct = round(float(partials["percent_branches_covered"]), 2)
+    # The branch run measured the LINE metric too, and it must agree with the
+    # line arm: the two arms are only a pair if they ran the same suite.
+    echoed = round(float(partials["percent_statements_covered"]), 2)
+    assert echoed == line_pct, (
+        f"the branch run's own line metric ({echoed}) disagrees with the line arm's "
+        f"total ({line_pct}), so the two arms did not measure the same suite. "
+        f"Re-measure both halves rather than publishing the difference."
+    )
+    gap = round(line_pct - branch_pct, 2)
+    return (
+        f"{line_pct}% of lines against {branch_pct}% of branches at "
+        f"{branch['commit'][:7]}, a gap of {gap} points"
+    )
+
+
 #: D1. Each entry binds a span of a document to a callable that recomputes the
 #: same value from source, in the rendering the document uses. `anchor` locates
 #: the claim and is asserted to occur EXACTLY ONCE — an anchor that matches
@@ -407,6 +569,20 @@ DERIVED_FIGURES: tuple[DerivedFigure, ...] = (
         anchor="is measured on",
         derive=lambda: f"--cov-fail-under={coverage_floor()}",
         note="The floor has one definition and three claim sites; AC8 compares them.",
+    ),
+    DerivedFigure(
+        document="TESTING.md",
+        anchor="of branches at",
+        derive=branch_and_line_coverage_span,
+        note=(
+            "PDF-73. The published coverage figure is a LINE figure, which is a weaker "
+            "claim than it reads, and the size of the weakening was written down "
+            "nowhere. This binds the documented line/branch pair to the perf/ "
+            "artefacts that measured it, so neither half can be quoted without the "
+            "other, nor carried forward to a commit it was never taken at. It is an "
+            "out-of-band measurement and NOT a gate: pyproject.toml's `branch = false` "
+            "is unchanged and --cov-fail-under keeps measuring lines."
+        ),
     ),
 )
 

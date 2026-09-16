@@ -650,6 +650,21 @@ met**, comfortably above the unchanged 85% threshold. Both targets became
 runnable again. That figure, too, is anchored to the commit it was taken at and
 is not a claim about HEAD.
 
+**The line figure and the branch figure, measured together and out of band.**
+`PDF-73` took a single out-of-band measurement with branch tracking forced by
+`--cov-branch` on the command line, against a same-commit, same-host line half:
+95.15% of lines against 85.86% of branches at 7d0360e, a gap of 9.29 points.
+`[tool.coverage.run] branch = false` is byte-unchanged, `--cov-fail-under` still
+measures lines, and **this is not a gate** — nothing in this product fails
+because the branch total is what it is. Both halves were taken in the same
+sitting, at the same cache state, with the same engines resolved, because a
+branch total subtracted from a line total measured elsewhere is rumour
+arithmetic rather than a measurement. Read the pair as a pair: the retained
+partial-branch list, sorted by module, is `perf/branch-partials.md`, the records
+behind both halves are the `target: "cover"` entries in
+`perf/gate-timings.jsonl`, and `perf/README.md` states how to read them — and
+why re-measuring beats re-reading.
+
 **This paragraph used to state a wall-clock figure for each of them, and
 that is why there is no figure here now.** `X-109` corrected the original
 number on the record; the paragraph never followed, and a documented figure
