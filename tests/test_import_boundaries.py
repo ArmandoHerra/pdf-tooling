@@ -2447,13 +2447,28 @@ class HelpImports(NamedTuple):
     self_us_by_module: Mapping[str, int]
     #: Sum of the above. The second net, for a regression spread thinly.
     total_self_us: int
-    #: PDF-55 D1/D2/E6. The bare-interpreter floor census's OWN self-time sum --
-    #: already computed by `_importtime_census(["-c", "pass"], env)` below and,
-    #: until now, spent on nothing but a name-set subtraction. `floor` already
-    #: carries `self_us`/`cumulative_us` on every row (`parse_importtime_row`),
-    #: so this costs no new subprocess: it is the measurement already on the
-    #: wire, held in memory, and no longer discarded three lines later.
-    floor_self_us: int
+    #: PDF-68 D1/E7. The bare-interpreter floor census's NAME set -- the very
+    #: set `attributable` is defined by subtracting. It is kept because the
+    #: repeated readings below must partition the SAME rows this census did: a
+    #: repetition that re-derived its own floor names from its own bare census
+    #: could drift, and a numerator and a denominator drawn from two different
+    #: partitions are describing two different programs (the failure
+    #: `test_the_timing_census_is_not_vacuous` already refuses one level up).
+    floor_names: frozenset[str]
+    #: PDF-68 D1/E7 -- the DENOMINATOR, and it is the complement of a filter
+    #: that already ran. `attributable` keeps the rows whose name is NOT in
+    #: `floor_names`; this is the self-time sum of the rows it DISCARDS, from
+    #: the SAME `--help` subprocess, the same scheduler window and the same
+    #: coverage instrumentation as the numerator. It costs no new subprocess.
+    #:
+    #: WHY THIS QUANTITY AND NOT THE BARE CENSUS'S OWN SUM. `PDF-55` shipped
+    #: `floor_self_us` (the `-c pass` process's self-time sum) for a candidate
+    #: its campaign then rejected, and at `7e36649` NO assertion read it --
+    #: a measurement moved from being discarded inside a function to being
+    #: discarded inside a NamedTuple. It is retired here and replaced by the
+    #: quantity measured in the numerator's OWN window, which is what makes
+    #: contention cancel rather than merely correlate.
+    in_run_floor_self_us: int
 
 
 #: The console script under test. Deliberately the venv's own, by path: the
@@ -2589,6 +2604,44 @@ HELP_MODULE_CEILING: Final = 320
 #      CPU-bound regression of the same wall-clock cost behaves in the OPPOSITE
 #      direction and its separation GROWS with load, which is why AC1 drives
 #      both plant shapes rather than the sleep alone.
+#   4. PDF-68, AND IT IS THE ONE THAT ESCAPED. A DIFFUSE PROPORTIONAL SLOWDOWN
+#      OF AN UNCHANGED IMPORT SET -- same count, same names, no single
+#      dominator, product and non-product inflating TOGETHER -- is invisible to
+#      both ratios above BY ALGEBRA rather than by threshold. Under
+#      `t_m -> k*t_m` for every attributable module, `product/non-product`
+#      reads `kA/kB = A/B` and `peak/non-product` reads `k*peak/kB`: both are
+#      EXACTLY invariant, so no value of either ceiling could see it. That is
+#      the ordinary shape of a dependency version bump, and it is NOT blind
+#      spot 1 above: entry 1 describes growth landing in the denominator alone
+#      (the ratio FALLS); this is growth landing on both sides in proportion
+#      (the ratio does not move at all). Entry 1's mitigation does not cover it
+#      either -- a `uv.lock` diff sees a VERSION change and is silent for a
+#      transitive re-resolve, a wheel rebuild, an interpreter minor bump or a
+#      platform change.
+#      WHICH ARM HOLDS IT NOW: `test_total_startup_import_cost_stays_under_its_-
+#      ceiling` below, whose denominator is the IN-RUN FLOOR -- rows the bare
+#      interpreter also loads, measured in the numerator's own window, which a
+#      product- or dependency-side import regression cannot enter. The class
+#      moves the numerator alone, so the statistic moves with `k` exactly.
+#      WHAT REMAINS BLIND: a proportional slowdown of the FLOOR ITSELF (an
+#      interpreter or libc regression) inflates numerator and denominator
+#      together and cancels here as contention does -- correctly, since this
+#      instrument's proposition is about what the PRODUCT costs to start, not
+#      what the machine costs to boot. And the arm bounds COST, not CAUSE, and
+#      only above a MEASURED factor: see the constant's own block for the
+#      sensitivity boundary, which is the honest statement of what it cannot
+#      see.
+#   5. PDF-68, and it is a LIMIT OF THE ARM ABOVE rather than of the basis.
+#      Under `make cover`/`make ci`, coverage.py is injected into BOTH censuses
+#      (`patch = ["subprocess"]`), so its ~144 modules join the floor name set
+#      and its import cost joins the in-run floor DENOMINATOR -- measured at
+#      this commit, denominator 8,564 -> 83,887 us and the statistic 16.5 ->
+#      1.6062. The dilution is one-sided toward GREEN, so it can never produce
+#      a false red, but the arm is roughly TEN TIMES LESS SENSITIVE in the
+#      instrumented leg than in `make test`. Stated here because an instrument
+#      that quietly stops being able to see is the exact defect this section
+#      exists to end, and because the set-half already declares its own version
+#      of this ("120, not 280") one screen up.
 # --------------------------------------------------------------------------- #
 
 #: PDF-55 D3. Below this, the ratio's denominator is not trusted -- roughly a
@@ -2764,6 +2817,270 @@ MODULE_SELF_RATIO_CEILING_PER_MILLE: Final = 470
 PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE: Final = 2_600
 
 
+# --------------------------------------------------------------------------- #
+# PDF-68 -- the TOTAL half, which BOTH ratios above are blind to by algebra
+#
+# THE DEFECT, STATED AS ALGEBRA RATHER THAN AS AN OPINION. After PDF-55 retired
+# `TOTAL_IMPORT_US_CEILING`, no arm that RUNS BY DEFAULT bounded total startup
+# import cost. The four surviving default-running arms hold four propositions
+# and none of them is that one: the allowlist holds NAMES, the count ceiling
+# holds COUNT, and both ratios above are exactly invariant under a uniform
+# proportional inflation of the census (see DECLARED BLIND SPOT 4). The only
+# surviving absolute, `STARTUP_BUDGET_MS` in tests/test_cli_spine.py, abstains
+# on every xdist worker BY DESIGN and `-n auto` is this project's default -- so
+# it never runs here and never runs in CI. That abstention is CORRECT and is
+# untouched by this block: the answer to a control that must abstain is a
+# control that does not have to.
+#
+# THE BASIS (D1). The denominator must be measured in the SAME window (so
+# contention still cancels) and must be a quantity the regression CANNOT ENTER
+# (so the class still moves the numerator). The in-run floor is exactly that
+# and it is free: `probe_help_imports` already computes `floor_names` and
+# already throws away the rows that match it. Counting the product's total
+# import cost in units of a CONTROL WORKLOAD, rather than in microseconds, is
+# what makes this arm load-immune without ever asking how busy the box is --
+# which it may not do anyway (`tests/test_gate_budget.py::LOAD_SENSING_NAMES`).
+#
+# WHY NOT A WIDER ABSOLUTE. Re-deriving the retired absolute at a wider ceiling
+# is the forbidden move twice over -- it is a guard that goes green because a
+# constant moved, and it is the defect PDF-55 measured. It is also INEFFECTIVE,
+# and this campaign measured by how much: see the C3 row below.
+# --------------------------------------------------------------------------- #
+
+#: PDF-68 D3. Readings per evaluation. The arm reds only on a STRICT MAJORITY
+#: of these (3 of 5), which is the same predicate as "the median of K readings
+#: exceeds the ceiling" -- the quorum form is used because
+#: `"k of K readings exceeded C (readings: ...)"` localises for a reader and a
+#: single derived number does not.
+#:
+#: K WAS MEASURED, NOT CHOSEN. Dispersion of the median-of-K over the 50
+#: deliberately-loaded trials below (consecutive windows, so the real
+#: autocorrelation of a load window is preserved): K=1 cv 18.15%, K=3 cv 9.69%,
+#: K=5 cv 7.71%, K=7 cv 7.38%. K=5 is where it flattens, and the worst reading
+#: at K=5 equals the worst at K=3 (21.3947) while the cv is two points better.
+#:
+#: COST, stated rather than spent silently: a repetition costs ONE subprocess,
+#: not two. `floor_names` is taken once (by `help_imports`, which pays for the
+#: bare census anyway) and REUSED, so `startup_cost` adds K-1 = 4 `--help`
+#: subprocesses per test MODULE and no extra bare censuses. The rejected
+#: bare-floor candidate would have cost two per repetition, because its
+#: denominator lives in a different process and drifts if it is not re-taken.
+STARTUP_COST_READINGS: Final = 5
+
+#: PDF-68 D3/AC9, and DERIVED for THIS denominator rather than copied from
+#: `DENOMINATOR_SANITY_FLOOR_US` above (which guards a different, ~9x larger
+#: quantity). The in-run floor's own measured readings on this host: quiet
+#: median 8,564 us, smallest reading ever observed 8,430 us over 90 trials
+#: spanning loadavg 0.19-66. A fifth of the quiet median is ~1,713, so this
+#: floor sits 4.96x BELOW the smallest live reading this campaign ever saw --
+#: far enough that contention cannot reach it, close enough that a genuinely
+#: broken census (a `--help` that never reached the real path, or a subtraction
+#: that swept the whole census into one bucket) RAISES rather than dividing.
+STARTUP_FLOOR_SANITY_FLOOR_US: Final = 1_700
+
+#: Total attributable import self time, AS A SHARE OF the in-run floor's self
+#: time measured in the SAME `--help` subprocess. Expressed as an integer x1000
+#: (a per-mille) so `ceiling_block()`'s existing integer parser needs no change:
+#: `26_500` means the ratio must not exceed `26.500`.
+#:
+#: STATISTIC: median of K=5 readings of (sum of attributable self time / sum of
+#:   the self time of the rows whose name IS in the bare-census floor name set),
+#:   both sums from the SAME `pdftooling --help` `-X importtime` run. One bare
+#:   census supplies the floor NAME set for every reading.
+#: DATE: 2026-09-16
+#: COMMIT: 7e36649 (measured on a byte-identical working tree at that commit,
+#:   `git status --porcelain` empty before and after every reading; the harness
+#:   lived OUTSIDE the product tree for exactly that reason)
+#: HOST: station-01, 8 logical CPUs, Linux.
+#: INTERPRETER: CPython 3.12.13 (`uv run python -V`)
+#: ENGINES: all six present -- pypdf 6.16.2 / pypdfium2 5.13.0 / reportlab
+#:   5.0.1 / pdfplumber 0.11.10 / tesseract 5.5.0 / soffice 26.2.5.2
+#:
+#: Figures are `attributable self / in-run floor self`, unitless, SINGLE
+#: readings (K=1) unless the line says median-of-5:
+#:   serial (`-n 0`, N=20, loadavg 0.19-0.25):
+#:     min 16.1617  median 16.6154  p95 17.0052  max 17.8239  spread 1.6622  cv 2.07%
+#:   `-n auto` (this project's default, ambient, N=20, loadavg 0.25-0.31):
+#:     min 15.0132  median 16.5322  p95 17.3232  max 17.4527  spread 2.4395  cv 2.99%
+#:   deliberate ambient load (N=50 over TWO regimes, loadavg 23.7-35.2 at 5x
+#:   nproc and 57.1-66.0 at 8x nproc; independent CPU-bound busy-loop processes,
+#:   killed by process group afterwards and proven dead with `ps`):
+#:     min 12.3391  median 18.3084  p95 24.9179  max 32.6462  spread 20.3071  cv 18.15%
+#:   the SHIPPED ESTIMATOR, median-of-5 over those same 50 loaded trials:
+#:     min 16.2671  median 18.2659  p95 21.1705  max 21.3947  spread 5.1276  cv 7.71%
+#:
+#: THE LOAD-INVARIANCE THIS BASIS RESTS ON, measured across a 2x load range:
+#: doubling the load moved this statistic's median by 0.8% (18.2348 at loadavg
+#: 23-35 -> 18.3820 at loadavg 57-66) while the RAW ABSOLUTE over the identical
+#: trials moved 87% (1,551,512 -> 2,906,813 us). The level is flat and only the
+#: dispersion widens, which is why the median-of-5 estimator is sufficient and
+#: why the headroom below is smaller than the shipped N=1 constants needed.
+#:
+#: REJECTED ALTERNATIVES, measured rather than argued (D2/AC7):
+#:   C2, bare-census floor (`total/floor`, PDF-55's rejected candidate,
+#:     re-measured here): loaded cv 19.67% at K=1, 7.62% at K=5 -- a virtual
+#:     TIE with C1 at K=5, and it would have been ~10 points MORE SENSITIVE
+#:     (f_min 50.6% vs 60.3%). It loses on the rule's stated tiebreak (the
+#:     loaded-arm cv, 19.67% vs 18.15%), on cost (two subprocesses per
+#:     repetition, not one) and structurally: its denominator comes from a
+#:     DIFFERENT process, so there is no single row set over which numerator and
+#:     denominator partition and AC9's partition assertion is not even
+#:     well-posed. That is the inconvenient number, recorded rather than buried.
+#:   C3, a majority quorum over the raw absolute: the quorum does kill the
+#:     recorded false positive, but the absolute's LEVEL is not load-invariant
+#:     (see above), so its ceiling must clear 3,178,150 us against a quiet
+#:     median of 141,516 -- f_min 2707%, i.e. it can only catch a 28x slowdown.
+#:     Rejected on MEASURED sensitivity, not on argument.
+#:
+#: FACTOR: 1.25x the deliberately-loaded arm's p95 OF THE SHIPPED ESTIMATOR
+#: (21.1705), rounded to 26.500. The loaded arm governs (D2 rule 3): a contended
+#: box is the condition the assertion actually runs in. That is 5.73 standard
+#: deviations above the loaded mean of the shipped estimator and 1.237x the
+#: worst median-of-5 ever observed. False-red rate over the 50 loaded readings:
+#: 0 of 46 consecutive windows; 0.013% by bootstrap over 100,000 draws.
+#: SEPARATION: the escaping-class plant at f = 2.5 reads a median-of-5 of
+#: 56.85 (readings 43.5714 / 56.1641 / 56.8511 / 66.5980 / 57.3577) against
+#: this 26.500 ceiling -- 2.15x the ceiling, and 2.66x the worst median-of-5
+#: ever observed on a byte-identical tree at loadavg 23-66 (21.3947). Both
+#: forms of D2's threshold are cleared. The ORDER is the criterion (X-476): the
+#: unmutated loaded distribution above was measured and recorded FIRST, this
+#: constant was derived from it SECOND, and the plant was driven against it
+#: THIRD -- the value was never chosen with a plant reading in view.
+#: SENSITIVITY BOUNDARY, measured on a descending ladder of f rather than
+#: claimed (D5.3/AC5): the arm REDS at f >= 0.65 and stays GREEN at f <= 0.60.
+#: Derivation predicted f_min = 60.3% from the quiet median-of-5 (16.5322) and
+#: the crossing was observed between 0.60 and 0.65 -- the ceiling detects what
+#: the measurement says it should, which is the difference between a derived
+#: constant and an aimed one. Below f = 0.60 this arm is BLIND, stated plainly:
+#: it is a NOISE-FLOOR ceiling ("red when the reading exceeds what contention
+#: alone can produce"), never a POLICY ceiling ("red when a user would
+#: notice"). Only the first is answerable from measurement; the second is the
+#: project-manager's call and is deliberately not taken here.
+#:
+#: THE COVERAGE LEG IS DILUTED, MEASURED AND DECLARED RATHER THAN DISCOVERED
+#: LATER. Every figure above was taken WITHOUT coverage instrumentation, i.e.
+#: under `make test`'s condition. Under `make cover`/`make ci`,
+#: `[tool.coverage.run] patch = ["subprocess"]` puts coverage.py into BOTH
+#: censuses, so its ~144 modules join the floor NAME set and its own import
+#: cost joins the DENOMINATOR: measured at this commit, the floor name set goes
+#: 39 -> 183, the denominator 8,564 -> 83,887 us, and this statistic reads
+#: 1.6062 instead of ~16.5. That direction is SAFE -- it is one-sided toward
+#: green and cannot manufacture a false red, which is the direction that
+#: matters across eight matrix legs -- but the arm's sensitivity in the
+#: coverage leg is roughly a TENTH of its sensitivity in `make test`
+#: (f_min ~1546% rather than ~60%). The arm therefore does its real work in the
+#: uninstrumented leg, which CI also runs. Narrowing the denominator to the
+#: true interpreter floor would recover it and is a DIFFERENT spec: it needs
+#: its own three-arm campaign, and inventing it here would mean shipping a
+#: constant derived against one condition and asserted under another.
+#:
+#: CLASS: a diffuse PROPORTIONAL slowdown of an UNCHANGED import set -- same
+#: count, same names, no single dominator, both shipped ratios exactly flat
+#: (DECLARED BLIND SPOT 4). Under `t_m -> (1+f)*t_m` for every attributable
+#: module, this statistic reads `(1+f)x` exactly, because the floor rows are not
+#: attributable and do not scale.
+#: CONTROL: a `sys.meta_path` shim installed in a scratch rsync copy only, which
+#: CPU-SPINS (never `time.sleep` -- a sleep is contention-invariant and is the
+#: one shape a ratio basis is structurally weakest against) for `f x` each
+#: module's own measured exec time, gated to skip the captured floor-name list
+#: so the bare-interpreter floor is unmoved. Proven in the class before it was
+#: allowed to grade anything: count delta 0, name set identical, BOTH shipped
+#: ratio arms GREEN on the planted tree under the default `-n auto`, floor
+#: within its own noise. The SEPARATION and the measured SENSITIVITY BOUNDARY
+#: ("reds at f >= X, green at f <= Y") are in this spec's Implementation Log.
+STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = 26_500
+
+
+class StartupPartition(NamedTuple):
+    """One `--help` census's rows, split into the two populations this ratio
+    divides -- the ATTRIBUTABLE rows (the numerator a product- or
+    dependency-side import regression enters) and the IN-RUN FLOOR rows (the
+    denominator it cannot), over the SAME row set.
+
+    Deliberately a second partition type beside `ImportPartition` rather than a
+    generalisation of it: that one splits the ATTRIBUTABLE set by ownership and
+    this one splits the WHOLE census by whether the bare interpreter loaded it.
+    They answer different questions over different universes, and a shared type
+    would have to lie about one of them in its failure message.
+    """
+
+    attributable_modules: frozenset[str]
+    floor_modules: frozenset[str]
+    attributable_us: int
+    floor_us: int
+
+
+def assert_startup_partition_valid(
+    attributable: frozenset[str], floor: frozenset[str], universe: frozenset[str]
+) -> None:
+    """AC9. *attributable* and *floor* must partition *universe* -- no overlap,
+    no remainder -- or cost could move between this ratio's numerator and its
+    denominator without either one noticing.
+
+    The overlap half is the dangerous one and it is not hypothetical: a row
+    counted on BOTH sides inflates the numerator and the denominator together,
+    which is precisely the signature this instrument reads as "nothing
+    happened". The remainder half is the `d933b5abdd` shape one level in --
+    rows that fall out of both populations are cost the instrument stops
+    measuring while still reporting a plausible number.
+    """
+    overlap = attributable & floor
+    assert overlap == frozenset(), (
+        f"module(s) counted in BOTH the attributable numerator and the in-run floor "
+        f"denominator: {sorted(overlap)}. A row on both sides moves cost into the "
+        "numerator and the denominator together, which this statistic reads as no "
+        "change at all -- the exact blindness it exists to end."
+    )
+    covered = attributable | floor
+    assert covered == universe, (
+        f"the startup partition does not cover the census. missing="
+        f"{sorted(universe - covered)} extra={sorted(covered - universe)}"
+    )
+
+
+def checked_startup_denominator(partition: StartupPartition) -> int:
+    """*partition*'s in-run floor denominator, or a raise naming the reading.
+
+    Same rule as `checked_denominator` above and for the same reason, with a
+    floor DERIVED for this quantity (`STARTUP_FLOOR_SANITY_FLOOR_US`) rather
+    than borrowed from a denominator roughly nine times larger: a ratio that
+    normalises by a denominator it cannot trust manufactures a false positive
+    out of the instrument itself.
+    """
+    if not partition.floor_modules or partition.floor_us <= 0:
+        raise AssertionError(
+            f"the startup ratio's denominator (in-run floor self time) is "
+            f"{partition.floor_us} us over {len(partition.floor_modules)} module(s) -- "
+            "refusing to divide. Either the probe did not reach the real `--help` path, "
+            "or the bare-census subtraction claimed every row in the census."
+        )
+    if partition.floor_us < STARTUP_FLOOR_SANITY_FLOOR_US:
+        raise AssertionError(
+            f"the startup ratio's denominator read {partition.floor_us} us, under the "
+            f"{STARTUP_FLOOR_SANITY_FLOOR_US} us sanity floor -- this is not a live "
+            "in-run floor, so no ratio is computed from it."
+        )
+    return partition.floor_us
+
+
+def partition_by_floor(rows: list[ModuleImport], floor_names: frozenset[str]) -> StartupPartition:
+    """Split one `--help` census's rows into attributable and in-run floor.
+
+    This is the complement of the filter `probe_help_imports` already runs: it
+    keeps the rows that one discards. Both sides are summed from the SAME row
+    list, so contention that dilates the process dilates both.
+    """
+    attributable = frozenset(row.name for row in rows if row.name not in floor_names)
+    floor = frozenset(row.name for row in rows if row.name in floor_names)
+    assert_startup_partition_valid(attributable, floor, frozenset(row.name for row in rows))
+    return StartupPartition(
+        attributable_modules=attributable,
+        floor_modules=floor,
+        attributable_us=sum(row.self_us for row in rows if row.name not in floor_names),
+        floor_us=sum(row.self_us for row in rows if row.name in floor_names),
+    )
+
+
 #: `-X importtime` writes `import time: self [us] | cumulative | imported package`
 #: and then one row per module in the same three columns. Until PDF-42 this
 #: parser kept `fields[2]` and threw the two timing columns away -- the
@@ -2861,6 +3178,8 @@ def probe_help_imports(entry: Path | None = None) -> HelpImports:
     )
     floor_names = {row.name for row in floor}
     attributable = [row for row in measured if row.name not in floor_names]
+    # PDF-68 D1/E7: the complement of the filter above, from the SAME process.
+    in_run_floor_self_us = sum(row.self_us for row in measured if row.name in floor_names)
     top_level = frozenset(row.name.split(".")[0] for row in attributable)
     non_stdlib = frozenset(
         name
@@ -2879,7 +3198,8 @@ def probe_help_imports(entry: Path | None = None) -> HelpImports:
         non_stdlib,
         self_us_by_module,
         sum(self_us_by_module.values()),
-        sum(row.self_us for row in floor),
+        frozenset(floor_names),
+        in_run_floor_self_us,
     )
 
 
@@ -2893,6 +3213,72 @@ def help_imports() -> HelpImports:
             "Run `uv sync`."
         )
     return probe_help_imports()
+
+
+class StartupCostReadings(NamedTuple):
+    """K paired (numerator, denominator) readings and the ratios they give.
+
+    Paired is the whole point: each ratio's two halves come from ONE `--help`
+    subprocess, so a scheduling excursion that inflates the numerator inflated
+    the denominator in the same window and divides out.
+    """
+
+    ratios: tuple[float, ...]
+    numerators: tuple[int, ...]
+    denominators: tuple[int, ...]
+
+
+def probe_startup_cost(
+    floor_names: frozenset[str], repetitions: int, first: tuple[int, int] | None = None
+) -> StartupCostReadings:
+    """*repetitions* readings of the startup-cost ratio, sharing ONE floor name set.
+
+    `floor_names` is passed in rather than re-derived, for two reasons and both
+    are load-bearing. (1) COST: a repetition is then ONE subprocess, not two --
+    the bare census is paid for once, by `help_imports`, which needs it anyway.
+    (2) CORRECTNESS: every reading partitions its census against the SAME name
+    set, so the numerator and the denominator of every ratio are complementary
+    over one row set. A repetition that re-derived its own floor names would be
+    dividing two quantities drawn from two different partitions.
+
+    *first* is the reading `help_imports` already paid for, reused rather than
+    re-taken, so K=5 costs four extra subprocesses and not five.
+    """
+    ratios: list[float] = []
+    numerators: list[int] = []
+    denominators: list[int] = []
+
+    def record(numerator: int, denominator: int) -> None:
+        numerators.append(numerator)
+        denominators.append(denominator)
+        ratios.append(numerator / denominator)
+
+    if first is not None:
+        record(*first)
+    env = dict(os.environ)
+    while len(ratios) < repetitions:
+        _, measured = _importtime_census([str(VENV_CONSOLE_SCRIPT), "--help"], env)
+        partition = partition_by_floor(measured, floor_names)
+        record(partition.attributable_us, checked_startup_denominator(partition))
+    return StartupCostReadings(tuple(ratios), tuple(numerators), tuple(denominators))
+
+
+@pytest.fixture(scope="module")
+def startup_cost(help_imports: HelpImports) -> StartupCostReadings:
+    """K readings of the total-startup-cost ratio, taken once per test module.
+
+    Module-scoped for the same reason `help_imports` is, and it DEPENDS on
+    `help_imports` rather than re-censusing: that is what lets the K readings
+    reuse one bare census and one floor name set. It adds NO abstention of its
+    own -- the only precondition in this section is the build-absent skip
+    `help_imports` already carries, and a second one would redden
+    `tests/test_gate_budget.py::test_the_abstention_walk_is_not_vacuous`.
+    """
+    return probe_startup_cost(
+        help_imports.floor_names,
+        STARTUP_COST_READINGS,
+        first=(help_imports.total_self_us, help_imports.in_run_floor_self_us),
+    )
 
 
 def test_the_help_import_census_is_not_vacuous(help_imports: HelpImports) -> None:
@@ -3150,6 +3536,108 @@ def test_the_product_import_ratio_stays_under_its_ceiling(help_imports: HelpImpo
     )
 
 
+def test_total_startup_import_cost_stays_under_its_ceiling(
+    startup_cost: StartupCostReadings,
+) -> None:
+    """PDF-68's claim-bearing arm: the proposition NO default-running arm held.
+
+    `PLAN §12 R-13` is a claim about `--help` startup latency. The allowlist
+    holds the import NAMES, the count ceiling holds the COUNT, and the two
+    ratios above hold SHAPE -- which module dominates, and how much of the cost
+    is the product's. None of them holds the TOTAL, and the two ratios are
+    blind to a uniform proportional inflation of the census BY ALGEBRA rather
+    than by threshold (DECLARED BLIND SPOT 4). The only arm that would see it
+    abstains on every xdist worker, and `-n auto` is the default -- so it never
+    runs here or in CI.
+
+    This one runs, on every leg, because it never asks how busy the box is: it
+    counts the product's total import cost in units of the IN-RUN FLOOR -- the
+    rows the bare interpreter loads anyway, measured in the same subprocess.
+    Contention multiplies both sides and cancels; a product- or dependency-side
+    import regression enters the numerator and cannot enter the denominator.
+
+    The QUORUM is the estimator (D3). A strict majority of K readings must
+    exceed the ceiling, which is the same predicate as "the median of K exceeds
+    it" and localises far better in the message. `min`-of-N is forbidden on the
+    denominator: a small denominator's minimum is an outlier draw, and a
+    min-based ratio tuned to catch a plant fires on a byte-identical tree.
+    """
+    readings = startup_cost.ratios
+    assert len(readings) == STARTUP_COST_READINGS, (
+        f"the startup-cost probe returned {len(readings)} reading(s), not "
+        f"{STARTUP_COST_READINGS}. A quorum over the wrong number of readings is not the "
+        "estimator this ceiling was derived against."
+    )
+    ceiling = STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000
+    over = [round(value, 4) for value in readings if value > ceiling]
+    assert len(over) * 2 <= len(readings), (
+        f"{len(over)} of {len(readings)} readings exceeded the {ceiling:.3f} "
+        f"total-startup-cost ratio ceiling (readings: "
+        f"{[round(value, 4) for value in readings]}; over: {over}). This is TOTAL "
+        "attributable import self time measured in units of the in-run interpreter "
+        "floor, so a busy box moves both halves together and does NOT produce this "
+        "red -- what does is everything getting proportionally more expensive to "
+        "import: a dependency bump, a wheel rebuild, a transitive re-resolve. The "
+        "import NAMES and the COUNT can all be unchanged and both shipped ratios flat "
+        "while this fires; that is the case this arm exists for. Find it with "
+        f"`python -X importtime {VENV_CONSOLE_SCRIPT} --help` and compare against the "
+        "distribution beside STARTUP_COST_RATIO_CEILING_PER_MILLE. Either make an "
+        "import lazy, or widen the ceiling **with a fresh measured distribution "
+        "recorded beside it** -- widening a pin without a measurement is how the "
+        "wall-clock budget this section replaced came to be defended by nothing."
+    )
+
+
+def test_the_startup_partition_reddens_on_a_row_counted_in_both_populations() -> None:
+    """AC9 RED (ii). Hand-built populations, computed two different ways --
+    `partition_by_floor`'s own membership test cannot itself produce an overlap,
+    so the only way to prove `assert_startup_partition_valid` fires is to hand
+    it one."""
+    universe = frozenset({"pdf_tooling.models", "_io"})
+    with pytest.raises(AssertionError, match="counted in BOTH"):
+        assert_startup_partition_valid(
+            frozenset({"pdf_tooling.models", "_io"}),  # "_io" wrongly on BOTH sides
+            frozenset({"_io"}),
+            universe,
+        )
+
+
+def test_the_startup_partition_reddens_on_a_row_left_out_of_both_populations() -> None:
+    """AC9 RED (ii)'s sibling: a row in NEITHER population is cost the ratio has
+    silently stopped measuring while still reporting a plausible number."""
+    universe = frozenset({"pdf_tooling.models", "_io"})
+    with pytest.raises(AssertionError, match="does not cover the census"):
+        assert_startup_partition_valid(frozenset({"pdf_tooling.models"}), frozenset(), universe)
+
+
+def test_a_hollow_startup_denominator_raises_rather_than_dividing() -> None:
+    """AC9 RED (i). An empty (or zero-summed) in-run floor REFUSES rather than
+    manufacturing an enormous ratio out of the instrument itself."""
+    hollow = StartupPartition(
+        attributable_modules=frozenset({"pdf_tooling.models"}),
+        floor_modules=frozenset(),
+        attributable_us=140_000,
+        floor_us=0,
+    )
+    with pytest.raises(AssertionError, match="refusing to divide"):
+        checked_startup_denominator(hollow)
+
+
+def test_a_startup_denominator_under_its_sanity_floor_raises_by_name() -> None:
+    """AC9 RED (iii). A denominator that is technically positive but far too
+    small to be a live in-run floor still refuses, naming the reading. The
+    smallest floor reading this campaign ever observed was 8,430 us over 90
+    trials spanning loadavg 0.19-66; 1,699 is not a census, it is a bug."""
+    thin = StartupPartition(
+        attributable_modules=frozenset({"pdf_tooling.models"}),
+        floor_modules=frozenset({"_io"}),
+        attributable_us=140_000,
+        floor_us=STARTUP_FLOOR_SANITY_FLOOR_US - 1,
+    )
+    with pytest.raises(AssertionError, match="sanity floor"):
+        checked_startup_denominator(thin)
+
+
 def test_the_partition_reddens_on_a_module_placed_in_both_populations() -> None:
     """AC8 RED (ii). Direct call, hand-built input -- the same shape as
     `test_a_malformed_timing_column_raises_rather_than_reading_as_zero`'s proof
@@ -3226,6 +3714,26 @@ def test_the_timing_census_is_not_vacuous(help_imports: HelpImports) -> None:
         f"names-only: {sorted(help_imports.top_level - timed_top_level)}"
     )
     assert sum(help_imports.self_us_by_module.values()) == help_imports.total_self_us
+
+    # PDF-68 D8/AC15. The denominator half of the startup-cost ratio, held to
+    # the same non-vacuity floor as the numerator: a zero (or absent) in-run
+    # floor would make that arm raise rather than pass, but an unasserted field
+    # is how `floor_self_us` came to be declared, populated and read by nothing.
+    assert help_imports.floor_names, (
+        "the bare-interpreter floor census reported NO module names, so the baseline "
+        "subtraction subtracted nothing -- every row in the `--help` census would be "
+        "credited to the product and the in-run floor denominator would be empty"
+    )
+    assert help_imports.in_run_floor_self_us > 0, (
+        f"the in-run floor self time is {help_imports.in_run_floor_self_us}; the "
+        "denominator of the total-startup-cost ratio parsed to nothing"
+    )
+    assert not (help_imports.floor_names & set(help_imports.self_us_by_module)), (
+        "a module the bare interpreter loads is ALSO in the attributable set: the two "
+        "populations of the startup-cost ratio overlap, so cost is being counted in its "
+        f"numerator and its denominator at once. Overlap: "
+        f"{sorted(help_imports.floor_names & set(help_imports.self_us_by_module))}"
+    )
 
     # `total` counts `-X importtime` ROWS; the mapping is keyed by module NAME, and
     # CPython emits repeat rows. Measured at b175d10: 282 rows over 273 distinct
@@ -3308,6 +3816,46 @@ def test_the_ceilings_are_one_sided_and_an_improvement_is_never_a_red() -> None:
         raised_partition.product_self_us * 1000
         > PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE * raised_denominator
     ), "the product/non-product ratio ceiling did not notice the same raise"
+
+    # PDF-68 AC8, the same asymmetry for the TOTAL half. Synthesised rows rather
+    # than a live census, so the direction is proven by construction rather than
+    # by whatever the host happened to do this minute.
+    floor_names = frozenset({"_io", "codecs"})
+    improved = [
+        ModuleImport("pdf_tooling.models", 20_000, 20_000),
+        ModuleImport("typing", 20_000, 20_000),
+        ModuleImport("_io", 5_000, 5_000),
+        ModuleImport("codecs", 5_000, 5_000),
+    ]
+    improved_partition = partition_by_floor(improved, floor_names)
+    improved_ratio = improved_partition.attributable_us / checked_startup_denominator(
+        improved_partition
+    )
+    assert improved_ratio * 1000 <= STARTUP_COST_RATIO_CEILING_PER_MILLE, (
+        f"halving every attributable import cost produced a ratio of {improved_ratio:.4f}, "
+        "over the ceiling -- the total-startup-cost arm reddens on an IMPROVEMENT, which "
+        "is the one direction a pin may never fire in"
+    )
+
+    # ...and the same shape with the numerator raised past the ceiling DOES redden,
+    # WITHOUT any name, count or per-module share changing beyond the scaling.
+    inflated = [
+        ModuleImport(
+            row.name,
+            row.self_us * 30 if row.name not in floor_names else row.self_us,
+            row.cumulative_us,
+        )
+        for row in improved
+    ]
+    inflated_partition = partition_by_floor(inflated, floor_names)
+    inflated_ratio = inflated_partition.attributable_us / checked_startup_denominator(
+        inflated_partition
+    )
+    assert inflated_ratio * 1000 > STARTUP_COST_RATIO_CEILING_PER_MILLE, (
+        f"a 30x proportional inflation of the attributable set read {inflated_ratio:.4f}, "
+        f"under the {STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000:.3f} ceiling -- the arm "
+        "does not notice the class it exists for"
+    )
 
 
 #: The single module-scope `PIL` import site under `src/`, DERIVED below rather

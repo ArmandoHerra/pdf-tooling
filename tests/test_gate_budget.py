@@ -499,6 +499,12 @@ SECTION_SIX_CLAIM_BEARING: Final = (
     "test_help_import_count_stays_under_the_ceiling",
     "test_the_help_import_census_is_not_vacuous",
     "test_the_product_import_ratio_stays_under_its_ceiling",
+    # PDF-68 D7/AC14: the arm that holds TOTAL startup import cost -- the
+    # proposition no default-running arm held after PDF-55 retired
+    # `TOTAL_IMPORT_US_CEILING`. It is a FLOOR member here, not the roster:
+    # the roster is derived (`section_six_test_names`), and this tuple only
+    # pins the members whose removal must never read as a refactor.
+    "test_total_startup_import_cost_stays_under_its_ceiling",
 )
 
 #: The ONLY admissible precondition: the venv's console script is not there, so
@@ -1755,12 +1761,35 @@ def test_removing_one_alternative_from_the_matcher_reddens_its_case(dropped: str
 PDF42_CEILINGS: Final = (
     "MODULE_SELF_RATIO_CEILING_PER_MILLE",
     "PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE",
+    # PDF-68: the TOTAL half. Joining this tuple buys the new constant the
+    # existing evidence/distribution/derivation checks and their red control
+    # with no new machinery, which is the whole reason it is a tuple.
+    "STARTUP_COST_RATIO_CEILING_PER_MILLE",
 )
 
 #: Beyond EVIDENCE_TOKENS/DISTRIBUTION_TOKENS: D2 requires the multiplier to be
 #: written down and the plant separation to be stated, because "p95 times a
 #: factor" is only checkable if the factor is on the page.
 PDF42_DERIVATION_TOKENS: Final = ("FACTOR", "SEPARATION", "-n auto", "serial")
+
+#: PDF-68 D9, and this tuple is DELIBERATELY NOT appended to the one above.
+#:
+#: THE TRAP, recorded because the obvious implementation falls into it.
+#: `test_the_pdf42_ceilings_carry_their_measurement` is parametrized over
+#: `PDF42_CEILINGS`, so extending `PDF42_DERIVATION_TOKENS` with CLASS/CONTROL
+#: would immediately redden the TWO SHIPPED constants, whose landed derivation
+#: blocks carry neither token -- and the next step from there is editing a
+#: landed derivation block to accommodate a new token, which destroys the
+#: evidence that makes a constant checkable in the first place. A ceiling whose
+#: block was rewritten to pass a guard is a ceiling with no measurement behind
+#: it, which is the defect this whole family exists to prevent.
+#:
+#: So the requirement lands as a dedicated arm over the NEW constant only. If a
+#: future cycle wants CLASS/CONTROL on all three, that is a spec that
+#: deliberately back-fills the two shipped blocks with their own class and
+#: control, not a tuple edit taken in passing.
+PDF68_CEILING: Final = "STARTUP_COST_RATIO_CEILING_PER_MILLE"
+PDF68_DERIVATION_TOKENS: Final = ("CLASS", "CONTROL")
 
 
 def ceiling_block(text: str, name: str) -> tuple[int, str]:
@@ -1800,6 +1829,132 @@ def test_the_pdf42_ceilings_carry_their_measurement(name: str) -> None:
         f"{name} = {value} but its block omits {unstated}. A ceiling set to 'the p95 times a "
         "factor' is only checkable by a reader if BOTH arms and the factor are on the page; "
         "without them the number is indistinguishable from one that was picked."
+    )
+
+
+def test_the_startup_cost_ceiling_names_its_class_and_its_control() -> None:
+    """PDF-68 AC16. X-715 condition (4), made checkable instead of prose.
+
+    A frozen ceiling is licensed only if its block names the CLASS of defect it
+    exists to catch and the CONTROL that proved it catches it. Prose rots and a
+    register of blind spots that nobody can grade is a register that acquires a
+    new blind spot silently -- which is exactly what happened here: the class
+    this constant holds went undeclared through two previous instrument shapes
+    against the same finding.
+    """
+    _, block = ceiling_block(IMPORT_BOUNDARIES.read_text(), PDF68_CEILING)
+    missing = [token for token in PDF68_DERIVATION_TOKENS if token not in block]
+    assert missing == [], (
+        f"{PDF68_CEILING}'s derivation block omits {missing}. A ceiling on a measured "
+        "quantity is licensed by naming the CLASS of regression it catches and the "
+        "CONTROL that was observed catching it; without both, the number is "
+        "indistinguishable from one that was aimed at whatever the last plant read."
+    )
+
+
+@pytest.mark.parametrize("stripped", PDF68_DERIVATION_TOKENS)
+def test_the_startup_cost_ceiling_reddens_when_it_loses_its_class_or_control(
+    tmp_path: Path, stripped: str
+) -> None:
+    """AC16's RED, one case per token, against a scratch copy -- a guard over a
+    comment block is worth exactly the proof that it notices a missing line."""
+    original = IMPORT_BOUNDARIES.read_text()
+    value, block = ceiling_block(original, PDF68_CEILING)
+    assert stripped in block, (
+        f"{stripped!r} is not in the live block, so removing it proves nothing"
+    )
+
+    kept = [line for line in block.splitlines() if stripped not in line]
+    scratch = tmp_path / "planted.py"
+    scratch.write_text("\n".join(kept) + f"\n{PDF68_CEILING}: Final = {value}\n")
+
+    _, damaged = ceiling_block(scratch.read_text(), PDF68_CEILING)
+    assert [token for token in PDF68_DERIVATION_TOKENS if token not in damaged], (
+        f"stripping every line mentioning {stripped!r} left a block the guard still "
+        "accepts; the guard is not reading what it claims to read"
+    )
+
+
+def help_imports_fields(text: str) -> list[str]:
+    """Every field DECLARED on `HelpImports`, derived by parsing the class."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.ClassDef) and node.name == "HelpImports":
+            return [
+                item.target.id
+                for item in node.body
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+            ]
+    raise AssertionError("`HelpImports` is not defined in " + IMPORT_BOUNDARIES.name)
+
+
+def fields_read_by_section_six_tests(text: str) -> set[str]:
+    """Every attribute name read inside a `test_*` function in Section 6.
+
+    Deliberately restricted to TEST bodies rather than to the whole section: a
+    field consumed only by a fixture is plumbing, and plumbing is precisely
+    what `floor_self_us` was. The proposition is that some ASSERTION depends on
+    the quantity, so that removing it from the census breaks something.
+    """
+    start, end = section_span(text, SECTION_SIX_BANNER)
+    read: set[str] = set()
+    for node in ast.parse(text).body:
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name.startswith("test_")
+            and start <= node.lineno < end
+        ):
+            for child in ast.walk(node):
+                if isinstance(child, ast.Attribute):
+                    read.add(child.attr)
+    return read
+
+
+def test_every_help_imports_field_is_read_by_a_section_six_assertion() -> None:
+    """PDF-68 D8/AC15. Forbid the SHAPE, not merely the instance.
+
+    `PDF-55` shipped `HelpImports.floor_self_us` -- collected on the wire,
+    populated on every census, and at `7e36649` read by NOTHING: `git grep`
+    returned the declaration and a changelog sentence. The quantity had been
+    moved from being discarded inside a function to being discarded inside a
+    NamedTuple, and no guard could tell.
+
+    That is `R-05`'s lesson one file over -- *the defect was a shape; forbid the
+    shape, do not merely correct the instance* -- and it is why this arm exists
+    rather than a one-line deletion. The next carrier quantity cannot go dark
+    the same way.
+    """
+    text = IMPORT_BOUNDARIES.read_text()
+    declared = help_imports_fields(text)
+    assert declared, "`HelpImports` declares no fields; the derivation broke"
+
+    read = fields_read_by_section_six_tests(text)
+    unread = [name for name in declared if name not in read]
+    assert unread == [], (
+        f"`HelpImports` field(s) declared and populated but read by no assertion in "
+        f"Section 6: {unread}. A census quantity nobody asserts on is a subprocess "
+        "paid for on every CI leg and spent on nothing -- either consume it or remove "
+        "it. (This is the `floor_self_us` shape, which is why this guard exists.)"
+    )
+
+
+def test_an_unread_help_imports_field_reddens_the_liveness_guard(tmp_path: Path) -> None:
+    """AC15's RED. A field added to `HelpImports` that no Section-6 assertion
+    reads must fail NAMING it -- against a scratch copy, never the real file."""
+    text = IMPORT_BOUNDARIES.read_text()
+    planted = text.replace(
+        "    in_run_floor_self_us: int\n",
+        "    in_run_floor_self_us: int\n    a_field_nobody_reads: int\n",
+        1,
+    )
+    assert planted != text, "the plant anchor moved; this red is not planting anything"
+    scratch = tmp_path / "planted_help_imports.py"
+    scratch.write_text(planted)
+
+    declared = help_imports_fields(scratch.read_text())
+    assert "a_field_nobody_reads" in declared
+    read = fields_read_by_section_six_tests(scratch.read_text())
+    assert "a_field_nobody_reads" not in read, (
+        "the planted field is somehow read; the plant is not a plant"
     )
 
 
