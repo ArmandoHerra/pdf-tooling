@@ -216,7 +216,13 @@ AUDIT: Final[tuple[ACAudit, ...]] = (
             "tests/test_cli_contract.py::test_c5_nonexistent_input_exits_4[info]",
             "tests/test_cli_contract.py::test_c6_malformed_page_range_exits_2[extract]",
             "tests/test_cli_contract.py::test_c7_no_backup_alone_exits_2[info]",
-            "tests/test_cli_contract.py::test_c8_no_ansi_on_a_pipe[info]",
+            # PDF-71 repaired C8: the old node drove `--help` and measured the CLI
+            # framework's help formatter, so this row vouched for a third-party
+            # library. The covering node moves to the arm that drives the verb's
+            # registered invocation on a pipe under `-o table` -- the hand-rolled
+            # renderer -- and asserts on BOTH streams. PDF-06's status is NOT
+            # re-granted here; only the pointer its own guard reddened is repaired.
+            "tests/test_cli_contract.py::test_c8_no_ansi_in_a_rendered_payload_on_a_pipe[table-info]",
             "tests/test_cli_contract.py::test_every_population_is_non_empty[PAGE_ADDRESSING]",
             "tests/test_cli_contract.py::test_every_population_is_non_empty[TAKES_INPUT_PATHS]",
             "tests/test_cli_contract.py::test_every_population_is_non_empty[GROUPS]",

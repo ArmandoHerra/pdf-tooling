@@ -394,14 +394,516 @@ def test_c7_no_backup_alone_exits_2(verb) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# C8 -- no ANSI escape through a pipe, at every verb
+# C8 (PDF-71) -- no ANSI escape in a RENDERED PAYLOAD on a pipe: every verb,
+# every output shape, BOTH streams.
+#
+# WHAT THIS ROW MEASURED UNTIL PDF-71, AND WHY IT WAS NOT THIS PRODUCT. The body
+# was two statements -- `run_cli(verb.name, "--help")` and `"\x1b[" not in
+# result.stdout` -- so 26 collected cases asserted a property of the CLI
+# FRAMEWORK's own help formatter under a contract row's name. It never ran the
+# verb, never passed a payload-producing argv, never passed `-o`, and never
+# looked at `stderr`: four independent defects, each sufficient on its own to
+# make the header comment's claim false. `render_error_table`
+# (`output/table.py`) writes to `stderr` (`output/__init__.py`), so the one
+# renderer on that stream was out of scope BY CONSTRUCTION, at every cell, for
+# the row's entire history. The row was blind twice over, and repairing only the
+# command it drives would have left the second blindness in place.
+#
+# WHAT IT MEASURES NOW -- the quadrant map, which is also the row's LOCALISATION
+# claim:
+#
+#   quadrant                renderer            stream   reached by
+#   success x table         render_table        stdout   arms A and C
+#   success x json          render_json         stdout   arms A and C
+#   success x ndjson        render_ndjson       stdout   arms A and C
+#   failure x table         render_error_table  STDERR   arm B (and arm A, on a
+#                                                        host whose engine is
+#                                                        absent -- see below)
+#   failure x json/ndjson   render_error_json   stdout   arm B (likewise)
+#
+# All five of the product's renderers, for the first time. Each occupies a
+# distinct quadrant, so a plant in one has an exactly predictable red set AND an
+# exactly predictable green set -- which is what makes the NEGATIVE half of the
+# red control checkable rather than rhetorical. A row that reds everywhere
+# localises nothing; it is only louder than the row it replaced.
+#
+# WHY THE PIPE NEEDS NO SETUP, AND WHY `-o` IS NOT OPTIONAL. `run_cli` runs with
+# `capture_output=True`, so both streams are pipes by construction for every row
+# in this module. `auto_format()` returns `table` only when `sys.stdout.isatty()`
+# -- so on a pipe the default shape is `json`, and `render_table`, the product's
+# ONLY hand-rolled formatter and the likeliest place styling would ever be
+# added, is reachable only by passing `-o table` explicitly. No C8 cell had ever
+# passed `-o` at all, so the hand-rolled renderer had never once been rendered
+# by this row.
+#
+# THE REUSE, WITH A FITNESS JUDGEMENT BESIDE EVERY PROVENANCE ONE. X-157 is
+# right about drift and silent about fitness, so each surface carries both --
+# and the REJECTIONS are as load-bearing as the acceptances.
+#
+#   CONSUMED
+#     `run_cli`                  every row here. `capture_output=True` makes both
+#                                streams pipes BY CONSTRUCTION; this row's
+#                                posture needs no setup at all.
+#     `INVOCATIONS[..].build`    C10/C12/C14's surface. Supplies a
+#                                payload-producing argv per verb -- precisely the
+#                                thing C8 has never had.
+#     `--dry-run` (arm A)        C10's stimulus. The RENDERER is the subject, not
+#                                the payload's values: a dry run reaches
+#                                `emit_result` -> `render_payload` through the
+#                                identical dispatch, costs no engine work and
+#                                writes nothing. Arm C closes the one honest
+#                                objection to that at 3 cells rather than 78.
+#     `REGISTERED`               C12's population. Every leaf that can be driven
+#                                to a payload; `test_every_verb_is_registered`
+#                                forces REGISTERED == VERBS, so it cannot
+#                                silently NARROW -- the failure mode a floor of 1
+#                                cannot see.
+#     `OPERAND_VERBS`            C18/C19/C20's population. Every leaf that can be
+#                                driven into an ERROR render. Operand arity and
+#                                click type are irrelevant to a renderer
+#                                property, which is C18's own argument against
+#                                modelling on `TAKES_INPUT_PATHS` -- that
+#                                predicate excludes `merge`.
+#     a nonexistent operand      C5/C24's stimulus (exit 4). Past argv parsing,
+#                                so `-o` is honoured and the shape axis is REAL;
+#                                needs no mode bits, therefore NO root skip.
+#     `output_formats()`         the X-157 dimension surface. The renderer set IS
+#                                the shape set, so a fourth renderer joins this
+#                                row with zero author action.
+#
+#   REJECTED
+#     `UNREADABLE_SHAPES`        carries the `--quiet` axis C8 does not grade;
+#                                consuming it would make this row CLAIM a
+#                                dimension it does not measure.
+#     `ENGINE_VISIBLE_SHAPES`    EXCLUDES `table` -- the single shape whose
+#                                renderer is hand-rolled, and the one C8 most
+#                                needs.
+#     `output_shape_states()`    adds the absent-`-o` state, which on a pipe
+#                                resolves through `auto_format()` to `json` and
+#                                therefore reaches NO renderer the `json` cell
+#                                does not; and the default-selection guarantee is
+#                                C12's row, not this one (tier discipline).
+#     `_skip_unless_engine_available`
+#                                C8 can still assert something real on an
+#                                engine-less host, so this row BRANCHES and never
+#                                skips -- C15's own written rule. A skip would
+#                                silently delete three cells of a three-shape row.
+#     `_substitute_unreadable_operand`
+#                                works, but drags `_skip_as_root()` with it,
+#                                which would delete the ENTIRE failure arm under
+#                                root: a hole in a contract row. C5's stimulus
+#                                instead.
+#     `run_cli_with_pty`         a TTY arm is a DIFFERENT claim -- "this product
+#                                never colours anywhere" rather than "no ANSI
+#                                escape through a pipe". Out of scope,
+#                                deliberately, and named so its absence is a
+#                                decision.
+#
+# THE WITNESS IS ASSERTED FIRST, AND IT IS WHAT STOPS THIS ROW PASSING ON
+# NOTHING. The pre-PDF-71 row would have passed on a cell that printed ZERO
+# bytes on both streams -- the absence of a token in an empty string. Every cell
+# therefore proves it REACHED its quadrant's renderer BEFORE it asserts the
+# absence, and a cell that cannot fails BY NAME, naming the verb, the arm, the
+# shape, the exit code and both streams (this module's `_discover_target` /
+# `_substitute_unreadable_operand` anti-lapse idiom). It never skips and never
+# passes quietly.
+#
+# ENGINE POSTURE: BRANCH, NEVER SKIP. The expected renderer is selected by the
+# OBSERVED exit code rather than by an independent engine probe -- exit 0 took
+# the payload quadrant, anything else took the error quadrant. On a host without
+# `soffice`, `convert --dry-run` legitimately exits 3 and renders the ERROR
+# shape, which is still a rendered payload on a pipe, still through `emit_error`,
+# and still required to carry no escape. The engine changes WHICH renderer a
+# cell reaches, never WHETHER the cell can assert, so no cell is lost on either
+# host and this row contributes no skip to `scripts/assert_skips.py
+# --expect-zero`.
+#
+# THE ESCAPE TOKEN IS UNCHANGED. The assertion stays on the CSI introducer
+# `"\x1b["`, the exact token this row has always used, so the change here is in
+# WHAT IS DRIVEN and never in what counts as ANSI. Widening to the bare ESC byte
+# -- which would also catch OSC-8 hyperlinks, and could red on document metadata
+# the product echoes -- is a different and stronger claim with a different
+# failure mode. FILED, not taken.
+#
+# MEASURED AT LANDING, AND IT GOVERNS HOW THIS ROW IS PROVEN: `src/` contains
+# zero literal ESC bytes and zero styling call sites (`grep -rc $'\x1b'`,
+# `click.style`/`typer.style`/`secho`/`colorama` all empty), so the repaired row
+# CANNOT catch a defect that exists today. It is a REGRESSION instrument from
+# the day it lands, armed for whoever adds colour to the hand-rolled formatter,
+# and its only proof of function is a planted red control. The standing half of
+# that proof is `test_the_ansi_instrument_reports_what_it_must` below; the
+# planted half -- four plants in four renderers, with four red sets predicted
+# before the run -- lives in PDF-71's own record, because a control that only
+# proved "some cell can fail" would leave this row indistinguishable from an
+# assertion on a global.
 # --------------------------------------------------------------------------- #
 
 
+def _ansi_shapes() -> tuple[str, ...]:
+    """C8's shape dimension, DERIVED from the live `OutputFormat` enum.
+
+    Consumed from `output_formats()` (X-157) rather than listed, so a fourth
+    renderer joins all three C8 arms with zero action from its author -- which
+    is the whole instruction this row was repaired under. Named for its
+    CONSUMER rather than generically because the module's other two shape
+    tuples each carry an axis C8 does not grade: `UNREADABLE_SHAPES` crosses
+    `--quiet`, and `ENGINE_VISIBLE_SHAPES` excludes `table`.
+    """
+    from registry import output_formats
+
+    return tuple(fmt.value for fmt in output_formats())
+
+
+#: The shapes every C8 arm is crossed with.
+ANSI_SHAPES: Final[tuple[str, ...]] = _ansi_shapes()
+
+
+def _hand_rolled_shape() -> str:
+    """The one shape whose renderer this product hand-rolled.
+
+    Read off the product's own enum member rather than typed, so a rename of
+    the shape moves this with it instead of leaving a stale literal that
+    silently routes every cell down the structured branch.
+    """
+    from pdf_tooling.output import OutputFormat
+
+    return OutputFormat.TABLE.value
+
+
+TABLE_SHAPE: Final[str] = _hand_rolled_shape()
+
+#: The CSI introducer -- the exact token this row has always asserted on. The
+#: change in PDF-71 is in WHAT IS DRIVEN, never in what counts as ANSI.
+_CSI: Final[str] = "\x1b["
+
+#: The three arm labels. `_ARM_ERROR` is load-bearing rather than cosmetic: it
+#: is the one arm whose stimulus DECLARES which tier it must reach, so a cell of
+#: it that exits 0 has rendered a success payload and exercised neither error
+#: renderer -- and must say so by name rather than pass on a valid envelope.
+_ARM_PAYLOAD: Final[str] = "payload"
+_ARM_ERROR: Final[str] = "error"
+_ARM_REAL_RUN: Final[str] = "real-run"
+
+#: `render_error_table`'s own literal prefix (`output/table.py`). The witness
+#: for the failure x table quadrant, and the ONLY witness in this row that
+#: lives on `stderr` -- which is why deleting the stderr assertion makes a
+#: plant in that renderer produce zero reds.
+_ERROR_TABLE_PREFIX: Final[str] = "error: "
+
+
+def _payload_witness_problems(shape: str, stdout: str, detail: str) -> list[str]:
+    """Did this cell actually reach `render_payload`'s renderer for *shape*?
+
+    `render_table` always returns a line -- it falls back to
+    ``"<verb>: no items"`` rather than to nothing -- so a non-blank `stdout` is
+    the whole witness there. For the structured shapes the witness is that
+    `stdout`'s FIRST LINE parses as a JSON object: that is exactly `ndjson`'s
+    shape, and it is equivalent to parsing the whole stream for `json`, whose
+    renderer emits a single `json.dumps` line. A `render_json` that began
+    indenting would fail this by name rather than silently, which is the
+    correct outcome for a witness.
+    """
+    if not stdout.strip():
+        return [f"no payload witness: the cell exited 0 and wrote NOTHING to stdout -- {detail}"]
+    if shape == TABLE_SHAPE:
+        return []
+    first = stdout.splitlines()[0]
+    try:
+        record = json.loads(first)
+    except json.JSONDecodeError as exc:
+        return [
+            f"no payload witness: stdout's first line does not parse as JSON ({exc}), so this "
+            f"cell never reached the structured renderer it names -- {detail}"
+        ]
+    if not isinstance(record, dict):
+        return [
+            f"no payload witness: stdout's first line parsed as {type(record).__name__}, not an "
+            f"object -- {detail}"
+        ]
+    return []
+
+
+def _error_witness_problems(shape: str, stdout: str, stderr: str, detail: str) -> list[str]:
+    """Did this cell actually reach `emit_error`'s renderer for *shape*?
+
+    The two halves land on DIFFERENT STREAMS, deliberately (`output/__init__.py`
+    states the asymmetry in terms): `-o table` prints `render_error_table`'s
+    one-line ``error: ...`` on STDERR, while `-o json`/`ndjson` print
+    `render_error_json`'s object on STDOUT so a machine consumer reading stdout
+    learns the run failed without also having to read stderr. The `table` half
+    is the only witness in this module that lives on stderr, and it is the
+    reason C8 asserts on that stream at all.
+    """
+    if shape == TABLE_SHAPE:
+        if _ERROR_TABLE_PREFIX not in stderr:
+            return [
+                f"no error witness: a non-zero exit under `-o {shape}` must carry "
+                f"`render_error_table`'s own {_ERROR_TABLE_PREFIX!r} line on STDERR -- {detail}"
+            ]
+        return []
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        return [
+            f"no error witness: a non-zero exit under `-o {shape}` must carry "
+            f"`render_error_json`'s object on stdout, which did not parse ({exc}) -- {detail}"
+        ]
+    if not isinstance(payload, dict) or "error" not in payload:
+        return [f"no error witness: stdout carries no `error` key -- {detail}"]
+    return []
+
+
+def ansi_problems(
+    verb_name: str,
+    shape: str,
+    arm: str,
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> list[str]:
+    """Every problem C8 finds in one already-obtained result. Empty means pass.
+
+    A PURE function of a result, following C14's `assert_the_verb_itself_wrote`
+    idiom, so `test_the_ansi_instrument_reports_what_it_must` can grade the
+    ASSERTION with synthetic streams instead of spawning 153 more subprocesses.
+    The standing control is what makes this an instrument; without it the row
+    is a string comparison nobody has ever seen fail.
+
+    Three clauses, in this order and for this reason:
+
+    1. THE WITNESS -- the cell reached the renderer its quadrant names. First,
+       because the two clauses after it are ABSENCES, and an absence is exactly
+       what a cell reports once it stops reaching the code under test.
+    2. no CSI introducer on `stdout`.
+    3. no CSI introducer on `stderr`.
+
+    The quadrant is selected by the OBSERVED *returncode*, never by an
+    independent engine probe (C15's branch-never-skip rule): exit 0 rendered a
+    payload, anything else rendered an error. That branch is what lets arm A
+    keep asserting on a host whose engine is absent, where `convert --dry-run`
+    legitimately exits 3 and renders the ERROR shape instead.
+
+    *arm* is NOT decorative, and the one place it changes the answer is the
+    error arm: its stimulus DECLARES the tier it must reach, so a cell of it
+    that exited 0 rendered a success payload, exercised neither error renderer,
+    and fails by name rather than passing on a valid envelope. Arms A and C
+    declare no tier -- either quadrant is legitimate for them -- so for those
+    the exit code is the whole story. *verb_name* is carried for the message
+    alone; a cell that fails must say which arm, which verb, which shape, which
+    exit code and what both streams held.
+    """
+    detail = (
+        f"{verb_name} [{arm} arm] -o {shape}: exit={returncode} stdout={stdout!r} stderr={stderr!r}"
+    )
+    if arm == _ARM_ERROR and returncode == 0:
+        problems = [
+            f"no error witness: this arm's stimulus is a nonexistent operand and MUST reach "
+            f"the product's own error tier, but the cell exited 0 -- it rendered a SUCCESS "
+            f"payload, so neither error renderer was exercised and the cell would otherwise "
+            f"have passed on a run that proves nothing -- {detail}"
+        ]
+    elif returncode == 0:
+        problems = _payload_witness_problems(shape, stdout, detail)
+    else:
+        problems = _error_witness_problems(shape, stdout, stderr, detail)
+    if _CSI in stdout:
+        problems.append(
+            f"an ANSI CSI escape reached STDOUT through a pipe -- this product renders no "
+            f"styling anywhere and a piped payload must survive `jq` unedited -- {detail}"
+        )
+    if _CSI in stderr:
+        problems.append(f"an ANSI CSI escape reached STDERR through a pipe -- {detail}")
+    return problems
+
+
+def _substitute_nonexistent_operand(verb, args: list[str], tmp_path: Path) -> list[str]:
+    """*args* with its input operand replaced by a path that does not exist.
+
+    C5/C24's stimulus (exit 4) delivered through C18's SUBSTITUTION idiom, and
+    the combination is deliberate. Typing `run_cli(verb.name, str(missing))` --
+    C5's own literal shape -- drops the rest of the registered tail, which
+    drives `merge` into a USAGE refusal (exit 2, no `-O`) instead of the
+    product's error tier; the usage tier is a different claim and is filed
+    rather than driven here. C18's own stimulus was rejected for the opposite
+    reason: a mode-000 copy drags `_skip_as_root()` with it, which would delete
+    this entire arm under root.
+
+    Anti-lapse, mirroring `_substitute_unreadable_operand` and
+    `_discover_target`: every `INVOCATIONS` row places the input operand FIRST,
+    and a future row that no longer does fails HERE, by name, rather than
+    dropping silently out of C8's failure arm.
+    """
+    if not args:
+        pytest.fail(
+            f"{verb.name}: its INVOCATIONS row builds an empty argv tail, so C8's error arm "
+            "has no operand to replace -- an operand verb must name one"
+        )
+    operand = Path(args[0])
+    if not operand.is_file():
+        pytest.fail(
+            f"{verb.name}: its INVOCATIONS row does not begin with an existing file "
+            f"({args[0]!r}), so C8 cannot build the nonexistent-operand stimulus from it. "
+            "Every row placed the operand first when this was written; a row that no longer "
+            "does needs its own arm here, by name"
+        )
+    slug = verb.name.replace(" ", "-")
+    missing = tmp_path / f"c8-does-not-exist-{slug}{operand.suffix or '.bin'}"
+    return [str(missing), *args[1:]]
+
+
+def _engine_free_verb():
+    """Arm C's verb: the first REGISTERED leaf declaring no engine precondition.
+
+    DERIVED, never typed. A verb name written into this module is a convention
+    breach (module docstring, AC5), and `requires_engine is None` is the same
+    declaration C10 reads to predict an exit code -- so arm C cannot pick a
+    verb whose real run would legitimately fail for want of an engine, on any
+    host, without this module gaining a second definition of "needs an engine".
+    """
+    for verb in REGISTERED:
+        if getattr(INVOCATIONS[verb.name], "requires_engine", None) is None:
+            return verb
+    pytest.fail(
+        "every REGISTERED invocation declares an engine precondition, so C8's real-run "
+        "control has no verb it can drive without one -- give arm C its own engine posture "
+        "rather than letting this arm vanish"
+    )
+
+
+@pytest.mark.parametrize("verb", REGISTERED, ids=_ids(REGISTERED))
+@pytest.mark.parametrize("shape", ANSI_SHAPES, ids=list(ANSI_SHAPES))
+def test_c8_no_ansi_in_a_rendered_payload_on_a_pipe(
+    verb, shape: str, corpus, tmp_path: Path
+) -> None:
+    """Arm A -- the registered invocation, under every shape, on both streams.
+
+    The stimulus is C10's: `INVOCATIONS[verb].build` plus `--dry-run`, which
+    reaches `emit_result` -> `render_payload` through the identical dispatch a
+    real run takes and is pure by `CLAUDE.md` rule 2. Arm C below is what closes
+    the objection that a dry run might render through a different seam, at three
+    cells rather than seventy-eight.
+
+    On a host whose engine is absent this arm's `convert` cells exit non-zero
+    and take the ERROR quadrant instead -- asserted, never skipped.
+    """
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    result = run_cli(verb.name, "--dry-run", *args, "-o", shape, cwd=tmp_path)
+    problems = ansi_problems(
+        verb.name, shape, _ARM_PAYLOAD, result.returncode, result.stdout, result.stderr
+    )
+    assert problems == [], "\n".join(problems)
+
+
+@pytest.mark.parametrize("verb", OPERAND_VERBS, ids=_ids(OPERAND_VERBS))
+@pytest.mark.parametrize("shape", ANSI_SHAPES, ids=list(ANSI_SHAPES))
+def test_c8_no_ansi_in_a_rendered_error_on_a_pipe(verb, shape: str, corpus, tmp_path: Path) -> None:
+    """Arm B -- the error renderers, in scope for the FIRST time.
+
+    `render_error_table` writes to `stderr`, so no cell of the pre-PDF-71 row
+    could see it under any stimulus: this arm and the stderr clause of
+    `ansi_problems` are the two halves of that repair, and a plant in that
+    renderer produces zero reds if either is missing.
+
+    No skip, for any reason -- not for an engine (the stimulus never reaches
+    one) and not for root (a nonexistent path is nonexistent for uid 0 too).
+    """
+    args = _substitute_nonexistent_operand(
+        verb, INVOCATIONS[verb.name].build(corpus, tmp_path), tmp_path
+    )
+    result = run_cli(verb.name, *args, "-o", shape, cwd=tmp_path)
+    problems = ansi_problems(
+        verb.name, shape, _ARM_ERROR, result.returncode, result.stdout, result.stderr
+    )
+    assert problems == [], "\n".join(problems)
+
+
+@pytest.mark.parametrize("shape", ANSI_SHAPES, ids=list(ANSI_SHAPES))
+def test_c8_the_real_run_renders_through_the_same_seam(shape: str, corpus, tmp_path: Path) -> None:
+    """Arm C -- three cells that close arm A's one honest objection.
+
+    Arm A drives `--dry-run` because the RENDERER is the subject and 78 real
+    invocations of every verb (`ocr`, `compress`, `convert` included) would buy
+    no additional renderer. That argument is only sound if a real run renders
+    through the same seam, so this arm drives one for real, in every shape, at a
+    verb DERIVED from `requires_engine is None` rather than typed.
+    """
+    verb = _engine_free_verb()
+    args = INVOCATIONS[verb.name].build(corpus, tmp_path)
+    result = run_cli(verb.name, *args, "-o", shape, cwd=tmp_path)
+    problems = ansi_problems(
+        verb.name, shape, _ARM_REAL_RUN, result.returncode, result.stdout, result.stderr
+    )
+    assert problems == [], "\n".join(problems)
+
+
+def test_the_ansi_instrument_reports_what_it_must() -> None:
+    """C8's STANDING control: the assertion is an instrument, not a comparison.
+
+    Driven with synthetic streams over `ansi_problems`, so it costs no
+    subprocess (C14's own red-proof idiom). Four negatives -- one per quadrant,
+    clean and witness-bearing -- and four positives: an escape on `stdout`, an
+    escape on `stderr`, and an EMPTY STREAM PAIR on each quadrant.
+
+    **The empty-pair cases are the load-bearing ones.** A row that grades the
+    absence of a token in an empty string is the row PDF-71 replaced; delete the
+    witness clause and those two cases go green while all 153 driven cells stay
+    green over a product that printed nothing at all.
+
+    What this control alone does NOT establish, stated because the omission is
+    silent otherwise: that any cell reaches a renderer, that any parametrization
+    is non-empty, or that this row would notice a real change in the product. It
+    grades a string comparison. The planted half -- four renderers, four
+    predicted red sets, predicted BEFORE the run -- is what establishes that the
+    row both FIRES and LOCALISES, and it lives in PDF-71's record.
+    """
+    structured = next(shape for shape in ANSI_SHAPES if shape != TABLE_SHAPE)
+    name = "synthetic-verb"
+
+    # The four clean, witness-bearing quadrants: no problem reported.
+    assert ansi_problems(name, TABLE_SHAPE, _ARM_PAYLOAD, 0, "path  pages\n----  ----\n", "") == []
+    assert ansi_problems(name, structured, _ARM_PAYLOAD, 0, '{"schema_version": 1}\n', "") == []
+    assert ansi_problems(name, TABLE_SHAPE, _ARM_ERROR, 4, "", "error: no such file\n") == []
+    assert ansi_problems(name, structured, _ARM_ERROR, 4, '{"error": {"code": 4}}\n', "") == []
+
+    # An escape on stdout, and an escape on stderr -- each named for its stream.
+    on_stdout = ansi_problems(name, TABLE_SHAPE, _ARM_PAYLOAD, 0, "\x1b[31mpath\x1b[0m\n", "")
+    assert [p for p in on_stdout if "STDOUT" in p], on_stdout
+    on_stderr = ansi_problems(
+        name, TABLE_SHAPE, _ARM_ERROR, 4, "", "\x1b[31merror: no such file\x1b[0m\n"
+    )
+    assert [p for p in on_stderr if "STDERR" in p], on_stderr
+
+    # The empty pair, on BOTH quadrants: no witness, therefore a problem.
+    for shape, arm, code in ((TABLE_SHAPE, _ARM_PAYLOAD, 0), (structured, _ARM_ERROR, 4)):
+        empty = ansi_problems(name, shape, arm, code, "", "")
+        assert [p for p in empty if "witness" in p], f"{shape}/{arm}: {empty}"
+
+    # The error arm's own stimulus contract: a cell that SUCCEEDED rendered no
+    # error at all, and must say so rather than pass on a valid payload.
+    succeeded = ansi_problems(name, TABLE_SHAPE, _ARM_ERROR, 0, "path  pages\n----  ----\n", "")
+    assert [p for p in succeeded if "error witness" in p], succeeded
+
+
 @pytest.mark.parametrize("verb", VERBS, ids=_ids(VERBS))
-def test_c8_no_ansi_on_a_pipe(verb) -> None:
+def test_the_help_formatter_emits_no_ansi_on_a_pipe(verb) -> None:
+    """The pre-PDF-71 C8 body, renamed and stripped of its contract-row label.
+
+    **This measures the CLI FRAMEWORK's help formatter, not this product.**
+    Nothing under `src/` renders `--help`: that text is built by the vendored
+    click's own `HelpFormatter`, so a green here is a true statement about a
+    third-party library and about nothing this repository ships.
+
+    It is KEPT because a framework upgrade that began colouring help on a pipe
+    would be a real, user-visible regression and 26 cheap cells is a fair price
+    for noticing. It carries no `C<N>` label because leaving the honest test
+    wearing the contract row's name would re-commit, in miniature, the exact
+    misattribution PDF-71 exists to remove.
+    """
     result = run_cli(verb.name, "--help")
-    assert "\x1b[" not in result.stdout
+    assert _CSI not in result.stdout, (
+        f"{verb.name} --help: the CLI framework's help formatter emitted an ANSI escape on a "
+        f"pipe -- {result.stdout!r}"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1265,7 +1767,7 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "VERBS",
         VERBS,
-        "C1,C2,C3,C7,C8,C14",
+        "C1,C2,C3,C7,C14,test_the_help_formatter_emits_no_ansi_on_a_pipe",
         1,
         "the root population; zero makes six checks collect zero cases at once",
     ),
@@ -1327,7 +1829,7 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "REGISTERED",
         REGISTERED,
-        "C12",
+        "C8,C12",
         1,
         "`test_every_verb_is_registered` forces REGISTERED == VERBS, so a zero here means "
         "the CLI tree itself came back empty",
@@ -1435,7 +1937,7 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "OPERAND_VERBS",
         OPERAND_VERBS,
-        "C18,C19,C20",
+        "C8,C18,C19,C20",
         1,
         "PDF-26's own population, and it is DERIVED here rather than read off "
         "`TAKES_INPUT_PATHS` because that predicate excludes `merge` -- the one verb the "
@@ -1543,6 +2045,22 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "`EEXIST` past every guard in the product (`f892cc8d75`). Zero does not make C23 "
         "fail; it makes C23 collect no cases at all and report green over a defect that "
         "was live on every one of them",
+    ),
+    Population(
+        "ANSI_SHAPES",
+        ANSI_SHAPES,
+        "C8",
+        1,
+        "PDF-71's own dimension, DERIVED from `output_formats()` so a fourth renderer joins "
+        "every C8 arm with zero author action. Zero collapses ALL THREE C8 arms to zero "
+        "cases at once -- a stacked parametrize is vacuous if EITHER dimension empties, and "
+        "this is the dimension all three arms share. NOT pinned at 3: a floor that fails "
+        "when a shape is legitimately retired gets lowered rather than investigated "
+        "(`DESTRUCTIVE`'s own argument); what keeps it honest above 1 is the derivation off "
+        "the live `OutputFormat` enum. Deliberately NEITHER of the module's other two shape "
+        "tuples: `UNREADABLE_SHAPES` crosses `--quiet`, an axis C8 does not grade, and "
+        "`ENGINE_VISIBLE_SHAPES` excludes `table` -- the one shape whose renderer is "
+        "hand-rolled and the one C8 most needs",
     ),
 )
 
