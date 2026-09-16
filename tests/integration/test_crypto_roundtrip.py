@@ -631,7 +631,7 @@ def test_ac14_no_password_material_reaches_disk_and_no_temp_survives(
 ) -> None:
     """Every file created under the target directory and $TMPDIR during the
     run is scanned for the sentinel, and no `.pdftoolkit-*` temp survives."""
-    sentinel = "Sentinel-PW-7f3a91c4e85b4d02"
+    sentinel = "4e86c1d0-9b2f0a53-3a86c4e5"
     workspace = tmp_path / "work"
     workspace.mkdir()
     source = workspace / "in.pdf"
@@ -676,7 +676,7 @@ def _dry(verb: str, *args: str, env: dict[str, str] | None = None, cwd: Path | N
 @pytest.mark.e2e
 @pytest.mark.parametrize("verb", ["encrypt", "decrypt", "permissions"])
 def test_ac15_dry_run_is_pure_and_reads_no_password(corpus: Any, tmp_path: Path, verb: str) -> None:
-    sentinel = "Sentinel-PW-7f3a91c4e85b4d02"
+    sentinel = "4e86c1d0-9b2f0a53-3a86c4e5"
     workspace = tmp_path / "work"
     workspace.mkdir()
     pw = _password_file(workspace, "pw.txt", sentinel)

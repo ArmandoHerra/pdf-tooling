@@ -31,7 +31,7 @@ from pdf_tooling.cli.password import (
 )
 from pdf_tooling.errors import UsageError
 
-PW_SENTINEL = "Sentinel-PW-7f3a91c4e85b4d02"
+PW_SENTINEL = "4e86c1d0-9b2f0a53-3a86c4e5"
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling"
 

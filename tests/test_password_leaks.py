@@ -44,6 +44,7 @@ import subprocess
 import sys
 import time
 import traceback
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -68,7 +69,22 @@ REPO_ROOT: Final[Path] = TESTS_DIR.parent
 SRC: Final[Path] = REPO_ROOT / "src" / "pdf_tooling"
 
 #: Fixed so a grep can be written once and re-run by anyone.
-PW_SENTINEL: Final[str] = "Sentinel-PW-7f3a91c4e85b4d02"
+#:
+#: PDF-66: the value is **structurally non-lexical** -- ``[0-9a-f-]`` only, so
+#: no window of it can spell an English word. The previous value began with
+#: the word *Sentinel*, and this arm's windowed half swept those windows
+#: against output that legitimately carries ``password_source:
+#: "file:<absolute path>"`` -- so any contributor whose checkout, username or
+#: ``$TMPDIR`` contained *sentinel*, *identity*, *entity*, *potential* or
+#: *scientific* got a red gate **alleging the product leaked a password**.
+#: (Measured: five of the twenty-five four-character windows collided with
+#: ``/tmp/qa-sentinel-identity-potential/...``.) The alphabet is the half of
+#: the repair that :data:`MIN_NEEDLE_CHARS` cannot make on its own -- see
+#: :func:`test_pdf66_the_needle_floor_alone_would_not_have_removed_the_class`.
+#: Hyphen-separated hex groups also keep the longest contiguous hex run
+#: SHORTER than the value they replace, so the ``gitleaks`` posture does not
+#: get worse.
+PW_SENTINEL: Final[str] = "4e86c1d0-9b2f0a53-3a86c4e5"
 #: The Unicode variant exists because a JSON encoder may emit ``\\uXXXX``
 #: escapes, so a raw-byte grep for the ASCII sentinel alone would miss an
 #: escape-encoded leak.
@@ -1595,6 +1611,336 @@ def test_b068_rendered_help_names_no_password_flag_outside_the_registry(verb: st
 
 
 # --------------------------------------------------------------------------- #
+# PDF-66 (`70af9eb89a`) -- the C5 sweep's NEEDLE and HAYSTACK scoping, lifted
+# out of the matrix arm below into pure, module-level helpers.
+#
+# THE DEFECT THIS SECTION REMOVES. The sweep built twenty-five FOUR-character
+# windows of a sentinel that began with the English word *Sentinel*, and swept
+# them against the CLI's own stdout -- which, on the dry sub-arm, legitimately
+# carries `password_source: "file:<absolute path>"`, and that path is the
+# contributor's, rooted at `$TMPDIR`. Five of those windows occur in
+# `/tmp/qa-sentinel-identity-potential/...`, so the suite went red with
+# `leaked a sentinel substring (4 chars): 'enti'` -- an ACCUSATION that the
+# product leaked a password, produced by nothing worse than an unlucky path.
+# `B-098`, quoted in shipped source by `startup_gate_abstention_reason()`: a
+# control that goes red without a defect costs more than one that stays green,
+# because a phantom red gets chased into a spec.
+#
+# THE CLASS, NOT THE INSTANCE. Three changes, and NONE of them is sufficient
+# alone:
+#
+#   1. the sentinel's ALPHABET (`[0-9a-f-]`, above) -- a window of it cannot
+#      spell a word;
+#   2. `MIN_NEEDLE_CHARS`, a FLOOR under the window length;
+#   3. `_scrub_test_paths()`, which removes THE TEST'S OWN PATHS -- by value,
+#      never by field name -- from the windowed half's haystack only.
+#
+# That 1 and 2 are independent is MEASURED here rather than argued in prose:
+# the pre-fix sentinel's eight-character windows still include `entinel-`,
+# which occurs in `/tmp/qa-sentinel-identity-potential/...`, so a floor of
+# eight applied to the OLD value would not have prevented the red. An arm
+# below pins exactly that, so a later author cannot "simplify" the sentinel
+# back toward a word on the grounds that the floor protects them.
+#
+# WHY THE SCRUB IS VALUE-SCOPED. Excising the `password_source` FIELD would be
+# a false-GREEN generator: a product that one day emitted the password INSIDE
+# that field would never be caught again, and this suite's own record
+# (`57156e22c0`, `319a3b7b70`) is that the false green is the expensive
+# direction. Only the exact path literals this test CONSTRUCTED are replaced,
+# so a secret merely ADJACENT to a path survives the scrub and still reds.
+#
+# WHAT IS DELIBERATELY UNCHANGED. The EXACT-match half, which has no
+# false-positive mode and is the half of this control that always worked.
+# `_assert_no_sentinel()` above is byte-untouched, and `_assert_sentinel_
+# absent()` below runs the full sentinel against the RAW, unscrubbed haystack
+# FIRST and unconditionally -- so a real leak fails there, on unmodified
+# bytes, with a message naming the whole sentinel.
+# --------------------------------------------------------------------------- #
+
+#: The sentinel this module carried before PDF-66, kept ONLY as the planted
+#: input to the two trap arms below (the structural predicate's red sibling,
+#: and the floor-alone measurement).
+#:
+#: It is ASSEMBLED rather than written as one literal, deliberately, so that
+#: `git grep` for the old value stays at ZERO hits across the repository: the
+#: old value must be unfindable AS A PASSWORD -- a surviving occurrence would
+#: mean some module is still planting a different password than the sweep
+#: expects -- while remaining available here as the evidence that the floor
+#: alone was not the fix.
+_PRE_FIX_SENTINEL: Final[str] = "Sentinel" + "-PW-7f3a91c4e85b4d02"
+
+#: The floor under a windowed needle. EIGHT, and the derivation is the red
+#: control that has to survive it: the planted-partial-leak control emits
+#: TWELVE characters of the sentinel, so eight catches it with four
+#: characters to spare, and would still catch an eight-character leak that
+#: nothing plants yet. A new frozen constant, not a moved ceiling -- and on
+#: its own it is NOT the fix; see the module comment above.
+MIN_NEEDLE_CHARS: Final[int] = 8
+
+#: What a scrubbed path literal is replaced BY -- a fixed marker, so a
+#: scrubbed haystack still reads as a haystack in a failure message.
+_SCRUB_PLACEHOLDER: Final[str] = "<TEST-PATH>"
+
+#: The sentinel-shape property, written as something a test can EVALUATE.
+#: "No natural-language substring" is not computable; an alphabet is.
+#: `[0-9a-f-]` cannot spell an eight-character word, so with the floor above
+#: every needle is structurally non-lexical rather than judged so by eye.
+_NON_LEXICAL_SENTINEL: Final[re.Pattern[str]] = re.compile(r"[0-9a-f-]{24,}")
+
+
+def _is_structurally_non_lexical(value: str) -> bool:
+    """Whether *value* is a sentinel whose windows cannot be ordinary words.
+
+    Pure, so both the live constant and the pre-fix literal can be pushed
+    through it in milliseconds without the ~35 s matrix arm below.
+    """
+    return _NON_LEXICAL_SENTINEL.fullmatch(value) is not None and "--" not in value
+
+
+def _sweep_needles(sentinel: str, minimum: int) -> tuple[str, ...]:
+    """The full *sentinel*, then every distinct window of *minimum* characters.
+
+    Windows of exactly *minimum* are sufficient rather than stingy: any leak
+    longer than the floor contains one of them. The result is never empty --
+    the full sentinel is always the first member -- but the caller asserts
+    that at the point of use anyway, because an empty needle set is a sweep
+    that cannot fail.
+    """
+    needles = [sentinel]
+    for index in range(len(sentinel) - minimum + 1):
+        window = sentinel[index : index + minimum]
+        if window not in needles:
+            needles.append(window)
+    return tuple(needles)
+
+
+def _scrub_test_paths(haystack: str, paths: Iterable[Path | str]) -> str:
+    """Replace each EXACT path literal in *paths* with `_SCRUB_PLACEHOLDER`.
+
+    Value-scoped, never field-scoped: this takes PATHS, never a JSON key,
+    never a field name, and never a regex over the payload. Longest-first,
+    so a parent directory cannot partially consume a child path and leave a
+    fragment of it behind. Empty strings are skipped -- replacing `""` would
+    scatter the placeholder through every character of the haystack.
+    """
+    scrubbed = haystack
+    for path in sorted({str(p) for p in paths if str(p)}, key=len, reverse=True):
+        scrubbed = scrubbed.replace(path, _SCRUB_PLACEHOLDER)
+    return scrubbed
+
+
+def _assert_sentinel_absent(
+    haystack: str,
+    *,
+    where: str,
+    test_paths: Iterable[Path | str],
+    needles: Sequence[str],
+) -> None:
+    """The two ORDERED steps of the repaired sweep, and the order is the design.
+
+    1. EXACT, on the RAW haystack, first and unconditionally -- the half with
+       no false-positive mode. A real leak fails here, on unmodified bytes,
+       with the unambiguous message.
+    2. WINDOWED, on the SCRUBBED haystack -- the partial-leak half, and the
+       only half that was ever capable of a false positive.
+    """
+    assert PW_SENTINEL not in haystack, f"{where} leaked the ascii sentinel"
+    assert needles, f"{where}: the needle set is EMPTY -- this sweep cannot fail"
+    scrubbed = _scrub_test_paths(haystack, test_paths)
+    for needle in needles:
+        assert needle not in scrubbed, (
+            f"{where} leaked a sentinel substring ({len(needle)} chars): {needle!r}"
+        )
+
+
+#: A path of the shape this defect fired on, written once and reused by the
+#: arms below. It is a LITERAL and never a real sandbox: these arms must
+#: measure the collision property itself, not whatever `$TMPDIR` happens to
+#: be on the machine running them.
+_COLLIDING_PATH_SHAPE: Final[str] = (
+    "/tmp/qa-sentinel-identity-potential/pytest-of-someone/pytest-0/"
+    "pdf52-c50/planted-password-file.txt"
+)
+
+
+def test_pdf66_the_sweep_sentinel_is_structurally_non_lexical() -> None:
+    """G1: `PW_SENTINEL` is drawn from an alphabet that cannot spell a word.
+
+    The standing form of the repair's first half. Its can-fail sibling is
+    the next arm, which pushes the PRE-FIX literal through this same pure
+    predicate -- the real constant is never edited to drive a red.
+    """
+    assert _is_structurally_non_lexical(PW_SENTINEL), (
+        f"PW_SENTINEL {PW_SENTINEL!r} is not structurally non-lexical: a window of it "
+        "may spell an ordinary word, which is how this sweep once accused a "
+        "contributor of leaking a password because their $TMPDIR was unlucky"
+    )
+
+
+def test_pdf66_the_pre_fix_sentinel_fails_the_structural_predicate() -> None:
+    """G1's can-fail sibling: the predicate REJECTS the value it replaced."""
+    assert not _is_structurally_non_lexical(_PRE_FIX_SENTINEL), (
+        f"the pre-fix sentinel {_PRE_FIX_SENTINEL!r} PASSED the structural predicate -- "
+        "the predicate accepts word-bearing sentinels and guards nothing"
+    )
+
+
+def test_pdf66_the_needle_builder_holds_the_floor() -> None:
+    """G2: no needle is shorter than the floor, and the floor is at least eight.
+
+    Also pins the two properties the matrix arm depends on: the FULL sentinel
+    survives in the needle set (the exact half's reach does not narrow), and
+    the set is non-empty (a sweep over no needles cannot fail).
+    """
+    assert MIN_NEEDLE_CHARS >= 8, (
+        f"MIN_NEEDLE_CHARS is {MIN_NEEDLE_CHARS}; below eight, a needle is short "
+        "enough to be an ordinary word fragment again"
+    )
+    needles = _sweep_needles(PW_SENTINEL, MIN_NEEDLE_CHARS)
+    assert needles, "the needle builder returned nothing -- the sweep could not fail"
+    assert PW_SENTINEL in needles, "the full sentinel left the needle set"
+    too_short = sorted(needle for needle in needles if len(needle) < MIN_NEEDLE_CHARS)
+    assert too_short == [], (
+        f"the builder emitted needle(s) below the floor of {MIN_NEEDLE_CHARS}: {too_short}"
+    )
+
+
+def test_pdf66_the_needle_builder_emits_a_short_needle_when_the_floor_is_lowered() -> None:
+    """G2's can-fail sibling: at `minimum=4` the builder yields four-character
+    needles, so the arm above is measuring the floor and not a builder that
+    is structurally incapable of a short window."""
+    needles = _sweep_needles(PW_SENTINEL, 4)
+    short = [needle for needle in needles if len(needle) == 4]
+    assert short, (
+        "the builder produced no four-character needle at minimum=4, so the floor arm "
+        "above proves nothing about the floor"
+    )
+
+
+def test_pdf66_the_needle_floor_alone_would_not_have_removed_the_class() -> None:
+    """The measurement that makes the alphabet change non-optional, frozen as
+    an arm rather than left in a comment.
+
+    The pre-fix sentinel begins with the word *Sentinel*, so its windows stay
+    lexical at every length up to eight: at the NEW floor it still yields
+    `entinel-`, which occurs in a `/tmp/qa-sentinel-.../` path. A floor-only
+    half-fix ships green on its author's machine and still accuses the next
+    contributor. Derived here, never transcribed.
+    """
+    colliding = sorted(
+        needle
+        for needle in _sweep_needles(_PRE_FIX_SENTINEL, MIN_NEEDLE_CHARS)
+        if len(needle) == MIN_NEEDLE_CHARS and needle in _COLLIDING_PATH_SHAPE
+    )
+    assert colliding, (
+        f"the pre-fix sentinel {_PRE_FIX_SENTINEL!r} yielded no {MIN_NEEDLE_CHARS}-character "
+        f"needle occurring in {_COLLIDING_PATH_SHAPE!r} -- this arm exists to prove that "
+        "RAISING THE FLOOR ALONE does not remove the class, and it just failed to prove it"
+    )
+
+
+def test_pdf66_the_live_sentinel_does_not_collide_with_the_control_path() -> None:
+    """The positive counterpart of the arm above, and the standing form of the
+    repair's acceptance signal: the LIVE sentinel produces no needle at all --
+    at the floor, or at the pre-fix width of four -- that occurs in the very
+    path the defect fired on."""
+    for width in (4, MIN_NEEDLE_CHARS):
+        colliding = sorted(
+            needle
+            for needle in _sweep_needles(PW_SENTINEL, width)
+            if len(needle) == width and needle in _COLLIDING_PATH_SHAPE
+        )
+        assert colliding == [], (
+            f"PW_SENTINEL yields {width}-character needle(s) {colliding} occurring in "
+            f"{_COLLIDING_PATH_SHAPE!r} -- the sentinel has drifted back toward a word"
+        )
+
+
+def test_pdf66_the_path_scrub_is_value_scoped_not_field_scoped() -> None:
+    """G3: the scrub removes the test's own PATH and nothing else.
+
+    A sentinel fragment sitting INSIDE the `password_source` value, adjacent
+    to the path, survives -- which is what makes the scrub incapable of
+    manufacturing a false green.
+    """
+    fragment = PW_SENTINEL[:MIN_NEEDLE_CHARS]
+    haystack = f'{{"password_source": "file:{_COLLIDING_PATH_SHAPE}?k={fragment}"}}'
+
+    scrubbed = _scrub_test_paths(haystack, [_COLLIDING_PATH_SHAPE])
+
+    assert _COLLIDING_PATH_SHAPE not in scrubbed, "the scrub did not remove the path it was given"
+    assert _SCRUB_PLACEHOLDER in scrubbed, "the scrub left no placeholder behind"
+    assert fragment in scrubbed, (
+        f"the scrub removed the sentinel fragment {fragment!r} along with the path -- it is "
+        "field-scoped, and a product leaking the password INSIDE password_source would "
+        "never be caught again"
+    )
+
+
+def test_pdf66_a_field_scoped_scrub_would_have_hidden_the_fragment() -> None:
+    """G3's can-fail sibling: the property above is FALSIFIABLE, and the
+    implementation that falsifies it is the obvious one -- excising the whole
+    `password_source` field, which is what the improvement report's wording
+    would have produced if read literally."""
+    fragment = PW_SENTINEL[:MIN_NEEDLE_CHARS]
+    haystack = f'{{"password_source": "file:{_COLLIDING_PATH_SHAPE}?k={fragment}"}}'
+
+    field_scoped = re.sub(r'"password_source": "[^"]*"', '"password_source": "<GONE>"', haystack)
+
+    assert fragment not in field_scoped, (
+        "a field-scoped scrub left the fragment in place, so it is not the hazard this "
+        "sibling claims it is and the value-scoped arm above proves nothing"
+    )
+
+
+def test_pdf66_the_scrub_does_not_hide_a_fragment_planted_inside_the_path_value() -> None:
+    """The scrub does not hide: twelve characters of the sentinel planted
+    INSIDE the path field's value still red the composed assertion, and the
+    needle it names is at least the floor. Driven on the pure helpers, on a
+    planted haystack -- no product run needed."""
+    fragment = PW_SENTINEL[:12]
+    haystack = f'{{"password_source": "file:{_COLLIDING_PATH_SHAPE}?k={fragment}"}}'
+    needles = _sweep_needles(PW_SENTINEL, MIN_NEEDLE_CHARS)
+
+    with pytest.raises(AssertionError) as excinfo:
+        _assert_sentinel_absent(
+            haystack,
+            where="planted/inside-the-path-value",
+            test_paths=[_COLLIDING_PATH_SHAPE],
+            needles=needles,
+        )
+
+    message = str(excinfo.value)
+    assert "leaked a sentinel substring" in message, message
+    named = re.search(r"\((\d+) chars\)", message)
+    assert named is not None, f"the failure named no needle width: {message}"
+    assert int(named.group(1)) >= MIN_NEEDLE_CHARS, (
+        f"the failure named a {named.group(1)}-character needle, below the floor of "
+        f"{MIN_NEEDLE_CHARS}: {message}"
+    )
+
+
+def test_pdf66_the_exact_arm_runs_on_the_raw_haystack_before_the_scrub() -> None:
+    """The exact half keeps its full reach: the sentinel placed exactly where
+    the scrub WOULD have removed it still reds, because step one runs on the
+    raw, unscrubbed haystack."""
+    hidden = f"/tmp/pytest-of-someone/pytest-0/{PW_SENTINEL}/planted-password-file.txt"
+    haystack = f'{{"password_source": "file:{hidden}"}}'
+
+    assert PW_SENTINEL not in _scrub_test_paths(haystack, [hidden]), (
+        "the scrub did not remove this path, so the arm below would red for the wrong reason"
+    )
+
+    with pytest.raises(AssertionError, match="leaked the ascii sentinel"):
+        _assert_sentinel_absent(
+            haystack,
+            where="planted/inside-a-scrubbed-path",
+            test_paths=[hidden],
+            needles=_sweep_needles(PW_SENTINEL, MIN_NEEDLE_CHARS),
+        )
+
+
+# --------------------------------------------------------------------------- #
 # PDF-52 (`d01c9d52fb`/`0f230317ef`) -- AC-C5, D6: the derived shape x tty
 # sweep, EXTENDED to reach the two new surfaces this spec adds (the dry
 # payload's `password_source`/`password_verified` pair, and the adapter's
@@ -1643,18 +1989,26 @@ def test_pdf52_c5_the_planted_secret_never_reaches_stdout_stderr_or_the_payload(
     pw_path.write_text(PW_SENTINEL, encoding="utf-8")
     pw_path.chmod(0o600)
 
-    proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
-    substrings = [PW_SENTINEL, *(PW_SENTINEL[i : i + 4] for i in range(len(PW_SENTINEL) - 3))]
+    operand = corpus.path("encrypted_aes256")
+    proxy = _EncryptedOperandProxy(operand)
+    # PDF-66: the needle set is built by the module-level builder at the
+    # module-level floor, and the haystack the WINDOWED half sees has this
+    # test's OWN paths taken out of it by value. The exact half still runs
+    # on the raw haystack, first and unconditionally -- see
+    # `_assert_sentinel_absent()`.
+    needles = _sweep_needles(PW_SENTINEL, MIN_NEEDLE_CHARS)
+    assert needles, "the needle set is empty -- this sweep could not fail (PDF-66)"
 
-    def _assert_clean(haystack: str, *, where: str) -> None:
-        for needle in substrings:
-            assert needle not in haystack, (
-                f"{where} leaked a sentinel substring ({len(needle)} chars): {needle!r}"
-            )
+    def _assert_clean(haystack: str, *, where: str, paths: Sequence[Path]) -> None:
+        _assert_sentinel_absent(haystack, where=where, test_paths=paths, needles=needles)
 
     for verb in _PDF52_PREMISE_VERBS:
         verb_dir = root / verb.replace(" ", "_")
         verb_dir.mkdir()
+        # The absolute paths THIS test created, handed to the scrub by
+        # value: the password file, the per-verb directory, the sandbox
+        # root, and the encrypted operand the proxy hands every verb.
+        scrub_paths = (pw_path, verb_dir, root, operand)
         argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, verb_dir))
         base = [*argv, "--password-file", str(pw_path), "-vv"]
         verb_tokens = verb.split()
@@ -1669,16 +2023,20 @@ def test_pdf52_c5_the_planted_secret_never_reaches_stdout_stderr_or_the_payload(
                 f"{verb}/{mode}: no {non_vacuity!r} record -- this control cannot pass "
                 f"because the disclosure was silently off ({plain.stdout!r}, {plain.stderr!r})"
             )
-            _assert_clean(plain.stdout, where=f"{verb}/{mode}/plain/stdout")
-            _assert_clean(plain.stderr, where=f"{verb}/{mode}/plain/stderr")
+            _assert_clean(plain.stdout, where=f"{verb}/{mode}/plain/stdout", paths=scrub_paths)
+            _assert_clean(plain.stderr, where=f"{verb}/{mode}/plain/stderr", paths=scrub_paths)
 
             # MANDATORY pty arm 1 -- stderr, arm B's own sink, where
             # `color_enabled()` takes its OTHER branch.
             pty_stderr = run_cli_with_pty(
                 *verb_tokens, *tail, "-o", "json", pty_stream="stderr", env=_clean_env()
             )
-            _assert_clean(pty_stderr.stdout, where=f"{verb}/{mode}/pty-stderr/stdout")
-            _assert_clean(pty_stderr.stderr, where=f"{verb}/{mode}/pty-stderr/stderr")
+            _assert_clean(
+                pty_stderr.stdout, where=f"{verb}/{mode}/pty-stderr/stdout", paths=scrub_paths
+            )
+            _assert_clean(
+                pty_stderr.stderr, where=f"{verb}/{mode}/pty-stderr/stderr", paths=scrub_paths
+            )
 
             # MANDATORY pty arm 2 -- stdout, NO -o flag at all:
             # `auto_format()` resolves TABLE here, the shape a hand-written
@@ -1686,5 +2044,13 @@ def test_pdf52_c5_the_planted_secret_never_reaches_stdout_stderr_or_the_payload(
             pty_stdout = run_cli_with_pty(
                 *verb_tokens, *tail, pty_stream="stdout", env=_clean_env()
             )
-            _assert_clean(pty_stdout.stdout, where=f"{verb}/{mode}/pty-stdout-no-flag/stdout")
-            _assert_clean(pty_stdout.stderr, where=f"{verb}/{mode}/pty-stdout-no-flag/stderr")
+            _assert_clean(
+                pty_stdout.stdout,
+                where=f"{verb}/{mode}/pty-stdout-no-flag/stdout",
+                paths=scrub_paths,
+            )
+            _assert_clean(
+                pty_stdout.stderr,
+                where=f"{verb}/{mode}/pty-stdout-no-flag/stderr",
+                paths=scrub_paths,
+            )
