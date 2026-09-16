@@ -1477,3 +1477,197 @@ def test_pdf64_predict_out_dir_creation_over_a_relative_over_long_out_dir(
         f"the message was absolutized -- {message!r} contains the cwd {str(tmp_path)!r}"
     )
     assert not (tmp_path / too_long[:50]).exists()
+
+
+# --------------------------------------------------------------------------- #
+# PDF-74 -- the value-shape dimension at the IN-PROCESS tier.
+#
+# `PDF-64` opened exactly ONE spelling here (a bare relative name). This
+# generalizes its own D5 argument from one spelling to eight, and it is the
+# tier that keeps failing if a later refactor re-introduces the raw parameter
+# while the CLI cells happen to stay green: the law it owns is that **the
+# geometry is computed against the ABSOLUTIZED value while the message keeps
+# the user's spelling**, and only a direct call can see both halves at once.
+#
+# `PATH_SPELLINGS` is CONSUMED, never re-listed -- the AC3 scan over the whole
+# `tests/` tree enforces that, and `str(Path(value))` rather than `value` is the
+# expected echo throughout, because the CLI framework hands this tier a `Path`
+# and `Path("./x")`/`Path("x/")` both normalize at construction. That is a
+# MEASURED property of the echo, recorded rather than asserted away.
+# --------------------------------------------------------------------------- #
+
+from pdf_tooling.safety.paths import canonical  # noqa: E402
+from registry import (  # noqa: E402
+    PATH_SPELLINGS,
+    TILDE_SPELLING,
+    PathSpelling,
+    spelled_destination,
+)
+
+#: `--out-dir` needs a directory name and `--output` a file name; the leaf is
+#: the cell's to choose, never the row's.
+PDF74_DIR_LEAF = "pdf74-out-dir"
+PDF74_FILE_LEAF = "pdf74-output.pdf"
+
+#: The `--out-dir` half of the tilde defect `tests/integration/test_value_shape.py`
+#: files and pins in full. Repeated here because this tier reaches the same two
+#: seams directly, one call frame from the divergence: `_predict_out_dir_creation`
+#: expands `~` and `_ensure_out_dir`'s `mkdir` does not.
+PDF74_TILDE_PIN = (
+    "PDF-74 E6 (H1, FILED not fixed): _predict_out_dir_creation expands '~' and "
+    "_ensure_out_dir's real mkdir does not, so the dry branch answers for $HOME/<leaf> "
+    "while the real branch creates a literal '~' directory in the process cwd and "
+    "ensure_destination_writable then refuses. PDF-74 writes no product code; this xfail "
+    "PINS the defect. The day the real branch expands too, this XPASSes and the suite goes "
+    "red -- that is the signal to retire the pin. Full measurement and the --output half: "
+    "tests/integration/test_value_shape.py."
+)
+
+
+def pdf74_marks(spelling: PathSpelling) -> tuple[pytest.MarkDecorator, ...]:
+    if spelling.id == TILDE_SPELLING:
+        return (pytest.mark.xfail(strict=True, reason=PDF74_TILDE_PIN),)
+    return ()
+
+
+PDF74_SPELLING_PARAMS = [
+    pytest.param(row, marks=pdf74_marks(row), id=row.id) for row in PATH_SPELLINGS
+]
+PDF74_PLAIN_SPELLING_PARAMS = [pytest.param(row, id=row.id) for row in PATH_SPELLINGS]
+
+
+def pdf74_anchor(tmp_path: Path, spelling: PathSpelling, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An anchor prepared for *spelling*, with `$HOME` and the process working
+    directory both moved to where the row declares they must be.
+
+    The working directory is the whole point: a relative value driven from the
+    wrong directory measures nothing, and it measures nothing SILENTLY.
+    """
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    home = anchor / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    spelling.prepare(anchor)
+    monkeypatch.chdir(spelling.cwd(anchor))
+    return anchor
+
+
+def pdf74_home(anchor: Path) -> Path:
+    return anchor / "home"
+
+
+@pytest.mark.parametrize("spelling", PDF74_SPELLING_PARAMS)
+def test_pdf74_out_dir_predicts_and_creates_the_path_the_spelling_denotes(
+    spelling: PathSpelling, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The in-process mirror, plus the effect oracle, at one spelling.
+
+    A prediction that refuses where the real run succeeds (or the reverse) is
+    the `README.md` exit-code-table violation `PDF-64` fixed one instance of;
+    a real run that creates a directory the prediction never named is the same
+    defect wearing the other hat.
+    """
+    anchor = pdf74_anchor(tmp_path, spelling, monkeypatch)
+    value = spelling.render(anchor, PDF74_DIR_LEAF)
+    denoted = spelled_destination(spelling, anchor, PDF74_DIR_LEAF, home=pdf74_home(anchor))
+
+    _predict_out_dir_creation(Path(value))  # the DRY branch: must not refuse, must not raise
+    assert not os.path.lexists(denoted), (
+        f"[{spelling.id}] the prediction CREATED {denoted} -- a prediction that performs the "
+        "operation in order to measure it is not a prediction"
+    )
+
+    plan = plan_output_set([Path(value) / "part.pdf"], out_dir=Path(value), policy=make_policy())
+    assert plan.refusal is None, f"[{spelling.id}] the real run refused: {plan.refusal!r}"
+    assert denoted.is_dir(), (
+        f"[{spelling.id}] the real run reported success over {value!r} but nothing exists at "
+        f"{denoted} -- the path that spelling DENOTES by the rule a shell would use"
+    )
+
+
+@pytest.mark.parametrize("spelling", PDF74_PLAIN_SPELLING_PARAMS)
+def test_pdf74_the_out_dir_refusal_echoes_the_spelling_at_every_shape(
+    spelling: PathSpelling, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE GEOMETRY LAW, at eight spellings instead of `PDF-64`'s one.
+
+    The remainder `_predict_name_too_long` walks is computed against the
+    ABSOLUTIZED value -- which is what makes `relative_to` total rather than
+    guarded -- while `message` and `path` keep interpolating the user's own
+    spelling. The two values are deliberately different, and the mutant that
+    conflates them (`_predict_name_too_long(absolute, ancestor, absolute)`)
+    leaves the geometry correct, every exit code correct and every mirror
+    correct, and destroys only the message. That mutant ships green against
+    anything less precise; here it reds at all eight spellings.
+    """
+    anchor = pdf74_anchor(tmp_path, spelling, monkeypatch)
+    try:
+        limit = os.pathconf(str(anchor), "PC_NAME_MAX")
+    except (OSError, ValueError, AttributeError):  # pragma: no cover - platform-dependent
+        pytest.skip("PC_NAME_MAX is not available on this platform")
+    too_long = "x" * (limit + 1)
+    value = spelling.render(anchor, too_long)
+    spelled = str(Path(value))
+
+    with pytest.raises(errors.DestinationUnwritableError) as excinfo:
+        _predict_out_dir_creation(Path(value))
+
+    message = str(excinfo.value)
+    assert str(limit) in message, message
+    assert excinfo.value.path == spelled, (
+        f"[{spelling.id}] the refusal echoed {excinfo.value.path!r} instead of the user's own "
+        f"spelling {spelled!r} -- the absolutized value leaked into the payload"
+    )
+    assert message.startswith(f"destination directory cannot be created: {spelled}"), message
+    if spelling.anchoring == "relative":
+        assert str(anchor) not in message, (
+            f"[{spelling.id}] the message was absolutized -- {message!r} carries the anchor "
+            f"{str(anchor)!r}, while the user typed {value!r}"
+        )
+
+
+@pytest.mark.parametrize("spelling", PDF74_PLAIN_SPELLING_PARAMS)
+def test_pdf74_output_absolutizes_the_key_and_echoes_the_spelling(
+    spelling: PathSpelling, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The OTHER destination flag, whose normalization is not the same one.
+
+    `--out-dir` normalizes with `.absolute()` (symlinks NOT followed, `..` NOT
+    collapsed) and `--output` with `canonical()` (`.resolve(strict=False)`,
+    symlinks followed). Nothing in this repository recorded that the product
+    therefore answers two different identity questions at its two destination
+    flags; this is the arm that says so, and that reds if either side quietly
+    adopts the other's rule.
+    """
+    anchor = pdf74_anchor(tmp_path, spelling, monkeypatch)
+    value = spelling.render(anchor, PDF74_FILE_LEAF)
+    denoted = spelled_destination(spelling, anchor, PDF74_FILE_LEAF, home=pdf74_home(anchor))
+    spelled = str(Path(value))
+
+    writer = AtomicWriter(Path(value), policy=make_policy())
+    assert writer.destination == canonical(denoted), (
+        f"[{spelling.id}] the comparison key is {writer.destination}, not the canonical form "
+        f"of the path {value!r} denotes ({canonical(denoted)})"
+    )
+    assert str(writer.target) == spelled, (
+        f"[{spelling.id}] the writer echoes {str(writer.target)!r} rather than the user's own "
+        f"spelling {spelled!r}"
+    )
+    if spelling.anchoring == "relative":
+        assert str(anchor) not in str(writer.target), str(writer.target)
+
+    dry_plan = plan_filesystem(
+        [Path(value)], out_dir=None, policy=make_policy(dry_run=True), kind="pdf"
+    )
+    assert not os.path.lexists(denoted), f"[{spelling.id}] the dry plan created {denoted}"
+    real_refused = False
+    try:
+        plan_filesystem([Path(value)], out_dir=None, policy=make_policy(), kind="pdf")
+    except errors.PdfToolingError:
+        real_refused = True
+    assert dry_plan.refused == real_refused, (
+        f"[{spelling.id}] the dry plan {'refused' if dry_plan.refused else 'did not refuse'} "
+        f"while the real plan {'refused' if real_refused else 'did not'} over the same value "
+        f"{value!r}"
+    )

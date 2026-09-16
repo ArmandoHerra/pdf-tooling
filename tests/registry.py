@@ -53,6 +53,15 @@ registry or a live enum, never typed beside it:
 * ``expectation()`` — the safe shape for per-verb DATA: a mapping keyed by a
   derived verb, with a lookup that fails BY NAME when a new verb has no
   expectation declared, instead of skipping it silently.
+* ``path_spellings()`` — PDF-74's value-shape axis: the SHAPE of the value a
+  user types, which no other dimension here describes. Declared (there is no
+  spelling enum under ``src/`` to derive from) and therefore carrying both of
+  the guards a declaration owes — a live collapse tie and a tree-wide
+  no-re-listing scan, both in `tests/test_derived_dimensions.py`.
+* ``destination_flag_cases()`` — the ``(verb, flag)`` population that axis is
+  crossed against, derived off ``consumes`` alone, and carrying a FITNESS
+  statement beside its provenance one. ``out_dir_batch_verbs()`` is NOT it: its
+  operand-arity filter is irrelevant to value shape and drops ``split``.
 
 `PDF-17` exports and pins these. It does not cross them, cap them, or write a
 single secret-leak case: the cardinality budget is `PDF-22`'s own deliverable.
@@ -81,16 +90,22 @@ from pdf_tooling.cli.main import PROG_NAME, app
 from pdf_tooling.output import OutputFormat
 
 __all__ = [
+    "DESTINATION_VALUE_FLAGS",
     "INVOCATIONS",
+    "LICENSED_POPULATION_FIELDS",
     "OUTPUT_FLAGS",
     "OUTPUT_FLAG_INVOCATIONS",
+    "PATH_SPELLINGS",
     "PDF_08_VERBS",
     "REPO_ROOT",
+    "FILTER_MEANINGS",
     "Invocation",
+    "PathSpelling",
     "PtyResult",
     "VerbSpec",
     "console_script",
     "derive_password_file_pairs",
+    "destination_flag_cases",
     "discover_groups",
     "discover_verbs",
     "no_input_population",
@@ -100,8 +115,11 @@ __all__ = [
     "expectation",
     "output_formats",
     "output_shape_states",
+    "path_spellings",
+    "population_fields",
     "run_cli",
     "run_cli_with_pty",
+    "spelled_destination",
     "tty_modes",
 ]
 
@@ -2212,3 +2230,353 @@ def run_cli_with_pty(
     if pty_stream == "stderr":
         return PtyResult(process.returncode, piped_stdout or "", pty_text)
     return PtyResult(process.returncode, piped_stdout or "", piped_stderr or "")
+
+
+# --------------------------------------------------------------------------- #
+# PDF-74 -- the argument VALUE-SHAPE dimension.
+#
+# Every dimension above answers a question the command tree can be asked: which
+# verbs exist, which flags they declare, which enum members exist. NONE of them
+# describes THE SHAPE OF THE VALUE A USER TYPES, and this harness has a uniform,
+# unexamined convention that pins it to one shape -- `str(tmp_path / ...)`,
+# always absolute. `PDF-64` measured what that costs: a `--dry-run` with a
+# relative, not-yet-existing `--out-dir` crashed with a raw `ValueError`, exit
+# 1, zero bytes on stdout, on all ELEVEN `--out-dir` verbs, while the identical
+# argv without `--dry-run` succeeded on all eleven -- and 4,450 tests were green
+# over it, including the contract row added three specs earlier to assert that a
+# dry run predicts the real run's exit code.
+#
+# :data:`PATH_SPELLINGS` is a :func:`tty_modes`/:data:`PDF_08_VERBS`-class
+# member: DECLARED, never derived, because the shapes a user can type are not
+# enumerable from the command tree -- there is no spelling enum under `src/` to
+# iterate, and inventing one there to make a test derivable would be a product
+# change made to serve a test. A declaration is only admissible with the two
+# things those precedents carry, and both live in
+# `tests/test_derived_dimensions.py`:
+#
+#   * a LIVE TIE that fails when the axis collapses -- two distinct spellings of
+#     one destination must still produce two distinct rendered payload values at
+#     every `(verb, flag)` cell, or something has absolutized at the boundary
+#     and this tuple describes nothing;
+#   * an AST SCAN that fails when the members are re-listed anywhere under
+#     `tests/` outside this declaration site, in the shape `PDF_08_VERBS`'
+#     own AC30 scan already has.
+#
+# The rows are deliberately left in a shape the deferred operand-side property
+# (`I-15` / `B-311`) can CONSUME rather than re-declare: a `render(anchor, leaf)`
+# that builds a value and an `anchoring` that says what it is are as true of a
+# positional operand as of a destination flag.
+# --------------------------------------------------------------------------- #
+
+#: The working subdirectory the `parent-relative` row runs from, and the sibling
+#: it then descends into. Two names rather than one because the row's whole
+#: point is that the value ASCENDS out of the process `cwd` before it descends,
+#: which a single directory cannot express.
+SPELLING_SUB_DIR: Final[str] = "sub"
+
+#: The `symlink` row's link and its target. `--out-dir` normalizes with
+#: `.absolute()` (symlinks NOT followed) and `--output` with `canonical()`
+#: (symlinks followed), so this is the spelling at which the two destination
+#: flags answer two different identity questions.
+SPELLING_LINK_NAME: Final[str] = "link"
+SPELLING_REAL_DIR: Final[str] = "real"
+
+#: The `nonexistent-parent` row's intermediate component, which must NOT exist
+#: when the cell runs -- the precondition that makes the row cross the existing
+#: unwritable-parent tier instead of duplicating the ordinary cell.
+SPELLING_ABSENT_DIR: Final[str] = "missing"
+
+#: The two `anchoring` values. The red control derives its predicted red set
+#: from this field (a relative `Path` is what `relative_to` raised on), so it is
+#: DATA rather than a comment.
+ANCHORING_ABSOLUTE: Final[str] = "absolute"
+ANCHORING_RELATIVE: Final[str] = "relative"
+
+#: The one row whose value presupposes a redirected `$HOME` rather than a
+#: chosen `cwd`. Named once so a consumer asks the declaration instead of
+#: matching on a tilde character.
+TILDE_SPELLING: Final[str] = "tilde"
+
+
+def _render_absolute(anchor: Path, leaf: str) -> str:
+    return str(anchor / leaf)
+
+
+def _render_bare_relative(anchor: Path, leaf: str) -> str:
+    return leaf
+
+
+def _render_dot_relative(anchor: Path, leaf: str) -> str:
+    return f"./{leaf}"
+
+
+def _render_parent_relative(anchor: Path, leaf: str) -> str:
+    return f"../{anchor.name}/{leaf}"
+
+
+def _render_trailing_slash(anchor: Path, leaf: str) -> str:
+    return f"{leaf}/"
+
+
+def _render_tilde(anchor: Path, leaf: str) -> str:
+    return f"~/{leaf}"
+
+
+def _render_symlink(anchor: Path, leaf: str) -> str:
+    return f"{SPELLING_LINK_NAME}/{leaf}"
+
+
+def _render_absent_parent(anchor: Path, leaf: str) -> str:
+    return f"{SPELLING_ABSENT_DIR}/{leaf}"
+
+
+def _prepare_nothing(anchor: Path) -> None:
+    return None
+
+
+def _prepare_parent_relative(anchor: Path) -> None:
+    """The `cwd` to ascend out of, and the sibling to descend into.
+
+    Both are created here rather than by the cell, because `--output` refuses a
+    destination whose parent does not exist -- without the sibling, this row
+    would silently become a second copy of `nonexistent-parent`.
+    """
+    (anchor / SPELLING_SUB_DIR).mkdir(parents=True, exist_ok=True)
+    (anchor / anchor.name).mkdir(parents=True, exist_ok=True)
+
+
+def _prepare_symlink(anchor: Path) -> None:
+    real = anchor / SPELLING_REAL_DIR
+    real.mkdir(parents=True, exist_ok=True)
+    link = anchor / SPELLING_LINK_NAME
+    if not os.path.lexists(link):
+        os.symlink(real, link)
+
+
+def _prepare_absent_parent(anchor: Path) -> None:
+    """Asserts its own precondition rather than creating anything.
+
+    `os.path.lexists`, never `.exists()`: a dangling link at this name would
+    satisfy `.exists()` with `False` and still make `mkdir(parents=True)`
+    answer a different question than this row intends to ask.
+    """
+    absent = anchor / SPELLING_ABSENT_DIR
+    if os.path.lexists(absent):
+        raise AssertionError(
+            f"the nonexistent-parent spelling presupposes {absent} is ABSENT, and it exists "
+            "-- the row would then be a second copy of the ordinary relative cell"
+        )
+
+
+def _cwd_anchor(anchor: Path) -> Path:
+    return anchor
+
+
+def _cwd_sub(anchor: Path) -> Path:
+    return anchor / SPELLING_SUB_DIR
+
+
+@dataclass(frozen=True, slots=True)
+class PathSpelling:
+    """One shape a user can type for a destination path value.
+
+    Attributes:
+        id: The stable name of the shape. The ONE place it is written down;
+            re-listing it anywhere else under `tests/` fails the AC3 scan.
+        anchoring: :data:`ANCHORING_ABSOLUTE` or :data:`ANCHORING_RELATIVE`.
+            The red control derives its predicted red set from this field.
+        render: ``render(anchor, leaf) -> str`` -- the argv VALUE. *leaf* is
+            supplied by the cell rather than by the row, because `--out-dir`
+            needs a directory name and `--output` a file name (with the right
+            extension, which only the registered invocation knows).
+        prepare: ``prepare(anchor) -> None`` -- creates (or asserts absent)
+            whatever the spelling presupposes.
+        cwd: ``cwd(anchor) -> Path`` -- the process working directory the cell
+            MUST run under. A relative value driven from the wrong directory
+            measures nothing, which is why the builder asserts this rather than
+            documenting it.
+        redirect_home: whether the row's value is anchored on ``$HOME`` instead
+            of the working directory.
+    """
+
+    id: str
+    anchoring: str
+    render: Callable[[Path, str], str]
+    prepare: Callable[[Path], None]
+    cwd: Callable[[Path], Path]
+    redirect_home: bool
+
+
+#: The eight shapes, `I-6`'s own list preserved verbatim.
+#:
+#: TWO MEMBERS OF `AUDIT.md` 5.1's LIST ARE DELIBERATELY ABSENT, with grounds,
+#: so a later reader does not read the gap as an oversight. `-` (a stdin
+#: sentinel) is not a destination that a directory or an atomic replace can
+#: denote, and the product declares no stdin sentinel at either flag. A value
+#: that looks like a flag (`--out-dir --force`) is a USAGE-tier property of the
+#: CLI framework's parser, one tier above the geometry these rows cover, and
+#: mixing a tier-2 oracle into a tier-1 matrix is how `C8` came to assert a
+#: third-party library. The flag-lookalike shape is a real member of this
+#: dimension and is filed for a carrier of its own rather than smuggled in here.
+PATH_SPELLINGS: Final[tuple[PathSpelling, ...]] = (
+    PathSpelling(
+        "absolute", ANCHORING_ABSOLUTE, _render_absolute, _prepare_nothing, _cwd_anchor, False
+    ),
+    PathSpelling(
+        "bare-relative",
+        ANCHORING_RELATIVE,
+        _render_bare_relative,
+        _prepare_nothing,
+        _cwd_anchor,
+        False,
+    ),
+    PathSpelling(
+        "dot-relative",
+        ANCHORING_RELATIVE,
+        _render_dot_relative,
+        _prepare_nothing,
+        _cwd_anchor,
+        False,
+    ),
+    PathSpelling(
+        "parent-relative",
+        ANCHORING_RELATIVE,
+        _render_parent_relative,
+        _prepare_parent_relative,
+        _cwd_sub,
+        False,
+    ),
+    PathSpelling(
+        "trailing-slash",
+        ANCHORING_RELATIVE,
+        _render_trailing_slash,
+        _prepare_nothing,
+        _cwd_anchor,
+        False,
+    ),
+    PathSpelling(
+        TILDE_SPELLING, ANCHORING_RELATIVE, _render_tilde, _prepare_nothing, _cwd_anchor, True
+    ),
+    PathSpelling(
+        "symlink", ANCHORING_RELATIVE, _render_symlink, _prepare_symlink, _cwd_anchor, False
+    ),
+    PathSpelling(
+        "nonexistent-parent",
+        ANCHORING_RELATIVE,
+        _render_absent_parent,
+        _prepare_absent_parent,
+        _cwd_anchor,
+        False,
+    ),
+)
+
+
+def path_spellings() -> tuple[PathSpelling, ...]:
+    """The value-shape axis, in the shape :func:`output_formats` and
+    :func:`tty_modes` already have, so every consumer imports a CALL rather
+    than a constant and the deferred operand-side property (`I-15`, `B-311`)
+    can consume the same rows without a second declaration."""
+    return PATH_SPELLINGS
+
+
+def spelled_destination(spelling: PathSpelling, anchor: Path, leaf: str, *, home: Path) -> Path:
+    """The absolute path *spelling* DENOTES, by the rule a shell would use.
+
+    This is the oracle a mirror comparison and an echo comparison cannot give:
+    a run that echoes ``~/out`` and writes ``./~/out`` agrees with itself on the
+    exit code AND on the spelling, and is still wrong. The one place the
+    expansion rule is written down, so a cell asks it instead of reimplementing
+    it per tier.
+    """
+    value = spelling.render(anchor, leaf)
+    if value.startswith("~/"):
+        value = f"{home}{value[1:]}"
+    return Path(spelling.cwd(anchor)) / value
+
+
+#: The two destination flags whose VALUE this dimension is scoped to. `--name`
+#: is a filename TEMPLATE rather than a path, and `--in-place` takes no value at
+#: all, so neither is a member of this axis; the operand side is the deferred
+#: `I-15` property and is not driven here. Tied to the product's own
+#: `OUTPUT_FLAGS` by `tests/test_derived_dimensions.py`, so a flag renamed under
+#: `src/` cannot leave this pair silently stale.
+DESTINATION_VALUE_FLAGS: Final[tuple[str, ...]] = ("--out-dir", "--output")
+
+
+def destination_flag_cases(root: object | None = None) -> tuple[tuple[str, str], ...]:
+    """Every ``(verb, flag)`` pair that takes a destination PATH value.
+
+    PROVENANCE. A leaf (``not verb.is_group``) whose own ``consumes``
+    declaration contains the flag, for each flag in
+    :data:`DESTINATION_VALUE_FLAGS`. ``consumes`` is itself derived --
+    ``_common.consumed_output_flags(module)`` -- so this is the live
+    declaration, never a grep over docstrings (two module docstrings mention
+    ``--out-dir`` beside a literal ``consumes=()``) and never the module
+    basename (`cli/cmd_office.py` registers ``convert``; a population keyed on
+    the module reports ``convert`` missing while inventing ``office``).
+
+    FITNESS, and this is the statement `X-157` does not ask for. The property
+    being tested is *does the SHAPE OF THE VALUE the user typed change the
+    answer?*, and the only filter that question licenses is **flag
+    declaration**. Every other filter a neighbouring population applies is a
+    filter this property does not license -- which is not a hypothetical:
+    :func:`out_dir_batch_verbs` was proposed for this job twice, and its step-2
+    **operand arity** filter drops ``split``, giving a TEN-verb answer for an
+    ELEVEN-verb defect. Arity is a fit property of *can a bad input sit in the
+    middle of a batch?* and an irrelevant one here: ``_ensure_out_dir`` has a
+    single call site, ``plan_output_set``, and ``ops/split.py`` reaches it
+    directly. `tests/integration/test_value_shape.py` MECHANIZES this
+    paragraph -- prose alone was satisfied by `PDF-64`'s own brief, which
+    carried a provenance statement and still named the wrong population.
+
+    Thirty pairs at `b16fb87`/`aae2822`: eleven at ``--out-dir`` including
+    ``split``, nineteen at ``--output``. A verb declaring both flags is TWO
+    cells and not one, because the two flags do not share a code path --
+    ``--out-dir`` reaches ``_ensure_out_dir``/``_predict_out_dir_creation`` and
+    ``--output`` reaches ``AtomicWriter``/``ensure_no_clobber``, and the two do
+    not even agree on how they normalize a path.
+    """
+    leaves = sorted(
+        (verb for verb in discover_verbs(root) if not verb.is_group), key=lambda verb: verb.name
+    )
+    return tuple(
+        (verb.name, flag)
+        for flag in DESTINATION_VALUE_FLAGS
+        for verb in leaves
+        if flag in verb.consumes
+    )
+
+
+#: Every ``VerbSpec`` field a population may read WITHOUT narrowing the
+#: value-shape property, mapped to what filtering on it would actually mean.
+#: `is_group` and `name` are structural (which leaves exist, what they are
+#: called) and `consumes` is the flag declaration itself; anything else is a
+#: narrowing that has to be argued for, and none has been.
+FILTER_MEANINGS: Final[dict[str, str]] = {
+    "variadic_operands": "operand arity",
+    "takes_input_paths": "operand typing",
+    "takes_positional_argument": "operand presence",
+    "is_page_addressing": "page addressing",
+    "is_mutating": "reachability of the write chokepoint",
+}
+
+#: The fields :func:`destination_flag_cases` is licensed to read.
+LICENSED_POPULATION_FIELDS: Final[frozenset[str]] = frozenset({"name", "is_group", "consumes"})
+
+
+def population_fields(population: Callable[..., object]) -> frozenset[str]:
+    """Every ``VerbSpec`` attribute *population*'s own source reads.
+
+    Static over the function's source (`ast`, the convention this module and
+    `tests/test_derived_dimensions.py` already share) rather than a behavioural
+    probe, because the thing under examination is which filters the derivation
+    APPLIES -- a property of the code, not of today's answer.
+    """
+    import inspect
+
+    fields: set[str] = set()
+    for node in ast.walk(ast.parse(inspect.getsource(population))):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id in ("verb", "v", "leaf"):
+                fields.add(node.attr)
+    return frozenset(fields)

@@ -41,6 +41,7 @@ its own non-emptiness pin plus a proof that the detector detects.
 from __future__ import annotations
 
 import ast
+import json
 import re
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -48,8 +49,23 @@ from typing import Final
 
 import pytest
 
+from fs_snapshot import redirected_environment
 from pdf_tooling.output import OutputFormat, auto_format
-from registry import PDF_08_VERBS, REPO_ROOT, discover_verbs, output_formats, tty_modes
+from registry import (
+    ANCHORING_ABSOLUTE,
+    ANCHORING_RELATIVE,
+    DESTINATION_VALUE_FLAGS,
+    OUTPUT_FLAG_INVOCATIONS,
+    OUTPUT_FLAGS,
+    PDF_08_VERBS,
+    REPO_ROOT,
+    destination_flag_cases,
+    discover_verbs,
+    output_formats,
+    path_spellings,
+    run_cli,
+    tty_modes,
+)
 
 TESTS_DIR: Final[Path] = REPO_ROOT / "tests"
 
@@ -514,3 +530,218 @@ def test_the_snapshot_helper_scan_can_find_a_second_one(tmp_path: Path) -> None:
     assert [entry.split("::")[-1] for entry in tree_snapshot_helpers([tmp_path])] == [
         "snapshot_tree"
     ]
+
+
+# --------------------------------------------------------------------------- #
+# PDF-74 -- the VALUE-SHAPE axis, and the two guards a DECLARED dimension owes.
+#
+# `PATH_SPELLINGS` is a `tty_modes()`/`PDF_08_VERBS`-class member: declared,
+# because the shapes a user can type are not enumerable from the command tree
+# and inventing a spelling enum under `src/` to make a test derivable would be
+# a product change made to serve a test. A declaration is admissible only with
+# the two things those precedents carry, and both are below:
+#
+#   * THE TIE -- two distinct spellings of one destination must still produce
+#     two distinct rendered payload values, at every `(verb, flag)` cell, or
+#     something has absolutized at the boundary and the tuple describes
+#     nothing. This is also the mechanization of the item's load-bearing
+#     quantity: *the number of distinct spellings driven at a cell*, which was
+#     ONE everywhere before `PDF-64` and TWO on eleven cells after it.
+#   * THE SCAN -- `typed_verb_collections` is CONSUMED rather than copied: it
+#     is already generic over the governed set, and the property is identical
+#     (a literal collection of >=2 governed names, anywhere under `tests/`,
+#     outside the one declaration site). A dimension each test re-enumerates is
+#     not a dimension.
+# --------------------------------------------------------------------------- #
+
+SPELLING_IDS: Final[frozenset[str]] = frozenset(row.id for row in path_spellings())
+
+DESTINATION_CELLS: Final[tuple[tuple[str, str], ...]] = destination_flag_cases()
+
+
+def test_the_value_shape_axis_is_the_eight_member_axis_it_claims_to_be() -> None:
+    rows = path_spellings()
+    assert len(rows) > 0, "path_spellings() is empty -- every consuming matrix collapses"
+    assert len(SPELLING_IDS) == len(rows), f"duplicate spelling id(s): {[r.id for r in rows]}"
+    assert {row.anchoring for row in rows} == {ANCHORING_ABSOLUTE, ANCHORING_RELATIVE}, (
+        "the anchoring field no longer takes both values -- the red control derives its "
+        "predicted red set from it, so an axis that is all-absolute or all-relative makes "
+        "that prediction unfalsifiable"
+    )
+    assert sum(1 for row in rows if row.anchoring == ANCHORING_ABSOLUTE) == 1, (
+        "exactly one row is the absolute CONTROL column; more than one and the cross stops "
+        "being a spelling axis crossed against a single reference"
+    )
+
+
+def test_the_declared_destination_flags_are_live_product_flags() -> None:
+    """`DESTINATION_VALUE_FLAGS` is a scoping declaration, so it can go stale.
+    This is what stops it doing so silently: a flag renamed under `src/` fails
+    here by name instead of leaving a two-member axis quietly measuring one."""
+    stale = sorted(set(DESTINATION_VALUE_FLAGS) - set(OUTPUT_FLAGS))
+    assert stale == [], (
+        f"registry.DESTINATION_VALUE_FLAGS names {stale}, which the product's own "
+        f"OUTPUT_FLAGS {list(OUTPUT_FLAGS)} no longer declares"
+    )
+
+
+def test_the_spellings_driven_at_a_cell_is_the_whole_axis() -> None:
+    """E4's load-bearing quantity, as a number the suite carries rather than a
+    census someone re-greps.
+
+    *The maximum, over all `(verb, flag)` cells, of the number of distinct
+    spellings driven at that cell* was **one** everywhere before `PDF-64`,
+    **two** on the eleven `--out-dir` cells after it, and is the whole axis now
+    -- because `tests/integration/test_value_shape.py` parametrizes the full
+    cross and a cell dropped from it fails that module's own cross-product
+    assertion.
+    """
+    assert len(path_spellings()) == 8, (
+        f"the value-shape axis has {len(path_spellings())} member(s); it was declared with "
+        "eight, and a narrowing must be recorded IN CODE with the measurement that forced "
+        "it, never absorbed here"
+    )
+    assert len(DESTINATION_CELLS) == 30, len(DESTINATION_CELLS)
+
+
+def _destination_index(argv: list[str], flag: str) -> int:
+    tokens = ("--output", "-O") if flag == "--output" else (flag,)
+    return next(index for index, token in enumerate(argv) if token in tokens)
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize(
+    ("verb", "flag"),
+    DESTINATION_CELLS,
+    ids=[f"{verb.replace(' ', '-')}-{flag.lstrip('-')}" for verb, flag in DESTINATION_CELLS],
+)
+def test_the_value_shape_axis_still_changes_the_products_answer(
+    verb: str, flag: str, corpus: object, tmp_path: Path
+) -> None:
+    """The TIE, and it is stronger than `tty_modes()`' because it runs against
+    the live product at every cell rather than against one pure function.
+
+    Two spellings of the SAME destination, driven under `--dry-run` so neither
+    creates anything, must render two DIFFERENT destination values. If they
+    ever render identically, the product has absolutized at the boundary --
+    *"a payload change wearing a bug fix's clothes"* -- and this whole axis
+    describes nothing, while every cell in the matrix keeps passing.
+    """
+    absolute = next(row for row in path_spellings() if row.anchoring == ANCHORING_ABSOLUTE)
+    relative = next(row for row in path_spellings() if row.anchoring == ANCHORING_RELATIVE)
+
+    anchor = tmp_path / "cell"
+    anchor.mkdir()
+    env, _roots = redirected_environment(anchor)
+    registered = OUTPUT_FLAG_INVOCATIONS[(verb, flag)](corpus, anchor)
+    index = _destination_index(registered, flag)
+    leaf = Path(registered[index + 1]).name
+
+    def outcome(row: object) -> str:
+        value = row.render(anchor, leaf)  # type: ignore[attr-defined]
+        argv = [*registered[: index + 1], value, *registered[index + 2 :]]
+        dry = run_cli(
+            verb,
+            "--dry-run",
+            *argv,
+            "-o",
+            "json",
+            cwd=row.cwd(anchor),  # type: ignore[attr-defined]
+            env=env,
+        )
+        assert dry.stdout.strip(), f"{verb} {flag}: the dry run printed nothing -- {dry.stderr}"
+        payload = json.loads(dry.stdout)
+        items = payload.get("items") or []
+        rendered = items[0].get("output") if items else None
+        if rendered is None:
+            error = payload.get("error") or {}
+            rendered = error.get("path")
+        assert rendered is not None, f"{verb} {flag}: the payload named no destination"
+        return str(rendered)
+
+    assert not collapsed_axis(outcome, (absolute, relative)), (
+        f"{verb} {flag}: an absolute and a relative spelling of the SAME destination render "
+        "the IDENTICAL payload value, so the value-shape axis has collapsed and "
+        "path_spellings() no longer describes anything the product does. The likely cause "
+        "is an absolutization at the CLI boundary -- a payload change wearing a bug fix's "
+        "clothes"
+    )
+
+
+def test_the_value_shape_collapse_check_fires() -> None:
+    """The tie's own red, synthetic: a renderer that ignores the spelling
+    collapses the axis and is reported as collapsed."""
+    rows = path_spellings()[:2]
+    assert collapsed_axis(lambda row: "always-the-same", rows)
+    assert not collapsed_axis(lambda row: row.id, rows)
+
+
+def test_no_typed_spelling_list_survives_anywhere_under_tests() -> None:
+    """AC3. The same mechanism AC30 already has, pointed at the new dimension
+    -- `typed_verb_collections` is generic over its governed set, so this
+    CONSUMES the detector rather than growing a second one that can disagree
+    with it."""
+    findings: list[str] = []
+    for path in scanned_modules():
+        if path == DECLARATION_SITE:
+            continue
+        for lineno, text in typed_verb_collections(path.read_text(encoding="utf-8"), SPELLING_IDS):
+            findings.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {text}")
+    assert findings == [], (
+        "hand-typed collection(s) of PATH_SPELLINGS ids sit beside the live declaration -- "
+        "consume `registry.path_spellings()` instead. A dimension each test re-enumerates is "
+        "not a dimension, it is eight tuples waiting to go stale:\n  " + "\n  ".join(findings)
+    )
+
+
+PLANTED_SPELLING_COLLECTIONS: Final[tuple[tuple[str, str], ...]] = (
+    ("full-tuple", "S = ('absolute', 'bare-relative', 'dot-relative', 'tilde')\n"),
+    ("partial-subset", "RELATIVE = ['tilde', 'symlink']\n"),
+    ("set-literal", "SEEN = {'tilde', 'trailing-slash'}\n"),
+    ("nested-with-data", "CASES = [('tilde', 0), ('symlink', 1), ('absolute', 2)]\n"),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "source"),
+    PLANTED_SPELLING_COLLECTIONS,
+    ids=[row[0] for row in PLANTED_SPELLING_COLLECTIONS],
+)
+def test_a_planted_spelling_collection_is_detected(label: str, source: str) -> None:
+    assert typed_verb_collections(source, SPELLING_IDS) != [], (
+        f"the AC3 detector did not see the planted {label} -- a re-listed value-shape axis "
+        "would go unnoticed, which is the defect the declaration exists to avoid"
+    )
+
+
+NOT_SPELLING_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
+    ("mixed-with-a-flag", "ROW = ('tilde', '--out-dir')\n"),
+    ("single-spelling", "ONE = ('tilde',)\n"),
+    ("mapping-keyed-by-spelling", "EXPECTED = {'tilde': 1, 'symlink': 0}\n"),
+    ("derived", "IDS = tuple(row.id for row in path_spellings())\n"),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "source"),
+    NOT_SPELLING_VIOLATIONS,
+    ids=[row[0] for row in NOT_SPELLING_VIOLATIONS],
+)
+def test_the_spelling_detector_does_not_cry_wolf(label: str, source: str) -> None:
+    """The other half. A detector that flagged everything would be satisfied by
+    every red proof above and would make the real scan unmaintainable, which is
+    how a check gets deleted rather than fixed."""
+    assert typed_verb_collections(source, SPELLING_IDS) == [], label
+
+
+def test_the_registry_documents_the_value_shape_surface_too() -> None:
+    """X-157, applied to the new members: a surface can only be CONSUMED rather
+    than rebuilt if it is written down where its next engineer will look."""
+    import registry
+
+    docstring = registry.__doc__ or ""
+    for name in ("path_spellings()", "destination_flag_cases()"):
+        assert name in docstring, (
+            f"tests/registry.py's module docstring does not name {name} as part of the "
+            "dimension surface a later matrix is meant to consume"
+        )
