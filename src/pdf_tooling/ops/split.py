@@ -288,7 +288,7 @@ def split_document(
                         exit_code=0,
                         message=f"pages {_extent_text(part.page_numbers)}",
                         bytes_before=source_size,
-                        bytes_after=target.stat().st_size,
+                        bytes_after=atomic.bytes_written,
                         duration_ms=0,
                     )
                 )

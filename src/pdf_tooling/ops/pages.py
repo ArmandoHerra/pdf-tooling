@@ -659,7 +659,7 @@ def _run_with_resolver(
             exit_code=0,
             message=(f"{page_plan.page_count_before} -> {len(page_plan.page_numbers)} page(s)"),
             bytes_before=bytes_before,
-            bytes_after=item.target.stat().st_size,
+            bytes_after=atomic.bytes_written,
             duration_ms=int((time.monotonic() - started) * 1000),
             detail=_item_detail(page_plan),
         )

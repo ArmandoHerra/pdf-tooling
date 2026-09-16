@@ -225,7 +225,7 @@ def merge_documents(
                 else:
                     writer.write(atomic.stream)
 
-            merged_size = output.stat().st_size if output.exists() else None
+            merged_size = atomic.bytes_written
             items = tuple(
                 ItemResult(
                     input=merge_input.raw,

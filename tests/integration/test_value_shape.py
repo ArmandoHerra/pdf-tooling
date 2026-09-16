@@ -36,12 +36,22 @@ module consumes `prediction()` and `real_envelope()` from the same helper
 module, which is where the value of `tests/dryreal.py` actually is (a legible
 failure when a dry run prints nothing, instead of a bare `JSONDecodeError`).
 
-**What is filed here and NOT fixed.** Driving H1/H2 before writing a line of
-matrix surfaced a real product defect, on both destination flags. It is pinned
-with `strict=True` xfails naming it and escalated; `src/` is byte-untouched by
-this spec, and deliberately so — a spec whose new matrix reds and whose same
-commit fixes the product cannot show which change moved the needle, and this
-module's red control is measured against an unmodified binary.
+**What this module FOUND, and what became of it.** Driving H1/H2 before
+writing a line of matrix surfaced a real product defect on both destination
+flags: the product did not agree with itself about whether a destination's `~`
+is expanded. `PDF-74` filed it rather than fixing it — `src/` is byte-untouched
+by that spec, deliberately, because a spec whose new matrix reds and whose same
+commit fixes the product cannot show which change moved the needle — and pinned
+it with twenty-eight `strict=True` xfails so it could not go quiet.
+
+**`PDF-80` fixed it and those pins are gone** (ledger `1e824f5f74`, ruled
+`X-732`). The thirty tilde cells are now ordinary parametrizations that must
+PASS, which is strictly stronger than the pin was: `strict=True` proved only
+that *something* changed, while a passing cell proves the contract. Two oracles
+this matrix was blind to arrived with the retirement and are asserted at every
+cell — **disclosure** and **real-run purity** — because a crash-only fix would
+have left `bytes_after: null` beside a real file, and every one of the five
+original oracles passed on that.
 
 **If `PDF-76` consolidates the `POPULATIONS` roster, this is the module to
 consume.** Its floors are carried here, in the same three-field shape, rather
@@ -113,97 +123,57 @@ def _cell_id(verb: str, flag: str, spelling: PathSpelling) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# The defect this matrix found on its first run, PINNED and not fixed.
+# The defect this matrix found on its first run, and the shape of its repair.
 #
-# MEASURED, both commands, from a scratch directory, before any cell existed:
+# MEASURED at PDF-74, both commands, from a scratch directory:
 #
 #   $ cd "$SCRATCH" && HOME="$SCRATCH/home" pdftooling extract in.pdf \
-#       --out-dir '~/out' --dry-run -o json
-#   rc 0   items[0].output "~/out/in.pdf"   detail.would_exit 0
+#       --out-dir '~/out' --dry-run -o json        ->  rc 0, would_exit 0
 #   $ cd "$SCRATCH" && HOME="$SCRATCH/home" pdftooling extract in.pdf \
-#       --out-dir '~/out' -o json
-#   rc 1   {"error": {"code": 1, "kind": "failure",
-#                     "message": "destination directory does not exist: ~/out"}}
-#   $ ls -a "$SCRATCH"   ->   a literal '~' DIRECTORY, containing 'out'
+#       --out-dir '~/out' -o json                  ->  rc 1, and a literal '~'
+#                                                      DIRECTORY in the cwd
 #
-# THE MECHANISM, three seams that do not agree on one question:
+# RE-MEASURED at PDF-80 against the same binary, and it was WORSE than filed in
+# two ways nothing upstream had named. (1) A FOURTH SEAM: `plan_output_set`'s
+# own `out_dir.exists()` read the raw spelling, so a dry run over a `~`
+# `--out-dir` whose EXPANDED form exists skipped the writability tier entirely
+# and predicted 0 for a real run that exits 1 -- while the ABSOLUTE spelling of
+# that same directory mirrored exactly. (2) A FOURTH SHAPE: when the expanded
+# `--out-dir` already exists, the eleven `--out-dir` cells stopped returning a
+# clean error envelope and started returning a raw traceback with 0 bytes of
+# stdout AND the artefact written to `$HOME` undisclosed.
 #
-#   1. `safety/atomic.py::_predict_out_dir_creation` (the DRY branch) builds
-#      `Path(out_dir).expanduser().absolute()` -- `$HOME/out` -- and predicts
-#      success against it;
-#   2. `safety/atomic.py::_ensure_out_dir` (the REAL branch) calls
-#      `out_dir.mkdir(parents=True, exist_ok=True)` on the RAW parameter, and
-#      `Path.mkdir` does not expand `~` -- so it creates `./~/out`;
-#   3. `safety/paths.py::ensure_destination_writable` then calls `canonical()`,
-#      which DOES expand `~`, finds `$HOME/out` absent, and refuses with 1.
+# THE ROOT CAUSE, and it is not what the pin text said. `canonical()` was
+# always the single correct expansion point; the defect was twenty-three sites
+# asking the filesystem about a path `canonical()` was never given -- two in
+# `safety/atomic.py` (`_ensure_out_dir`'s `mkdir`, `plan_output_set`'s
+# existence test) and twenty-one in `ops/`, each one stat()-ing the spelling
+# handed to an `AtomicWriter` whose `.destination` was the canonical path
+# `os.replace` had just written to. So the fix ADDS NO EXPANSION: the two
+# `safety/` seams consume one `canonical()` call made at `plan_output_set`'s
+# boundary, and the twenty-one readbacks consume `AtomicWriter.bytes_written`.
+# `tests/test_destination_canonicalization_boundary.py` is the rule that keeps
+# `ops/` at ZERO destination filesystem calls.
 #
-# `git grep -n expanduser -- src/` returns seven hits, all in `safety/atomic.py`
-# and `safety/paths.py`, and none of them is on `_ensure_out_dir`'s real branch.
+# WHAT THE RETIREMENT HAD TO BE, and it was not the marks. `PDF-74` derived pin
+# membership from the DECLARATION (`set(consumes[verb]) != {"--output"}`), not
+# from behaviour, so after the fix that derivation still returned twenty-seven
+# and a GREEN test named "the pinned tilde membership is tied to the
+# measurement" would have asserted that twenty-seven cells are defective when
+# none is. The population and its two guards were the retirement; the marks
+# were the easy half. What replaces the pin is below, asserting the properties
+# of the PRODUCT (30 / 11 / 19) that must outlive the defect.
 #
-# THE SAME SPLIT ON THE OTHER FLAG, and it is worse. At `--output`, sixteen of
-# the nineteen verbs answer a tilde spelling with a RAW `FileNotFoundError`
-# TRACEBACK, exit 1, zero bytes of stdout -- `AtomicWriter` writes the bytes
-# through `canonical()` (so the file really does land at `$HOME/…`) and the op
-# then reads the size back off the UNEXPANDED spelling, e.g.
-# `ops/optimize.py:449`'s `bytes_after = item.target.stat().st_size`. The three
-# that survive (`ops/compose.py:847`/`:979`, `ops/merge.py:228`) guard that read
-# with `if output.exists() else None`. So the user gets a traceback, exit 1, and
-# a file they were never told about.
-#
-# THIS IS EXACTLY `PDF-64`'s CLASS, on cells `PDF-64` did not have: the suite
-# contains ZERO `~/` spellings.
-#
-# WHY IT IS PINNED AND NOT FIXED. `PDF-74` writes no product code (its Scope's
-# most important exclusion): the red control below is measured against an
-# unmodified binary, and a spec whose new matrix reds and whose same commit
-# fixes the product cannot show which change moved the needle.
+# ONE THING THIS ITEM DID NOT FIX, recorded so a reader does not read its
+# absence as a failure. `linearize` was silent on BOTH channels, not just
+# stdout, because `adapters/pikepdf_structure.py`'s `check_linearization(
+# io.StringIO())` assigns `sys.stderr = <that buffer>` and never restores it.
+# That is a different root cause in a different layer, filed as PDF-80 E6 and
+# allocated `PDF-81` (ledger `333f0b182f`). PDF-80 removed the TRIGGER, not the
+# silence: `linearize` now exits 0 and prints its payload on stdout, which was
+# never stolen -- but any OTHER post-engine failure on that verb is still
+# silent on stderr, and that is PDF-81's, not evidence against this matrix.
 # --------------------------------------------------------------------------- #
-
-_TILDE_PIN_REASON: Final[str] = (
-    "PDF-74 E6/E7 (H1+H2, FILED not fixed): the product does not agree with itself about "
-    "whether a destination's '~' is expanded. --out-dir's dry branch expands it "
-    "(_predict_out_dir_creation) while its real branch mkdir()s the raw spelling and "
-    "ensure_destination_writable then canonical()s it -- dry 0, real 1, and a literal '~' "
-    "directory left in the cwd. At --output the bytes land at $HOME through canonical() and "
-    "the op stats the UNEXPANDED spelling back, so a raw FileNotFoundError traceback and an "
-    "empty -o json stdout reach the user after a successful write. PDF-74 writes no product "
-    "code (its Scope's most important exclusion) because its own red control is measured "
-    "against an unmodified binary; this xfail PINS the defect so it stays visible. The day "
-    "either seam is corrected, this XPASSes and the suite goes red -- that is the signal to "
-    "retire the pin, and to route the verdict back to the project-manager."
-)
-
-
-def _tilde_defect_cells() -> tuple[tuple[str, str], ...]:
-    """The `(verb, flag)` cells at which the tilde spelling is defective today.
-
-    DERIVED from the live registry, never listed: a verb is affected exactly
-    when it declares a destination flag BEYOND a lone ``--output``. That
-    predicate is the MEASURED membership boundary expressed against the live
-    tree, and it is deliberately labelled as such rather than dressed up as the
-    mechanism -- the mechanism is the raw-versus-canonical path split described
-    at length above, and `VerbSpec` cannot see it. It is admissible for the
-    same reason :data:`registry.PDF_08_VERBS` is: it carries a LIVE TIE
-    (:func:`test_the_pinned_tilde_membership_is_tied_to_the_measurement`) that
-    fails BY NAME the moment the membership moves, instead of going stale and
-    passing. `strict=True` closes the other direction: the day the defect is
-    fixed, every pin XPASSes and the suite reds.
-    """
-    consumes = {verb.name: verb.consumes for verb in discover_verbs() if not verb.is_group}
-    return tuple(
-        (verb, flag)
-        for verb, flag in destination_flag_cases()
-        if set(consumes[verb]) != {"--output"}
-    )
-
-
-TILDE_DEFECT_CELLS: Final[tuple[tuple[str, str], ...]] = _tilde_defect_cells()
-
-
-def _marks(verb: str, flag: str, spelling: PathSpelling) -> tuple[pytest.MarkDecorator, ...]:
-    if spelling.id == TILDE_SPELLING and (verb, flag) in TILDE_DEFECT_CELLS:
-        return (pytest.mark.xfail(strict=True, reason=_TILDE_PIN_REASON),)
-    return ()
 
 
 # --------------------------------------------------------------------------- #
@@ -409,6 +379,116 @@ def assert_echo(completed: Any, cell: Cell, mode: str, *, whole: bool) -> None:
     )
 
 
+def landed_at(named: str, cell: Cell) -> Path:
+    """Where *named* -- a destination string the payload echoed -- actually is.
+
+    Built by SUBSTITUTION against the cell's own two values rather than by a
+    second copy of the expansion rule: `cell.value` is what the user typed and
+    `cell.denoted` is what `registry.spelled_destination` says that denotes, so
+    an echoed string beginning with the former is rebased onto the latter.
+    Re-implementing `~`-expansion here would put a second definition of the
+    rule beside the one in `tests/registry.py`, and two definitions of one
+    expansion rule that can disagree is the entire subject of this item.
+    """
+    spelled = str(Path(cell.value))
+    if named == spelled:
+        return cell.denoted
+    if named.startswith(spelled + os.sep):
+        return cell.denoted / named[len(spelled) + 1 :]
+    if os.path.isabs(named):
+        return Path(named)
+    return Path(cell.cwd) / named
+
+
+def undisclosed_items(payload: Any, cell: Cell) -> tuple[str, ...]:
+    """Items that SUCCEEDED, named a destination that exists, and reported no size.
+
+    **The oracle the existing five are blind to, and the blindness was
+    measured.** `create`, `compose` and `merge` guarded their readback with
+    ``output.stat().st_size if output.exists() else None``, which converted the
+    crash the other sixteen verbs had into a FALSE FIELD: at a `~` spelling
+    they exited 0 and published ``bytes_after: null`` for a file that exists and
+    is non-empty, while the identical argv at an absolute spelling published
+    the real byte count for a byte-identical file. Mirror held, echo held,
+    effect held (the bytes really did land at `$HOME`), purity held, and there
+    was no traceback -- so all three cells were UNPINNED and green, and a
+    crash-only fix would have left this limb of the defect shipping.
+    ``ItemResult.bytes_after`` is part of the structured shapes `README.md:161`
+    freezes as public API from v1.0.0; its value may not depend on the SPELLING
+    of the destination.
+
+    Deliberately narrow, in three ways that are each a "does not fire" half:
+    a DRY item reports ``null`` by design and is skipped via the envelope's own
+    ``dry_run``; a REFUSED or failed item reports ``null`` by design
+    (`ops/raster.py`'s per-page failure path is exactly that shape) and is
+    skipped on ``ok``/``exit_code``; and an item whose destination is not on
+    disk has nothing to disclose.
+    """
+    if not isinstance(payload, dict) or payload.get("dry_run"):
+        return ()
+    found: list[str] = []
+    for item in payload.get("items") or ():
+        if not isinstance(item, dict):
+            continue
+        if item.get("ok") is not True or item.get("exit_code") not in (0, None):
+            continue
+        if item.get("bytes_after") is not None:
+            continue
+        named = item.get("output")
+        if named is None:
+            continue
+        landed = landed_at(str(named), cell)
+        if landed.is_file() and landed.stat().st_size > 0:
+            found.append(f"{named} -> {landed} ({landed.stat().st_size} bytes on disk)")
+    return tuple(found)
+
+
+def assert_disclosure(completed: Any, cell: Cell) -> None:
+    """A real run that wrote bytes says how many."""
+    text = completed.stdout or ""
+    if not text.strip():
+        return
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return
+    undisclosed = undisclosed_items(payload, cell)
+    assert undisclosed == (), (
+        f"{cell.verb} {cell.flag} [{cell.spelling.id}] real: exited 0 and reported "
+        f"bytes_after: null for {list(undisclosed)} -- file(s) that exist and are "
+        "non-empty. bytes_after is part of the structured shapes README.md freezes as "
+        "public API; a published field whose value depends on the SPELLING of the "
+        "destination is the half of this defect a crash-only fix leaves behind"
+    )
+
+
+def literal_tilde_entries(root: Path) -> tuple[str, ...]:
+    """Every directory entry literally NAMED `~` anywhere under *root*.
+
+    Matched on `Path.name` rather than through a glob pattern so the character
+    is compared as data, never interpreted. The real run used to create one of
+    these -- `_ensure_out_dir`'s `mkdir` ran on the raw spelling -- moments
+    before printing a message asserting that path does not exist, and the
+    shipped purity oracle could not see it because it snapshots after the DRY
+    run alone.
+    """
+    return tuple(
+        sorted(str(path.relative_to(root)) for path in root.rglob("*") if path.name == "~")
+    )
+
+
+def assert_real_run_purity(cell: Cell) -> None:
+    """The sharpest single sentence of the `--out-dir` shape, as an assertion."""
+    strays = literal_tilde_entries(cell.anchor)
+    assert strays == (), (
+        f"{cell.verb} {cell.flag} [{cell.spelling.id}] real: the run created "
+        f"{list(strays)} -- a directory entry literally named '~', at a path the user "
+        f"never named, under {cell.anchor}. A destination is expanded by exactly one "
+        "vocabulary (safety/paths.py::canonical) or by none; a mkdir on the raw "
+        "spelling is the product disagreeing with the writer standing beside it"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # The matrix. 240 cells, 480 runs, dry and real driven separately so the purity
 # oracle can land BETWEEN them.
@@ -418,7 +498,7 @@ def assert_echo(completed: Any, cell: Cell, mode: str, *, whole: bool) -> None:
 @pytest.mark.e2e
 @pytest.mark.parametrize(
     ("verb", "flag", "spelling"),
-    [pytest.param(*case, marks=_marks(*case), id=_cell_id(*case)) for case in CASES],
+    [pytest.param(*case, id=_cell_id(*case)) for case in CASES],
 )
 def test_the_value_shape_cell_holds(
     verb: str, flag: str, spelling: PathSpelling, corpus: Any, tmp_path: Path
@@ -436,7 +516,14 @@ def test_the_value_shape_cell_holds(
       nothing there. This is the oracle mirror and echo cannot cover: a binary
       that echoes `~/out` and writes `./~/out` satisfies both and is wrong.
     * **purity** — after the dry run ALONE, the destination does not exist and
-      the redirected `$HOME`/`$TMPDIR` roots are byte-unchanged.
+      the redirected `$HOME`/`$TMPDIR` roots are byte-unchanged; and after the
+      REAL run, no directory entry literally named `~` exists under the cell's
+      anchor (`PDF-80` D10.2 — the shipped oracle snapshots only after the dry
+      run, so *"the real run created a directory the user never named"* was
+      asserted by nothing).
+    * **disclosure** — a real run that exits 0 over a destination that exists on
+      disk reports its size rather than `bytes_after: null` (`PDF-80` D10.1 —
+      the limb all five oracles above pass on, measured).
     * **engine gating** — `convert`'s and `ocr`'s cells assert a DERIVED
       relation (dry agrees with real) rather than a hard-coded code, so an
       engine-absent leg answers the same question without a skip. No cell here
@@ -466,6 +553,12 @@ def test_the_value_shape_cell_holds(
 
     real = run_cli(verb, *cell.argv, "-o", "json", cwd=cell.cwd, env=cell.env)
     assert_no_traceback(real, cell, "real")
+
+    # -- purity, measured after the REAL run (PDF-80 D10.2) ---------------- #
+    assert_real_run_purity(cell)
+
+    # -- disclosure (PDF-80 D10.1) ----------------------------------------- #
+    assert_disclosure(real, cell)
 
     # -- mirror ------------------------------------------------------------ #
     assert dry.returncode == real.returncode, (
@@ -617,17 +710,6 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "that this module drives. Below four, the matrix has stopped being a cross of two "
         "axes and is a list of examples again",
     ),
-    Population(
-        "TILDE_DEFECT_CELLS",
-        TILDE_DEFECT_CELLS,
-        "the strict=True xfail pins on the tilde slice",
-        1,
-        "ONE, and the floor is the weaker of two guards on purpose. An EMPTY membership "
-        "would silently un-pin a filed defect, which this catches; but the membership's "
-        "real guarantee is test_the_pinned_tilde_membership_is_tied_to_the_measurement, "
-        "which fails by name in BOTH directions, plus strict=True itself, which reds the "
-        "day the product is fixed",
-    ),
 )
 
 _ROSTERED: Final[frozenset[str]] = frozenset(row.name for row in POPULATIONS)
@@ -749,27 +831,42 @@ def test_no_verb_name_is_written_down_anywhere_in_this_module() -> None:
     )
 
 
-def test_the_pinned_tilde_membership_is_tied_to_the_measurement() -> None:
-    """The live tie the derived pin membership owes.
+def test_the_destination_population_outlives_the_defect_that_shaped_it() -> None:
+    """What REPLACES the retired pin membership (`PDF-80` D9).
 
-    MEASURED across the whole 30-cell population before any cell was written:
-    the tilde spelling is defective at all eleven `--out-dir` cells and at
-    sixteen of nineteen `--output` cells -- twenty-seven, with three correct.
-    A membership that moved without this firing would leave a filed defect
-    silently un-pinned (too few) or a strict pin XPASSing (too many).
+    `PDF-74`'s pin membership derived from each verb's `consumes` DECLARATION
+    rather than from behaviour, so it would have kept returning twenty-seven
+    after the fix and kept this node green while asserting that twenty-seven
+    cells are defective when none is. Deleting it outright would have thrown
+    away three guarantees that were never about the defect at all: **the
+    population is thirty, the `--out-dir` limb is eleven, the `--output` limb
+    is nineteen.** Those are properties of the PRODUCT, so they are asserted
+    here against the live registry with the defect vocabulary gone -- gone to
+    the letter, including from this docstring, because `PDF-80` AC12 mechanises
+    the retirement as a grep for the retired name over the whole `tests/` tree
+    and a prose mention is a hit. The name is preserved where naming a dead
+    symbol belongs: this item's `changelog.md` entry.
+
+    Red: drop a destination flag from any verb's `consumes` and this names the
+    flag whose count moved. The `--out-dir` limb being ELEVEN is the one worth
+    reading twice -- `_ensure_out_dir` is verb-independent, so every one of the
+    eleven reaches the same planner and a count that falls means a verb stopped
+    reaching it, not that a verb got simpler.
     """
-    assert len(TILDE_DEFECT_CELLS) == 27, (
-        f"the derived tilde-defect membership is now {len(TILDE_DEFECT_CELLS)} cells, not the "
-        f"27 measured when this pin was filed: {sorted(TILDE_DEFECT_CELLS)}. Re-drive the two "
-        "commands in this module's header before adjusting anything"
+    cases = destination_flag_cases()
+    by_flag = {
+        flag: tuple(verb for verb, row_flag in cases if row_flag == flag)
+        for flag in DESTINATION_VALUE_FLAGS
+    }
+    measured = {flag: len(verbs) for flag, verbs in by_flag.items()}
+    assert (len(cases), measured) == (30, {"--out-dir": 11, "--output": 19}), (
+        f"the live destination population is {len(cases)} cell(s) {measured}, not 30 "
+        "(11 --out-dir / 19 --output) -- extend this matrix rather than silently "
+        f"accepting the new shape: {sorted(cases)}"
     )
-    unpinned = tuple(case for case in VERB_FLAG_CASES if case not in TILDE_DEFECT_CELLS)
-    assert len(unpinned) == 3 and {flag for _verb, flag in unpinned} == {"--output"}, unpinned
-    pinned_out_dir = [case for case in TILDE_DEFECT_CELLS if case[1] == "--out-dir"]
-    assert len(pinned_out_dir) == 11, (
-        "the --out-dir tilde defect was measured as UNIVERSAL over that flag "
-        f"(_ensure_out_dir is verb-independent); {len(pinned_out_dir)} cells are pinned"
-    )
+    for flag, verbs in by_flag.items():
+        assert verbs, f"no verb declares {flag} any more -- a whole limb of the cross is gone"
+        assert len(set(verbs)) == len(verbs), f"{flag} names a verb twice: {sorted(verbs)}"
 
 
 def test_the_builder_catches_a_smuggled_absolute_value(corpus: Any, tmp_path: Path) -> None:
@@ -801,3 +898,113 @@ def test_the_builder_is_not_simply_always_red(corpus: Any, tmp_path: Path) -> No
     for index, row in enumerate(SPELLINGS):
         cell = build_cell(verb, flag, row, corpus, tmp_path / f"clean-{index}")
         assert cell.value, row.id
+
+
+# --------------------------------------------------------------------------- #
+# The two new oracles' own controls (`PDF-80` AC15/AC16). Each has a half that
+# FIRES and a half that does NOT over-fire, because an oracle proven in one
+# direction only is the shape three engineers hit this cycle.
+# --------------------------------------------------------------------------- #
+
+
+def synthetic_cell(tmp_path: Path, value: str) -> Cell:
+    """A `Cell` built by hand, so the controls below need no subprocess.
+
+    The oracles are pure functions of a payload plus a cell's two destination
+    values, which is deliberate: it is what lets them be driven to red without
+    vandalising the product or the matrix to do it.
+    """
+    anchor = tmp_path / "anchor"
+    home = anchor / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    spelling = next(row for row in SPELLINGS if row.id == TILDE_SPELLING)
+    return Cell(
+        verb="",
+        flag="--output",
+        spelling=spelling,
+        argv=[],
+        value=value,
+        cwd=anchor,
+        env={"HOME": str(home)},
+        anchor=anchor,
+        roots=(),
+        denoted=home / Path(value).name,
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "item", "expect_reported"),
+    [
+        ("succeeded-with-a-null-size", {"ok": True, "exit_code": 0, "bytes_after": None}, True),
+        ("succeeded-and-disclosed", {"ok": True, "exit_code": 0, "bytes_after": 1395}, False),
+        ("refused", {"ok": False, "exit_code": 5, "bytes_after": None}, False),
+        ("failed-per-item", {"ok": False, "exit_code": 4, "bytes_after": None}, False),
+    ],
+)
+def test_the_disclosure_oracle_fires_on_a_null_size_beside_a_real_file(
+    label: str, item: dict[str, object], expect_reported: bool, tmp_path: Path
+) -> None:
+    """AC15, both halves.
+
+    FIRES on the exact shape `create`/`compose`/`merge` shipped -- exit 0, a
+    real non-empty artefact on disk, `bytes_after: null`. DOES NOT fire on a
+    refused or per-item-failed row, which is `ops/raster.py`'s own legitimate
+    `None` and must stay legitimate.
+    """
+    cell = synthetic_cell(tmp_path, "~/til.pdf")
+    cell.denoted.write_bytes(b"%PDF-1.7\n" * 40)
+    payload = {"dry_run": False, "items": [{**item, "output": cell.value}]}
+    reported = undisclosed_items(payload, cell)
+    assert bool(reported) is expect_reported, f"{label}: {reported}"
+
+
+def test_the_disclosure_oracle_is_silent_on_a_dry_item(tmp_path: Path) -> None:
+    """The other "does not fire" half, and the one most likely to be got wrong:
+    a DRY item reports `bytes_after: null` by design, at every spelling, and an
+    oracle that flagged it would be red on all 240 cells on arrival."""
+    cell = synthetic_cell(tmp_path, "~/til.pdf")
+    cell.denoted.write_bytes(b"%PDF-1.7\n" * 40)
+    dry = {
+        "dry_run": True,
+        "items": [{"ok": True, "exit_code": 0, "bytes_after": None, "output": cell.value}],
+    }
+    assert undisclosed_items(dry, cell) == ()
+
+
+def test_the_disclosure_oracle_needs_the_file_to_exist(tmp_path: Path) -> None:
+    """And the narrowing is real rather than accidental: an item naming a
+    destination that is NOT on disk has nothing to disclose, so a refusal that
+    wrote nothing is not reported as an undisclosed write."""
+    cell = synthetic_cell(tmp_path, "~/absent.pdf")
+    payload = {
+        "dry_run": False,
+        "items": [{"ok": True, "exit_code": 0, "bytes_after": None, "output": cell.value}],
+    }
+    assert undisclosed_items(payload, cell) == ()
+
+
+def test_the_real_run_purity_scan_sees_a_literal_tilde_directory(tmp_path: Path) -> None:
+    """AC16 half 1, synthetic: the entry `_ensure_out_dir`'s raw-spelling
+    `mkdir` used to create IS detected, at any depth, and is reported by name.
+
+    The nested arm is not decoration. `--out-dir '~/out'` creates `./~/out`, so
+    the entry to find is the `~` at the TOP of that pair and `out` beneath it is
+    an ordinary directory name -- and the run that reaches the anchor's own
+    subdirectories (the parent-relative spelling drives from `anchor/sub`)
+    would leave its stray one level down. A scan that only looked at the root's
+    immediate children would be green on that cell, forever.
+    """
+    (tmp_path / "~" / "out").mkdir(parents=True)
+    (tmp_path / "sub" / "~").mkdir(parents=True)
+    assert literal_tilde_entries(tmp_path) == ("sub/~", "~")
+
+
+def test_the_real_run_purity_scan_does_not_cry_wolf(tmp_path: Path) -> None:
+    """AC16 half 2: a tree with no literal `~` entry is quiet -- including one
+    holding files whose names merely CONTAIN the character, which the other
+    seven spellings legitimately produce and which must not be flagged."""
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "out.pdf").write_bytes(b"x")
+    (tmp_path / "~draft.pdf").write_bytes(b"x")
+    (tmp_path / "a~b").mkdir()
+    assert literal_tilde_entries(tmp_path) == ()

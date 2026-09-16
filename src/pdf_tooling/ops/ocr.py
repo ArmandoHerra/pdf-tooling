@@ -436,7 +436,7 @@ def ocr_run(
             with AtomicWriter(item.target, policy=policy, kind="pdf") as atomic:
                 writer.write(atomic.stream)
 
-        bytes_after = item.target.stat().st_size
+        bytes_after = atomic.bytes_written
         duration_ms = int((time.monotonic() - started) * 1000)
         return ItemResult(
             input=str(item.source),

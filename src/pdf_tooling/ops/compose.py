@@ -844,7 +844,7 @@ def compose_document(
             except OSError as error:
                 raise _engine_boundary_error(placements, error) from error
 
-    written = output.stat().st_size if output.exists() else None
+    written = atomic.bytes_written
     duration_ms = int((time.monotonic() - started) * 1000)
     items = tuple(
         _item(
@@ -976,7 +976,7 @@ def create_document(
         else:
             page_count = engine.render_text(body, layout=layout, out=atomic.stream).page_count
 
-    written = output.stat().st_size if output.exists() else None
+    written = atomic.bytes_written
     duration_ms = int((time.monotonic() - started) * 1000)
     detail: dict[str, object] = {
         "page": 1,

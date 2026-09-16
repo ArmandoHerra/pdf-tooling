@@ -396,7 +396,7 @@ def encrypt_run(
     # inside-the-block read this line replaced was always `None` and the
     # plaintext-`.bak` warning AC14 requires never fired.
     backup_path = writer.backup_path
-    bytes_after = target.stat().st_size
+    bytes_after = writer.bytes_written
 
     warnings: list[str] = [LEGACY_WARNING] if legacy else []
     if backup_path is not None:
@@ -510,7 +510,7 @@ def decrypt_run(
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(decrypted)
-    bytes_after = target.stat().st_size
+    bytes_after = writer.bytes_written
 
     return OperationResult(
         schema_version=_SCHEMA_VERSION,

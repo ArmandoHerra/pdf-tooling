@@ -288,7 +288,7 @@ def watermark_run(
             with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
                 writer.write(atomic.stream)
 
-        bytes_after = target.stat().st_size
+        bytes_after = atomic.bytes_written
         duration_ms = int((time.monotonic() - started) * 1000)
         item = ItemResult(
             input=str(source),
@@ -423,7 +423,7 @@ def stamp_run(
             with AtomicWriter(target, policy=policy, kind="pdf") as atomic:
                 writer.write(atomic.stream)
 
-        bytes_after = target.stat().st_size
+        bytes_after = atomic.bytes_written
         duration_ms = int((time.monotonic() - started) * 1000)
         item = ItemResult(
             input=str(source),

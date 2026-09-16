@@ -266,7 +266,7 @@ def _render_one(
         exit_code=0,
         message=message,
         bytes_before=bytes_before,
-        bytes_after=target_path.stat().st_size,
+        bytes_after=writer.bytes_written,
         duration_ms=duration_ms,
     )
 

@@ -329,7 +329,7 @@ def _predict_out_dir_creation(out_dir: Path) -> None:
     _predict_name_too_long(out_dir, ancestor, absolute)
 
 
-def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
+def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy, resolved: Path) -> None:
     """Create ``--out-dir`` if it does not exist, unless ``--dry-run`` (`PLAN.md` §4.2).
 
     PDF-07 is the first spec to consume this: `split` is the CLI's first verb
@@ -360,12 +360,30 @@ def _ensure_out_dir(out_dir: Path, *, policy: SafetyPolicy) -> None:
     caller: a verb author who reaches past the planner cannot obtain a
     created output directory at all, which is what makes skipping the
     planner a real run that cannot write rather than a silent diagnostic gap.
+
+    **PDF-80 (`1e824f5f74`): the two values, and which one each line owes.**
+    *resolved* is :func:`~pdf_tooling.safety.paths.canonical`'s answer for
+    *out_dir*, computed ONCE at :func:`plan_output_set`'s boundary and handed
+    down — the same resolved/as-written pair :class:`AtomicWriter` has carried
+    since `PDF-04` (``self.destination``/``self.target``). The ``mkdir``
+    below takes *resolved* because ``Path.mkdir`` does not expand ``~``, so
+    the raw spelling created a literal ``~`` directory in the process working
+    directory while every other destination decision in this layer — no-clobber,
+    writability, ``os.replace`` — was already answering for ``$HOME``. Both
+    raise sites keep interpolating *out_dir*, because a message echoes the
+    path the user wrote. The dry branch keeps passing *out_dir* to
+    :func:`_predict_out_dir_creation`, which does its own expansion for its own
+    geometry and is correct as it stands.
+
+    **This function adds no expansion.** ``canonical()`` remains the single
+    expansion point; this parameter is how its answer reaches the one
+    filesystem call that was asking a different question.
     """
     if policy.dry_run:
         _predict_out_dir_creation(out_dir)
         return
     try:
-        out_dir.mkdir(parents=True, exist_ok=True)
+        resolved.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         detail = f" ({error.strerror})" if error.strerror else ""
         raise DestinationUnwritableError(
@@ -466,12 +484,31 @@ def plan_output_set(
     exact question itself — see its own docstring — so the tier this
     function's Trap 1 exemption steps around is covered by the step
     *before* it rather than by nothing at all.
+
+    **PDF-80 (`1e824f5f74`): Trap 1's existence test is a FILESYSTEM question
+    and so it asks the RESOLVED path, not the spelling.** ``out_dir.exists()``
+    read the raw parameter, so a dry run over ``--out-dir '~/ro'`` whose
+    *expanded* form exists concluded "it does not exist yet", skipped the
+    writability tier entirely, and predicted ``0`` for a real run that exits
+    ``1`` — while the ABSOLUTE spelling of that same directory mirrored
+    exactly. That is this docstring's own ``OR-7`` violation two paragraphs
+    below (*"a plan that evaluates a different set of tiers per mode"*)
+    produced not by a mode branch but by a SPELLING, and it is the seam no
+    artefact upstream of `PDF-80` named.
+
+    ``canonical()`` is called ONCE here and its answer is handed to every
+    filesystem question this function and :func:`_ensure_out_dir` ask;
+    ``out_dir`` stays the value every message and every ``path`` interpolates.
+    That is :class:`AtomicWriter`'s ``destination``/``target`` pair, which has
+    shipped since `PDF-04`, reaching this class's multi-destination sibling —
+    **no new expansion site, and no new vocabulary.**
     """
     try:
         if out_dir is not None:
-            _ensure_out_dir(out_dir, policy=policy)
-            if not (policy.dry_run and not out_dir.exists()):
-                ensure_destination_writable(out_dir)
+            resolved_out_dir = canonical(out_dir)
+            _ensure_out_dir(out_dir, policy=policy, resolved=resolved_out_dir)
+            if not (policy.dry_run and not resolved_out_dir.exists()):
+                ensure_destination_writable(resolved_out_dir, as_written=out_dir)
         for target in targets:
             ensure_no_clobber(target, force=policy.force, in_place=policy.in_place)
     except PdfToolingError as refusal:
@@ -580,7 +617,14 @@ class AtomicWriter:
 
     Args:
         target: The destination, spelled as the user spelled it. Echoed verbatim
-            in every message; canonicalized only as a comparison key.
+            in every message. Its canonical form (:attr:`destination`) is what
+            every filesystem decision here answers for — the no-clobber recheck,
+            the backup sidecar, the temp file's parent and the ``os.replace``
+            that commits the write. **PDF-80 (`X-735`) corrects this line: it
+            previously read *"canonicalized only as a comparison key"*, which
+            was false before that item and load-bearing after it — `:853`
+            replaces ONTO the canonical form, so the bytes have always landed
+            there rather than at the spelling.**
         policy: The resolved safety posture for this invocation.
         kind: A short label for the artefact, used in diagnostics.
         warn: Where warnings go. Injectable so a test can capture them without
@@ -614,6 +658,11 @@ class AtomicWriter:
         self._handle: IO[bytes] | None = None
         self._temp_path: Path | None = None
         self._dry_run = False
+        #: PDF-80. The size of what this writer COMMITTED, measured in
+        #: :meth:`_commit` off :attr:`destination` immediately after the
+        #: replace. ``None`` until then, and ``None`` forever for a dry
+        #: writer, which committed nothing.
+        self._bytes_written: int | None = None
 
     # -- the surface a verb touches ---------------------------------------- #
 
@@ -650,6 +699,34 @@ class AtomicWriter:
         if self._handle is None:
             raise RuntimeError("AtomicWriter.stream is only valid inside the with-block")
         return self._handle
+
+    @property
+    def bytes_written(self) -> int | None:
+        """How many bytes this writer COMMITTED, or ``None`` if it committed none.
+
+        **PDF-80 (`1e824f5f74`, mandated at `X-737`): the one way an ``ops/``
+        module may learn the size of what it just wrote.** Twenty-one call
+        sites across twelve modules read that size back with
+        ``<the name handed to this writer>.stat().st_size`` — the SPELLING the
+        user typed — while :meth:`_replace` had already committed the bytes to
+        :attr:`destination`, the canonical form. At a ``~`` spelling those are
+        two different paths, so sixteen verbs answered a successful write with
+        a raw ``FileNotFoundError`` traceback and zero bytes of stdout, and
+        three more (guarded with ``if output.exists() else None``) answered
+        with a published ``bytes_after: null`` for a file that exists and is
+        non-empty.
+
+        Reading it here rather than in the caller is what takes ``ops/`` to
+        **zero** filesystem calls on a destination, which is what lets
+        ``tests/test_destination_canonicalization_boundary.py::destination_readbacks``
+        state its rule without an allowlist. It also measures what was
+        **committed** rather
+        than whatever happens to be at that path by the time the caller looks,
+        and it gives the three guarded sites the answer they were groping for:
+        a dry writer wrote nothing, so the size is ``None`` — not the stale
+        size of whatever was already there.
+        """
+        return self._bytes_written
 
     @property
     def is_dry_run(self) -> bool:
@@ -798,6 +875,10 @@ class AtomicWriter:
 
         self._replace(temp)
         self._temp_path = None
+        # PDF-80. Measured off `destination` -- the path `_replace` just
+        # committed to -- and never off `target`, the spelling. This is the
+        # single readback the twenty-one `ops/` sites now consume.
+        self._bytes_written = self.destination.stat().st_size
 
     def _make_backup(self) -> None:
         if not (self.policy.in_place and self.policy.backup):

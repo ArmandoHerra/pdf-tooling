@@ -269,7 +269,7 @@ def convert_run(
             output_bytes = produced.read_bytes()
             with AtomicWriter(item.target, policy=policy, kind="pdf") as atomic:
                 atomic.stream.write(output_bytes)
-        bytes_after = item.target.stat().st_size
+        bytes_after = atomic.bytes_written
         duration_ms = int((time.monotonic() - started) * 1000)
         return ItemResult(
             input=str(item.source),

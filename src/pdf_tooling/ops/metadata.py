@@ -286,7 +286,7 @@ def meta_set_run(
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(outcome.output)
 
-    bytes_after = target.stat().st_size
+    bytes_after = writer.bytes_written
     duration_ms = int((time.monotonic() - started) * 1000)
     message = "ok" if outcome.wrote_xmp or clear_all else "ok (no XMP packet; /Info only)"
     item = ItemResult(

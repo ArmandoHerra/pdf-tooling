@@ -446,9 +446,16 @@ def _compress_write_all(
         )
         with AtomicWriter(item.target, policy=policy, kind="pdf") as writer:
             writer.stream.write(output_bytes)
-        bytes_after = item.target.stat().st_size
+        # PDF-80: the size of what was COMMITTED, read off the writer rather
+        # than off `item.target` -- the spelling the user typed, which at a `~`
+        # destination is not the path `os.replace` wrote to. `bytes_written` is
+        # `None` only for a DRY writer, and this function is the real-run path
+        # (`_compress_write_all`; the dry branch returned long before it). The
+        # two uses below say that rather than assume it: an unknown size must
+        # not become a fabricated `0`, which would report a 100% saving.
+        bytes_after = writer.bytes_written
 
-        if bytes_after >= bytes_before:
+        if bytes_after is not None and bytes_after >= bytes_before:
             warnings.append(
                 f"{item.source}: did not shrink ({bytes_before} -> {bytes_after} bytes)"
             )
@@ -456,7 +463,11 @@ def _compress_write_all(
         if isinstance(skipped, int) and skipped > 0:
             warnings.append(f"{item.source}: {skipped} image(s) skipped (not safely re-encodable)")
 
-        ratio = ((bytes_before - bytes_after) / bytes_before * 100) if bytes_before else 0.0
+        ratio = (
+            ((bytes_before - bytes_after) / bytes_before * 100)
+            if bytes_before and bytes_after is not None
+            else 0.0
+        )
         duration_ms = int((time.monotonic() - started) * 1000)
         return ItemResult(
             input=str(item.source),
@@ -582,7 +593,7 @@ def repair_run(
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(outcome.output)
-    bytes_after = target.stat().st_size
+    bytes_after = writer.bytes_written
     duration_ms = int((time.monotonic() - started) * 1000)
 
     report_detail: dict[str, object] | None = None
@@ -689,7 +700,7 @@ def linearize_run(
 
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(output_bytes)
-    bytes_after = target.stat().st_size
+    bytes_after = writer.bytes_written
     duration_ms = int((time.monotonic() - started) * 1000)
 
     item = ItemResult(

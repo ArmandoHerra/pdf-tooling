@@ -1499,7 +1499,6 @@ def test_pdf64_predict_out_dir_creation_over_a_relative_over_long_out_dir(
 from pdf_tooling.safety.paths import canonical  # noqa: E402
 from registry import (  # noqa: E402
     PATH_SPELLINGS,
-    TILDE_SPELLING,
     PathSpelling,
     spelled_destination,
 )
@@ -1509,30 +1508,15 @@ from registry import (  # noqa: E402
 PDF74_DIR_LEAF = "pdf74-out-dir"
 PDF74_FILE_LEAF = "pdf74-output.pdf"
 
-#: The `--out-dir` half of the tilde defect `tests/integration/test_value_shape.py`
-#: files and pins in full. Repeated here because this tier reaches the same two
-#: seams directly, one call frame from the divergence: `_predict_out_dir_creation`
-#: expands `~` and `_ensure_out_dir`'s `mkdir` does not.
-PDF74_TILDE_PIN = (
-    "PDF-74 E6 (H1, FILED not fixed): _predict_out_dir_creation expands '~' and "
-    "_ensure_out_dir's real mkdir does not, so the dry branch answers for $HOME/<leaf> "
-    "while the real branch creates a literal '~' directory in the process cwd and "
-    "ensure_destination_writable then refuses. PDF-74 writes no product code; this xfail "
-    "PINS the defect. The day the real branch expands too, this XPASSes and the suite goes "
-    "red -- that is the signal to retire the pin. Full measurement and the --output half: "
-    "tests/integration/test_value_shape.py."
-)
-
-
-def pdf74_marks(spelling: PathSpelling) -> tuple[pytest.MarkDecorator, ...]:
-    if spelling.id == TILDE_SPELLING:
-        return (pytest.mark.xfail(strict=True, reason=PDF74_TILDE_PIN),)
-    return ()
-
-
-PDF74_SPELLING_PARAMS = [
-    pytest.param(row, marks=pdf74_marks(row), id=row.id) for row in PATH_SPELLINGS
-]
+#: PDF-80 (ledger `1e824f5f74`, ruled `X-732`): the `--out-dir` half of the
+#: tilde defect used to be PINNED here with a `strict=True` xfail, because
+#: `_predict_out_dir_creation` expanded `~` and `_ensure_out_dir`'s `mkdir` did
+#: not. `plan_output_set` now resolves ONCE at its own boundary and hands that
+#: answer to both, so the tilde row asserts at this tier exactly what the other
+#: seven already asserted -- the prediction refuses nothing and creates nothing,
+#: the real plan succeeds, and `spelled_destination(...)` IS a directory. The
+#: retirement therefore DELETES a parametrization list rather than writing one:
+#: the single remaining list below is the one three nodes now share.
 PDF74_PLAIN_SPELLING_PARAMS = [pytest.param(row, id=row.id) for row in PATH_SPELLINGS]
 
 
@@ -1557,7 +1541,7 @@ def pdf74_home(anchor: Path) -> Path:
     return anchor / "home"
 
 
-@pytest.mark.parametrize("spelling", PDF74_SPELLING_PARAMS)
+@pytest.mark.parametrize("spelling", PDF74_PLAIN_SPELLING_PARAMS)
 def test_pdf74_out_dir_predicts_and_creates_the_path_the_spelling_denotes(
     spelling: PathSpelling, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

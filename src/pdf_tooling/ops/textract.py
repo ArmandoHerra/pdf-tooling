@@ -650,7 +650,7 @@ def extract_text_run(
                 exit_code=0,
                 message=f"{len(item.page_numbers)} page(s), {len(payload)} bytes",
                 bytes_before=item.source.stat().st_size,
-                bytes_after=item.target.stat().st_size,
+                bytes_after=atomic.bytes_written,
                 duration_ms=0,
             )
         )
@@ -903,7 +903,7 @@ def extract_tables_run(
                 exit_code=0,
                 message=f"page {grid.page} table {grid.index}: {grid.row_count}x{grid.col_count}",
                 bytes_before=Path(grid.source).stat().st_size,
-                bytes_after=target.stat().st_size,
+                bytes_after=atomic.bytes_written,
                 duration_ms=0,
             )
         )
