@@ -13,7 +13,14 @@ from __future__ import annotations
 from typing import Final
 
 #: Success — including an empty-but-valid report. A ``--dry-run`` mirrors the
-#: exit code the real run would return, so it is not always 0.
+#: exit code the real run would return, so it is not always 0 — except where an
+#: out-of-process engine decides the operand at load time, which a preview may
+#: not start (PDF-67 / OR-19). This comment is a COPY of ``README.md``'s
+#: code-``0`` row and the copy is amended in the same commit the row is, because
+#: an unamended copy here would be a knowingly false statement the moment the
+#: row moved. The verbs in that carve-out state ``engine_verified: false`` in
+#: every dry item's ``detail`` (``ops/engine_disclosure.py``), so a preview
+#: never reads as an unqualified success.
 OK: Final[int] = 0
 
 #: The operation ran and failed — corrupt input, engine error, unwritable

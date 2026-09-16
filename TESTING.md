@@ -61,7 +61,7 @@ contract.
 `tests/registry.py::discover_verbs()` walks the **live** Typer command tree
 with no skip list, no filter and no hard-coded verb name — a new verb is
 covered automatically the next time the suite runs. `tests/test_cli_contract.py`
-parameterizes 25 checks (`--help`, exit codes, dry-run purity,
+parameterizes 26 checks (`--help`, exit codes, dry-run purity,
 no-clobber, JSON-on-a-pipe, bulk non-TTY posture, PDF-36's pair of
 non-substitutable arms — no traceback from a malformed operand, no heap
 address in a rendered message — PDF-40's batch-continuation sweep,
@@ -69,7 +69,7 @@ PDF-38's `.bak` sidecar prediction over every `--in-place` verb,
 PDF-50's dangling-symlink twin of the same sidecar tier, PDF-51's
 run-scoped error-envelope shape row over a nonexistent operand, and
 PDF-53's `convert` dry-run/real-run exit-code mirror over a corrupt
-operand) over that discovery.
+operand, and PDF-67's engine-blind disclosure row) over that discovery.
 
 **The batch continuation contract.** A `--out-dir` batch records a failing input
 and carries on, so `tests/test_batch_continuation.py` drives every verb in the
@@ -330,7 +330,7 @@ Measured against the landed suite at PDF-06's own commit (`uv run pytest -rs
 | Configuration | Total skips | What they are |
 |---|---|---|
 | **Engines present** (`tesseract` + `soffice` on `PATH`) | non-zero, but **zero are engine-gated** — `scripts/assert_skips.py --expect-zero` asserts exactly that. The non-zero remainder is the pre-existing safety-spine skips (see below) plus the `samples`-marked arms (unset). All five parametrize sets are non-empty in `test_cli_contract.py` — `GROUPS`, `MUTATING`, `DESTRUCTIVE`, `PRODUCING` and `OUTPUT_CONSUMING_MUTATING` — and each is derived from the live registry, so none of them can silently empty out; this sentence previously named four of them (`C4`, `C9`, `C10`/`C11`/`C13`) as empty, which was stale in whole rather than in part. **Every remaining skip is conditional.** PDF-15 originally shipped one that was not — `test_ac7_rotated_page_returns_the_expected_text` carried an unconditional `@pytest.mark.skip` because `adapters/pdfium_raster.py` double-applied `/Rotate`; **B-094 fixed the adapter and the test now runs**, gated only by the ordinary `requires("tesseract")` marker. |
-| **Engines hidden** (`PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice`) | the engines-present count **plus at least 20 engine-gated skips** — `tests/test_doctor.py`'s existing arms (PDF-05) and `tests/test_testdata.py`'s tesseract-recovery arm (PDF-06, 7 together) **plus PDF-15's own 20** (15 in `tests/integration/test_ocr.py`, 5 in `tests/integration/test_office.py`). The documented command is `PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest tests/integration/test_ocr.py tests/integration/test_office.py -rs -q` and it reports `11 passed, 20 skipped` — **all 20 engine-gated**, none unconditional, since B-094 unskipped AC7 and added three rotated-page arms beside it, and PDF-38 added its own engine-free `ocr` filesystem-vs-auth precedence arms, which pass here rather than skipping. **`make docs-gate` now re-runs that command and compares this figure**, which is B-099's instruction — *re-run it, do not copy it* — given a carrier at last. It needed one: B-099 measured `18` and the figure was `20` when PDF-30 re-ran it, the `test_ocr.py` half having drifted 13 → 15 across the intervening waves with nothing able to observe it. `scripts/assert_skips.py` (no `--expect-zero`) asserts this count is **non-zero**; a zero here is a regression, not vacuity, as of PDF-06. |
+| **Engines hidden** (`PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice`) | the engines-present count **plus at least 20 engine-gated skips** — `tests/test_doctor.py`'s existing arms (PDF-05) and `tests/test_testdata.py`'s tesseract-recovery arm (PDF-06, 7 together) **plus PDF-15's own 20** (15 in `tests/integration/test_ocr.py`, 5 in `tests/integration/test_office.py`) and PDF-67's engine-residual arms beside them. The documented command is `PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice uv run pytest tests/integration/test_ocr.py tests/integration/test_office.py -rs -q` and it reports `12 passed, 22 skipped` — **every skip engine-gated**, none unconditional, since B-094 unskipped AC7 and added three rotated-page arms beside it, and PDF-38 added its own engine-free `ocr` filesystem-vs-auth precedence arms, which pass here rather than skipping. **`make docs-gate` now re-runs that command and compares this figure**, which is B-099's instruction — *re-run it, do not copy it* — given a carrier at last. It needed one: B-099 measured `18` and the figure was `20` when PDF-30 re-ran it, the `test_ocr.py` half having drifted 13 → 15 across the intervening waves with nothing able to observe it. `scripts/assert_skips.py` (no `--expect-zero`) asserts this count is **non-zero**; a zero here is a regression, not vacuity, as of PDF-06. |
 
 Both counts are read with `-rs` (`pytest`'s own reason-printing flag) — a
 skip is information, not noise: it says which guarantee this particular run

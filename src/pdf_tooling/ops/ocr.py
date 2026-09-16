@@ -74,6 +74,7 @@ from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult, PageInfo, PageRange
 from pdf_tooling.ops.batch import BatchLedger, preflight_operands
 from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
+from pdf_tooling.ops.engine_disclosure import disclose_engine_blindness
 from pdf_tooling.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_tooling.ports.ocr import OcrEngine, require_ocr
 from pdf_tooling.ports.raster import require_raster
@@ -360,7 +361,13 @@ def ocr_run(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_OCR,
             dry_run=True,
-            items=ledger.assemble(items),
+            # PDF-67 -- the identical seam `ops/office.py`'s dry branch carries,
+            # and `ocr` is in the derived class for the same structural reason:
+            # `tesseract` never sees the page image under `--dry-run`, so the
+            # preview cannot report the engine's verdict on the operand and says
+            # so instead. Wrapped AROUND `assemble` so the ledger's own failure
+            # rows carry it too; the real path below is byte-unchanged.
+            items=disclose_engine_blindness(ledger.assemble(items)),
             warnings=(),
             duration_ms=0,
         )

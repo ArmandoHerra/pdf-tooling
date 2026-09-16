@@ -71,6 +71,7 @@ from registry import (
     REPO_ROOT,
     discover_groups,
     discover_verbs,
+    engine_blind_verbs,
     out_dir_batch_verbs,
     run_cli,
 )
@@ -85,6 +86,22 @@ GROUPS = discover_groups()
 #: the module basename -- `cli/cmd_office.py` registers `convert`). `split` is
 #: the one consumer excluded, BY ARITY rather than by a literal.
 OUT_DIR_BATCH = out_dir_batch_verbs()
+#: PDF-67 / OR-19 -- the ENGINE-BLIND class: every verb whose operand is finally
+#: judged by an out-of-process engine that `--dry-run` purity forbids the preview
+#: from starting. Derived in `registry.engine_blind_verbs()` from the IMPORT
+#: GRAPH (leaf callback module -> a `ports/` module whose adapter reaches the
+#: product's one spawn chokepoint), never from a verb name, a file extension or
+#: `Invocation.requires_engine` -- that field is hand-set and set on one row.
+#: `convert`, `ocr` at `20a3dbc`, which is independently the pair `README.md`
+#: names in prose as *"the two verbs that depend on a system binary"*.
+ENGINE_BLIND = engine_blind_verbs()
+#: C26's uniformity axis -- the three states a dry item can arrive in. `clean`
+#: and `occupied` are built by the row itself; `ledger-failure` comes from the
+#: batch module's own per-verb corrupt-operand fixture. Declared here, beside
+#: the population it is crossed with, because `test_every_population_is_rostered`
+#: FIRED ON IT during implementation and the roster needs it defined before
+#: `POPULATIONS` is built.
+_C26_STATES: Final[tuple[str, ...]] = ("clean", "occupied", "ledger-failure")
 MUTATING = tuple(verb for verb in VERBS if verb.is_mutating)
 #: AC21 (PDF-20) — the population C9 and C10 measure. **Every verb, not just the
 #: mutating ones.** `CLAUDE.md` rule 2 and `README.md`'s own claim state
@@ -2061,6 +2078,36 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "tuples: `UNREADABLE_SHAPES` crosses `--quiet`, an axis C8 does not grade, and "
         "`ENGINE_VISIBLE_SHAPES` excludes `table` -- the one shape whose renderer is "
         "hand-rolled and the one C8 most needs",
+    ),
+    Population(
+        "ENGINE_BLIND",
+        ENGINE_BLIND,
+        "C26",
+        1,
+        "PDF-67's class -- the verbs whose operand only an out-of-process engine can "
+        "finally judge, and whose dry payload therefore discloses `engine_verified: "
+        "false`. Zero does not make C26 fail; it makes C26 collect no cases at all and "
+        "report green over a carve-out `README.md` publishes as public API, which is the "
+        "`e138934a60` shape this roster exists to end. NOT pinned at 2: a floor that "
+        "fails when an engine verb is legitimately retired gets lowered rather than "
+        "investigated (`DESTRUCTIVE`'s own argument); what keeps it honest above 1 is "
+        "the import-graph derivation, plus `test_c26_the_population_is_derived_from_the_"
+        "import_graph` which fails if the two-step walk stops discriminating",
+    ),
+    Population(
+        "_C26_STATES",
+        _C26_STATES,
+        "C26 (the uniformity axis)",
+        3,
+        "PDF-67 D3 rule 3. The floor is 3 rather than 1, and the argument is the one "
+        "`_SIDECAR_EXEMPTIONS` already makes rather than the one `DESTRUCTIVE` warns "
+        "against: these are not verbs that could be legitimately retired, they are the "
+        "three PRODUCTION PATHS a dry item can arrive by -- the verb's own predicted row, "
+        "the same row carrying a filesystem refusal, and a row `ops/batch.py::failure_item` "
+        "built instead. C26's subject IS uniformity across them, so losing any one leaves "
+        "a row that still runs, still passes, and can no longer tell a uniform disclosure "
+        "from one that only appears on the clean path -- which is the exact defect measured "
+        "at `20a3dbc`, where the ledger's rows carried no `detail` at all",
     ),
 )
 
@@ -4376,3 +4423,189 @@ def test_c25_out_dir_batch_dry_run_mirrors_the_real_run_on_a_corrupt_operand(
 def test_c25_population_is_non_empty() -> None:
     """C25 cannot pass by iterating over nothing."""
     assert OUT_DIR_BATCH, "the --out-dir batch population derived empty; C25 collected zero cases"
+
+
+# --------------------------------------------------------------------------- #
+# C26 (PDF-67) -- every dry item of every ENGINE-BLIND verb discloses that the
+# preview did not run the engine. `README.md`'s code-`0` row publishes that
+# carve-out as public API; this row is the half that keeps it true.
+#
+# Banner census re-derived at HEAD rather than transcribed:
+# `/usr/bin/grep -cE '^# C[0-9]+ ' tests/test_cli_contract.py` -> 25 at
+# `20a3dbc`, C1..C25 contiguous, so C26 is the next free banner ON THE TREE.
+# PDF-53's spec claimed C24 before PDF-51 landed in the same wave; the counter
+# is global and has collided once already.
+#
+# THE CLASS, NOT A VERB LIST (X-727). The population is `ENGINE_BLIND`, derived
+# from the import graph in `registry.engine_blind_verbs()`. A third engine verb
+# joins this row with zero author action; a carve-out written as "except for
+# `convert`" would not have covered `ocr`, whose exposure is structural and was
+# unmeasured until this spec drove it.
+#
+# WHY THE DISCLOSURE IS UNIFORM ACROSS THE STATES. The claim is about the
+# PREVIEW'S blindness, not about the operand's fate, so a key that appears only
+# on the clean path is a key a consumer has to branch on. All three states are
+# graded: a clean prediction, a filesystem refusal (`would_exit: 5`) and a row
+# the batch ledger recorded on the way (the spawn-free triage's own refusal for
+# `convert`, an unreadable/corrupt operand for any member).
+#
+# NOT `test_batch_continuation._drive`: PDF-75 rewrites that helper's
+# unconditional `-y`, and an arm that depends on another module's argv is an arm
+# that reds for someone else's reason. The operand BUILDERS are reused (they are
+# the per-verb fixture knowledge this file has no business duplicating); the
+# argv is assembled here.
+# --------------------------------------------------------------------------- #
+
+
+def _c26_rows(shape: str, stdout: str) -> list[dict[str, object]]:
+    """The item rows of a dry payload, in either structured shape."""
+    if shape == "ndjson":
+        return [json.loads(line) for line in stdout.splitlines() if line.strip()]
+    payload = json.loads(stdout)
+    for key in ("items", "documents", "ports"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    raise AssertionError(f"dry payload declares no collection key: {sorted(payload)}")
+
+
+def _c26_drive(verb: str, operands: list[Path], out_dir: Path, shape: str, extra: list[str]):
+    argv = [
+        verb,
+        *(str(operand) for operand in operands),
+        *extra,
+        "--out-dir",
+        str(out_dir),
+        "--dry-run",
+        "-o",
+        shape,
+    ]
+    return run_cli(*argv)
+
+
+@pytest.mark.parametrize("shape", ("json", "ndjson"))
+@pytest.mark.parametrize("state", _C26_STATES)
+@pytest.mark.parametrize("verb", ENGINE_BLIND)
+def test_c26_every_engine_blind_dry_item_discloses_the_unrun_engine(
+    verb: str, state: str, shape: str, tmp_path: Path
+) -> None:
+    """PDF-67 AC6. `engine_verified` is `False` by IDENTITY on every dry item.
+
+    RED, observed: drop the disclosure from `ops/office.py`'s dry branch alone
+    and this row fails naming `convert` while every `ocr` cell stays green --
+    a row that reds everywhere localises nothing.
+
+    RED, second direction: emit it only where `plan.detail()` already exists
+    (the `:209`-style single-seam placement) and the `ledger-failure` cells red,
+    because `ops/batch.py::failure_item` builds those rows with no `detail`.
+    """
+    from pdf_tooling.ops.engine_disclosure import ENGINE_VERIFIED_KEY
+    from test_batch_continuation import (
+        _EXTRA_ARGV,
+        _build_batch,
+        _good_operand,
+        _skip_unless_engine_available,
+    )
+
+    _skip_unless_engine_available(verb)
+    extra = list(_EXTRA_ARGV[verb])
+
+    root = tmp_path / "in"
+    root.mkdir()
+    out_dir = tmp_path / "out"
+
+    if state == "ledger-failure":
+        operands = _build_batch(root, "corrupt", [], verb)
+    else:
+        operands = [_good_operand(root, "a", verb)]
+
+    if state == "occupied":
+        # The refusal is provoked from the product's OWN prediction rather than
+        # from a guessed destination filename: drive the clean preview, read the
+        # target it names, and occupy exactly that.
+        probe = _c26_drive(verb, operands, out_dir, "json", extra)
+        assert probe.returncode == 0, f"{verb}: clean probe failed: {probe.stdout}{probe.stderr}"
+        target = Path(str(_c26_rows("json", probe.stdout)[0]["output"]))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"occupied")
+
+    result = _c26_drive(verb, operands, out_dir, shape, extra)
+    rows = _c26_rows(shape, result.stdout)
+    assert rows, (
+        f"{verb}/{state}/{shape}: the dry run produced no item rows, so this cell "
+        f"asserted nothing: rc={result.returncode} {result.stdout!r}{result.stderr!r}"
+    )
+    if state == "occupied":
+        assert any(row.get("exit_code") == 5 for row in rows), (
+            f"{verb}/{shape}: the occupied-target state did not reach a filesystem "
+            f"refusal, so this cell graded the clean path twice: {rows}"
+        )
+    if state == "ledger-failure":
+        assert any(row.get("ok") is False for row in rows), (
+            f"{verb}/{shape}: the corrupt batch produced no failed row, so this cell "
+            f"never reached the ledger's own rendering: {rows}"
+        )
+    for row in rows:
+        detail = row.get("detail")
+        assert isinstance(detail, dict), (
+            f"{verb}/{state}/{shape}: item {row.get('input')!r} carries no `detail` at "
+            f"all, so the preview states nothing about the engine it did not run: {row}"
+        )
+        assert detail.get(ENGINE_VERIFIED_KEY) is False, (
+            f"{verb}/{state}/{shape}: item {row.get('input')!r} does not state "
+            f"{ENGINE_VERIFIED_KEY}=False (identity) -- `README.md`'s code-`0` carve-out "
+            f"says every dry item of this verb does: {detail}"
+        )
+
+
+def test_c26_the_population_is_derived_from_the_import_graph() -> None:
+    """The derivation's own non-vacuity guard, and C26's second RED.
+
+    A walk that reaches EVERYTHING satisfies every assertion in the row above
+    while discriminating nothing, so the discriminating property is asserted
+    here rather than inferred from the row passing. MEASURED at `20a3dbc`:
+    removing `registry._IMPORT_GRAPH_AGGREGATORS` turns step 1 into all SIX
+    ports and step 2 into TWENTY-FIVE verbs, `doctor` included -- and every one
+    of the row's own cells stays green throughout.
+
+    The sharp assertion is the agreement below. Step 1 is derived by walking
+    the import graph to the product's one spawn chokepoint; the product ALSO
+    declares which ports are system binaries, in each port's own source, and
+    the two derivations are independent. A walk that stopped discriminating
+    reaches six ports against the two that declare `KIND_SYSTEM_BINARY`, and
+    this arm names both sides when they disagree.
+    """
+    from registry import SRC, engine_ports
+
+    ports = engine_ports()
+    assert ports, "no engine port derived; C26's population is empty by construction"
+    assert all(port.startswith("pdf_tooling.ports.") for port in ports), sorted(ports)
+
+    declared = {
+        f"pdf_tooling.ports.{path.stem}"
+        for path in sorted((SRC / "pdf_tooling" / "ports").glob("*.py"))
+        if path.stem != "__init__" and "KIND_SYSTEM_BINARY" in path.read_text(encoding="utf-8")
+    }
+    assert ports == declared, (
+        f"the import-graph walk derives {sorted(ports)} but the ports themselves declare "
+        f"{sorted(declared)} as system binaries. Two independent derivations of the same "
+        "class have diverged: either the walk has stopped discriminating (an aggregator "
+        "edge is being traversed) or a port's declared kind has moved"
+    )
+    # The class is a PROPER subset of the verbs: a walk that reached everything
+    # would satisfy every assertion in the row above and discriminate nothing.
+    assert 0 < len(ENGINE_BLIND) < len(VERBS), (
+        f"ENGINE_BLIND is {ENGINE_BLIND} against {len(VERBS)} verbs -- a population that "
+        "is empty grades nothing and one that is universal grades nothing either"
+    )
+    # README states the same class in the user's own words. A derivation that
+    # disagrees with the product's own documentation is a FINDING, not a figure
+    # to adopt silently.
+    prose = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    for verb in ENGINE_BLIND:
+        assert f"`{verb}`" in prose, f"{verb} is derived engine-blind but README never names it"
+
+
+def test_c26_population_is_non_empty() -> None:
+    """C26 cannot pass by iterating over nothing."""
+    assert ENGINE_BLIND, "the engine-blind population derived empty; C26 collected zero cases"

@@ -43,6 +43,7 @@ from pdf_tooling.errors import UsageError
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult
 from pdf_tooling.ops.batch import BatchLedger, preflight_operands
+from pdf_tooling.ops.engine_disclosure import disclose_engine_blindness
 from pdf_tooling.ports.office import (
     ensure_office_source_loadable,
     office_binary_present,
@@ -245,7 +246,15 @@ def convert_run(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_CONVERT,
             dry_run=True,
-            items=ledger.assemble([item for item in predicted if item is not None]),
+            # PDF-67 -- the engine-residual carve-out's payload half. `soffice`
+            # decides this operand at LOAD time and a `--dry-run` may not start
+            # it (the purity rule above), so every predicted row says so rather
+            # than reading as an unqualified success. Wrapped AROUND `assemble`
+            # so the ledger's own failure rows carry it too; the real path
+            # (`_convert_one` below) is byte-unchanged.
+            items=disclose_engine_blindness(
+                ledger.assemble([item for item in predicted if item is not None])
+            ),
             warnings=(),
             duration_ms=0,
         )

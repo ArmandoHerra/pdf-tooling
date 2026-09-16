@@ -383,3 +383,209 @@ def test_ac13_timeout_kills_the_whole_process_group(
         "survived, which is the MHC-50 shape. This deadline may NOT be widened to make "
         "this green: a survivor past it is a real defect and is FILED."
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-67 -- ARM C: the class stimulus, and the TWO-WAY anti-rot arm.
+#
+# `README.md`'s code-`0` row now carries a named exception: an operand whose
+# acceptability an out-of-process engine decides at load time. This arm is what
+# keeps that sentence from rotting in EITHER direction, and the second direction
+# is the one that separates an anti-rot arm from a test that freezes a defect.
+#
+# THE STIMULUS is `_odt_fixture`'s own output with ONE member changed -- its
+# `META-INF/manifest.xml` emptied of file-entries (E10's V1 -> V3). Everything
+# else is byte-for-byte the shipped helper's, so the fixture tracks the helper
+# rather than forking from it, and the mutation is visible in one line.
+#
+# WHY THAT MUTATION AND NOT A SIMPLER ONE. Measured at `20a3dbc` against
+# LibreOffice 26.2.5.2: a package with NO `content.xml` at all converts, while
+# a complete package that under-declares its manifest does not. The engine
+# trusts the manifest's declaration and does not require the declared member to
+# exist -- so this is engine POLICY, not structural validity, and a spawn-free
+# predicate that refused it would be encoding one LibreOffice version's policy
+# as this product's contract. That measurement is why OR-19 carved the case out
+# instead of chasing it, and it is also why this arm is written to red when the
+# engine's behaviour changes rather than to assume it will not.
+#
+# THE THREE BRANCHES (Design D5):
+#   dry 0 / real 1 / disclosure present  -> GREEN, the documented state
+#   dry 0 / real 1 / disclosure absent   -> RED, the payload stopped saying
+#                                           what `README.md` says it says
+#   dry and real AGREE                   -> RED, naming the measured soffice
+#                                           version: the README now carves out
+#                                           an exception the product no longer
+#                                           needs, so NARROW THE CLAIM. A wider
+#                                           SPAWN-FREE triage that legitimately
+#                                           predicts this operand is welcome;
+#                                           improvement is not punished, it is
+#                                           required to move the documentation
+#                                           with it.
+#
+# The verdict function is PURE OVER ITS PARAMETERS, following
+# `docs_ratification_complaints`'s rule, so the third branch can be DRIVEN
+# against a convertible operand rather than asserted to exist -- an arm that
+# cannot tell "the claim is still needed" from "the claim is stale" is an arm
+# that will one day certify a false carve-out.
+#
+# It SKIPS WITH A REASON when `soffice` is absent. A vacuous pass here would be
+# worse than no arm at all.
+# --------------------------------------------------------------------------- #
+
+
+def _odt_with_empty_manifest(tmp_path: Path, name: str) -> Path:
+    """E10's V3: the shipped `_odt_fixture` with its manifest file-entries gone."""
+    import zipfile
+
+    source = _odt_fixture(tmp_path, f"_{name}", "engine residual")
+    target = tmp_path / name
+    with zipfile.ZipFile(source) as original, zipfile.ZipFile(target, "w") as mutated:
+        for entry in original.namelist():
+            payload = original.read(entry)
+            if entry == "META-INF/manifest.xml":
+                payload = (
+                    b'<?xml version="1.0" encoding="UTF-8"?>\n'
+                    b"<manifest:manifest xmlns:manifest="
+                    b'"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"/>'
+                )
+            mutated.writestr(entry, payload)
+    source.unlink()
+    return target
+
+
+def _soffice_version() -> str:
+    """The measured engine version, so an engine-behaviour change is diagnosable."""
+    from pdf_tooling.ports.office import probe
+
+    report = probe()
+    return f"{report.adapter} {report.version or '<unparsed>'}"
+
+
+def engine_residual_complaints(
+    *,
+    dry_code: int,
+    dry_rows: list[dict[str, Any]],
+    real_code: int,
+    soffice_version: str,
+) -> list[str]:
+    """Every violation of `README.md`'s code-`0` carve-out. Empty means ACCEPTED.
+
+    Pure over its parameters so BOTH directions can be driven: the documented
+    state from a real pair of runs, and the stale-claim branch from a
+    convertible operand, without mutating the product to prove a point.
+    """
+    from pdf_tooling.ops.engine_disclosure import ENGINE_VERIFIED_KEY
+
+    complaints: list[str] = []
+    if dry_code == real_code:
+        complaints.append(
+            f"the engine residual has CLOSED against {soffice_version}: the preview and "
+            f"the real run now agree (both exited {dry_code}). README.md's code-`0` row "
+            f"carves out an exception this product no longer needs -- NARROW THE CLAIM. "
+            f"Do not widen, bump or delete this arm: it is doing its job."
+        )
+        return complaints
+    if real_code != 1:
+        complaints.append(
+            f"the real run exited {real_code}, not 1, against {soffice_version}: the "
+            f"stimulus no longer reproduces the class the carve-out is about"
+        )
+    if dry_code != 0:
+        complaints.append(
+            f"the preview exited {dry_code}, not 0: the divergence the carve-out "
+            f"discloses is not the one being measured"
+        )
+    for row in dry_rows:
+        detail = row.get("detail")
+        if not isinstance(detail, dict) or detail.get(ENGINE_VERIFIED_KEY) is not False:
+            complaints.append(
+                f"dry item {row.get('input')!r} does not state {ENGINE_VERIFIED_KEY}=False: "
+                f"the payload no longer says what README.md says it says ({detail!r})"
+            )
+    return complaints
+
+
+def _convert_dry_and_real(operand: Path, tmp_path: Path) -> tuple[int, list[dict[str, Any]], int]:
+    """Drive *operand* through `convert` in both modes, `--out-dir` in each."""
+    import json
+
+    dry = run_cli(
+        "convert", str(operand), "--out-dir", str(tmp_path / "dry"), "--dry-run", "-o", "json"
+    )
+    real = run_cli("convert", str(operand), "--out-dir", str(tmp_path / "real"), "-o", "json")
+    dry_payload = json.loads(dry.stdout)
+    return dry.returncode, list(dry_payload.get("items", [])), real.returncode
+
+
+@pytest.mark.requires("soffice")
+def test_pdf67_arm_c_the_engine_residual_is_the_documented_state(tmp_path: Path) -> None:
+    """PDF-67 AC17, branch 1 -- the GREEN case, driven end to end.
+
+    RED, branch 2 (observed): remove the disclosure from `ops/office.py`'s dry
+    branch and this arm fails naming the item that stopped stating it.
+    RED, branch 3: `test_pdf67_arm_c_reds_when_the_residual_closes` below.
+    """
+    operand = _odt_with_empty_manifest(tmp_path, "engine-residual.odt")
+    dry_code, dry_rows, real_code = _convert_dry_and_real(operand, tmp_path)
+    assert dry_rows, "the preview produced no item rows; this arm asserted nothing"
+    assert (
+        engine_residual_complaints(
+            dry_code=dry_code,
+            dry_rows=dry_rows,
+            real_code=real_code,
+            soffice_version=_soffice_version(),
+        )
+        == []
+    ), f"dry={dry_code} real={real_code} rows={dry_rows}"
+
+
+@pytest.mark.requires("soffice")
+def test_pdf67_arm_c_reds_when_the_residual_closes(tmp_path: Path) -> None:
+    """AC17's SECOND red, driven rather than asserted: point the arm's own
+    verdict path at E10's V1 -- the CONVERTIBLE shape the shipped `_odt_fixture`
+    builds -- and it must refuse, naming the measured engine version.
+
+    This is the branch that keeps the arm from being a test that freezes a
+    defect. If a future engine, or a wider spawn-free triage, makes the residual
+    operand predictable, the arm demands that `README.md` be narrowed instead of
+    staying silently green.
+    """
+    operand = _odt_fixture(tmp_path, "convertible.odt", "the control")
+    dry_code, dry_rows, real_code = _convert_dry_and_real(operand, tmp_path)
+    assert (dry_code, real_code) == (0, 0), (
+        f"the CONTROL operand did not convert (dry={dry_code} real={real_code}); a "
+        f"carve-out justified by a fixture everything fails is not a carve-out"
+    )
+    version = _soffice_version()
+    complaints = engine_residual_complaints(
+        dry_code=dry_code, dry_rows=dry_rows, real_code=real_code, soffice_version=version
+    )
+    assert complaints, "the arm accepted a CONVERGENT pair; branch 3 cannot fire"
+    assert version in complaints[0], complaints
+    assert "NARROW THE CLAIM" in complaints[0], complaints
+
+
+def test_pdf67_arm_c_reds_when_the_disclosure_goes_missing() -> None:
+    """AC17's FIRST red, as a standing arm: the divergence still there, the
+    payload no longer saying so. Synthetic rows, because a red proof that
+    vandalises the product it proves is not a proof."""
+    from pdf_tooling.ops.engine_disclosure import ENGINE_VERIFIED_KEY
+
+    honest = [{"input": "x.odt", "detail": {"would_exit": 0, ENGINE_VERIFIED_KEY: False}}]
+    assert (
+        engine_residual_complaints(
+            dry_code=0, dry_rows=honest, real_code=1, soffice_version="<synthetic>"
+        )
+        == []
+    )
+    for rows in (
+        [{"input": "x.odt", "detail": {"would_exit": 0}}],
+        [{"input": "x.odt", "detail": None}],
+        [{"input": "x.odt", "detail": {"would_exit": 0, "engine_checked": False}}],
+        [{"input": "x.odt", "detail": {"would_exit": 0, ENGINE_VERIFIED_KEY: True}}],
+    ):
+        complaints = engine_residual_complaints(
+            dry_code=0, dry_rows=rows, real_code=1, soffice_version="<synthetic>"
+        )
+        assert complaints, f"the arm accepted a payload with no honest disclosure: {rows}"
+        assert ENGINE_VERIFIED_KEY in complaints[0], complaints

@@ -451,6 +451,19 @@ def branch_partials_fields() -> dict[str, str]:
     return fields
 
 
+def engine_disclosure_key() -> str:
+    """The disclosure key as `README.md` renders it, FROM the product constant.
+
+    PDF-67 Arm A. Never a literal: renaming ``ENGINE_VERIFIED_KEY`` in `src/`
+    without following in `README.md` must redden the registry arm rather than
+    rot silently -- which is precisely what `E9`'s census found had already
+    happened to the code-`0` row's THREE unbound prose copies.
+    """
+    from pdf_tooling.ops.engine_disclosure import ENGINE_VERIFIED_KEY
+
+    return f"`{ENGINE_VERIFIED_KEY}`"
+
+
 def branch_and_line_coverage_span() -> str:
     """TESTING.md's line/branch pair, rendered from the artefacts that measured it.
 
@@ -582,6 +595,24 @@ DERIVED_FIGURES: tuple[DerivedFigure, ...] = (
             "other, nor carried forward to a commit it was never taken at. It is an "
             "out-of-band measurement and NOT a gate: pyproject.toml's `branch = false` "
             "is unchanged and --cov-fail-under keeps measuring lines."
+        ),
+    ),
+    DerivedFigure(
+        document="README.md",
+        anchor="the carve-out covers an out-of-process engine",
+        derive=lambda: f"carries {engine_disclosure_key()} set to `false` in its `detail`",
+        note=(
+            "PDF-67 / OR-19. `README.md`'s exit-code table is PUBLIC API from v1.0.0 and "
+            "its code-`0` row now carries a named exception: an operand an out-of-process "
+            "engine decides at load time, which a preview may not start. The row's own "
+            "sentence already lived in THREE places bound by nothing -- README.md, "
+            "cli/exit_codes.py and a synthetic string in test_honesty_claims.py -- and the "
+            "first two had already drifted apart ('the code' vs 'the exit code') with "
+            "nothing watching. This entry is the registry's FIRST README.md row, and it "
+            "binds the documented carve-out to the product constant that implements it: "
+            "delete or reword the carve-out and the anchor count moves off 1; rename "
+            "ENGINE_VERIFIED_KEY in src/ alone, or reword README's rendering of it alone, "
+            "and the derivation stops occurring in the document."
         ),
     ),
 )
@@ -912,6 +943,40 @@ DOCS_RESIDUE_LEDGER: Final[tuple[_DocsRatification, ...]] = (
             "so the span is a PM decision and the number is RECORDED, not chosen. "
             "PDF-70 transcribes this record byte-identically in value and pays no "
             "debt down: every figure here is the figure that was live before it."
+        ),
+    ),
+    _DocsRatification(
+        date="2026-09-16",
+        spec="PDF-67",
+        direction="down",
+        ceilings=MappingProxyType(
+            {
+                "README.md": 29,
+                "CLAUDE.md": 7,
+                "CONTRIBUTING.md": 6,
+                "TESTING.md": 127,
+            }
+        ),
+        reason=(
+            "THE FIRST USE OF PDF-70's DOWNWARD PATH, and both movements are debt PAID "
+            "rather than declared. README.md 30 -> 29: PDF-67 amended the code-`0` "
+            "exit-code row to carry the engine-residual carve-out (OR-19), and "
+            "rendering the row's trailing zero as an inline code span -- like every "
+            "other code the row names -- was part of that amendment rather than an "
+            "errand run beside it; the added carve-out prose itself introduces NO "
+            "cardinal, bare or spelled, which is why the movement is a clean -1 and "
+            "not a swap. TESTING.md 128 -> 127: the engines-hidden row's quoted "
+            "`N passed, M skipped` figure moved because this spec's own arms joined "
+            "that run, and `make docs-gate` compared the re-run against the document "
+            "and refused -- re-running it meant rewriting the sentence beside it, "
+            "where a HAND-MAINTAINED bare cardinal asserting that all of the skips "
+            "were engine-gated became a claim that every skip is, which is both true "
+            "of any population and one fewer figure for a later author to forget. "
+            "MEASURED with this module's own backstop immediately before and after "
+            "each edit at 20a3dbc; CLAUDE.md and CONTRIBUTING.md are unchanged on "
+            "both sides. Nothing here is a tightening this spec invented to look "
+            "good: the arm above measures the residue independently and would red "
+            "naming the offending lines if it were."
         ),
     ),
 )

@@ -108,6 +108,8 @@ __all__ = [
     "destination_flag_cases",
     "discover_groups",
     "discover_verbs",
+    "engine_blind_verbs",
+    "engine_ports",
     "no_input_population",
     "operand_metavar",
     "operand_metavars",
@@ -117,6 +119,7 @@ __all__ = [
     "output_shape_states",
     "path_spellings",
     "population_fields",
+    "reaches_engine_port",
     "run_cli",
     "run_cli_with_pty",
     "spelled_destination",
@@ -177,6 +180,22 @@ class VerbSpec:
     population's own denominator (`no_input_population()` below); `doctor`
     and `version` decline no positional operand and are correctly excluded
     from both predicates."""
+
+    module: str | None = None
+    """PDF-67 -- the dotted name of the module this leaf's callback lives in,
+    e.g. ``"pdf_tooling.cli.cmd_office"`` for the verb ``convert``.
+
+    STRUCTURAL, like ``name`` and ``is_group``: it records WHERE the leaf is
+    declared, and narrows nothing about the verb's behaviour. ``discover_verbs``
+    already resolved it (``is_mutating`` is computed from it), so this exposes a
+    value that was being computed and thrown away rather than recomputing it --
+    which is what `engine_blind_verbs()` needs in order to walk the import graph
+    from a leaf without re-walking the command tree beside `discover_verbs`.
+
+    Defaulted so a ``VerbSpec`` built by hand (a unit test's own throwaway) does
+    not have to name it, exactly as ``consumes`` and ``variadic_operands`` are.
+    ``None`` for a leaf whose callback cannot be resolved, which is the same
+    case ``is_mutating`` already treats as ``False``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,6 +350,206 @@ def reaches_atomic_writer(entry_module: str, *, max_hops: int = _MAX_IMPORT_HOPS
     return False
 
 
+# --------------------------------------------------------------------------- #
+# PDF-67 -- the ENGINE-BLIND class, derived from the import graph.
+#
+# The claim `README.md`'s code-`0` row now carries is about a verb whose
+# operand is judged by an out-of-process engine the preview may not start. That
+# is a property of the import graph, not of a verb name, and it is derived here
+# so a third engine verb joins the class with zero author action.
+#
+# WHY NOT `VerbSpec.requires_engine`/`INVOCATIONS`: that field is hand-set,
+# test-harness-side, and set on a single row (`convert`) -- `ocr` declares
+# `None` there deliberately, because it has an engine-free path. A population
+# read off it would report a class of one and be a verb list wearing a
+# derivation's clothes.
+#
+# WHY NOT `reaches_atomic_writer`'s walker, reused verbatim: MEASURED at
+# `20a3dbc`, and the measurement is the reason the two walks differ at all.
+# --------------------------------------------------------------------------- #
+
+#: The product's ONE process-spawn point (`adapters/subprocess_util.py`'s own
+#: module docstring says so, and `tests/test_license_policy.py::
+#: test_subprocess_chokepoint` asserts nothing else under `src/` imports
+#: `subprocess`). The derivation below therefore rests on a property the suite
+#: already keeps true rather than on a fresh assumption.
+_SPAWN_CHOKEPOINT: Final[str] = "pdf_tooling.adapters.subprocess_util"
+
+#: The package modules the walk refuses to traverse THROUGH, and this exclusion
+#: is a measurement rather than a preference.
+#:
+#: Each of the three is an AGGREGATOR: it names every member of a package by
+#: construction, so an edge through it means "this module is part of the same
+#: product as that one", never "this module depends on that one".
+#:
+#: * `pdf_tooling.ports.__init__` -- `resolve()` and `probe_all()` each carry a
+#:   function-local `from pdf_tooling.ports import compose, ocr, office,
+#:   raster, structure, text`, which is `doctor`'s whole job. MEASURED: a walk
+#:   that descends into it reports ALL SIX ports as engine ports.
+#: * `pdf_tooling.adapters.__init__` -- `doctor`'s probe helper, the same shape.
+#: * `pdf_tooling.cli.main` -- the command registry, which imports every
+#:   `cli/cmd_*` module in order to register it. MEASURED: dropping THIS entry
+#:   alone reports fifteen engine-blind verbs, because every `cmd_*` module
+#:   imports `cli.main` and `cli.main` imports `cmd_ocr`; dropping all three
+#:   reports twenty-five, `doctor` included -- and every contract cell over the
+#:   population stays green throughout, which is why the agreement check in
+#:   `tests/test_cli_contract.py::test_c26_the_population_is_derived_from_the_import_graph`
+#:   exists rather than being inferred from those cells passing.
+#:
+#: `reaches_atomic_writer` above does NOT apply this exclusion, and it is not
+#: changed here: `is_mutating` is a shipped classifier that C11/C13/C15 depend
+#: on, and re-scoping it to suit this population would be a change to three
+#: other checks made sideways. The two walks answer different questions and are
+#: allowed to differ; what is not allowed is one silently becoming the other.
+_IMPORT_GRAPH_AGGREGATORS: Final[frozenset[str]] = frozenset(
+    {
+        "pdf_tooling.ports",
+        "pdf_tooling.adapters",
+        "pdf_tooling.cli.main",
+    }
+)
+
+
+def _pdf_tooling_module_imports(path: Path) -> set[str]:
+    """Every `pdf_tooling.*` MODULE *path*'s own source names, SUBMODULES included.
+
+    The one behavioural difference from :func:`_imports_and_references`, and it
+    is required rather than stylistic: `from pdf_tooling.adapters import
+    soffice_office` records `pdf_tooling.adapters` there, so the walker that
+    feeds `is_mutating` sees the PACKAGE and never the adapter module. Measured
+    at `20a3dbc`: `adapters/__init__.py` does not import `subprocess_util`, so a
+    walk built on that reading cannot reach the spawn chokepoint from a port at
+    all. Each alias is therefore offered as `<module>.<name>` too, and
+    :func:`_dotted_to_path` discards the ones that are functions or constants
+    rather than modules.
+
+    Same `ast`-over-source convention as every other walk in this module; never
+    a real import.
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith("pdf_tooling")
+        ):
+            found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names if alias.name.startswith("pdf_tooling"))
+    return {
+        dotted
+        for dotted in found
+        if dotted not in _IMPORT_GRAPH_AGGREGATORS and _dotted_to_path(dotted) is not None
+    }
+
+
+def _reaches_any(entry_module: str, targets: frozenset[str], *, max_hops: int) -> bool:
+    """Whether *entry_module* reaches any of *targets*, bounded, aggregators excluded."""
+    if entry_module in _IMPORT_GRAPH_AGGREGATORS:
+        return False
+    seen: set[str] = set()
+    frontier = [entry_module]
+    for _ in range(max_hops):
+        next_frontier: list[str] = []
+        for dotted in frontier:
+            if dotted in seen or dotted in _IMPORT_GRAPH_AGGREGATORS:
+                continue
+            seen.add(dotted)
+            path = _dotted_to_path(dotted)
+            if path is None:
+                continue
+            imported = _pdf_tooling_module_imports(path)
+            if imported & targets:
+                return True
+            next_frontier.extend(sorted(imported))
+        frontier = next_frontier
+        if not frontier:
+            break
+    return False
+
+
+def engine_ports(*, max_hops: int = _MAX_IMPORT_HOPS) -> frozenset[str]:
+    """Every `ports/` module whose adapter reaches the ONE spawn chokepoint.
+
+    Step 1 of PDF-67's two-step derivation. The target is the engine PORTS
+    rather than `subprocess` itself, and a RECORDED PREMISE DID NOT HOLD when it
+    was re-measured here: the planning artifact predicted that walking straight
+    to the spawn chokepoint would balloon the population, because
+    `safety/confirm.py` and `ops/procpool.py` also import `subprocess`. Measured
+    at `20a3dbc`, it does not -- those two import the STDLIB `subprocess`, not
+    `adapters/subprocess_util`, and the direct walk returns the same pair. The
+    blow-up this derivation actually has to defend against is the AGGREGATOR
+    edge above, not the choice of target. The two-step shape is kept anyway: it
+    is what makes the class statable ("the preview did not run the ENGINE over
+    this operand") and what lets the agreement check in
+    `tests/test_cli_contract.py::test_c26_the_population_is_derived_from_the_import_graph`
+    compare this walk against each port's own declared kind.
+
+    Derived at `20a3dbc`: `pdf_tooling.ports.ocr`, `pdf_tooling.ports.office`.
+    """
+    ports_dir = SRC / "pdf_tooling" / "ports"
+    return frozenset(
+        dotted
+        for dotted in (
+            f"pdf_tooling.ports.{path.stem}"
+            for path in sorted(ports_dir.glob("*.py"))
+            if path.stem != "__init__"
+        )
+        if _reaches_any(dotted, frozenset({_SPAWN_CHOKEPOINT}), max_hops=max_hops)
+    )
+
+
+def reaches_engine_port(entry_module: str, *, max_hops: int = _MAX_IMPORT_HOPS) -> bool:
+    """Whether *entry_module* reaches an engine port -- the sibling of
+    :func:`reaches_atomic_writer`, same `ast` walk, same `_dotted_to_path`.
+
+    PROVENANCE: static over the source tree, never a real import, never a
+    `--help` census, never a typed verb list.
+
+    FITNESS -- why reaching an ENGINE PORT is the right property for the claim
+    this feeds, stated here because provenance alone has already let a wrong
+    population ship on this product. PDF-67's disclosure says one thing: *the
+    preview did not run the engine over this operand*. A verb can only be blind
+    in that way if there IS an out-of-process engine standing between it and a
+    verdict on its operand -- which is exactly what reaching a port whose
+    adapter reaches the spawn chokepoint means, and what nothing else in the
+    registry means. `is_mutating` answers "can this verb write" (a different
+    question, and true of twenty-three verbs); `takes_input_paths` answers "does
+    it accept an operand"; `requires_engine` is hand-set on one row. None of
+    them can tell a verb whose operand LibreOffice judges from a verb whose
+    operand pypdf judges in-process, and that distinction is the whole claim.
+    """
+    return _reaches_any(entry_module, engine_ports(max_hops=max_hops), max_hops=max_hops)
+
+
+def engine_blind_verbs(root: object | None = None) -> tuple[str, ...]:
+    """Every verb whose operand only an out-of-process engine can finally judge.
+
+    Step 2, and keyed on the live command's VERB NAME rather than its module
+    basename -- `cli/cmd_office.py` registers `convert`, so a module-keyed
+    population is a different population from the one a user types and the
+    payload's own `verb` field carries (`out_dir_batch_verbs()` records the same
+    trap, and it is the step a re-derivation is most likely to skip).
+
+    Derived at `20a3dbc`: `convert`, `ocr` -- which is independently what
+    `README.md` names in the user's own words, *"the two verbs that depend on a
+    system binary rather than a Python wheel"*. A derivation that disagrees with
+    the product's own documentation is a finding, not a new figure to adopt.
+    """
+    ports = engine_ports()
+    return tuple(
+        sorted(
+            verb.name
+            for verb in discover_verbs(root)
+            if not verb.is_group
+            and verb.module is not None
+            and _reaches_any(verb.module, ports, max_hops=_MAX_IMPORT_HOPS)
+        )
+    )
+
+
 def _takes_input_paths(cmd: object) -> bool:
     return any(
         getattr(param, "param_type_name", None) == "argument"
@@ -448,6 +667,7 @@ def discover_verbs(root: object | None = None) -> tuple[VerbSpec, ...]:
                 consumes=consumes,
                 variadic_operands=_has_variadic_operand(cmd),
                 takes_positional_argument=_takes_positional_argument(cmd),
+                module=module,
             )
         )
 
