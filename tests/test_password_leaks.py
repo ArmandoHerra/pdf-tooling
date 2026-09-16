@@ -2026,8 +2026,13 @@ def test_pdf52_c5_the_planted_secret_never_reaches_stdout_stderr_or_the_payload(
             _assert_clean(plain.stdout, where=f"{verb}/{mode}/plain/stdout", paths=scrub_paths)
             _assert_clean(plain.stderr, where=f"{verb}/{mode}/plain/stderr", paths=scrub_paths)
 
-            # MANDATORY pty arm 1 -- stderr, arm B's own sink, where
-            # `color_enabled()` takes its OTHER branch.
+            # MANDATORY pty arm 1 -- stderr, arm B's own sink, under a REAL
+            # terminal rather than a pipe.
+            # STRUCK 2026-09-15 (`PDF-65`, OR-18): this line used to read
+            # "where `color_enabled()` takes its OTHER branch"; that function
+            # was removed with the inert `--no-color` it served. The arm stands
+            # on the surviving proposition -- a secret must not leak under
+            # EITHER stderr posture -- and no assertion here moved.
             pty_stderr = run_cli_with_pty(
                 *verb_tokens, *tail, "-o", "json", pty_stream="stderr", env=_clean_env()
             )

@@ -1373,12 +1373,19 @@ def test_pdf52_b3_a_wrong_password_logs_verification_false(
 
 
 def test_pdf52_b4_the_record_is_the_same_under_a_stderr_pty(corpus: Any, tmp_path: Path) -> None:
-    """AC-B4: the record survives `color_enabled()`'s `isatty()` branch
-    IDENTICALLY IN CONTENT, driven through `registry.run_cli_with_pty()`
-    (imported, never re-implemented -- E9/X-157). `decrypt` is picked as
-    the representative verb: single-word (this function does not tokenize
-    a multi-word verb the way `run_cli` does) and one of the five verbs
-    arm B's fix reaches directly."""
+    """AC-B4: the record survives ~~`color_enabled()`'s `isatty()` branch~~
+    A REAL STDERR TERMINAL, identically in content, driven through
+    `registry.run_cli_with_pty()` (imported, never re-implemented -- E9/X-157).
+    `decrypt` is picked as the representative verb: single-word (this function
+    does not tokenize a multi-word verb the way `run_cli` does) and one of the
+    five verbs arm B's fix reaches directly.
+
+    STRUCK 2026-09-15 (`PDF-65`, OR-18): `color_enabled()` was removed with the
+    inert `--no-color` it served. WHAT THIS ARM ASSERTS TODAY is the stream
+    posture rather than the deleted branch -- the resolution record must be
+    byte-for-byte the same whether stderr is a pipe or a terminal, which is a
+    claim about `output/logging.py`'s handler and is exactly as falsifiable as
+    it was before. No assertion below moved."""
     from corpus import ENCRYPTED_PASSWORD
 
     verb = "decrypt"

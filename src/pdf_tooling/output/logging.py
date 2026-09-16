@@ -27,7 +27,6 @@ shadow it.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from typing import Any, Final
 
@@ -131,13 +130,6 @@ def resolve_level(*, verbose: int, quiet: bool) -> int:
     return logging.WARNING
 
 
-def color_enabled(*, no_color: bool) -> bool:
-    """Colour is off when asked, when ``NO_COLOR`` is set, or when stderr is not a TTY."""
-    if no_color or os.environ.get("NO_COLOR"):
-        return False
-    return sys.stderr.isatty()
-
-
 def _build_handler() -> logging.StreamHandler[Any]:
     """One stderr handler, formatter and redaction filter — built the same way
     for our own logger and for root, so the two cannot drift apart."""
@@ -148,7 +140,7 @@ def _build_handler() -> logging.StreamHandler[Any]:
     return handler
 
 
-def configure_logging(*, verbose: int = 0, quiet: bool = False, no_color: bool = False) -> None:
+def configure_logging(*, verbose: int = 0, quiet: bool = False) -> None:
     """Install the stderr handlers for this process. Idempotent.
 
     **Two loggers, on purpose** (PDF-25 Design §D8, `d220b7d79d`). Configuring
@@ -201,8 +193,6 @@ def configure_logging(*, verbose: int = 0, quiet: bool = False, no_color: bool =
         if getattr(existing, _OWNED_MARKER, False):
             root.removeHandler(existing)
     root.addHandler(_build_handler())
-
-    del no_color  # Colour styling is applied by renderers, not by the logger.
 
 
 def get_logger(name: str | None = None) -> logging.Logger:

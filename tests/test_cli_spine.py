@@ -11,6 +11,7 @@ arrive later: this file owns the spine, and there is no ``conftest.py`` here yet
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -20,7 +21,8 @@ import subprocess
 import sys
 import tomllib
 import typing
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
@@ -30,6 +32,7 @@ import pytest
 from pdf_tooling import errors
 from pdf_tooling.cli import exit_codes
 from pdf_tooling.cli.common import (
+    GLOBAL_FLAG_SPELLINGS,
     GLOBAL_OPTIONS,
     GLOBAL_PARAMS,
     OUTPUT_FLAGS,
@@ -685,6 +688,1204 @@ def test_the_partition_control_can_fail_on_all_three_arms() -> None:
     assert problems(("--a", "--b", "--c"), ("--a", "--b"), ("--b",), {"--c": "because"}) != []
     # (c) a blank reason
     assert problems(("--a", "--b", "--c"), ("--a",), ("--b",), {"--c": "  "}) != []
+
+
+# --------------------------------------------------------------------------- #
+# PDF-65 / OR-18 / X-723 -- THE LIVENESS ARM the partition never had
+# --------------------------------------------------------------------------- #
+#
+# WHAT WAS BROKEN, AND IT WAS NOT A MISSING FLAG. The partition control above
+# asserts that every ungoverned flag carries a non-blank reason longer than 20
+# characters. `--no-color`'s reason was *"a property of the stderr stream, which
+# every verb has"* -- 48 characters, grammatical, and BYTE-IDENTICAL to
+# `--quiet`'s and `--verbose`'s, both of which are TRUE because `resolve_level`
+# genuinely alters the stderr stream. The flag itself did nothing: `color_enabled`
+# had zero callers, `configure_logging` executed `del no_color`, and no module
+# under `src/` ever emitted an ANSI escape. **Prose quality is not evidence of
+# behaviour**, and that is the measured proof of it: the instrument this product
+# built BECAUSE it had already shipped inert flags (`996f9eb6bc`) could not see
+# the one it was shipping.
+#
+# THE THREE TERMINAL CLASSES (X-723). Every member of `UNGOVERNED_FLAGS`
+# resolves to exactly one, and each is a claim that is TRUE at this commit and
+# FALSIFIABLE:
+#
+#   (a) BEHAVIOURAL      driven and asserted at EVERY leaf it is declared on.
+#                        Reds when a node stops resolving, stops naming the
+#                        flag, or when the driven set falls short of declared.
+#   (b) INERT_BY_DESIGN  declared, provably no behaviour, AND the help text
+#                        SAYS SO. Reds if the flag ever gains behaviour.
+#                        EMPTY at this commit -- and asserted empty, plus
+#                        constructible, because an emptiness assertion over an
+#                        unbuildable shape is vacuous.
+#   (c) UNDER_DRIVEN     live, but asserted at fewer leaves than declared. A
+#                        RATCHET, not an exemption: the recorded floor may be
+#                        RAISED freely and LOWERED only by an edit somebody
+#                        makes on the record.
+#
+# `INERT_BY_DESIGN` IS FORBIDDEN ON `--threads` AND ON `--version`, and the
+# prohibition is evidenced rather than asserted. `--threads 0` turns exit 0 into
+# exit 2 (`test_ac6_threads_out_of_range_exits_2`) and `--threads 1` vs `8` is
+# asserted byte-identical at `text`; `--version` is eager and exits before any
+# verb body, which IS behaviour. Marking either inert would ship a false marker
+# at the version that turns help into a promise -- the exact defect this arm
+# exists to remove.
+#
+# WHY THE REGISTRY LIVES HERE AND NOT IN `cli/common.py`. `I-1` proposed
+# re-expressing `UNGOVERNED_FLAGS` itself as `(reason, evidence)`. Measured, that
+# breaks BOTH of its consumers: this file's `reason.strip()` raises on a tuple,
+# and `tests/test_honesty_claims.py`'s `"--in-place" in UNGOVERNED_FLAGS[...]`
+# silently changes meaning from *"this phrase is in the reason"* to *"this
+# element is in the tuple"* -- passing or failing for the wrong reason. Beyond
+# that, `evidence` is a pytest node id, and a shipped package whose module API
+# depends on the shape of the test tree is backwards. The guarantee is
+# identical anyway: `test_every_ungoverned_flag_resolves_to_a_terminal_class`
+# asserts `set(LIVENESS) == set(UNGOVERNED_FLAGS)`, so a flag cannot be declared
+# ungoverned without resolving to a class. The binding is ASSERTED rather than
+# structural, and it is asserted in the one place that can resolve a node id.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class _Behavioural:
+    """Class (a): driven and asserted at every leaf the flag is declared on."""
+
+    nodes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _InertByDesign:
+    """Class (b): declared, provably inert, and the help text DISCLOSES it.
+
+    The third condition is the one that gets dropped, so it is the one the arm
+    checks hardest: *inert by design, **disclosed*** is the safe state, and
+    *inert by omission* is what this product's headline defect class is made of.
+    """
+
+    disclosure: str
+
+
+@dataclass(frozen=True)
+class _UnderDriven:
+    """Class (c): live, but asserted at fewer leaves than it is declared on.
+
+    `leaves` is the driven-leaf set MEASURED at landing and `floor` is the
+    ratchet bound; the arm holds `len(leaves) == floor` so the recorded set and
+    the bound cannot drift apart. The DECLARED count is never a literal here --
+    it is derived from the live command tree every run (X-723 (ii)).
+
+    `carrier` is a `BACKLOG.md` row id, checked for SHAPE ONLY. That file lives
+    in a different repository, and making this product's gate read it would
+    re-create the cross-repository coupling `PDF-70` exists to remove and would
+    make a consumer's clone unable to go green. Verifying the row exists is the
+    `project-manager`'s write and the `qa-sentinel`'s check.
+    """
+
+    nodes: tuple[str, ...]
+    leaves: tuple[str, ...]
+    floor: int
+    carrier: str
+    #: Why the floor is the number it is. REQUIRED, and the ONLY admissible
+    #: cover for a floor of 0 -- an honest zero records a 0-of-26 gap in the
+    #: instrument instead of in a report nobody re-reads.
+    justification: str
+    #: Non-empty exactly when `carrier` is unallocated: what was escalated, to
+    #: whom, and what is owed back. An unallocated carrier can never be silent.
+    escalation: str = ""
+
+
+_Liveness = _Behavioural | _InertByDesign | _UnderDriven
+
+#: The shape `carrier` must take once the `project-manager` has allocated it.
+_CARRIER = re.compile(r"^B-\d{3}$")
+
+#: `--quiet` measures 24 of 26 and therefore resolves to class (c), which needs
+#: a carrier row the PM has not allocated (D8/AC9). The engineer does NOT mint a
+#: `B-NNN` and does NOT widen class (a) to absorb it, so the unallocated state is
+#: represented EXPLICITLY and carries its own escalation text.
+_UNALLOCATED: Final[str] = ""
+
+#: PDF-65 D7 -- `--threads` and `--version` are class (c) against the carrier the
+#: PM forward-allocated for the deferred `I-14` repair. Consumed as given: this
+#: file neither creates the row nor resolves it.
+_B310: Final[str] = "B-310"
+
+LIVENESS: Final[Mapping[str, _Liveness]] = MappingProxyType(
+    {
+        "--dry-run": _Behavioural(
+            nodes=(
+                "tests/test_cli_contract.py::test_c9_unconditional_dry_run_purity",
+                "tests/test_cli_contract.py::test_c10_registered_invocation_dry_run_purity",
+            ),
+        ),
+        "--output-format": _Behavioural(
+            nodes=(
+                "tests/test_usage_envelope.py::"
+                "test_ac1_ac3_an_unknown_flag_is_enveloped_at_every_verb_in_every_shape",
+            ),
+        ),
+        "--no-backup": _Behavioural(
+            nodes=("tests/test_cli_contract.py::test_c7_no_backup_alone_exits_2",),
+        ),
+        "--password-file": _Behavioural(
+            nodes=(
+                "tests/test_password_file_contract.py::"
+                "test_ac12_a_planted_secret_never_appears_in_debug_output",
+            ),
+        ),
+        # The same node covers `--verbose`: it types `--password-file <path> -vv`
+        # at every registered leaf through `_debug_sweep`, and `-vv` is `-v`'s
+        # count-flag repeat form, derived from the declaration rather than
+        # spelled out here.
+        "--verbose": _Behavioural(
+            nodes=(
+                "tests/test_password_file_contract.py::"
+                "test_ac12_a_planted_secret_never_appears_in_debug_output",
+            ),
+        ),
+        "--quiet": _UnderDriven(
+            nodes=(
+                "tests/test_cli_contract.py::test_c18_an_unreadable_operand_is_a_coded_failure",
+                "tests/test_cli_contract.py::test_c19_a_malformed_operand_never_tracebacks",
+                "tests/test_cli_contract.py::test_c20_no_rendered_message_carries_a_heap_address",
+            ),
+            leaves=(
+                "compose",
+                "compress",
+                "convert",
+                "create",
+                "decrypt",
+                "delete",
+                "encrypt",
+                "extract",
+                "info",
+                "linearize",
+                "merge",
+                "meta get",
+                "meta set",
+                "ocr",
+                "permissions",
+                "rasterize",
+                "reorder",
+                "repair",
+                "rotate",
+                "split",
+                "stamp",
+                "tables",
+                "text",
+                "watermark",
+            ),
+            floor=24,
+            carrier=_UNALLOCATED,
+            justification=(
+                "C18/C19/C20 run over `OPERAND_VERBS`, and `doctor` and `version` take no "
+                "operand -- so 24 of the 26 leaves `--quiet` is declared on, re-derived at "
+                "this commit and agreeing with AUDIT.md 3.4's prior of 24/26. The flag is "
+                "unambiguously LIVE (`resolve_level` alters the stderr stream and "
+                "`test_ac18_quiet_suppresses_engine_chatter_on_the_recorded_operand` "
+                "measures the suppression), so class (b) is false about it and class (a) "
+                "would let a short flag claim full coverage"
+            ),
+            escalation=(
+                "PDF-65 AC9/D8: scoping by defect CLASS rather than by enumerated location "
+                "pulls `--quiet` into class (c), and the PM allocated `B-310` for "
+                "`--threads` and `--version` only. The engineer does not mint a `B-NNN`, "
+                "does not borrow `B-310`, and does not widen class (a) to absorb it. "
+                "ESCALATED to the project-manager for either a carrier row id of its own or "
+                "a class ruling; until one lands the carrier stays unallocated and the "
+                "carrier-shape cell below is xfail-pinned so the debt is VISIBLE rather "
+                "than absorbed"
+            ),
+        ),
+        "--threads": _UnderDriven(
+            nodes=(
+                "tests/test_batch_continuation.py::"
+                "test_ac5_items_are_in_command_line_order_under_threads",
+                "tests/integration/test_rasterize_cli.py::test_ac6_threads_out_of_range_exits_2",
+                "tests/integration/test_text_tables_cli.py::"
+                "test_ac18_threads_1_and_threads_8_produce_byte_identical_stdout",
+            ),
+            leaves=(
+                "compress",
+                "convert",
+                "delete",
+                "extract",
+                "ocr",
+                "rasterize",
+                "reorder",
+                "rotate",
+                "tables",
+                "text",
+            ),
+            floor=10,
+            carrier=_B310,
+            justification=(
+                "AUDIT.md 3.4's prior is 3/26 and it UNDERCOUNTS: "
+                "`test_ac5_items_are_in_command_line_order_under_threads` is parameterized "
+                "over the ten `--out-dir` batch verbs and types `--threads 4` at each "
+                "through `_drive`, with a flag-attributable assertion, which the audit's "
+                "per-flag table does not carry. Re-derived here: 10. The other two nodes "
+                "are the LIVENESS proof rather than leaf coverage -- `--threads 0` exits 2 "
+                "and `--threads 1` vs `8` is byte-identical at `text` -- and they contribute "
+                "no leaves because their node ids carry no leaf parameter id, which is the "
+                "honest reading of a count derived from parameter ids"
+            ),
+        ),
+        "--version": _UnderDriven(
+            nodes=(
+                "tests/test_cli_spine.py::"
+                "test_version_flag_reports_tool_python_and_engine_versions",
+            ),
+            leaves=(),
+            floor=0,
+            carrier=_B310,
+            justification=(
+                "`--version` is EAGER: it exits before the callback, which is behaviour, and "
+                "`test_version_flag_reports_tool_python_and_engine_versions` observes it at "
+                "the ROOT. No control makes it observable AT A LEAF, so the derived count is "
+                "0 of the 26 leaves it is declared on -- and the honest zero is the point. "
+                "The entry still asserts that its node resolves, that the node names the "
+                "flag, that the declared count is derived live, and that a carrier is named; "
+                "it records a 0-of-26 gap in the instrument instead of in a report nobody "
+                "re-reads. `INERT_BY_DESIGN` on this flag would be a FALSE marker, not a "
+                "judgement call"
+            ),
+        ),
+    }
+)
+
+
+# --------------------------------------------------------------------------- #
+# The derivations. Every one reads the LIVE tree or a REAL collection; not one
+# count below is transcribed, which is why deleting a flag moves five separate
+# figures and requires no edit to any of them.
+# --------------------------------------------------------------------------- #
+
+
+def liveness_files() -> tuple[str, ...]:
+    """The test files the registry's node ids name, and no others.
+
+    Scoped this way so the arm costs one short collection rather than a
+    whole-suite one -- the `tests/test_acceptance_audit.py` precedent.
+    """
+    return tuple(
+        sorted(
+            {
+                node.split("::", 1)[0]
+                for entry in LIVENESS.values()
+                for node in getattr(entry, "nodes", ())
+            }
+        )
+    )
+
+
+def collect_liveness_nodes(targets: Sequence[str]) -> frozenset[str]:
+    """Every node id pytest collects from *targets*, as a REAL collection.
+
+    An AST guess would accept a node id that no longer collects, which is
+    precisely the staleness half (i) of the resolution arm exists to catch.
+    """
+    if not targets:
+        return frozenset()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "--no-header",
+            "-p",
+            "no:cacheprovider",
+            *targets,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(REPO_ROOT),
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            "pytest --collect-only failed over the files the liveness registry names "
+            f"({list(targets)}): {result.stdout}{result.stderr}"
+        )
+    return frozenset(
+        line.strip()
+        for line in result.stdout.splitlines()
+        if "::" in line and not line.startswith(" ")
+    )
+
+
+def _resolving(node: str, collected: frozenset[str]) -> tuple[str, ...]:
+    """The collected ids *node* names -- itself, or its parameterized cells."""
+    return tuple(sorted(one for one in collected if one == node or one.startswith(f"{node}[")))
+
+
+def _param_id(node_id: str) -> str:
+    if node_id.endswith("]") and "[" in node_id:
+        return node_id[node_id.index("[") + 1 : -1]
+    return ""
+
+
+def leaves_in_param_id(param_id: str, leaves: Sequence[str]) -> frozenset[str]:
+    """The live verb names appearing as dash-delimited runs in a parameter id.
+
+    `[merge]` and `[merge-json]` and `[c20-meta get-json-quiet]` all name a leaf;
+    `[default]` names none. Verb names carry spaces (`meta get`) and never
+    dashes, so a dash is an unambiguous delimiter here.
+    """
+    found = set()
+    for leaf in leaves:
+        if (
+            param_id == leaf
+            or param_id.startswith(f"{leaf}-")
+            or param_id.endswith(f"-{leaf}")
+            or f"-{leaf}-" in param_id
+        ):
+            found.add(leaf)
+    return frozenset(found)
+
+
+def driven_leaves(
+    nodes: Sequence[str], collected: frozenset[str], leaves: Sequence[str]
+) -> frozenset[str]:
+    """The leaves *nodes* cover, read off parameter ids against the live roster.
+
+    **WHICH QUESTION THIS ANSWERS, stated rather than left to the reader**: it
+    answers *the flag is TYPED at this leaf* -- the node names a spelling of the
+    flag (asserted separately by the resolution arm) and collects a cell whose
+    parameter id names the leaf. It does NOT answer *the flag's EFFECT is
+    asserted at this leaf*; `tests/test_usage_envelope.py`'s
+    `run_cli(verb.name, "--threads", "0", "-o", "json")` arm is the standing
+    counter-example, where `--threads 0` is a decoy to force an ARITY error and
+    the flag is not the subject. The same question is answered for every class-
+    (c) member, because mixing the two makes the counts incomparable.
+
+    Two caveats disclosed rather than hidden: the count is over COLLECTED cells
+    rather than executed ones -- a host without an engine skips some of them --
+    and a node whose leaf is fixed by its module rather than by a parameter
+    (`tests/integration/test_rasterize_cli.py` is always `rasterize`) contributes
+    no leaves at all. Both make the derived count a FLOOR on coverage, which is
+    the safe direction for a ratchet.
+    """
+    covered: set[str] = set()
+    for node in nodes:
+        for node_id in _resolving(node, collected):
+            covered |= leaves_in_param_id(_param_id(node_id), leaves)
+    return frozenset(covered)
+
+
+def _count_option_spellings() -> frozenset[str]:
+    """Spellings declared `count=True`, so `-vv` can be recognised as `-v` typed
+    twice WITHOUT writing `-vv` down anywhere."""
+    spellings: set[str] = set()
+    for spec in GLOBAL_PARAMS:
+        info = typing.get_args(spec.annotation)[1]
+        if not getattr(info, "count", False):
+            continue
+        decls = [getattr(info, "default", None), *(getattr(info, "param_decls", ()) or ())]
+        canonical = next(one for one in decls if isinstance(one, str) and one.startswith("--"))
+        spellings |= {
+            spelling for spelling, target in GLOBAL_FLAG_SPELLINGS.items() if target == canonical
+        }
+    return frozenset(spellings)
+
+
+_ARGV_TOKEN = re.compile(r"-{1,2}[A-Za-z][A-Za-z0-9-]*")
+
+
+def canonical_flag_of(token: str, count_spellings: frozenset[str]) -> str | None:
+    """The canonical long spelling *token* types, or `None` if it types nothing.
+
+    Derived entirely from `GLOBAL_FLAG_SPELLINGS` plus the `count=True`
+    repeat form; there is no literal spelling table here to go stale.
+    """
+    if token in GLOBAL_FLAG_SPELLINGS:
+        return GLOBAL_FLAG_SPELLINGS[token]
+    if not token.startswith("--") and len(token) > 2:
+        head = token[:2]
+        if head in count_spellings and set(token[1:]) == {token[1]}:
+            return GLOBAL_FLAG_SPELLINGS[head]
+    return None
+
+
+def node_source(node: str) -> str:
+    """The test function's own source, plus the source of the module-level
+    helpers it calls DIRECTLY. One hop, deliberately.
+
+    The flag is often typed in a helper -- `_debug_sweep` appends
+    `--password-file <path> -vv`, `_drive` appends `--threads 4` -- so a
+    function-body-only read would call those nodes flag-less and push live flags
+    into class (c) for a reason that is about this arm rather than about the
+    product. One hop covers every node this registry names; recursion is
+    deliberately NOT taken, because an unbounded walk ends up reading the whole
+    module, and a whole-module read is satisfied by any mention anywhere, which
+    is the weak check half (ii) exists to replace.
+    """
+    rel, _, func = node.partition("::")
+    path = REPO_ROOT / rel
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    top = {
+        node_.name: node_
+        for node_ in tree.body
+        if isinstance(node_, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    target = top.get(func)
+    if target is None:
+        return ""
+    chunks = [ast.get_source_segment(text, target) or ""]
+    called = {
+        inner.func.id
+        for inner in ast.walk(target)
+        if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
+    }
+    for name in sorted(called):
+        if name in top and name != func:
+            chunks.append(ast.get_source_segment(text, top[name]) or "")
+    return "\n".join(chunks)
+
+
+def source_names_flag(source: str, flag: str, count_spellings: frozenset[str]) -> bool:
+    """Whether *source* types *flag* under any spelling the block declares."""
+    return any(
+        canonical_flag_of(token, count_spellings) == flag for token in _ARGV_TOKEN.findall(source)
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The four checkers. PURE over their parameters, following
+# `docs_ratification_complaints`'s rule: a synthetic registry drives each one
+# exactly as the real one does, so the red controls never vandalise a real
+# entry to prove the arm fires.
+# --------------------------------------------------------------------------- #
+
+
+def totality_complaints(
+    registry: Mapping[str, _Liveness], partition: Mapping[str, str]
+) -> list[str]:
+    """Arm 1 -- the arm the partition has always been missing."""
+    complaints = []
+    for flag in sorted(set(partition) - set(registry)):
+        complaints.append(
+            f"{flag} is declared in UNGOVERNED_FLAGS and resolves to NO terminal class. "
+            "A non-blank reason is not evidence of behaviour: `--no-color` carried a "
+            "48-character reason byte-identical to `--quiet`'s and did nothing at all. "
+            "Classify it (a) BEHAVIOURAL, (b) INERT_BY_DESIGN with the disclosure its "
+            "help text carries, or (c) UNDER_DRIVEN with a floor and a carrier"
+        )
+    for flag in sorted(set(registry) - set(partition)):
+        complaints.append(
+            f"{flag} carries a liveness class but is not in UNGOVERNED_FLAGS -- the "
+            "registry is asserting about a flag the partition does not declare"
+        )
+    return complaints
+
+
+def resolution_complaints(
+    registry: Mapping[str, _Liveness],
+    *,
+    resolve: Callable[[str], tuple[str, ...]],
+    source_of: Callable[[str], str],
+    names_flag: Callable[[str, str], bool],
+) -> list[str]:
+    """Arm 2 -- both halves, and neither alone is sufficient (D5).
+
+    (i) alone would let a registry point every flag at one real test and stay
+    green; (ii) alone would let a deleted or renamed test sail through on a
+    text match. Every message names the flag, because an unlocalised red is the
+    first step toward an exemption.
+    """
+    complaints = []
+    for flag in sorted(registry):
+        for node in getattr(registry[flag], "nodes", ()):
+            resolved = resolve(node)
+            if not resolved:
+                complaints.append(
+                    f"{flag}: evidence node {node!r} resolves to NOTHING in the live "
+                    "collection -- it was deleted, renamed or moved, and the class "
+                    "marker has been making a claim about a test that is not there"
+                )
+                continue
+            if not names_flag(source_of(node), flag):
+                complaints.append(
+                    f"{flag}: evidence node {node!r} collects {len(resolved)} cell(s) but "
+                    f"its source never types {flag} under any spelling the block declares "
+                    "-- a resolving node id is not evidence about THIS flag"
+                )
+    return complaints
+
+
+def class_integrity_complaints(
+    registry: Mapping[str, _Liveness],
+    *,
+    declared_leaves: Callable[[str], frozenset[str]],
+    derived_driven: Callable[[str], frozenset[str]],
+    help_texts: Callable[[str], Mapping[str, str]],
+) -> list[str]:
+    """Arm 3 -- three separate properties, each with its own cover."""
+    complaints = []
+    for flag in sorted(registry):
+        entry = registry[flag]
+        declared = declared_leaves(flag)
+        if isinstance(entry, _Behavioural):
+            driven = derived_driven(flag)
+            missing = sorted(declared - driven)
+            if missing:
+                complaints.append(
+                    f"{flag} is marked BEHAVIOURAL -- driven and asserted at every leaf it "
+                    f"is declared on -- but the derived driven set misses {missing}. Either "
+                    "close the gap or re-mark it UNDER_DRIVEN with a floor and a carrier; "
+                    "class (a) may not be widened to absorb a short flag"
+                )
+        elif isinstance(entry, _InertByDesign):
+            gained = sorted(derived_driven(flag))
+            if gained:
+                complaints.append(
+                    f"{flag} is marked INERT_BY_DESIGN but the derived driven set is "
+                    f"{gained} -- the flag GAINED behaviour and the marker is now a FALSE "
+                    "claim in the help text. Re-classify it (a) or (c); a flag that does "
+                    "something may not advertise that it does nothing"
+                )
+            if not entry.disclosure.strip():
+                complaints.append(
+                    f"{flag} is marked INERT_BY_DESIGN with an EMPTY disclosure. *Inert by "
+                    "design, DISCLOSED* is the safe state; an undisclosed inert flag is "
+                    "*inert by omission*, which is the state this arm exists to remove"
+                )
+            else:
+                texts = help_texts(flag)
+                silent = sorted(
+                    leaf for leaf in declared if entry.disclosure not in texts.get(leaf, "")
+                )
+                if silent:
+                    complaints.append(
+                        f"{flag} is marked INERT_BY_DESIGN but its help text does not carry "
+                        f"the disclosure {entry.disclosure!r} at {silent}. A user reading "
+                        "--help must learn the flag does nothing"
+                    )
+        else:
+            if len(entry.leaves) != entry.floor:
+                complaints.append(
+                    f"{flag}: the recorded driven-leaf set has {len(entry.leaves)} members "
+                    f"but floor is {entry.floor} -- the record and the bound have drifted"
+                )
+            if entry.floor >= len(declared):
+                complaints.append(
+                    f"{flag} is marked UNDER_DRIVEN with floor {entry.floor} against "
+                    f"{len(declared)} declared leaves. A floor that equals or exceeds the "
+                    "declared count is a BEHAVIOURAL member wearing the wrong marker"
+                )
+            if entry.floor < 0:
+                complaints.append(f"{flag}: floor {entry.floor} is negative")
+            if not entry.justification.strip():
+                complaints.append(
+                    f"{flag} is marked UNDER_DRIVEN with no justification. A floor of "
+                    f"{entry.floor} against {len(declared)} declared leaves is a gap; an "
+                    "unexplained gap is the exemption this arm exists to prevent"
+                )
+            if entry.carrier == _UNALLOCATED and not entry.escalation.strip():
+                complaints.append(
+                    f"{flag} is marked UNDER_DRIVEN with an UNALLOCATED carrier and no "
+                    "escalation text. An unallocated carrier may be outstanding, but it "
+                    "may never be SILENT: record what was escalated and what is owed back"
+                )
+    return complaints
+
+
+def carrier_complaints(flag: str, entry: _Liveness) -> list[str]:
+    """Arm 3 (iii), split out so it can be observed per member (X-723 (iii)).
+
+    SHAPE ONLY -- see `_UnderDriven`'s docstring for why this deliberately does
+    not resolve the row against `BACKLOG.md`.
+    """
+    if not isinstance(entry, _UnderDriven):
+        return []
+    if not _CARRIER.fullmatch(entry.carrier):
+        return [
+            f"{flag} is marked UNDER_DRIVEN and its carrier is {entry.carrier!r}, which is "
+            "not a `B-NNN` BACKLOG.md row id. A carried gap needs a row somebody owns; an "
+            "uncarried one is an exemption with better manners"
+        ]
+    return []
+
+
+def ratchet_complaints(
+    registry: Mapping[str, _Liveness], *, derived_driven: Callable[[str], frozenset[str]]
+) -> list[str]:
+    """Arm 4 -- coverage may not fall silently.
+
+    RAISING a floor is free and is what closing the carrier row looks like.
+    LOWERING one is permitted and is supposed to be VISIBLE: it is an edit
+    somebody makes on the record, and an unexplained lowering is the finding a
+    `qa-sentinel` files.
+    """
+    complaints = []
+    for flag in sorted(registry):
+        entry = registry[flag]
+        if not isinstance(entry, _UnderDriven):
+            continue
+        driven = derived_driven(flag)
+        if len(driven) < entry.floor:
+            complaints.append(
+                f"{flag}: the derived driven-leaf count FELL to {len(driven)} "
+                f"({sorted(driven)}) against a recorded floor of {entry.floor}. Coverage "
+                "does not fall silently -- restore the covering node, or lower the floor "
+                "deliberately and say why in the entry"
+            )
+    return complaints
+
+
+def declared_leaves(flag: str) -> frozenset[str]:
+    """The leaves that DECLARE *flag*, walked off the LIVE command tree.
+
+    Never a literal and never `len(VERBS)` assumed-universal: a flag that stopped
+    being attached to a verb would otherwise leave every count below unchanged
+    (X-723 (ii)).
+    """
+    found: set[str] = set()
+
+    def walk(cmd: object, path: tuple[str, ...]) -> None:
+        commands = getattr(cmd, "commands", None)
+        if commands is not None:
+            for name in sorted(commands):
+                walk(commands[name], (*path, name))
+            return
+        spellings = {
+            opt for param in getattr(cmd, "params", ()) for opt in getattr(param, "opts", ())
+        }
+        if flag in spellings:
+            found.add(" ".join(path))
+
+    walk(typer_root_command(), ())
+    return frozenset(found)
+
+
+@pytest.fixture(scope="module")
+def liveness_nodes() -> frozenset[str]:
+    """One real collection, shared by every arm below."""
+    return collect_liveness_nodes(liveness_files())
+
+
+@pytest.fixture(scope="module")
+def count_spellings() -> frozenset[str]:
+    return _count_option_spellings()
+
+
+# --------------------------------------------------------------------------- #
+# Arm 1 -- TOTALITY. The arm the partition has always been missing, and the one
+# that was RED at `d3fca0c` naming `--no-color` while the flag was still
+# declared. The backend leg's eleven-line deletion is what turned it green, BY
+# SUBTRACTION -- which is what makes "we removed an inert flag" a checkable
+# claim rather than a commit message.
+# --------------------------------------------------------------------------- #
+
+
+def test_every_ungoverned_flag_resolves_to_a_terminal_class() -> None:
+    """AC1/AC2 (X-723). A flag cannot be declared ungoverned without resolving
+    to one of the three terminal classes."""
+    complaints = totality_complaints(LIVENESS, UNGOVERNED_FLAGS)
+    assert complaints == [], "\n".join(complaints)
+
+
+def test_the_totality_arm_fires_in_each_direction() -> None:
+    """AC2's red control, both directions, on SYNTHETIC data.
+
+    Each direction alone leaves the other hole open: an arm that only checks
+    *partition -> registry* accepts a registry asserting about a flag nobody
+    declares, and an arm that only checks *registry -> partition* is exactly the
+    hole `--no-color` lived in.
+    """
+    entry = _Behavioural(nodes=("tests/x.py::test_y",))
+
+    undeclared_class = totality_complaints({"--a": entry}, {"--a": "r", "--b": "r"})
+    assert any("--b" in one for one in undeclared_class), undeclared_class
+
+    unknown_flag = totality_complaints({"--a": entry, "--c": entry}, {"--a": "r"})
+    assert any("--c" in one for one in unknown_flag), unknown_flag
+
+    assert totality_complaints({"--a": entry}, {"--a": "r"}) == []
+
+
+# --------------------------------------------------------------------------- #
+# Arm 2 -- RESOLUTION, both halves (D5).
+# --------------------------------------------------------------------------- #
+
+
+def test_every_liveness_node_resolves_and_names_its_flag(
+    liveness_nodes: frozenset[str], count_spellings: frozenset[str]
+) -> None:
+    """AC3. Each evidence node collects live, AND its source types the flag."""
+    complaints = resolution_complaints(
+        LIVENESS,
+        resolve=lambda node: _resolving(node, liveness_nodes),
+        source_of=node_source,
+        names_flag=lambda source, flag: source_names_flag(source, flag, count_spellings),
+    )
+    assert complaints == [], "\n".join(complaints)
+
+
+def test_the_resolution_arm_fires_on_each_half_separately() -> None:
+    """AC3's red control. The two halves establish different things.
+
+    (i) alone would let a registry point EVERY flag at one real, resolving test
+    and stay green -- it never reads what the test is about. (ii) alone would let
+    a deleted or renamed node id sail through on a text match against source that
+    is no longer collected. Both, or neither is worth having.
+    """
+    real = "tests/real.py::test_real"
+    registry = {"--a": _Behavioural(nodes=(real,))}
+
+    missing = resolution_complaints(
+        registry,
+        resolve=lambda node: (),
+        source_of=lambda node: 'run_cli("--a")',
+        names_flag=lambda source, flag: flag in source,
+    )
+    assert any("--a" in one and "resolves to NOTHING" in one for one in missing), missing
+
+    silent = resolution_complaints(
+        registry,
+        resolve=lambda node: (f"{node}[info]",),
+        source_of=lambda node: 'run_cli("--something-else")',
+        names_flag=lambda source, flag: flag in source,
+    )
+    assert any("--a" in one and "never types" in one for one in silent), silent
+
+    assert (
+        resolution_complaints(
+            registry,
+            resolve=lambda node: (f"{node}[info]",),
+            source_of=lambda node: 'run_cli("--a")',
+            names_flag=lambda source, flag: flag in source,
+        )
+        == []
+    )
+
+
+def test_the_node_source_read_reaches_one_hop_into_a_helper() -> None:
+    """The non-vacuity proof for `node_source` itself, and for the count-flag
+    repeat form.
+
+    `test_ac12_a_planted_secret_never_appears_in_debug_output` types neither
+    `--password-file` nor `-vv` in its own body -- `_debug_sweep` does -- and a
+    body-only read would call the node flag-less and push two LIVE flags into
+    class (c) for a reason about this arm rather than about the product. If
+    typer ever stops reporting `count=True`, the `-vv` half below goes red here
+    rather than silently downgrading `--verbose`.
+    """
+    node = (
+        "tests/test_password_file_contract.py::"
+        "test_ac12_a_planted_secret_never_appears_in_debug_output"
+    )
+    body_only = ast.get_source_segment
+    assert body_only is not None  # the reader this helper is built on still exists
+    source = node_source(node)
+    assert source, "the one-hop source read returned nothing"
+    spellings = _count_option_spellings()
+    assert spellings, "no count=True spelling was derived -- the `-vv` branch is unreachable"
+    assert source_names_flag(source, "--password-file", spellings)
+    assert source_names_flag(source, "--verbose", spellings), (
+        "`-vv` was not recognised as `-v` typed twice; --verbose would be mis-classified"
+    )
+    assert not source_names_flag(source, "--no-backup", spellings), (
+        "the reader matches a flag the node never types -- it is not discriminating"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Arm 3 -- CLASS INTEGRITY. Three properties, three separate observations.
+# --------------------------------------------------------------------------- #
+
+
+def test_every_liveness_class_holds_its_own_invariants(
+    liveness_nodes: frozenset[str],
+) -> None:
+    """AC4 (i) and (ii)."""
+    leaves = tuple(verb.name for verb in discover_verbs())
+    complaints = class_integrity_complaints(
+        LIVENESS,
+        declared_leaves=declared_leaves,
+        derived_driven=lambda flag: driven_leaves(
+            getattr(LIVENESS[flag], "nodes", ()), liveness_nodes, leaves
+        ),
+        help_texts=lambda flag: {},
+    )
+    assert complaints == [], "\n".join(complaints)
+
+
+def test_the_class_integrity_arm_fires_on_each_property_separately() -> None:
+    """AC4's red control. A single combined observation would not establish that
+    each property has its own cover."""
+    declared = frozenset({"one", "two", "three"})
+
+    def check(registry, driven, helps=None):
+        return class_integrity_complaints(
+            registry,
+            declared_leaves=lambda flag: declared,
+            derived_driven=lambda flag: driven,
+            help_texts=lambda flag: helps or {},
+        )
+
+    # (i) an UNDER_DRIVEN floor that equals the declared count
+    full = {
+        "--a": _UnderDriven(
+            nodes=("tests/x.py::t",),
+            leaves=("one", "two", "three"),
+            floor=3,
+            carrier="B-310",
+            justification="because",
+        )
+    }
+    assert any("wrong marker" in one for one in check(full, declared)), check(full, declared)
+
+    # (ii) a BEHAVIOURAL member short of its declared leaves
+    short = {"--a": _Behavioural(nodes=("tests/x.py::t",))}
+    complaints = check(short, frozenset({"one"}))
+    assert any("misses" in one and "'three'" in one for one in complaints), complaints
+
+    # (iii) an UNDER_DRIVEN member with no justification at all
+    bare = {
+        "--a": _UnderDriven(
+            nodes=("tests/x.py::t",),
+            leaves=("one",),
+            floor=1,
+            carrier="B-310",
+            justification="  ",
+        )
+    }
+    assert any("no justification" in one for one in check(bare, declared)), check(bare, declared)
+
+    # (iv) an UNDER_DRIVEN member whose recorded set and bound disagree
+    drifted = {
+        "--a": _UnderDriven(
+            nodes=("tests/x.py::t",),
+            leaves=("one",),
+            floor=2,
+            carrier="B-310",
+            justification="because",
+        )
+    }
+    assert any("drifted" in one for one in check(drifted, declared)), check(drifted, declared)
+
+    # (v) an unallocated carrier with no escalation text is SILENT, which is
+    #     the one thing an outstanding escalation may never be
+    silent = {
+        "--a": _UnderDriven(
+            nodes=("tests/x.py::t",),
+            leaves=("one",),
+            floor=1,
+            carrier=_UNALLOCATED,
+            justification="because",
+        )
+    }
+    assert any("never be SILENT" in one for one in check(silent, declared)), check(silent, declared)
+
+    good = {
+        "--a": _UnderDriven(
+            nodes=("tests/x.py::t",),
+            leaves=("one",),
+            floor=1,
+            carrier="B-310",
+            justification="because",
+        )
+    }
+    assert check(good, frozenset({"one"})) == []
+
+
+def _carrier_cases() -> list[object]:
+    """One case per class-(c) member, xfail-pinned where the PM has not yet
+    allocated the carrier row.
+
+    The pin is derived from the ENTRY's own state (`carrier == _UNALLOCATED`),
+    never from a flag name written down here -- so it is a debt marker rather
+    than an enumerated exemption, and it disappears the moment the row lands.
+    """
+    cases: list[object] = []
+    for flag in sorted(LIVENESS):
+        entry = LIVENESS[flag]
+        if not isinstance(entry, _UnderDriven):
+            continue
+        marks = (
+            (pytest.mark.xfail(strict=True, reason=entry.escalation),)
+            if entry.carrier == _UNALLOCATED
+            else ()
+        )
+        cases.append(pytest.param(flag, marks=marks, id=flag))
+    return cases
+
+
+@pytest.mark.parametrize("flag", _carrier_cases())
+def test_every_under_driven_member_names_a_carrier_row(flag: str) -> None:
+    """AC4 (iii), X-723 (iii). Shape only -- `BACKLOG.md` is another repository's
+    file and resolving it here would make a consumer's clone unable to go green.
+
+    `--quiet` is the outstanding one: it measures 24 of 26, the PM allocated
+    `B-310` for `--threads` and `--version` only, and this engineer mints no
+    `B-NNN`. Its cell is xfail-pinned with the escalation text as its reason, so
+    the debt is VISIBLE in `-rx` output rather than absorbed into class (a).
+    """
+    complaints = carrier_complaints(flag, LIVENESS[flag])
+    assert complaints == [], "\n".join(complaints)
+
+
+def test_the_carrier_population_is_not_empty() -> None:
+    """The anti-lapse guard on the parametrization above: an empty case list
+    would make the carrier arm silently unrun."""
+    assert _carrier_cases(), "no class-(c) member -- the carrier arm collects nothing"
+
+
+def test_the_carrier_arm_fires_on_a_malformed_row_id() -> None:
+    """AC4 (iii)'s red control, on synthetic entries."""
+
+    def entry(carrier: str) -> _UnderDriven:
+        return _UnderDriven(
+            nodes=("tests/x.py::t",),
+            leaves=("one",),
+            floor=1,
+            carrier=carrier,
+            justification="because",
+        )
+
+    assert carrier_complaints("--a", entry("")) != []
+    assert carrier_complaints("--a", entry("B-31")) != []
+    assert carrier_complaints("--a", entry("b-310")) != []
+    assert carrier_complaints("--a", entry("B-310")) == []
+    assert carrier_complaints("--a", _Behavioural(nodes=())) == []
+
+
+# --------------------------------------------------------------------------- #
+# Arm 4 -- THE RATCHET.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_driven_leaf_count_has_not_fallen_below_its_floor(
+    liveness_nodes: frozenset[str],
+) -> None:
+    """AC5. Coverage may RISE freely; it may not FALL silently."""
+    leaves = tuple(verb.name for verb in discover_verbs())
+    complaints = ratchet_complaints(
+        LIVENESS,
+        derived_driven=lambda flag: driven_leaves(
+            getattr(LIVENESS[flag], "nodes", ()), liveness_nodes, leaves
+        ),
+    )
+    assert complaints == [], "\n".join(complaints)
+
+
+def test_the_ratchet_fires_when_the_count_falls_and_clears_when_the_floor_moves() -> None:
+    """AC5's red control, both halves, on synthetic data.
+
+    Half (i) alone proves only that the arm reads a count; half (ii) alone proves
+    only that the floor is editable. Together they establish the intended
+    property: coverage cannot fall silently, and LOWERING the bar is an edit
+    somebody makes on the record. Raising it is free, and is what closing the
+    carrier row looks like.
+    """
+
+    def registry(floor: int) -> Mapping[str, _Liveness]:
+        return {
+            "--a": _UnderDriven(
+                nodes=("tests/x.py::t",),
+                leaves=tuple(f"leaf{n}" for n in range(floor)),
+                floor=floor,
+                carrier="B-310",
+                justification="because",
+            )
+        }
+
+    fallen = frozenset({"leaf0", "leaf1"})
+    complaints = ratchet_complaints(registry(3), derived_driven=lambda flag: fallen)
+    assert any("--a" in one and "FELL to 2" in one and "floor of 3" in one for one in complaints), (
+        complaints
+    )
+
+    assert ratchet_complaints(registry(2), derived_driven=lambda flag: fallen) == []
+    assert ratchet_complaints(registry(3), derived_driven=lambda flag: fallen | {"leaf2"}) == []
+
+
+# --------------------------------------------------------------------------- #
+# Class (b) -- EMPTY after OR-18, and asserted empty AND constructible.
+# --------------------------------------------------------------------------- #
+
+
+def test_no_flag_is_marked_inert_by_design() -> None:
+    """AC5a (i). After OR-18 the class is empty, and an empty class is ASSERTED
+    rather than omitted -- otherwise the shape could be unrepresentable and
+    nobody would find out (`tests/test_secret_leak_sweeps.py`'s exact defect)."""
+    inert = sorted(flag for flag, entry in LIVENESS.items() if isinstance(entry, _InertByDesign))
+    assert inert == [], (
+        f"{inert} are marked INERT_BY_DESIGN. `--no-color` was the only candidate this "
+        "product had and OR-18 REMOVED it rather than documenting it as a no-op; a new "
+        "member needs its disclosure in the help text of every leaf that declares it"
+    )
+
+
+def test_inert_by_design_is_forbidden_on_threads_and_version() -> None:
+    """The prohibition, asserted rather than trusted to a reviewer.
+
+    Both flags are LIVE and the controls that prove it are named here so nobody
+    re-derives them: `--threads 0` turns exit 0 into exit 2
+    (`tests/integration/test_rasterize_cli.py::test_ac6_threads_out_of_range_exits_2`)
+    and `--threads 1` vs `8` is asserted byte-identical at `text`; `--version`
+    is eager and exits before any verb body, observed by
+    `test_version_flag_reports_tool_python_and_engine_versions`. Marking either
+    inert would ship a false marker at the version that turns help into a
+    promise -- a P0 finding, not a judgement call.
+    """
+    for flag in ("--threads", "--version"):
+        entry = LIVENESS.get(flag)
+        assert entry is not None, f"{flag} left the liveness registry entirely"
+        assert not isinstance(entry, _InertByDesign), (
+            f"{flag} is marked INERT_BY_DESIGN and it is LIVE. This is a failed "
+            "acceptance, not a judgement call"
+        )
+
+
+def test_a_synthetic_inert_by_design_member_classifies_and_reds_on_gaining_behaviour() -> None:
+    """AC5a (ii). Half (i) alone is vacuous over an unbuildable shape; this half
+    alone says nothing about the live population. Both are required.
+
+    The disclosure discipline being generalised already ships at one verb:
+    `tests/integration/test_text_tables_cli.py` asserts `text`'s help carries
+    *"`--threads` is accepted but has NO effect"* and calls it *"a DECLARED
+    no-op, not a silent one"*.
+    """
+    disclosure = "--pretend is accepted but has NO effect"
+    registry = {"--pretend": _InertByDesign(disclosure=disclosure)}
+    declared = frozenset({"one", "two"})
+    disclosed = {"one": f"Usage: ... {disclosure}", "two": f"Usage: ... {disclosure}"}
+
+    def check(driven: frozenset[str], helps: Mapping[str, str]) -> list[str]:
+        return class_integrity_complaints(
+            registry,
+            declared_leaves=lambda flag: declared,
+            derived_driven=lambda flag: driven,
+            help_texts=lambda flag: helps,
+        )
+
+    # it CLASSIFIES: constructible, and passing its disclosure check
+    assert check(frozenset(), disclosed) == []
+
+    # it REDS when the flag gains behaviour
+    gained = check(frozenset({"one"}), disclosed)
+    assert any("--pretend" in one and "GAINED behaviour" in one for one in gained), gained
+
+    # it REDS when a leaf's help text stops carrying the disclosure
+    undisclosed = check(frozenset(), {"one": f"Usage: ... {disclosure}", "two": "Usage: ..."})
+    assert any("--pretend" in one and "'two'" in one for one in undisclosed), undisclosed
+
+    # and an empty disclosure is *inert by omission* wearing class (b)'s clothes
+    blank = class_integrity_complaints(
+        {"--pretend": _InertByDesign(disclosure="   ")},
+        declared_leaves=lambda flag: declared,
+        derived_driven=lambda flag: frozenset(),
+        help_texts=lambda flag: disclosed,
+    )
+    assert any("EMPTY disclosure" in one for one in blank), blank
+
+
+def test_the_declared_leaf_derivation_reads_the_live_tree() -> None:
+    """The non-vacuity proof for `declared_leaves`: an empty return would make
+    every BEHAVIOURAL comparison and every floor-versus-declared check above pass
+    over nothing."""
+    leaves = {verb.name for verb in discover_verbs()}
+    for flag in GLOBAL_OPTIONS:
+        assert declared_leaves(flag) == leaves, (
+            f"{flag} is declared at {sorted(declared_leaves(flag))}, not at every leaf"
+        )
+    assert declared_leaves("--definitely-not-a-flag") == frozenset()
+
+
+# --------------------------------------------------------------------------- #
+# OR-18 -- the removal, pinned as a BEHAVIOUR rather than as an absence.
+#
+# A source grep proves the code is gone; only the CLI proves the CONTRACT is.
+# The population is DERIVED -- the root rendering plus every live leaf, which is
+# 27 and not the 26 the brief said -- so a twenty-seventh verb inherits both
+# halves the day it is registered, and neither half is sufficient alone: (i) is
+# satisfied by any misspelled flag, and (ii) would be satisfied by a flag that
+# is hidden but still parses.
+# --------------------------------------------------------------------------- #
+
+#: Root, then every leaf, each already tokenized. `()` is the root position.
+#: `VerbSpec.name` is the space-joined display string (`"meta get"`), and THIS
+#: module's `run_cli` passes argv through unsplit -- so a position left joined
+#: reaches the binary as one token, which is a usage error for the WRONG reason
+#: ("No such command 'meta get'") and would have made the typed-flag half below
+#: pass on two cells without ever reaching the flag. Measured, not reasoned.
+REMOVED_COLOUR_POSITIONS: Final[tuple[tuple[str, ...], ...]] = (
+    (),
+    *(tuple(verb.name.split()) for verb in discover_verbs()),
+)
+
+
+def _position_id(position: tuple[str, ...]) -> str:
+    return " ".join(position) if position else "root"
+
+
+def test_the_removed_flag_population_covers_root_and_every_leaf() -> None:
+    """The anti-lapse guard: a population that went vacuous would make both
+    halves below pass over nothing."""
+    assert len(REMOVED_COLOUR_POSITIONS) == len(discover_verbs()) + 1
+    assert REMOVED_COLOUR_POSITIONS[0] == ()
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("position", REMOVED_COLOUR_POSITIONS, ids=_position_id)
+def test_the_removed_colour_flag_is_named_in_no_help_rendering(position: tuple[str, ...]) -> None:
+    """AC6 (ii). `--no-color` was declared once and rendered 27 times, and every
+    one of those renderings promised *"Disable ANSI styling; NO_COLOR is honoured
+    too"* about a product that emits no ANSI at all. OR-18 removed the flag, and
+    `v1.0.0` is the version at which a help text is a promise."""
+    result = run_cli(*position, "--help")
+    assert result.returncode == 0, result.stderr
+    assert "--no-color" not in result.stdout, (
+        f"{_position_id(position)} --help still names --no-color: a flag that suppresses "
+        "colour this product has committed to never emitting has no implementable meaning"
+    )
+    assert "NO_COLOR" not in result.stdout, (
+        f"{_position_id(position)} --help still names the NO_COLOR environment variable, "
+        "which has had no consumer since OR-18"
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("position", REMOVED_COLOUR_POSITIONS, ids=_position_id)
+def test_the_removed_colour_flag_is_an_unknown_flag_in_the_usage_envelope(
+    position: tuple[str, ...],
+) -> None:
+    """AC6 (i). Not *accepted and ignored*, not *hidden but parseable*: UNKNOWN.
+
+    Exit 2 carrying the envelope `README.md`'s output contract promises for an
+    unknown flag -- an object on **stdout** in a structured shape -- so a machine
+    consumer reading stdout learns the run failed without also reading stderr.
+
+    **THE MESSAGE IS ASSERTED, AND THE REASON IS MEASURED.** With the flag
+    restored in full, an exit-code-and-kind-only version of this arm stayed GREEN
+    on 25 of the 27 positions: at every leaf that takes an operand the ARITY error
+    (`Missing argument 'PDF...'`) is also a `usage` 2 on stdout, so the cell
+    passed while the flag parsed perfectly. That is `tests/test_usage_envelope.py`
+    line 635's decoy wearing a different hat, and the only thing that
+    distinguishes the two is what the message says.
+    """
+    result = run_cli(*position, "--no-color", "-o", "json")
+    assert result.returncode == exit_codes.USAGE, (
+        f"{_position_id(position)}: --no-color exited {result.returncode}, not "
+        f"{exit_codes.USAGE} -- it still parses somewhere"
+    )
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == exit_codes.USAGE, payload
+    assert payload["error"]["kind"] == "usage", payload
+    assert "--no-color" in payload["error"]["message"], (
+        f"{_position_id(position)}: the run failed, but not because of --no-color -- "
+        f"{payload['error']['message']!r}. An exit code alone does not distinguish an "
+        "UNKNOWN flag from a flag that parsed fine beside some other usage error"
+    )
+    assert "No such option" in payload["error"]["message"], payload
+    assert result.stderr == "", f"a structured shape must leave stderr empty: {result.stderr!r}"
 
 
 def test_the_or3_output_flags_are_byte_unchanged() -> None:

@@ -703,8 +703,13 @@ def test_ac7_an_unexpected_exception_keeps_its_traceback_and_exit_1() -> None:
 # --------------------------------------------------------------------------- #
 # AC8 / AC9 / AC10 / AC11 — the GROUP position (`a472acde7a`).
 #
-# All fifteen `GLOBAL_OPTIONS` members exit 2 at `meta` with **zero bytes on
-# stdout**. The exit code is correct and stays: `PLAN.md` §5.6 rules that a
+# All fourteen `GLOBAL_OPTIONS` members exit 2 at `meta` with **zero bytes on
+# stdout** -- fifteen until `PDF-65` removed `--no-color` under OR-18, and the
+# count is re-derived here rather than carried forward. The assertion that
+# matters (`len(GROUP_FLAG_CASES) == len(GROUPS) * len(GLOBAL_OPTIONS)`) is
+# derived on both sides and needed no edit at all.
+#
+# The exit code is correct and stays: `PLAN.md` §5.6 rules that a
 # grouping parent is exit 2 (`pdftooling meta bogus` is 2, not 0). Only the
 # empty stdout changes.
 #
@@ -1213,7 +1218,7 @@ def test_ac18_a_third_party_record_passes_through_the_redacting_filter(
     )
 
     register_secret(NEVER_ECHOED)
-    configure_logging(verbose=0, quiet=False, no_color=True)
+    configure_logging(verbose=0, quiet=False)
     _logging.getLogger("pypdf._reader").warning("a third-party record with %s in it", NEVER_ECHOED)
     captured = capsys.readouterr()
     assert NEVER_ECHOED not in captured.err, captured.err
@@ -1231,7 +1236,7 @@ def test_ac18_quiet_levels_the_root_logger_too(
 
     from pdf_tooling.output.logging import configure_logging
 
-    configure_logging(verbose=0, quiet=True, no_color=True)
+    configure_logging(verbose=0, quiet=True)
     _logging.getLogger("pypdf._reader").warning(CHATTER)
     assert capsys.readouterr().err == ""
 

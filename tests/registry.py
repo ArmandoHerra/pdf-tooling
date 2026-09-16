@@ -2162,10 +2162,24 @@ def run_cli_with_pty(
     that already existed in this suite (`tests/unit/test_confirm.py:251`,
     `tests/integration/test_compose_roundtrip.py:166`) attaches the pty to
     `stdin` only. `auto_format()` branches on `sys.stdout.isatty()` and
-    `color_enabled()` on `sys.stderr.isatty()` -- neither stream had ever
+    ~~`color_enabled()` on `sys.stderr.isatty()`~~ -- neither stream had ever
     been made a terminal by any test idiom in this repository before this
     function, which is why the sixth shape (a table on stderr, under a
     terminal, with no ``-o`` flag) was unreachable by anything shipped.
+
+    STRUCK 2026-09-15 (`PDF-65`, OR-18): `color_enabled()` no longer exists --
+    it was dead code behind an inert `--no-color`, and the flag was REMOVED at
+    `v1.0.0` rather than implemented. The clause is struck rather than deleted
+    because it is the recorded motivation, not a live claim.
+
+    WHAT JUSTIFIES THE STDERR PTY TODAY, which is a different and still-true
+    proposition: `sys.stderr.isatty()` remains an observable difference in
+    STREAM POSTURE -- `output/logging.py` builds this process's stderr handler,
+    `safety/confirm.py` reads a terminal, and the password-record and
+    secret-leak arms assert their guarantees hold IDENTICALLY with stderr as a
+    real terminal and as a pipe. No test idiom but this one can put stderr in
+    that posture, so the capability stands on its own evidence rather than on a
+    function that has been removed.
 
     ``start_new_session=True`` (verified against this host, `PDF-22`
     Implementation Log): without it the child inherits the calling process's

@@ -71,7 +71,6 @@ GLOBAL_OPTIONS: Final[tuple[str, ...]] = (
     "--password-file",
     "--quiet",
     "--verbose",
-    "--no-color",
     "--threads",
     "--version",
 )
@@ -127,7 +126,6 @@ UNGOVERNED_FLAGS: Final[Mapping[str, str]] = MappingProxyType(
         "--password-file": "any verb may meet an encrypted input, including the report-only ones",
         "--quiet": "a property of the stderr stream, which every verb has",
         "--verbose": "a property of the stderr stream, which every verb has",
-        "--no-color": "a property of the stderr stream, which every verb has",
         "--threads": "validated universally (< 1 exits 2) and consumed opportunistically",
         "--version": "eager; it exits before a verb body runs at all",
     }
@@ -473,14 +471,6 @@ GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
         0,
     ),
     _ParamSpec(
-        "no_color",
-        Annotated[
-            bool,
-            typer.Option("--no-color", help="Disable ANSI styling; NO_COLOR is honoured too."),
-        ],
-        False,
-    ),
-    _ParamSpec(
         "threads",
         Annotated[
             int | None,
@@ -656,7 +646,6 @@ class GlobalConfig:
     password_file: str | None
     quiet: bool
     verbose: int
-    no_color: bool
     threads: int
     safety: SafetyPolicy
 
@@ -715,7 +704,6 @@ def build_config(values: dict[str, Any]) -> GlobalConfig:
     raw_threads = values["threads"]
     threads = DEFAULT_THREADS if raw_threads is None else int(raw_threads)
 
-    no_color = bool(values["no_color"]) or bool(os.environ.get("NO_COLOR"))
     no_backup = bool(values["no_backup"])
 
     try:
@@ -745,7 +733,6 @@ def build_config(values: dict[str, Any]) -> GlobalConfig:
         password_file=values["password_file"],
         quiet=bool(values["quiet"]),
         verbose=int(values["verbose"] or 0),
-        no_color=no_color,
         threads=threads,
         safety=safety,
     )
@@ -1233,7 +1220,7 @@ def _apply(ctx: typer.Context, values: dict[str, Any]) -> GlobalConfig:
     # tier, so nothing about a successful run changes.
     if values.get("output_format") is not None:
         _set_error_format(config.output_format)
-    configure_logging(verbose=config.verbose, quiet=config.quiet, no_color=config.no_color)
+    configure_logging(verbose=config.verbose, quiet=config.quiet)
     ctx.obj = CliState(raw=dict(values), config=config)
     return config
 

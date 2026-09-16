@@ -61,7 +61,7 @@ uv run pdftooling --help
 
 ## Upgrading to 1.0.0
 
-A `0.3.1` invocation, script or import that relied on any of the following stops working, or observes a different shape, at `1.0.0`; nothing else in this file's contract moved.
+A `0.3.1` invocation, script or import that relied on any of the following stops working, or observes a different shape, at `1.0.0`. Beyond this table, the sole remaining movement in this file's contract is the `-o table` row under `## Output contract`, which no longer describes an ANSI-styling behaviour the renderer never had.
 
 | In 0.3.1 | In 1.0.0 | What to change |
 |---|---|---|
@@ -70,10 +70,11 @@ A `0.3.1` invocation, script or import that relied on any of the following stops
 | `PdfToolkitError` as the public base exception | `PdfToolingError` | update any `except`/`import` naming the old class |
 | `info` on a nonexistent input nested the failure inside `documents[0].error` | the same input returns a top-level `error` key and no `documents` key | read `error` at the top level; the exit code stays `4` |
 | `convert --dry-run` over a batch containing an item the real run fails on predicted a clean batch | the preview now predicts the real run's own exit code and per-item `ok` | do not trust a `--dry-run` result captured before the upgrade |
+| `--no-color`, and the `NO_COLOR` environment variable it honoured | removed — the flag is not declared, so passing it is an unknown-flag usage error that exits `2` carrying the usual envelope, and `NO_COLOR` is read nowhere | drop both from any script, alias or CI job. Neither ever changed a byte of output: this tool emits no ANSI styling at all, deliberately |
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
-Re-derived at `78941e1` on `2026-09-15`.
+Re-derived at `d3fca0c` on `2026-09-15`.
 
 ## What exists today
 
@@ -115,7 +116,7 @@ Rendered payloads go to **stdout**; diagnostics, warnings and progress go to **s
 
 | Shape | Behaviour |
 |---|---|
-| `-o table` | An aligned, plain-text table. No colour when `--no-color` is passed, when `NO_COLOR` is set, or when the stream is not a terminal. |
+| `-o table` | An aligned, plain-text table. |
 | `-o json` | One object, carrying `schema_version`. |
 | `-o ndjson` | One object per item, one per line, **each line carrying its own `schema_version`** so a single streamed line is self-describing. |
 
