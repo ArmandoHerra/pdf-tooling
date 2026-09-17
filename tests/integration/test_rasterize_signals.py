@@ -63,12 +63,14 @@ docstring calls a best-effort, not a guaranteed, property.
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing
 import os
 import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -125,9 +127,35 @@ _SIGNAL_AT_COUNT = _PAGE_COUNT // 2
 #: whole package) plus its first render can cost real seconds on a loaded CI
 #: VM, and this is waiting for HALF the run, not one page.
 _PROGRESS_TIMEOUT_S = 60.0
+#: The p95 of the PARENT's own teardown overhead -- everything
+#: `_terminate_pool` pays ON TOP of its grace window: the SIGKILL sweep, the
+#: joins, `shutdown(wait=False)` and interpreter exit.
+#:
+#: PDF-78, MEASURED rather than assumed, on the same instrumented shadow copy
+#: and the same 20-teardown protocol that derived `TEARDOWN_GRACE_S`, at the
+#: heaviest declared load (`L5` = 5 x cpu_count, loadavg 42.67-67.12):
+#: p95 0.327 s, max 0.521 s. At L2 it is 0.199 s and at L0 0.087 s -- i.e. it
+#: is an order of magnitude smaller than the grace and it barely moves with
+#: load, which is what makes the bound below mostly a statement about the
+#: grace.
+_PARENT_OVERHEAD_P95_S = 0.327
 #: `ops/procpool.py::TEARDOWN_GRACE_S` is paid in full on every signalled
-#: teardown (see that module's docstring), so this must clear it with room
-#: for process spawn/reap overhead on top.
+#: teardown -- MEASURED, not inferred: 8 of 8 workers were still alive when
+#: that module's grace loop reached its deadline in all 60 teardowns PDF-78
+#: sampled across three declared loads. So this must clear it with room for
+#: process spawn/reap overhead on top, and it is now DERIVED FROM IT rather
+#: than picked: `TEARDOWN_GRACE_S` (16.0) + `_PARENT_OVERHEAD_P95_S` (0.327)
+#: = 16.327 s, and
+#: `tests/unit/test_procpool.py::test_the_grace_fits_inside_the_parent_exit_bound`
+#: reddens by name the day a raised grace stops fitting.
+#:
+#: THE VALUE IS HELD AT 25.0 AND NOT NARROWED TO 17, and that is a decision
+#: rather than an omission. This is a BOUND, not a budget: it is paid only on
+#: pathology, so its size costs no wall-clock on any run that works, while
+#: shrinking it to hug the measurement would convert the next load spike into
+#: a NEW flake -- which is the exact defect this spec exists to remove. It may
+#: not be WIDENED to make room for a grace that does not fit (that would be
+#: the forbidden move one file over); it is simply not required to shrink.
 _PARENT_EXIT_TIMEOUT_S = 25.0
 _SETTLE_S = 1.0
 #: PDF-21/AC11: how long the enumerated-survivor check polls. Under SIGKILL
@@ -136,6 +164,205 @@ _SETTLE_S = 1.0
 #: a single sample is a race. This is a bound on a teardown that is expected
 #: to complete in milliseconds, not a probability judgment.
 _SURVIVOR_TIMEOUT_S = 10.0
+
+
+# --------------------------------------------------------------------------- #
+# PDF-78 D2 -- THE DECLARED LOAD.
+#
+# AMBIENT LOAD IS NOT A TEST CONDITION. Every recorded occurrence of the stray
+# flake this harness exists for happened under load nobody created on purpose --
+# three overlapping agent pytest runs on an 8-cpu box, a foreign `make ci` from
+# another checkout. A `qa-sentinel` cannot re-drive that, and a number derived
+# under it is evidence about one afternoon. So the contention is GENERATED here,
+# sized as a multiple of `cpu_count` rather than as an absolute loadavg (the core
+# count is part of every figure, so a declaration of "2" transfers to a host with
+# a different one), and the harness REFUSES a load band on a host it measures as
+# quiet -- `perf/README.md`'s own `quiet` predicate with its sign flipped, which
+# is exactly why this inverted rule cannot live in `perf/` beside a rule that
+# says a `quiet: false` record is inadmissible as a baseline.
+#
+# OPT-IN, AND NOT A STANDING GATE ARM (D7.5). Unset -- the default, and what
+# every CI leg does -- this fixture starts nothing, samples nothing and costs
+# nothing; the four arms below run byte-identically to before this spec. Set, it
+# is the REPRODUCIBLE form of the stimulus the ledger row recorded:
+#
+#     PDF_TOOLING_DECLARED_LOAD=2 uv run pytest \
+#         tests/integration/test_rasterize_signals.py -q -p no:randomly -n0
+#
+# `-n0` is part of the recipe and not an aside: under `-n auto` each xdist worker
+# would start a cohort of its own and the real load would be a multiple of the
+# declared one. The loadavg actually observed is printed at start, peak and end,
+# so an over-loaded run is visible in the record rather than silent.
+#
+# BANDS, both derived from what the ledger recorded rather than chosen:
+#   L2  2 x cpu_count -- the REPRODUCTION band (2026-09-15, loadavg ~12-17 on 8
+#                        cpus). A repair validated only against a heavier load
+#                        has not addressed the failure that actually last happened.
+#   L5  5 x cpu_count -- the DERIVATION band (2026-09-05, loadavg 34-44).
+#   L0  0             -- the DISCRIMINATION control. Without it a green run is a
+#                        number, not evidence: alternated pairs in a quiet window
+#                        gave 0/5 on both arms BEFORE any change.
+#
+# IT NEVER ABSTAINS, and that is the whole point. A band it cannot establish is a
+# FAILURE, never a skip. An arm that abstains under load has not survived a
+# loaded host; it has learned to recognise one.
+#
+# THE GENERATOR IS STDLIB AND HONEST ABOUT WHAT IT DOES NOT MODEL. Busy loops
+# create CPU contention; the recorded occurrences also carried memory pressure,
+# page-cache churn and competing I/O from concurrent pytest runs. The declared
+# load is therefore a LOWER BOUND on the hostility of the real band, and any
+# value derived under it inherits that conservatism in the unhelpful direction.
+# --------------------------------------------------------------------------- #
+
+#: The operator's declaration: `L`, a multiple of `cpu_count`. Absent or empty
+#: means "generate nothing", which is the default and is what CI runs.
+_DECLARED_LOAD_ENV = "PDF_TOOLING_DECLARED_LOAD"
+
+#: How long to let the 1-minute loadavg rise into the declared band before the
+#: arms start. The kernel's figure is an exponential moving average with a
+#: 60-second time constant, so a cohort started and measured immediately reports
+#: the load of the minute BEFORE it existed -- which is how a declared-load
+#: harness comes to record a band it never actually applied. A CEILING, not a
+#: cost: the ramp ends the moment the band floor below is reached.
+_LOAD_RAMP_S = 300.0
+
+#: The fraction of the cohort's own asymptote that counts as "the band was
+#: applied". `L x cpu_count` busy loops drive the 1-minute average toward
+#: `L x cpu_count`, so this floor is 12 at `L2` and 30 at `L5` on an 8-cpu host
+#: -- which is where the ledger's two recorded failure bands (12-17 and 34-44)
+#: actually sit.
+#:
+#: THIS EXISTS BECAUSE THE FIRST VERSION OF THIS FIXTURE WAS WRONG, and the
+#: error is worth keeping visible: it ramped only until the host stopped being
+#: QUIET, and `quiet` is `loadavg <= 0.25 x cpu_count`, i.e. 2.0 here. So it
+#: declared `L2`, ramped for four seconds, recorded `quiet: false` at loadavg
+#: 2.26 and ran the arms at a twentieth of the declared band -- a harness that
+#: reports the load it was ASKED for rather than the load it APPLIED, which is
+#: the exact failure mode `perf/README.md`'s `quiet` field exists to prevent.
+#: Caught by driving it and reading its own printed loadavg.
+_BAND_FLOOR_FRACTION = 0.75
+
+#: Long enough that the cohort outlives any drive; the fixture reaps it in a
+#: `finally` regardless, and asserts the reap.
+_LOAD_HOLD_S = 3600.0
+
+#: One stdlib busy loop, as a program rather than as a picklable callable: a
+#: `subprocess` cohort needs no start method, pickles nothing, and cannot fail to
+#: import this module inside a child -- and it leaves nothing for
+#: `multiprocessing`'s resource tracker to inherit into the render pool's own
+#: process group, which this file spends its docstring keeping clean.
+_BURN_PROGRAM = (
+    "import sys, time\n"
+    "deadline = time.monotonic() + float(sys.argv[1])\n"
+    "value = 0\n"
+    "while time.monotonic() < deadline:\n"
+    "    for _ in range(200000):\n"
+    "        value = (value * 1103515245 + 12345) & 0x7FFFFFFF\n"
+)
+
+
+def _host_is_quiet() -> bool:
+    """``perf/README.md``'s own predicate, in its loadavg half.
+
+    That document derives `quiet` as ``loadavg_start <= 0.25 * cpu_count`` AND
+    no foreign non-descendant process at or above 25 % cpu. Only the first half
+    is computable from here without a process table walk, and it is the half
+    that decides this measurement: a cohort of `L x cpu_count` busy loops moves
+    loadavg by construction, so a host that still reports quiet after the ramp
+    is a host where the cohort did not start.
+    """
+    return os.getloadavg()[0] <= 0.25 * (os.cpu_count() or 1)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def declared_load() -> Iterator[None]:
+    """Generate, hold and reap the declared load; refuse a band it cannot apply.
+
+    Yields immediately and starts nothing when `$PDF_TOOLING_DECLARED_LOAD` is
+    unset, which is the default posture and the one CI runs.
+    """
+    raw = os.environ.get(_DECLARED_LOAD_ENV, "").strip()
+    if not raw:
+        yield
+        return
+
+    multiple = float(raw)
+    cpus = os.cpu_count() or 1
+    cohort_size = int(round(multiple * cpus))
+    cohort: list[subprocess.Popen[bytes]] = []
+    observed: list[float] = []
+    try:
+        for _ in range(cohort_size):
+            cohort.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", _BURN_PROGRAM, str(_LOAD_HOLD_S)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            )
+        band_floor = _BAND_FLOOR_FRACTION * multiple * cpus
+        ramp_until = time.monotonic() + (_LOAD_RAMP_S if cohort_size else 0.0)
+        while time.monotonic() < ramp_until and os.getloadavg()[0] < band_floor:
+            observed.append(os.getloadavg()[0])
+            time.sleep(2.0)
+
+        at_start = os.getloadavg()[0]
+        observed.append(at_start)
+        quiet = _host_is_quiet()
+        if cohort_size and quiet:
+            pytest.fail(
+                f"declared load L={multiple} started {cohort_size} busy process(es) and "
+                f"the host still measures QUIET after {_LOAD_RAMP_S}s "
+                f"(loadavg {at_start:.2f} <= 0.25 x {cpus}). Refusing to record a loaded "
+                f"band on a quiet host -- a measurement taken here would be reported as "
+                f"contention and would be nothing of the kind"
+            )
+        if cohort_size and at_start < band_floor:
+            pytest.fail(
+                f"declared load L={multiple} started {cohort_size} busy process(es) but "
+                f"the 1-minute loadavg only reached {at_start:.2f} in {_LOAD_RAMP_S}s, "
+                f"short of the {band_floor:.1f} floor this declaration means. The band "
+                f"was NOT applied, so nothing measured here is a measurement of it -- "
+                f"and reporting it as one is how a harness comes to certify a load it "
+                f"never generated"
+            )
+        if not cohort_size and not quiet:
+            pytest.fail(
+                f"declared load L=0 is the QUIET control and the host measures LOUD "
+                f"(loadavg {at_start:.2f} > 0.25 x {cpus}). The discrimination control "
+                f"has to run on a quiet host or it discriminates nothing"
+            )
+        print(
+            f"PDF-78 declared load: L={multiple} cohort={cohort_size} cpu_count={cpus} "
+            f"loadavg_start={at_start:.2f} quiet={quiet}"
+        )
+        yield
+        at_end = os.getloadavg()[0]
+        observed.append(at_end)
+        print(
+            f"PDF-78 declared load: L={multiple} loadavg_peak={max(observed):.2f} "
+            f"loadavg_end={at_end:.2f}"
+        )
+    finally:
+        for burner in cohort:
+            if burner.poll() is None:
+                burner.terminate()
+        for burner in cohort:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                burner.wait(timeout=10)
+        survivors = [burner.pid for burner in cohort if burner.poll() is None]
+        for burner in cohort:
+            if burner.poll() is None:  # pragma: no cover - SIGTERM is enough here
+                burner.kill()
+                burner.wait(timeout=10)
+        # Counted, not hoped for. An orphaned busy-loop cohort would poison every
+        # subsequent measurement taken on this box, and the symptom would look
+        # like somebody else's flake.
+        assert survivors == [], (
+            f"the declared-load cohort did not reap: {survivors} still alive after "
+            f"SIGTERM. They have been SIGKILLed, but any measurement taken on this "
+            f"host in the meantime is contaminated"
+        )
 
 
 def _make_source(directory: Path, *, pages: int = _PAGE_COUNT) -> Path:
@@ -274,7 +501,25 @@ def _assert_clean_signal_death(
     )
 
     # (e) The fix must not trade orphaned processes for orphaned temp files.
-    assert strays == (), f"stray .pdftoolkit-* temp file(s) left behind: {strays}"
+    #
+    # PDF-78 D7.2: the COUNT is recorded on every drive, red or green, because
+    # one stray and six strays are different observations and the shipped
+    # assertion rendered both as a tuple nobody counted. The ledger row records
+    # an occurrence leaving FOUR at once; this spec's own pre-fix control at a
+    # declared `L2` left SIX. A single file at the margin reads as a knife-edge
+    # race; a whole cohort missing the window together is what a load spike
+    # does, and it is what actually happens here.
+    #
+    # The ASSERTION is untouched -- still an equality against zero, after the
+    # same settle discipline, still naming the paths. This is a reporting
+    # change; `len(strays) <= 1` would be the forbidden shape.
+    print(
+        f"PDF-78 stray census: {sig.name} strays={len(strays)} "
+        f"paths={tuple(str(path) for path in strays)}"
+    )
+    assert strays == (), (
+        f"{len(strays)} stray .pdftoolkit-* temp file(s) left behind after {sig.name}: {strays}"
+    )
 
     # T4: zero surviving workers, by the same portable check
     # `adapters/subprocess_util.py` already uses for its own group teardown.

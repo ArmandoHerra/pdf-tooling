@@ -222,7 +222,96 @@ def _mp_context() -> multiprocessing.context.BaseContext:
 #: it is not merely a ceiling; treat raising it as directly, linearly
 #: costing wall-clock, and consider it money well spent against residue
 #: rather than a knob to shrink casually.
-TEARDOWN_GRACE_S: Final[float] = 6.0
+#:
+#: ------------------------- PDF-78: THE MEASUREMENT -------------------------
+#: EVERYTHING ABOVE THIS LINE IS WHY 6.0 WAS PLAUSIBLE. It was never measured
+#: against the variable that actually moves this quantity, and the constant's own
+#: history is the argument for the block below: `[B-055]` tripled it BY HAND
+#: (2s -> 6s, 2026-08-30) to make one red CI leg green; that bought FOUR DAYS,
+#: and the same stray-temp assertion has reddened five times since, on both
+#: platforms. A second bump would be the same move against the same defect with
+#: the same evidence base. So this value is now the OUTPUT OF A RULE applied to a
+#: measurement taken under a DECLARED, GENERATED, REPRODUCIBLE load. Nothing
+#: about the number was chosen; only the measurement was.
+#:
+#: WHAT WAS MEASURED -- `T_unwind`, per worker: the interval from the SIGTERM
+#: `_terminate_pool` sends to the instant that worker has completed
+#: `AtomicWriter.__exit__`'s discard of whatever temp file it held open. NOT the
+#: parent's teardown wall-clock (that is `grace_s` by construction) and NOT the
+#: time to worker exit (which never happens on its own). Sampled on an
+#: INSTRUMENTED SHADOW COPY driven through `PYTHONPATH`, never in this tree, with
+#: a deliberately oversized 40 s window so that NOTHING was censored -- a sample
+#: truncated at the very window being derived would derive itself.
+#:
+#: STATISTIC:    pooled per-worker `max`, x 1.25. THE STATISTIC IS PART OF THE
+#:               NUMBER, and it is `max` rather than the house's p95 because of
+#:               the NUMBER OF DRAWS this window must survive: `--threads 8` x 3
+#:               signalled arms = 24 independent draws per suite execution, so a
+#:               per-worker coverage p is green p**24 of the time -- 0.95**24 =
+#:               0.29, 0.99**24 = 0.79. A percentile borrowed from a
+#:               single-measurement budget (`STARTUP_BUDGET_MS`) would be honest,
+#:               well-recorded, and red seven runs in ten. THE SHIPPED 6.0 IS
+#:               THAT ERROR ALREADY MADE: it covers 77.5 % of the 160 samples
+#:               below, and 0.775**24 = 0.0022.
+#: DATE:         2026-09-17
+#: COMMIT:       48b093d0685327ad649bd693ceab3f7b2c8c7638 -- measured on the
+#:               UNMODIFIED tree at that commit; the instrumentation existed only
+#:               in the shadow copy and is in no file in this repository.
+#: HOST:         Linux-7.0.0-31-generic x86_64, 8 cpus
+#: INTERPRETER:  CPython 3.12.13, resolved through this repository's own `.venv`,
+#:               never the system `python3`
+#: ENGINES:      tesseract AND soffice both present on PATH -- recorded because
+#:               the token set demands it, not because either moved the number:
+#:               `rasterize` reaches neither.
+#: LOAD:         L5 = 5 x cpu_count = 40 stdlib busy-loop SUBPROCESSES, started
+#:               before the trial, ramped, held through it, reaped after and the
+#:               reap COUNTED. Declared as a MULTIPLE of `cpu_count`, never as an
+#:               absolute loadavg, so the declaration transfers to a host with a
+#:               different core count. loadavg 34.38 start / 75.15 peak / 47.78
+#:               end; per trial 42.67-67.12. **quiet: false, ASSERTED** --
+#:               the harness REFUSES to record a load band on a host it measures
+#:               as quiet by `perf/README.md`'s own predicate. That is `perf/`'s
+#:               rule with its sign flipped, which is why this derivation lives
+#:               here and not there.
+#: TRIALS:       20 signalled teardowns x 8 workers = 160 pooled per-worker
+#:               samples. 1 sample was 0 -- that worker held no open writer
+#:               when the signal landed -- and are RETAINED, not dropped:
+#:               dropping the zeros measures the conditional distribution and
+#:               over-derives the window. 0 censored.
+#: DISTRIBUTION: min 0.000 / median 4.929 / p95 11.414 / max 12.407 s,
+#:               spread 12.407 s
+#:
+#: 12.407 x 1.25 = 15.509 -> rounded up to the next 0.5 s = 16.0
+#:
+#: THE CONTROL, because a measurement with no control is a number and not
+#: evidence. The identical protocol at two other declared loads:
+#:   L0 (quiet, loadavg 0.13-1.21): min 0.338 / median 0.564 / p95 0.637 /
+#:      max 0.705 s over 160 samples, 0 strays
+#:   L2 (2 x cpu_count, loadavg 15.64-19.05): min 0.096 / median 2.185 /
+#:      p95 2.942 / max 3.275 s over 160 samples, 0 strays
+#: The order of magnitude between L0 and L5 is what says this instrument reads
+#: CONTENTION rather than a constant.
+#:
+#: WHAT IT COSTS, STATED RATHER THAN DISCOVERED LATER. 36 of the 160 L5
+#: samples exceed the old 6.0; none exceeds 16.0. Restricted to the 34-44 loadavg
+#: band the ledger itself recorded (56 samples) the max is 6.207 s and this
+#: same rule would have produced 8.0 -- the generated cohort ran HOTTER than
+#: that band, because the eight render workers sit on top of it, so this number
+#: is CONSERVATIVE and the cheaper one is recorded beside it rather than quietly
+#: preferred. And the window is paid IN FULL on every signalled teardown --
+#: MEASURED, not inferred: 8 of 8 workers were still alive when the loop reached
+#: its deadline in all 60 teardowns across all three loads -- so this is
+#: 3 x (16.0 - 6.0) = 30.0 s of added worker-serial teardown per suite run.
+#:
+#: AND THE CEILING IT MUST FIT INSIDE. The measured p95 parent overhead at L5 is
+#: 0.327 s, so 16.0 + 0.327 = 16.327 s against the 25.0 s bound in
+#: `tests/integration/test_rasterize_signals.py::_PARENT_EXIT_TIMEOUT_S`, which
+#: bounds the parent's whole exit. That bound may NOT be widened to make room for
+#: a grace that does not fit -- widening it would be this same forbidden move one
+#: file over -- and
+#: `tests/unit/test_procpool.py::test_the_grace_fits_inside_the_parent_exit_bound`
+#: reddens by name if a later grace stops fitting.
+TEARDOWN_GRACE_S: Final[float] = 16.0
 
 #: Poll interval while waiting out `TEARDOWN_GRACE_S`.
 _POLL_S: Final[float] = 0.05
