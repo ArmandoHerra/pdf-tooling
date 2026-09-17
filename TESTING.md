@@ -61,7 +61,7 @@ contract.
 `tests/registry.py::discover_verbs()` walks the **live** Typer command tree
 with no skip list, no filter and no hard-coded verb name — a new verb is
 covered automatically the next time the suite runs. `tests/test_cli_contract.py`
-parameterizes 26 checks (`--help`, exit codes, dry-run purity,
+parameterizes 27 checks (`--help`, exit codes, dry-run purity,
 no-clobber, JSON-on-a-pipe, bulk non-TTY posture, PDF-36's pair of
 non-substitutable arms — no traceback from a malformed operand, no heap
 address in a rendered message — PDF-40's batch-continuation sweep,
@@ -69,7 +69,8 @@ PDF-38's `.bak` sidecar prediction over every `--in-place` verb,
 PDF-50's dangling-symlink twin of the same sidecar tier, PDF-51's
 run-scoped error-envelope shape row over a nonexistent operand, and
 PDF-53's `convert` dry-run/real-run exit-code mirror over a corrupt
-operand, and PDF-67's engine-blind disclosure row) over that discovery.
+operand, PDF-67's engine-blind disclosure row, and PDF-76's no-clobber
+row over the `--out-dir`-only producers) over that discovery.
 
 **The batch continuation contract.** A `--out-dir` batch records a failing input
 and carries on, so `tests/test_batch_continuation.py` drives every verb in the

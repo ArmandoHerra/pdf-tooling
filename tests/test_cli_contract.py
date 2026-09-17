@@ -171,6 +171,34 @@ PRODUCING = tuple(
 #: superset by construction) rather than MUTATING directly.
 OUTPUT_CONSUMING_MUTATING = tuple(verb for verb in PRODUCING if "--output" in verb.consumes)
 
+#: PDF-76, C27's population -- the SET DIFFERENCE `PRODUCING -
+#: OUTPUT_CONSUMING_MUTATING`, spelled as the predicate COMPLEMENT of the
+#: narrowing directly above so the two cannot disagree by construction. One
+#: definition of "producing" in this module and now two narrowings of it, never
+#: a third derivation.
+#:
+#: WHY A SIBLING EXISTS AT ALL. C11 is parameterized over the 19 leaves that
+#: declare `--output`; the five `consumes == ()` leaves are covered by the
+#: AC8/`B-115` refusal grid in `tests/test_cli_spine.py`. 19 + 5 = 24 against a
+#: surface of 26, and the remainder is exactly the two MULTI-FILE producers,
+#: which declare `('--out-dir', '--name')` and never `--output`. Neither
+#: existing population is wrong: a boundary drawn for one property
+#: (`--output` consumption) was silently deciding the coverage of a different
+#: one (overwrite safety), and the two verbs fell through the seam.
+#:
+#: NOT `OUT_DIR_BATCH`, and the reason is FITNESS rather than provenance
+#: (`PDF-64`'s lesson: a correctly shipped, correctly derived population can
+#: still be the wrong one). `out_dir_batch_verbs()` filters on OPERAND ARITY,
+#: which is irrelevant to overwrite safety -- it OMITS `split`, the headline
+#: verb, and INCLUDES nine verbs C11 already drives. The property here is
+#: "declares a destination flag, but not `--output`", which is this set
+#: difference and nothing else.
+#:
+#: NOT WIDENING C11 INSTEAD. Widening its population to `PRODUCING` would drive
+#: `-O` at a verb that does not consume it -- exit 2, not 5 (E13/AC29) --
+#: converting a no-clobber row into a usage-error row on these two leaves.
+OUT_DIR_ONLY_PRODUCING = tuple(verb for verb in PRODUCING if "--output" not in verb.consumes)
+
 #: PDF-38 / `6af2411c9e`, C22 — every verb that CONSUMES `--in-place`, and the
 #: `.bak` sidecar tier this product predicted wrong on all of them.
 #:
@@ -1122,6 +1150,198 @@ def test_c12_json_on_a_pipe_by_default(verb, corpus, tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert "schema_version" in payload
+
+
+# --------------------------------------------------------------------------- #
+# C27 -- (reg) no-clobber at the MULTI-FILE producers: `--out-dir` verbs that
+# never declare `--output`. C11's SIBLING, not a widening of it (see
+# `OUT_DIR_ONLY_PRODUCING`'s own note for why widening would answer 2, not 5).
+#
+# TWO CLAIMS, AND ONLY THE SECOND IS THE SAFETY PROPERTY. "It refused" and "it
+# refused WITHOUT WRITING" are different statements, and the exit code cannot
+# tell them apart: `AtomicWriter._plan` calls `ensure_no_clobber` per target
+# too, so deleting `plan_output_set`'s pre-flight loop leaves the exit code at
+# 5 and moves the refusal MID-STREAM -- items 0 and 1 land, then item 2
+# refuses. A code-only row is fully green while the product writes files
+# during a refusal. The tree snapshot is what separates them, and it is this
+# row's real subject.
+#
+# WHAT THIS ROW DELIBERATELY DOES NOT COVER. `check_output_collisions`
+# (`safety/paths.py`) shares exit 5 and shares the exit-code table's sentence,
+# and `--force` is NOT its remedy -- forcing two planned outputs onto one
+# destination still destroys one of them. A `--force` arm over it would encode
+# a contract this product does not have, so it is excluded BY DECISION rather
+# than by oversight, and is carried as an open scope question.
+# --------------------------------------------------------------------------- #
+
+#: `ensure_no_clobber`'s own words for the OCCUPANCY refusal (`safety/paths.py`),
+#: asserted instead of the exit code because **exit 5 is OVERLOADED five ways on
+#: this product** and neither the code nor the envelope's `path` discriminates:
+#:
+#:   1. this one              -- "<target> exists; pass --force to overwrite it"
+#:   2. the OR-1 TOCTOU half  -- "<target> appeared while the write was in
+#:                               flight; pass --force to overwrite it"
+#:   3. planned collision     -- "two planned outputs resolve to one destination"
+#:   4. bulk non-TTY (PDF-84) -- "stdin is not a terminal"  (`_GATE_SIGNATURE`)
+#:   5. TTY declined          -- "declined at the confirmation prompt"
+#:
+#: (2) is the trap: it shares `pass --force to overwrite it` verbatim, so the
+#: token has to reach back to `exists;` to name the PRE-FLIGHT refusal rather
+#: than the mid-stream recheck. (4) is the near neighbour `PDF-84` landed --
+#: a bulk `--force` run over an occupied `--out-dir` on a non-TTY now refuses
+#: at 5 from the CONFIRMATION gate, which is a different gate with a different
+#: remedy. A literal, exactly as `_NO_YES_MESSAGE` and `_GATE_SIGNATURE` are
+#: literals: deriving it by provoking the product would make the assertion
+#: vacuous on precisely the binary it exists to catch.
+_CLOBBER_MESSAGE: Final[str] = "exists; pass --force to overwrite it"
+
+
+def _c27_argv(verb, corpus, tmp_path: Path, out_dir: Path) -> list[str]:
+    """The verb's REGISTERED invocation with exactly two values rewritten.
+
+    Never re-typed, so `split`'s required `--each-page` mode flag and the bare
+    form its sibling needs both stay correct with no verb-name branch anywhere
+    in this row -- and a third `--out-dir`-only producer inherits the same
+    treatment with zero author action.
+
+    (1) The leading positional operand becomes a MULTI-PAGE fixture. Both
+    registered builds name a single-page operand, which plans exactly ONE
+    output -- and with a planned set of size 1 the occupant IS item 0, so a
+    mid-stream writer would also have written nothing before refusing and the
+    purity assertion below would pass against the very defect it exists to
+    catch. Three outputs is what makes it discriminating.
+
+    (2) The `--out-dir` value becomes the caller's directory.
+
+    ONE operand, not two, and that is load-bearing rather than incidental:
+    `require_confirmation` computes `bulk = input_count > 1` over INPUTS, and
+    one of these two verbs passes a `BulkContext` to `plan_output_set`. With a
+    second operand the `--force` arm would refuse at 5 from `PDF-84`'s
+    confirmation gate -- a correct refusal from the WRONG gate, which would
+    look exactly like this row failing.
+    """
+    args = list(INVOCATIONS[verb.name].build(corpus, tmp_path))
+    # The registry's own contract: leading positional operands precede the
+    # first flag (`token.startswith("-")` marks a flag -- C13's convention).
+    if not args or args[0].startswith("-"):
+        pytest.fail(
+            f"{verb.name}: the registered invocation leads with {args[:1]!r}, not a "
+            "positional operand -- C27 rewrites argv[0] to a multi-page fixture and "
+            "cannot do so for this shape; give the verb its own arm here, by name"
+        )
+    if "--out-dir" not in args:
+        pytest.fail(
+            f"{verb.name}: derived into OUT_DIR_ONLY_PRODUCING (it declares a destination "
+            "flag but not `--output`) yet its registered invocation spells no `--out-dir` "
+            "-- the population and the builder disagree about this verb's destination"
+        )
+    args[0] = str(corpus.path("multipage_text"))
+    args[args.index("--out-dir") + 1] = str(out_dir)
+    return args
+
+
+def _c27_seeded(verb, corpus, tmp_path: Path) -> tuple[list[str], Path, Path, list[str]]:
+    """``(argv, out_dir, seeded, names)`` -- an out-dir occupied by the LAST
+    planned output, seeded with `_SEED`.
+
+    The occupant's NAME comes from the PRODUCT, never from a re-implementation
+    of `safety/naming.py::render_name`: a throwaway real run is what names the
+    outputs, and this row reads them back off disk. That survives any future
+    change to the default `--name` template, and it does not depend on
+    `--dry-run` being correct -- enumerating the planned set from a dry-run
+    payload would make this no-clobber row red whenever a NEIGHBOUR's
+    prediction tier regressed, and a control that reds for somebody else's
+    defect is a control the next author weakens.
+
+    The LAST name, not the first: seeding item 0 makes the purity assertion
+    vacuous (a per-item writer refusing at item 0 has also written nothing).
+    Seeding the last of three means a mid-stream writer lands items 0 and 1
+    BEFORE refusing, and the tree snapshot reports two added entries.
+    """
+    _skip_unless_engine_available(INVOCATIONS.get(verb.name))
+
+    learn = tmp_path / f"c27-{verb.name}-learn"
+    first = run_cli(verb.name, *_c27_argv(verb, corpus, tmp_path, learn), cwd=tmp_path)
+    if first.returncode != 0:
+        pytest.fail(
+            f"{verb.name}: the transformed registered invocation exited {first.returncode}, "
+            f"not 0, into an EMPTY out-dir -- C27 cannot learn the product's own output "
+            f"names from a run that never completed: {first.stdout}{first.stderr}"
+        )
+    names = sorted(path.name for path in learn.iterdir())
+    if len(names) < 2:
+        pytest.fail(
+            f"{verb.name}: planned {len(names)} output(s) ({names}) from a multi-page "
+            "operand. C27 needs MORE THAN ONE for its purity assertion to discriminate: "
+            "with a single planned output the occupant is item 0, and a mid-stream writer "
+            "would also have written nothing before refusing"
+        )
+
+    out_dir = tmp_path / f"c27-{verb.name}-occupied"
+    out_dir.mkdir()
+    seeded = out_dir / names[-1]
+    seeded.write_bytes(_SEED)
+    return _c27_argv(verb, corpus, tmp_path, out_dir), out_dir, seeded, names
+
+
+@pytest.mark.parametrize("verb", OUT_DIR_ONLY_PRODUCING, ids=_ids(OUT_DIR_ONLY_PRODUCING))
+def test_c27_out_dir_only_no_clobber_refuses_before_writing_anything(
+    verb, corpus, tmp_path: Path
+) -> None:
+    """Arm 1 -- refuse WITHOUT `--force`, and write nothing while doing it."""
+    args, out_dir, seeded, names = _c27_seeded(verb, corpus, tmp_path)
+    before = snapshot(out_dir)
+
+    result = run_cli(verb.name, *args, cwd=tmp_path)
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 5 and _CLOBBER_MESSAGE in combined, (
+        f"{verb.name}: an occupied --out-dir without --force must be refused by the "
+        f"OCCUPANCY gate, carrying {_CLOBBER_MESSAGE!r} -- got {result.returncode}: "
+        f"{combined}"
+    )
+    assert seeded.name in combined, (
+        f"{verb.name}: the refusal does not name the seeded occupant {seeded.name!r}, so "
+        f"it is a refusal about some other target: {combined}"
+    )
+    # THE SAFETY CLAIM, and the only assertion here that a mid-stream writer
+    # fails. `assert_unchanged` reports ADDED entries, which is exactly the
+    # question "did the refused run write any of the OTHER planned outputs?" --
+    # a check that only re-read the occupant would answer "the occupant is
+    # intact", which is true and is not the claim.
+    assert_unchanged(before, snapshot(out_dir))
+    assert seeded.read_bytes() == _SEED, f"{verb.name}: the refused run replaced the occupant"
+    assert sorted(path.name for path in out_dir.iterdir()) == [seeded.name], (
+        f"{verb.name}: the refused run left {sorted(p.name for p in out_dir.iterdir())} in "
+        f"the out-dir; only the seeded occupant may be there (planned: {names})"
+    )
+
+
+@pytest.mark.parametrize("verb", OUT_DIR_ONLY_PRODUCING, ids=_ids(OUT_DIR_ONLY_PRODUCING))
+def test_c27_out_dir_only_force_replaces_the_occupant(verb, corpus, tmp_path: Path) -> None:
+    """Arm 2 -- `--force` succeeds, AND the bytes actually changed.
+
+    Exit 0 alone does not satisfy this: `PDF-64`'s own `--force` arm carries
+    the reason in its message -- *"exit 0 but the target still holds the seeded
+    bytes -- the run reported success without replacing anything"*. A binary
+    that skipped the write entirely would pass a code-only assertion.
+    """
+    args, out_dir, seeded, names = _c27_seeded(verb, corpus, tmp_path)
+
+    result = run_cli(verb.name, *args, "-f", cwd=tmp_path)
+
+    assert result.returncode == 0, (
+        f"{verb.name}: --force over an occupied --out-dir exited {result.returncode}, "
+        f"not 0: {result.stdout}{result.stderr}"
+    )
+    assert seeded.read_bytes() != _SEED, (
+        f"{verb.name}: exit 0 but {seeded.name} still holds the seeded bytes -- the run "
+        "reported success without replacing anything"
+    )
+    assert sorted(path.name for path in out_dir.iterdir()) == names, (
+        f"{verb.name}: --force succeeded but the out-dir holds "
+        f"{sorted(p.name for p in out_dir.iterdir())} against the planned {names}"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -2372,6 +2592,25 @@ POPULATIONS: Final[tuple[Population, ...]] = (
         "a row that still runs, still passes, and can no longer tell a uniform disclosure "
         "from one that only appears on the clean path -- which is the exact defect measured "
         "at `20a3dbc`, where the ledger's rows carried no `detail` at all",
+    ),
+    Population(
+        "OUT_DIR_ONLY_PRODUCING",
+        OUT_DIR_ONLY_PRODUCING,
+        "C27 (both arms)",
+        1,
+        "PDF-76. ONE, NOT TWO, and the difference is the whole argument. Both members "
+        "qualify at `34ca06d` and a floor of 2 would pin today's answer -- but it would "
+        "then fail the day either verb is legitimately retired OR legitimately gains "
+        "`--output` (which correctly MOVES it into OUTPUT_CONSUMING_MUTATING and C11). "
+        "A pin that fails for a CORRECT reason gets weakened by the next author rather "
+        "than investigated, which converts an instrument back into a claim -- "
+        "`DESTRUCTIVE`'s own argument. NECESSARY BUT NOT SUFFICIENT, and this half "
+        "matters more than the floor: zero would make both C27 arms collect zero cases "
+        "and report green having asserted nothing, but the REAL guarantee is the SET "
+        "DIFFERENCE above -- `PRODUCING` minus the `--output` consumers. A hand-written "
+        "pair would satisfy this floor forever while the next `--out-dir`-only producer "
+        "joined the product and not the row, which is exactly the transcription defect "
+        "PDF-75 removed from `destructive` in this same cycle",
     ),
 )
 
@@ -4511,10 +4750,20 @@ def test_c23_a_dangling_sidecar_is_refused_not_crashed(verb, corpus, tmp_path: P
 @pytest.mark.parametrize("verb", DANGLING_SIDECAR_IN_PLACE, ids=_ids(DANGLING_SIDECAR_IN_PLACE))
 def test_c23_the_refusal_holds_under_every_output_shape(verb, corpus, tmp_path: Path) -> None:
     """AC5 / AC6 / AC7 -- `table` is asserted to ITS OWN contract
-    (`README.md:107`), never to `json`'s: rc 5, ZERO bytes on stdout, one
-    `error:` line on stderr. An AC demanding the structured object on stdout
-    under all three shapes contradicts the published contract and is not
-    written (E7).
+    (`README.md:125`, *"Errors are the one deliberate asymmetry"*), never to
+    `json`'s: rc 5, ZERO bytes on stdout, one `error:` line on stderr. An AC
+    demanding the structured object on stdout under all three shapes
+    contradicts the published contract and is not written (E7).
+
+    PDF-76 re-derived that coordinate. It was written as `README.md:107` at
+    `c83ad77` and had drifted TWO sections down by `34ca06d` -- `:107` is a
+    bare code fence now -- because `PDF-79` inserted the `-o table` ruling
+    above it. Nothing caught the drift and nothing would have:
+    `tests/test_docstring_pointers.py` walks `src/` for `tests/**.py`
+    pointers, so a `README.md:<line>` citation inside a test file is checked
+    by no instrument in this repository. The sentence's own words are quoted
+    beside the number here so the NEXT drift is at least self-correcting by
+    grep; making it machine-checkable is filed, not done.
 
     RED, and it must be OBSERVED: asserting a JSON object on stdout under
     `-o table` fails on a CORRECT binary -- driven and recorded once by hand
@@ -4548,7 +4797,7 @@ def test_c23_the_refusal_holds_under_every_output_shape(verb, corpus, tmp_path: 
 
     assert as_table.stdout == "", (
         f"{verb.name}/table: expected ZERO bytes on stdout, got {as_table.stdout!r} -- "
-        "the documented asymmetry (README.md:107) puts the error on stderr under table"
+        "the documented asymmetry (README.md:125) puts the error on stderr under table"
     )
     # A registered cell may ALSO warn on stderr for reasons of its own (e.g.
     # `encrypt` without `--allow` logs a permission-defaults notice before the
