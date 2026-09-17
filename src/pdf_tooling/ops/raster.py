@@ -76,6 +76,7 @@ from pdf_tooling.ports import BROKEN_INSTALL_HINT
 from pdf_tooling.ports.raster import require_raster
 from pdf_tooling.ports.structure import require_structure
 from pdf_tooling.safety.atomic import AtomicWriter, plan_output_set
+from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
 from pdf_tooling.safety.policy import SafetyPolicy
@@ -320,6 +321,7 @@ def rasterize_document(
     out_dir: Path,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """Rasterize every selected page of every source into ``out_dir``.
 
@@ -375,6 +377,7 @@ def rasterize_document(
             template=template,
             out_dir=out_dir,
             policy=policy,
+            confirm=confirm,
         )
     finally:
         resolver.clear()
@@ -394,6 +397,7 @@ def _rasterize_planned(
     template: str,
     out_dir: Path,
     policy: SafetyPolicy,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     rendered: list[tuple[Path, int, Path]] = []
     for index, (source, page_number) in enumerate(planned, start=1):
@@ -419,7 +423,7 @@ def _rasterize_planned(
     # run raises exactly as before (see the block below); a dry run captures
     # the first refusal instead (X-67, extended to a multi-target --out-dir
     # run).
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
+    plan = plan_output_set(targets, out_dir=out_dir, policy=policy, confirm=confirm)
 
     if policy.dry_run:
         # A run-level refusal (an unwritable --out-dir) is not attributable

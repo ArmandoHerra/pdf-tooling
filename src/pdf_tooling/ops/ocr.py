@@ -80,6 +80,7 @@ from pdf_tooling.ports.ocr import OcrEngine, require_ocr
 from pdf_tooling.ports.raster import require_raster
 from pdf_tooling.ports.structure import StructureEngine, require_structure
 from pdf_tooling.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
+from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
 from pdf_tooling.safety.policy import SafetyPolicy
@@ -253,6 +254,7 @@ def ocr_run(
     in_place: bool,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """OCR every source, one output per input, in input order.
 
@@ -285,7 +287,7 @@ def ocr_run(
     # spawns tesseract to find that out (the same ordering rationale
     # `ensure_destination_writable`'s own docstring states: "before an
     # engine runs").
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf", confirm=confirm)
 
     structure_engine = require_structure()
     resolver = PasswordResolver(password)

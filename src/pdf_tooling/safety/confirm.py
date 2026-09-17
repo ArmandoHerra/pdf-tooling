@@ -73,16 +73,47 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TextIO
 
 from pdf_tooling.errors import ConfirmationDeclinedError, ConfirmationRequiredError
 from pdf_tooling.safety.policy import SafetyPolicy
 
-__all__ = ["require_confirmation"]
+__all__ = ["BulkContext", "require_confirmation"]
 
 #: Answers that mean yes. Everything else, including empty input, means no —
 #: the prompt defaults to No because the expensive mistake is the other way.
 _AFFIRMATIVE = frozenset({"y", "yes"})
+
+
+@dataclass(frozen=True, slots=True)
+class BulkContext:
+    """The two facts the filesystem planner cannot know, carried down from L1.
+
+    The clobber half of "destructive" is only computable where the complete,
+    resolved target set exists — ``safety/atomic.py::plan_output_set``, the one
+    shared planner every ``--out-dir`` batch verb routes through. Two of
+    :func:`require_confirmation`'s arguments are genuinely NOT the planner's to
+    know, and neither may be inferred there:
+
+    * :attr:`input_count` — the planner sees TARGETS, and ``bulk`` is more than
+      one **input** (``PLAN.md`` §5.3). ``tables`` turns two inputs into six
+      targets and a single input into three, so counting targets would fire this
+      gate on a one-input run and silently decide ``B-022``'s deferred 1->N
+      question. It is passed, never derived.
+    * :attr:`rerun_hint` — this module never reads ``sys.argv`` (see the module
+      docstring), and ``safety/`` below it must not either.
+
+    A carrier rather than an eighth ``SafetyPolicy`` field, deliberately:
+    ``PLAN.md`` §6 pins that dataclass at seven fields, and neither of these is
+    a posture — they are facts about one invocation's operands and spelling.
+    """
+
+    input_count: int
+    """How many inputs the invocation resolved to. Never a target count."""
+
+    rerun_hint: str
+    """The exact command to re-run, already ending in ``-y``."""
 
 
 def require_confirmation(

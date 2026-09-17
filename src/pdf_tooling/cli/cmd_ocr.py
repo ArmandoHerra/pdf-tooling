@@ -37,7 +37,12 @@ from typing import Annotated, Final
 
 import typer
 
-from pdf_tooling.cli.common import get_config, global_options, operand_argument
+from pdf_tooling.cli.common import (
+    bulk_context,
+    get_config,
+    global_options,
+    operand_argument,
+)
 from pdf_tooling.cli.password import ENV_PASSWORD, plan_password
 from pdf_tooling.errors import UsageError
 from pdf_tooling.ops.batch import preflight_operands
@@ -211,6 +216,13 @@ def ocr_command(
         in_place=config.in_place,
         policy=config.safety,
         password=password,
+        # PDF-84 / B-345: the clobber limb of the bulk-destructive gate. The
+        # set of targets this run would overwrite is only knowable where the
+        # complete resolved target list is -- the shared planner -- so L1
+        # hands down the two facts that layer cannot know and never the
+        # verdict. Passed UNCONDITIONALLY: deciding here whether the run is
+        # destructive is the mistake this item exists to undo.
+        confirm=bulk_context(len(sources)),
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

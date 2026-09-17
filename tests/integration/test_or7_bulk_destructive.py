@@ -309,3 +309,142 @@ def test_or7_with_y_the_engine_tier_answers_in_both_runs(
         f"dry={dry.returncode} real={real.returncode}: "
         f"{dry.stdout}{dry.stderr} / {real.stdout}{real.stderr}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-84 (`X-772`'s required criterion, `X-781`'s ratified +1, `X-782`'s pinned
+# instrument) -- `convert` AND `ocr` refuse on an OCCUPIED `--out-dir`.
+#
+# WHY THIS PAIR NEEDS AN ARM AT ALL. `engine_blind_verbs() & BATCH_VERBS` is
+# exactly these two, and they are precisely the pair
+# `tests/test_batch_continuation.py`'s INERT_GATE_VERBS deliberately excludes.
+# An inertness arm over the full population would have asserted that a bulk
+# `--force` run over an occupied `--out-dir` runs IDENTICALLY with and without
+# `-y` -- which is true of `ocr` before PDF-84, and is the defect. A criterion
+# that would have PINNED THE DEFECT AS CORRECT is why `X-772` made this one
+# required, and it is discharged here rather than deferred to a backlog row.
+#
+# WHY ONE NON-PARAMETRIZED FUNCTION AND NOT TWO CELLS. `PDF-82`'s census counts
+# ungated engine-blind drives per module against a frozen ceiling standing at
+# ZERO headroom in all sixteen, and `population()` appends one member per ARM:
+# a single arm naming both verbs costs `+1`, parametrizing over them costs `2`.
+# `X-781` authorized `+1` and stated in terms that `2` is NOT authorized. So the
+# four runs live in one function.
+#
+# WHY NO `@pytest.mark.requires(...)`. Refuted on measurement, not preference:
+# with the engine hidden the refusal below is byte-identical to the
+# engine-present one (PM-measured at 402 bytes, `cmp` clean), so the marker
+# would be a FALSE declaration -- and under `engines-hidden` it does not weaken
+# the arm, it DELETES it, in the `without-engines` job `release.yml:44` gates
+# the tag on. A tag-blocking safety criterion that is vacuous in the tag-gating
+# job is not a criterion. Both engines are hidden here for that reason: the arm
+# must mean the same thing on a host that has them and on one that does not.
+#
+# WHY THE `-y` FLIP IS THE NON-VACUITY HALF (`X-782`). The drafted
+# discriminator -- the same command over an EMPTY `--out-dir` returning 3 -- is
+# a true fact for `convert` and NOT satisfiable for `ocr` via its documented
+# engine-free path: `--skip-text-pages` IS that path, so such a run never enters
+# the engine tier and returns 0. Holding the occupancy CONSTANT and varying only
+# `-y` is the stronger control anyway, and it works for both verbs: without the
+# flag the gate answers 5, with it the engine tier answers 3. Before PDF-84
+# `convert` read 5 -> 3 and `ocr` read 3 -> 3, the engine tier owning both
+# answers because the gate was not there.
+# --------------------------------------------------------------------------- #
+
+#: THE FINGERPRINT for the arm below. Exit 5 is shared by four refusals on this
+#: product and two of them also report `path: null` (the TTY-declined branch,
+#: driven on a real pty), so neither the code nor the path discriminates -- only
+#: the message does.
+_GATE_SIGNATURE: Final = (
+    "refusing a destructive run on",
+    "(stdin is not a terminal)",
+)
+
+
+def _ocr_bulk_clobbering(corpus, tmp_path: Path) -> tuple[list[str], list[Path]]:
+    """`ocr --out-dir <occupied> --force` over TWO inputs.
+
+    The half of "destructive" `ocr` was blind to. Its `--in-place` sibling above
+    covers the other limb and is deliberately left where it is: swapping that
+    member to this builder would reach `+0` on the census by DELETING the
+    `--in-place` coverage, which is the trade the census exists to prevent.
+
+    The `--out-dir` is occupied by writing the target paths DIRECTLY rather than
+    by running the verb once: seeding through `ocr` would need tesseract, and
+    this arm has to run -- and mean the same thing -- with tesseract hidden.
+
+    Deliberately NOT `--skip-text-pages`. That flag is the documented
+    engine-free path, so a run carrying it never reaches the engine demand and
+    the `-y` control below would compare 0 against 0.
+    """
+    sources = []
+    for name in ("or7-ocr-clobber-a.pdf", "or7-ocr-clobber-b.pdf"):
+        destination = tmp_path / name
+        shutil.copy(corpus.path("single_page"), destination)
+        sources.append(destination)
+    out_dir = tmp_path / "or7-ocr-clobber-out"
+    out_dir.mkdir()
+    targets = []
+    for source in sources:
+        target = out_dir / f"{source.stem}.pdf"
+        target.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        targets.append(target)
+    args = [str(sources[0]), str(sources[1]), "--out-dir", str(out_dir), "--force"]
+    return args, targets
+
+
+def test_pdf84_the_clobber_gate_outranks_the_engine_tier_for_both_engine_blind_verbs(
+    corpus, tmp_path: Path
+) -> None:
+    """`convert` and `ocr`, occupied `--out-dir`, `--force`, engines hidden.
+
+    Four runs, one arm. Per verb, holding the occupancy constant:
+
+    * **without `-y`** -> exit 5 carrying BOTH fragments of the gate's own
+      message, and every target byte- and mtime-identical afterwards. The
+      message is the assertion because exit 5 is shared by four refusals on this
+      product and two of them also report ``path: null``;
+    * **with `-y`** -> exit 3, ``kind: "engine_missing"``. This is the half that
+      makes the first mean something: it proves the engine's absence is
+      genuinely REACHABLE on this exact command, so the refusal above is the
+      gate outranking the engine tier and not the engine being irrelevant.
+
+    RED before PDF-84: the `ocr` legs read 3 -> 3, both answers owned by the
+    engine tier because the gate never fired. The `convert` legs read 5 -> 3
+    then and must still read 5 -> 3 now -- `cli/cmd_office.py:147`'s L1 call
+    site is byte-identical in PDF-84's diff, so a regression there is this arm's
+    to catch.
+    """
+    for verb, binary, build in (
+        ("ocr", "tesseract", _ocr_bulk_clobbering),
+        ("convert", "soffice", _convert_bulk_clobbering),
+    ):
+        args, targets = build(corpus, tmp_path)
+        env = hidden_engine_env(binary, tmp_path=tmp_path)
+        before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in targets}
+
+        refused = run_cli(verb, "-o", "json", *args, env=env, cwd=tmp_path)
+        payload = json.loads(refused.stdout)
+        message = payload.get("error", {}).get("message", "")
+        missing = [fragment for fragment in _GATE_SIGNATURE if fragment not in message]
+        assert (
+            refused.returncode == REFUSED and payload["error"]["kind"] == "refused" and not missing
+        ), (
+            f"{verb}: a bulk --force run over an OCCUPIED --out-dir must refuse at "
+            f"{REFUSED} with the gate's own message (missing {missing}); got "
+            f"{refused.returncode}: {refused.stdout}{refused.stderr}"
+        )
+        for path, (content, mtime) in before.items():
+            assert path.read_bytes() == content, f"{verb}: the refused run rewrote {path.name}"
+            assert path.stat().st_mtime_ns == mtime, f"{verb}: the refused run touched {path.name}"
+
+        confirmed = run_cli(verb, "-o", "json", "-y", *args, env=env, cwd=tmp_path)
+        engine_payload = json.loads(confirmed.stdout)
+        assert confirmed.returncode == ENGINE_MISSING, (
+            f"{verb}: with -y the gate steps aside and the ENGINE tier must own the answer "
+            f"-- {binary} is hidden, so this is {ENGINE_MISSING}, not "
+            f"{confirmed.returncode}. Without this leg the refusal above would be equally "
+            f"consistent with the engine never having been relevant: "
+            f"{confirmed.stdout}{confirmed.stderr}"
+        )
+        assert engine_payload["error"]["kind"] == "engine_missing", engine_payload

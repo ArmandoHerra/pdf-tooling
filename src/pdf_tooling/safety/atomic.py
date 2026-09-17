@@ -169,6 +169,7 @@ from pdf_tooling.errors import (
     TargetExistsError,
 )
 from pdf_tooling.safety._faults import checkpoint
+from pdf_tooling.safety.confirm import BulkContext, require_confirmation
 from pdf_tooling.safety.paths import (
     canonical,
     declared_device,
@@ -177,6 +178,7 @@ from pdf_tooling.safety.paths import (
     ensure_no_clobber,
     nearest_existing_ancestor,
     resolved_device,
+    target_exists,
 )
 from pdf_tooling.safety.policy import SafetyPolicy
 from pdf_tooling.safety.tempnames import TEMP_PREFIX
@@ -445,6 +447,7 @@ def plan_output_set(
     *,
     out_dir: Path | None,
     policy: SafetyPolicy,
+    confirm: BulkContext | None = None,
 ) -> PlannedOutputs:
     """The filesystem tier for a multi-target ``--out-dir`` run (B-054).
 
@@ -502,7 +505,52 @@ def plan_output_set(
     That is :class:`AtomicWriter`'s ``destination``/``target`` pair, which has
     shipped since `PDF-04`, reaching this class's multi-destination sibling —
     **no new expansion site, and no new vocabulary.**
+
+    **PDF-84 (`B-345`): the clobber half of the confirmation gate fires HERE,
+    and it could not have fired anywhere higher.**
+    ``safety/confirm.py::require_confirmation`` computes
+    ``destructive = in_place or bool(clobbered)``, and inside the ten
+    ``--out-dir`` batch verbs nine never put anything on the second limb — so a
+    bulk ``--force`` run over an occupied ``--out-dir`` on a non-TTY overwrote
+    every target unconfirmed, at exit **0**, with ``ok: true`` per item. The
+    remedy is not nine copies of ``cli/cmd_office.py``'s L1 check: ``tables``
+    resolves its target set from the document's CONTENT (two inputs, six
+    targets) and ``rasterize`` from the selected page count, so L1 cannot know
+    either set without doing the work twice. *targets* here is the complete,
+    resolved set for every one of the ten, in both modes, before a byte is
+    written — the only seam where the question is answerable once and correctly.
+
+    ``confirm`` carries the two facts this tier genuinely does not have (see
+    :class:`~pdf_tooling.safety.confirm.BulkContext`). It is **optional** because
+    the single-destination callers below (``meta set``, ``encrypt``, ``repair``
+    and their siblings) gate at L1 on the ``in_place`` limb, which needs no
+    target set; when it is ``None`` this tier is inert and the tier order is
+    byte-for-byte what it was.
+
+    **The existence pass is a SECOND, COLLECTING pass — never a change to
+    :func:`~pdf_tooling.safety.paths.ensure_no_clobber`.** That function returns
+    before testing existence the moment ``--force`` is given, and its refusal
+    semantics are correct and load-bearing (`PDF-80`); the gate needs the set
+    that function declines to compute, not a different refusal from it.
+
+    **The ``in_place`` limb is NOT collected here, and the omission is the
+    design.** Under ``--in-place`` the targets ARE the inputs, so every one of
+    them exists; feeding them to ``clobbered`` would make the gate fire a SECOND
+    time for the five verbs whose L1 call site already passes ``in_place=True``
+    — a duplicate refusal on a non-TTY, and on a terminal a second prompt after
+    the operator had already answered the first. One limb per tier: ``in_place``
+    stays L1's, the clobber set is this one's, and they never overlap.
+
+    **The gate is raised OUTSIDE the ``try`` above, deliberately.** A refusal
+    caught there becomes a per-item ``would_exit`` under ``--dry-run``; this one
+    must stay the top-level error envelope that ``convert``'s L1 call site has
+    always produced, in BOTH modes, so ``dry == real == 5`` holds with the
+    identical payload (OR-7, and ``confirm.py``'s own note on why it never
+    manufactures a plan item). It also raises AFTER the loop, so an earlier
+    filesystem refusal — a target that exists without ``--force`` — keeps its
+    precedence and answers first, exactly as it did before.
     """
+    clobbered: list[str] = []
     try:
         if out_dir is not None:
             resolved_out_dir = canonical(out_dir)
@@ -510,11 +558,20 @@ def plan_output_set(
             if not (policy.dry_run and not resolved_out_dir.exists()):
                 ensure_destination_writable(resolved_out_dir, as_written=out_dir)
         for target in targets:
+            if confirm is not None and not policy.in_place and target_exists(target):
+                clobbered.append(str(target))
             ensure_no_clobber(target, force=policy.force, in_place=policy.in_place)
     except PdfToolingError as refusal:
         if not policy.dry_run:
             raise
         return PlannedOutputs(refusal=refusal)
+    if confirm is not None:
+        require_confirmation(
+            policy,
+            input_count=confirm.input_count,
+            clobbered=tuple(clobbered),
+            rerun_hint=confirm.rerun_hint,
+        )
     return PlannedOutputs(refusal=None)
 
 
@@ -524,6 +581,7 @@ def plan_filesystem(
     out_dir: Path | None,
     policy: SafetyPolicy,
     kind: str,
+    confirm: BulkContext | None = None,
 ) -> PlannedOutputs:
     """The ONE filesystem-tier planner (PDF-18 Design D1), reached by every
     producing verb including `ops/crypto.py`'s divergent former copy.
@@ -585,8 +643,13 @@ def plan_filesystem(
     — *a real run raises at the filesystem tier before the password loop is ever
     reached* — finally true of the fourth condition as well, and refusing on a
     ``.bak`` collision before decrypting a document is the cheaper order too.
+
+    ``confirm`` is passed straight through to :func:`plan_output_set`, which is
+    where `PDF-84`'s clobber gate fires; this wrapper adds no tier of its own for
+    it. See that function's docstring for why the gate lives at the planner and
+    why the ``in_place`` limb is not collected there.
     """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy)
+    plan = plan_output_set(targets, out_dir=out_dir, policy=policy, confirm=confirm)
     if plan.refusal is not None:
         return plan
     if out_dir is None:

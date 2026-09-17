@@ -80,6 +80,7 @@ from pdf_tooling.ports.text import (
     require_tables,
 )
 from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name, used_fields
 from pdf_tooling.safety.paths import check_output_collisions
 from pdf_tooling.safety.policy import SafetyPolicy
@@ -504,6 +505,7 @@ def extract_text_run(
     name_template: str | None,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> TextOutcome:
     """Extract text from every selected page of every source, in input order.
 
@@ -560,7 +562,7 @@ def extract_text_run(
     # identically in both modes -- the same rule `split` follows.
     check_output_collisions(targets)
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="text")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="text", confirm=confirm)
 
     if not planned:
         # PDF-18: `out_dir` is always `None` here (`_plan_text_targets`'s own
@@ -723,6 +725,7 @@ def extract_tables_run(
     name_template: str | None,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> TableOutcome:
     """Detect tables on every selected page of every source, in input order.
 
@@ -806,7 +809,7 @@ def extract_tables_run(
     # The two paths stay distinct, and a test proves they stay distinct.
     check_output_collisions(targets)
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="table")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="table", confirm=confirm)
 
     if not targets:
         # PDF-18/AC13: `tables` is the one verb whose own targets can be

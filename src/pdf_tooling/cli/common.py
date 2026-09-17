@@ -31,6 +31,7 @@ import typer
 from pdf_tooling.errors import UsageError
 from pdf_tooling.output import OutputFormat, auto_format
 from pdf_tooling.output.logging import configure_logging
+from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "UNGOVERNED_FLAGS",
     "CliState",
     "GlobalConfig",
+    "bulk_context",
     "consumed_output_flags",
     "current_error_format",
     "format_from_argv",
@@ -656,6 +658,36 @@ class CliState:
 
     raw: dict[str, Any]
     config: GlobalConfig
+
+
+def bulk_context(input_count: int) -> BulkContext:
+    """The bulk-destructive gate's L1 carrier, built the one way it can be built.
+
+    `PDF-84`. The clobber half of ``destructive`` is decided at
+    ``safety/atomic.py::plan_output_set`` — the one planner that sees every
+    ``--out-dir`` batch verb's complete, resolved target set, in both modes,
+    before a byte is written. Two of the gate's inputs are NOT that layer's to
+    know, and both are already in hand here:
+
+    * **the input count**, because ``bulk`` is more than one **input**
+      (``PLAN.md`` §5.3) and the planner sees targets — ``tables`` turns two
+      inputs into six targets, so a target count would fire the gate on a
+      single-input run;
+    * **the re-run hint**, because reading ``sys.argv`` is a property of being
+      the process entry point and ``safety/`` stays a pure function of its
+      arguments (``safety/confirm.py``'s own docstring).
+
+    Spelled ONCE, here, rather than as nine copies of a four-line idiom in nine
+    ``cmd_*.py`` modules: nine copies of a gate-feeding idiom is precisely the
+    shape that let the clobber limb go unwired on nine verbs in the first place.
+
+    The ``cli.main`` import is local for the reason every other call site's is:
+    ``cli.main`` imports this module at load time to register the commands, so a
+    module-level import would cycle.
+    """
+    from pdf_tooling.cli.main import build_rerun_hint
+
+    return BulkContext(input_count=input_count, rerun_hint=build_rerun_hint())
 
 
 _error_format: OutputFormat | None = None

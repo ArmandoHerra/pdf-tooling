@@ -79,6 +79,7 @@ from pdf_tooling.ports.structure import (
     require_structure,
 )
 from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import (
     check_output_collisions,
@@ -288,6 +289,7 @@ def compress_run(
     in_place: bool,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """Compress every source, one output per input, in input order.
 
@@ -312,7 +314,7 @@ def compress_run(
     # identically in both modes, mirroring `split`'s own AC10 convention.
     check_output_collisions(targets)
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf", confirm=confirm)
 
     if policy.dry_run:
         refusal = plan.refusal

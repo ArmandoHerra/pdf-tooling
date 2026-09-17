@@ -229,45 +229,97 @@ def gating_ratification_complaints(ledger: Sequence[_GatingRatification]) -> lis
     return complaints
 
 
+#: `PDF-82` D4's genesis record, NAMED so the record that follows can derive its
+#: own mapping from it (``{**previous, <one key>: <one value>}``) instead of
+#: re-typing sixteen entries. A re-typed mapping is a mapping a later raise can
+#: drift, and the verifier can only report a drift it is handed; deriving makes
+#: "exactly one key moved" true BY CONSTRUCTION rather than by inspection.
+_PDF_82_GENESIS: Final[_GatingRatification] = _GatingRatification(
+    date="2026-09-16",
+    spec="PDF-82",
+    direction="genesis",
+    ceilings=MappingProxyType(
+        {
+            "tests/integration/test_crypto_roundtrip.py": 1,
+            "tests/integration/test_ocr.py": 7,
+            "tests/integration/test_office.py": 1,
+            "tests/integration/test_or7_bulk_destructive.py": 12,
+            "tests/integration/test_or7_engine_absent.py": 2,
+            "tests/integration/test_out_dir_planning.py": 19,
+            "tests/integration/test_value_shape.py": 17,
+            "tests/test_batch_continuation.py": 24,
+            "tests/test_cli_contract.py": 16,
+            "tests/test_derived_dimensions.py": 2,
+            "tests/test_docs_antirot.py": 1,
+            "tests/test_envelope_contract.py": 20,
+            "tests/test_password_file_contract.py": 5,
+            "tests/unit/test_overlay.py": 1,
+            "tests/unit/test_registry.py": 4,
+            "tests/unit/test_verb_help_content.py": 2,
+        }
+    ),
+    reason=(
+        "GENESIS. The ungated half of the population as MEASURED after PDF-82's "
+        "eighteen marks landed -- 134 items across 16 modules, out of a population "
+        "of 158 -- never predicted. It is a DEBT REGISTER and not an exemption list: "
+        "nothing here is declared engine-free, each entry is a count of arms that "
+        "name an engine-blind verb and declare no engine, and the count may not GROW. "
+        "The population before the marks was the same 158 with 6 gated (PDF-82 E6's "
+        "125 callspec-derived members are 125 of them, of which zero were gated), "
+        "which is the measurement that licensed exactly eighteen marks and no "
+        "nineteenth: the eighteen are the arms `make engines-gate` arm 2 reddened, "
+        "minus tests/test_read_seams.py's residue-ceiling arm, which X-757 rules is "
+        "reporting correctly rather than missing a marker."
+    ),
+)
+
 #: PDF-82 D4 — THE RATIFICATION LEDGER, append-only. The live ceiling below is
 #: the NEWEST record's mapping and never a separately-writable literal.
 ENGINE_GATING_LEDGER: Final[tuple[_GatingRatification, ...]] = (
+    _PDF_82_GENESIS,
     _GatingRatification(
-        date="2026-09-16",
-        spec="PDF-82",
-        direction="genesis",
+        date="2026-09-17",
+        spec="PDF-84",
+        direction="up",
+        ruling="X-781",
         ceilings=MappingProxyType(
-            {
-                "tests/integration/test_crypto_roundtrip.py": 1,
-                "tests/integration/test_ocr.py": 7,
-                "tests/integration/test_office.py": 1,
-                "tests/integration/test_or7_bulk_destructive.py": 12,
-                "tests/integration/test_or7_engine_absent.py": 2,
-                "tests/integration/test_out_dir_planning.py": 19,
-                "tests/integration/test_value_shape.py": 17,
-                "tests/test_batch_continuation.py": 24,
-                "tests/test_cli_contract.py": 16,
-                "tests/test_derived_dimensions.py": 2,
-                "tests/test_docs_antirot.py": 1,
-                "tests/test_envelope_contract.py": 20,
-                "tests/test_password_file_contract.py": 5,
-                "tests/unit/test_overlay.py": 1,
-                "tests/unit/test_registry.py": 4,
-                "tests/unit/test_verb_help_content.py": 2,
-            }
+            {**_PDF_82_GENESIS.ceilings, "tests/integration/test_or7_bulk_destructive.py": 13}
         ),
         reason=(
-            "GENESIS. The ungated half of the population as MEASURED after PDF-82's "
-            "eighteen marks landed -- 134 items across 16 modules, out of a population "
-            "of 158 -- never predicted. It is a DEBT REGISTER and not an exemption list: "
-            "nothing here is declared engine-free, each entry is a count of arms that "
-            "name an engine-blind verb and declare no engine, and the count may not GROW. "
-            "The population before the marks was the same 158 with 6 gated (PDF-82 E6's "
-            "125 callspec-derived members are 125 of them, of which zero were gated), "
-            "which is the measurement that licensed exactly eighteen marks and no "
-            "nineteenth: the eighteen are the arms `make engines-gate` arm 2 reddened, "
-            "minus tests/test_read_seams.py's residue-ceiling arm, which X-757 rules is "
-            "reporting correctly rather than missing a marker."
+            "PDF-84 wires the clobber route into the bulk-destructive gate at every "
+            "batch verb, and X-772 makes an occupied-`--out-dir` REFUSAL assertion for "
+            "`convert` AND `ocr` a required criterion -- that pair being exactly "
+            "`engine_blind_verbs() & out_dir_batch_verbs()`, and exactly the pair "
+            "`tests/test_batch_continuation.py`'s INERT_GATE_VERBS excludes, so an "
+            "inertness arm there would have pinned the defect as CORRECT. The new arm "
+            "lands in tests/integration/test_or7_bulk_destructive.py, which already "
+            "carries this idiom at :275 and :293; the key "
+            "tests/integration/test_or7_bulk_destructive.py moves 12 -> 13 and no other "
+            "key moves, total 134 -> 135 across the same 16 modules. "
+            "THE DRIVE IS ENGINE-INDEPENDENT, MEASURED RATHER THAN ASSERTED: with PATH "
+            "pointed at a directory the engine does not resolve from, the refusal is "
+            "BYTE-IDENTICAL to the engine-present one -- PM-measured at 402 bytes, `cmp` "
+            "clean, and re-driven here byte-identical at 700 (convert) and 692 (ocr) "
+            "bytes, the absolute figure being a function of the fixture path length the "
+            "re-run hint echoes rather than of the engine -- while "
+            "the same command over an EMPTY `--out-dir` returns code 3 / kind "
+            "engine_missing for BOTH verbs, so the engine's absence is genuinely reachable "
+            "on that exact command and the gate is outranking the engine tier rather than "
+            "the engine being irrelevant. A `@pytest.mark.requires(...)` would therefore be "
+            "a FALSE declaration, and under `engines-hidden` it would not weaken the arm but "
+            "DELETE it -- in the without-engines job release.yml:44 gates the tag on, "
+            "where a vacuous safety criterion is no criterion. The per-verb discriminator "
+            "holds the out-dir occupancy CONSTANT and varies only the flag under test: "
+            "engine hidden, same occupied-`--out-dir` command, 5 with the gate's message "
+            "signature without `-y` and 3 engine_missing WITH it -- the `-y` -> 3 flip. "
+            "`convert` read 5 -> 3 before this item; `ocr` read 3 -> 3, the engine tier "
+            "owning both answers because the gate was absent, and reads 5 -> 3 after it. "
+            "+1 AND NO MORE: `population()` appends one Member per ARM, so the four runs "
+            "live in ONE non-parametrized function. Parametrizing them over the two verbs "
+            "would cost 2, is NOT authorized by X-781, and is a blocker back to the PM "
+            "rather than an engineer's call; and swapping the `ocr` member of `_ENGINES` "
+            "to the clobbering builder to reach +0 is refused in advance, because it buys "
+            "the ceiling by deleting the `--in-place` coverage D4/AC11 require to survive."
         ),
     ),
 )

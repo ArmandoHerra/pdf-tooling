@@ -2030,13 +2030,37 @@ def test_benign_section_4_mentions_are_never_flagged() -> None:
 # fifteen `cli/cmd_*.py` modules, and **12** `cmd_*` modules that call the gate
 # zero times. Four of those twelve are `{PDF...}` multi-input producers that
 # consume output-directory flags -- `extract`, `rasterize`, `tables`, `text` --
-# so `bulk` is reachable for them and `destructive` is the open question.
+# so `bulk` is reachable for them and `destructive` was the open question.
 #
-# WHETHER THOSE FOUR SHOULD GATE IS **B-022 ≡ B-045**, deferred by
-# `roadmap.md` §5 behind `PDF-18`'s unified planner. This section does not
-# decide it. What it does is make the absence an ENTRY A REVIEWER SEES rather
-# than a silence nobody counts -- the same idiom `ALLOWED_WRITE_SITES` uses one
-# section up, for the same reason.
+# WHETHER THOSE FOUR SHOULD GATE WAS **B-022 ≡ B-045**, deferred by
+# `roadmap.md` §5 behind `PDF-18`'s unified planner. This section did not decide
+# it. What it did was make the absence an ENTRY A REVIEWER SEES rather than a
+# silence nobody counts -- the same idiom `ALLOWED_WRITE_SITES` uses one section
+# up, for the same reason.
+#
+# **PDF-84 (`X-784`) DISCHARGES THE DEFERRAL, FOR THE MULTI-INPUT LIMB ONLY.**
+# The condition `roadmap.md` §5 deferred those four behind -- *decide it against
+# the unified planner `PDF-18` builds* -- shipped, and that planner is the very
+# seam PDF-84 uses: the clobber half of `destructive` is now answered once for
+# all ten `--out-dir` batch verbs at `safety/atomic.py::plan_output_set`, which
+# is the only place their complete resolved target set exists (`tables` builds
+# its targets from the tables it FINDS; L1 cannot know that set without doing
+# the work twice). So the four below still call `require_confirmation` zero
+# times, and their exemptions now name the TIER that gates them instead of a
+# deferral that has been taken -- an entry that outlived its reason is the rot
+# `test_no_gate_exemption_is_stale` exists to catch, one clause further in.
+#
+# **`B-022` DOES NOT CLOSE HERE, and the narrowing is recorded rather than
+# assumed (`X-784`/`X-785`).** Its actual question is the 1->N asymmetry --
+# `split` writes N destructive outputs from ONE input and therefore never trips
+# a gate whose `bulk` is `input_count > 1`. PDF-84 leaves that open, and
+# `cmd_split`/`cmd_permissions` keep their `"single-input"` exemptions unchanged.
+#
+# Re-derived at `af1dc4f` for PDF-84 rather than carried: **15** call sites
+# across fifteen `cli/cmd_*.py` modules (unchanged -- PDF-84 adds no L1 call
+# site and removes none), **12** `cmd_*` modules that call the gate zero times
+# (unchanged), and **16** `require_confirmation` call sites under `src/` in all,
+# the sixteenth being the planner's.
 # --------------------------------------------------------------------------- #
 
 #: Modules that do NOT call the confirmation gate, each with the reason it does
@@ -2068,16 +2092,21 @@ GATE_EXEMPT = frozenset(
         # reason: creates from {TEXT}, never from existing PDFs; a single
         # `--output` destination, protected by no-clobber rather than by a gate.
         ("pdf_tooling.cli.cmd_create", "non-pdf-input"),
-        # reason: B-022 == B-045 -- OPEN. `{PDF...}` multi-input producer
-        # consuming output-directory flags, so `bulk` IS reachable. Whether an
-        # output-shaped producer is "destructive" is the deferred question.
-        ("pdf_tooling.cli.cmd_extract", "B-022 == B-045 (deferred)"),
-        # reason: B-022 == B-045 -- OPEN. Same shape as extract.
-        ("pdf_tooling.cli.cmd_rasterize", "B-022 == B-045 (deferred)"),
-        # reason: B-022 == B-045 -- OPEN. Same shape as extract.
-        ("pdf_tooling.cli.cmd_tables", "B-022 == B-045 (deferred)"),
-        # reason: B-022 == B-045 -- OPEN. Same shape as extract.
-        ("pdf_tooling.cli.cmd_text", "B-022 == B-045 (deferred)"),
+        # reason: gated one tier down (PDF-84). `{PDF...}` multi-input producer
+        # consuming output-directory flags, so `bulk` IS reachable -- and
+        # `destructive` is now ANSWERED, at `safety/atomic.py::plan_output_set`,
+        # over the complete resolved target set this layer cannot compute. It
+        # calls the gate zero times BY DESIGN, not by omission.
+        ("pdf_tooling.cli.cmd_extract", "gated at the planner (PDF-84)"),
+        # reason: gated one tier down (PDF-84). Same shape as extract; its
+        # target set is one per SELECTED PAGE, which L1 knows least of all.
+        ("pdf_tooling.cli.cmd_rasterize", "gated at the planner (PDF-84)"),
+        # reason: gated one tier down (PDF-84). Same shape as extract; its
+        # target set comes from the tables the extractor FINDS (two inputs, six
+        # targets measured), so L1 could only know it by doing the work twice.
+        ("pdf_tooling.cli.cmd_tables", "gated at the planner (PDF-84)"),
+        # reason: gated one tier down (PDF-84). Same shape as extract.
+        ("pdf_tooling.cli.cmd_text", "gated at the planner (PDF-84)"),
     }
 )
 
@@ -2142,6 +2171,174 @@ def test_the_gate_reachability_helper_actually_finds_the_modules() -> None:
     modules = _cli_command_modules(SRC)
     assert len(modules) >= 20, f"only {len(modules)} cli/cmd_*.py module(s) found"
     assert "pdf_tooling.cli.cmd_delete" in modules
+
+
+# --------------------------------------------------------------------------- #
+# PDF-84 — Section 4 re-derivation: the gate's CLOBBER limb, and the 5/4/1 split.
+#
+# THE DEFECT THIS EXISTS FOR. `safety/confirm.py:121` computes
+# `destructive = in_place or bool(clobbered)`, and inside the ten `--out-dir`
+# batch verbs NINE never put anything on the second limb -- so a bulk `--force`
+# run over an occupied `--out-dir` on a non-TTY overwrote every target
+# unconfirmed, at exit 0, with `ok: true` per item.
+#
+# WHY A STRUCTURAL ARM AND NOT ONLY A BEHAVIOURAL ONE. The behavioural cells are
+# `tests/integration/test_bulk_clobber_gate.py` (the eight engine-free verbs) and
+# `tests/integration/test_or7_bulk_destructive.py`'s `PDF-84` arm (the two
+# engine-blind ones). Between them they cover the verbs that exist today. This
+# walk covers the SHAPE: the defect was not one bug repeated nine times, it was
+# TWO shapes that a fix written against either one alone would half-miss --
+# FIVE verbs calling the gate `in_place=`-only (a kwarg absent), FOUR not
+# calling it at all (a gate absent), ONE correct. A census that read "nine verbs
+# omit a kwarg" produces a patch that ships green having missed four verbs, and
+# that is the reading this section makes impossible to hold.
+#
+# DERIVED ON BOTH SIDES, NEVER TYPED. The call sites and their kwargs come from
+# the AST walk `_confirmation_call_sites` already performs; the population comes
+# from `registry.out_dir_batch_verbs()`; and the verb -> module map comes off the
+# LIVE command tree, because the verb name is not the module basename
+# (`cli/cmd_office.py` registers a verb spelled otherwise, and a module-keyed
+# population is a different population from the one a user types). No verb is
+# named in this section at all -- which is also what keeps this module out of
+# `PDF-82`'s ungated engine-blind census, standing at zero headroom.
+# --------------------------------------------------------------------------- #
+
+#: The keyword whose presence at a call site is the CLOBBER limb being fed.
+CLOBBER_KWARG: Final = "clobbered"
+
+
+def _confirmation_call_kwargs(root: Path) -> dict[str, set[str]]:
+    """``{module: every keyword name passed at any gate call site in it}``."""
+    found: dict[str, set[str]] = {}
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        tree = ast.parse(path.read_text(), filename=module)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and dotted(node.func).split(".")[-1] == CONFIRMATION_CALL:
+                found.setdefault(module, set()).update(
+                    keyword.arg for keyword in node.keywords if keyword.arg is not None
+                )
+    return found
+
+
+def confirmation_gate_groups(root: Path) -> tuple[tuple[str, ...], ...]:
+    """``(A, B, C)`` over the ``--out-dir`` batch verbs, by call-site shape.
+
+    * **A** — calls the gate, but never on the clobber limb. A kwarg to pass.
+    * **B** — no call site at all. A gate to reach, one tier down.
+    * **C** — already feeds the clobber limb from L1.
+    """
+    from registry import discover_verbs, out_dir_batch_verbs
+
+    kwargs_by_module = _confirmation_call_kwargs(root)
+    module_of = {verb.name: verb.module for verb in discover_verbs()}
+    groups: tuple[list[str], list[str], list[str]] = ([], [], [])
+    for verb in out_dir_batch_verbs():
+        kwargs = kwargs_by_module.get(module_of[verb])
+        if kwargs is None:
+            groups[1].append(verb)
+        elif CLOBBER_KWARG in kwargs:
+            groups[2].append(verb)
+        else:
+            groups[0].append(verb)
+    return tuple(tuple(group) for group in groups)
+
+
+def test_pdf84_the_batch_verbs_split_five_four_one_by_call_site_shape() -> None:
+    """The split the fix had to follow, re-derived rather than transcribed.
+
+    Red control: `test_pdf84_the_split_derivation_notices_a_moved_kwarg` below
+    renames ONE group-A call site's `in_place=` to `clobbered=` in a scratch
+    copy of `src/` and watches this same derivation report `4 / 4 / 2`.
+    """
+    from registry import out_dir_batch_verbs
+
+    group_a, group_b, group_c = confirmation_gate_groups(SRC)
+    assert (len(group_a), len(group_b), len(group_c)) == (5, 4, 1), (
+        f"the call-site split moved: {len(group_a)} / {len(group_b)} / {len(group_c)} "
+        f"(A={list(group_a)} B={list(group_b)} C={list(group_c)}). A is 'calls the gate "
+        f"but never on the clobber limb', B is 'no call site at all', C is 'already feeds "
+        f"it'. A fix written against A alone misses B entirely"
+    )
+    assert set(group_a) | set(group_b) | set(group_c) == set(out_dir_batch_verbs()), (
+        "the three groups no longer partition the --out-dir batch population"
+    )
+
+
+def test_pdf84_group_b_is_exactly_the_exempt_half_and_its_reasons_are_current() -> None:
+    """B's members are the modules that carry a `GATE_EXEMPT` entry, and those
+    entries name the TIER that gates them rather than a deferral that has been
+    taken (`X-784`). `test_no_gate_exemption_is_stale` catches an entry for a
+    module that started calling the gate; it cannot catch an entry whose REASON
+    stopped being true, which is what `B-022 == B-045 (deferred)` became the day
+    `PDF-18`'s planner shipped and `PDF-84` gated on it."""
+    from registry import discover_verbs
+
+    _group_a, group_b, _group_c = confirmation_gate_groups(SRC)
+    module_of = {verb.name: verb.module for verb in discover_verbs()}
+    exempt = {module for module, _ in GATE_EXEMPT}
+    assert {module_of[verb] for verb in group_b} <= exempt, (
+        f"a batch verb calls the gate nowhere AND carries no GATE_EXEMPT entry: "
+        f"{sorted(module_of[verb] for verb in group_b if module_of[verb] not in exempt)}"
+    )
+    discharged = sorted(
+        module for module, reason in GATE_EXEMPT if "B-022" in reason or "deferred" in reason
+    )
+    assert discharged == [], (
+        f"these GATE_EXEMPT entries still cite the B-022 == B-045 deferral: {discharged}. "
+        f"Its condition -- decide it against PDF-18's unified planner -- shipped, and "
+        f"PDF-84 decided the multi-input limb there. An exemption whose reason has expired "
+        f"is the rot this file's staleness arms exist to end, one clause further in"
+    )
+
+
+def test_pdf84_the_planner_is_the_one_gate_call_site_outside_l1() -> None:
+    """Exactly ONE `require_confirmation` call lives below the CLI layer, and it
+    is the shared filesystem planner.
+
+    This is the seam pinned as a seam. Nine per-verb copies inside `ops/` would
+    satisfy every behavioural arm in this suite and re-create, one layer down,
+    the fifteen-call-site shape `B-093` spent a spec collapsing -- so the count
+    that matters is not how many verbs gate but how many PLACES decide.
+    """
+    outside_l1 = sorted(
+        site for site in _confirmation_call_sites(SRC) if ".cli." not in site.split(":")[0]
+    )
+    assert [site.split(":")[0] for site in outside_l1] == ["pdf_tooling.safety.atomic"], (
+        f"gate call sites below L1: {outside_l1}. The clobber limb is answered in ONE "
+        f"place -- the one planner every --out-dir batch verb already routes its complete "
+        f"resolved target set through"
+    )
+
+
+def test_pdf84_the_split_derivation_notices_a_moved_kwarg(tmp_path: Path) -> None:
+    """The red control for the split, planted and observed rather than argued.
+
+    Rename ONE group-A call site's `in_place=` keyword to the clobber one in a
+    scratch copy of `src/` and the derivation must report `4 / 4 / 2`. A
+    derivation that answered `5 / 4 / 1` whatever the tree said would be a
+    transcription with an AST walk wrapped round it.
+    """
+    from registry import discover_verbs
+
+    group_a, group_b, group_c = confirmation_gate_groups(SRC)
+    module_of = {verb.name: verb.module for verb in discover_verbs()}
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    victim = scratch / Path(*module_of[group_a[0]].split(".")).with_suffix(".py")
+    source = victim.read_text()
+    assert "in_place=True," in source, f"{victim.name} no longer passes the in-place limb"
+    victim.write_text(source.replace("in_place=True,", f"{CLOBBER_KWARG}=(),", 1))
+
+    moved_a, moved_b, moved_c = confirmation_gate_groups(scratch)
+    assert (len(moved_a), len(moved_b), len(moved_c)) == (
+        len(group_a) - 1,
+        len(group_b),
+        len(group_c) + 1,
+    ), (
+        f"the planted kwarg move was not noticed: {len(moved_a)} / {len(moved_b)} / "
+        f"{len(moved_c)}. This derivation is not reading the tree it is handed"
+    )
 
 
 # --------------------------------------------------------------------------- #

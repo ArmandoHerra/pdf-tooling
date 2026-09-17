@@ -980,23 +980,51 @@ def test_plan_output_set_skips_the_too_long_check_when_pathconf_is_unavailable(
 # --------------------------------------------------------------------------- #
 # PDF-18 AC2 -- all 12 `plan_filesystem` call sites under `ops/` pass the
 # IDENTICAL keyword set, over a `Sequence[Path]` first argument.
+#
+# PDF-84 ADDS THE CONFIRMATION CARRIER, AND THIS ARM IS RESTATED RATHER THAN
+# RELAXED. The clobber limb of the bulk-destructive gate fires at
+# `plan_output_set`, which `plan_filesystem` wraps, and it needs two facts that
+# tier cannot know -- the INPUT count (it sees targets; `tables` turns two
+# inputs into six) and the re-run hint (`safety/` never reads `sys.argv`). They
+# ride one optional `confirm=` carrier, so the call sites now come in exactly
+# TWO shapes and "identical" would be false however it were spelled.
+#
+# The replacement is a rule, not a second literal set, and it is STRICTER than
+# a widened membership test in both directions: a site may pass `confirm=` if
+# and only if its ENCLOSING function declares a `confirm` parameter. So a batch
+# verb's op that quietly drops the carrier on the floor reds (it accepts one and
+# does not forward it), and a single-destination op that hard-codes `confirm=`
+# to a literal reds too (it passes one it was never handed) -- the two ways this
+# gate can be lost again without any behavioural arm noticing until a user does.
 # --------------------------------------------------------------------------- #
 
 _OPS_DIR = Path(__file__).resolve().parents[2] / "src" / "pdf_tooling" / "ops"
 
+#: PDF-84's carrier. Optional at the planner, so its PRESENCE at a call site is
+#: the thing a rule has to be written about.
+_CONFIRM_KWARG = "confirm"
 
-def _plan_filesystem_call_sites() -> list[tuple[str, ast.Call]]:
-    """Every ``plan_filesystem(...)`` call under ``src/pdf_tooling/ops/``."""
-    found: list[tuple[str, ast.Call]] = []
+
+def _plan_filesystem_call_sites() -> list[tuple[str, ast.Call, set[str]]]:
+    """Every ``plan_filesystem(...)`` call under ``src/pdf_tooling/ops/``, with
+    the parameter names of the function that encloses it."""
+    found: list[tuple[str, ast.Call, set[str]]] = []
     for path in sorted(_OPS_DIR.glob("*.py")):
         tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "plan_filesystem"
-            ):
-                found.append((path.name, node))
+        for owner in ast.walk(tree):
+            if not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            parameters = {
+                argument.arg
+                for argument in (*owner.args.args, *owner.args.posonlyargs, *owner.args.kwonlyargs)
+            }
+            for node in ast.walk(owner):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "plan_filesystem"
+                ):
+                    found.append((path.name, node, parameters))
     return found
 
 
@@ -1005,26 +1033,41 @@ def test_ac2_every_ops_call_site_passes_the_identical_keyword_set() -> None:
     call sites across the eight collapsed modules; this walks the AST
     instead of trusting the count, and pins the SHAPE those 12 calls share.
 
-    Red: plant a call missing ``kind=``; the walk fails.
+    Red: plant a call missing ``kind=``; the walk fails. PDF-84's own reds:
+    delete ``confirm=confirm`` from a batch verb's call (its function still
+    declares the parameter -> red), or add ``confirm=None`` to a
+    single-destination one (its function declares none -> red).
     """
     calls = _plan_filesystem_call_sites()
     assert len(calls) >= 12, f"found only {len(calls)} plan_filesystem call site(s) under ops/"
 
-    modules = {module for module, _ in calls}
+    modules = {module for module, _call, _parameters in calls}
     assert len(modules) == 8, (
         f"expected all eight collapsed modules to call plan_filesystem, saw {sorted(modules)}"
     )
 
-    for module, call in calls:
+    carrying = 0
+    for module, call, parameters in calls:
         assert len(call.args) == 1, (
             f"{module}:{call.lineno}: expected exactly one positional argument "
             f"(a Sequence[Path]), got {len(call.args)}"
         )
         keywords = {kw.arg for kw in call.keywords}
-        assert keywords == {"out_dir", "policy", "kind"}, (
+        expected = {"out_dir", "policy", "kind"}
+        if _CONFIRM_KWARG in parameters:
+            expected |= {_CONFIRM_KWARG}
+            carrying += 1
+        assert keywords == expected, (
             f"{module}:{call.lineno}: keyword set was {sorted(keywords)}, expected "
-            "{'kind', 'out_dir', 'policy'}"
+            f"{sorted(expected)}. A site passes `{_CONFIRM_KWARG}=` exactly when its "
+            f"enclosing function was handed one -- forwarding a carrier it does not have "
+            f"is a hard-coded gate, and dropping one it does have is a gate that silently "
+            f"stops firing (PDF-84)"
         )
+    assert carrying, (
+        "no plan_filesystem call site under ops/ forwards the confirmation carrier, so "
+        "the rule above is vacuous and PDF-84's clobber limb reaches no verb at all"
+    )
 
 
 # --------------------------------------------------------------------------- #

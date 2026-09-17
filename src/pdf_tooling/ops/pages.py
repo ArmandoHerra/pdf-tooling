@@ -99,6 +99,7 @@ from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, Pas
 from pdf_tooling.ops.pagerange import parse
 from pdf_tooling.ports.structure import OpenStructureDocument, require_structure
 from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
 from pdf_tooling.safety.policy import SafetyPolicy
@@ -467,6 +468,7 @@ def _run(
     in_place: bool,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """Plan and (unless ``--dry-run``) perform one run, in input order. See
     :func:`_run_with_resolver` for the body -- split out only so the
@@ -488,6 +490,7 @@ def _run(
             in_place=in_place,
             policy=policy,
             resolver=resolver,
+            confirm=confirm,
         )
     finally:
         resolver.clear()
@@ -507,6 +510,7 @@ def _run_with_resolver(
     in_place: bool,
     policy: SafetyPolicy,
     resolver: PasswordResolver,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """Fails closed: every input's selection is resolved before the first
     byte is written, so a refusal on any input aborts the run and writes
@@ -603,7 +607,7 @@ def _run_with_resolver(
         )
 
     # Tier 2 -- the filesystem.
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf", confirm=confirm)
 
     if policy.dry_run:
         fs_detail = plan.detail()
@@ -702,6 +706,7 @@ def extract_run(
     name_template: str | None,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """`extract` — ORDERED (§D1). Writes the selected pages to a NEW document,
     in the order given, duplicates preserved.
@@ -723,6 +728,7 @@ def extract_run(
         in_place=False,
         policy=policy,
         password=password,
+        confirm=confirm,
     )
 
 
@@ -736,6 +742,7 @@ def delete_run(
     in_place: bool,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """`delete` — SET (§D1). Writes everything *except* the selected pages;
     refuses (exit 5) to produce a zero-page document (§D5)."""
@@ -750,6 +757,7 @@ def delete_run(
         in_place=in_place,
         policy=policy,
         password=password,
+        confirm=confirm,
     )
 
 
@@ -765,6 +773,7 @@ def rotate_run(
     in_place: bool,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """`rotate` — SET (§D1). Rotates the selected pages by a multiple of 90°,
     relative by default and absolute under ``--absolute`` (§D4).
@@ -786,6 +795,7 @@ def rotate_run(
         in_place=in_place,
         policy=policy,
         password=password,
+        confirm=confirm,
     )
 
 
@@ -799,6 +809,7 @@ def reorder_run(
     in_place: bool,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    confirm: BulkContext | None = None,
 ) -> OperationResult:
     """`reorder` — ORDERED and total (§D1/§D3). Rewrites page order from an
     explicit sequence; pages the selection does not name are **appended** in
@@ -814,4 +825,5 @@ def reorder_run(
         in_place=in_place,
         policy=policy,
         password=password,
+        confirm=confirm,
     )
