@@ -192,6 +192,11 @@ MAKEFILE_TARGETS = {
     # PDF-28: local counterparts for three CI-only checks. None joins `ci`'s
     # own prerequisite list -- see .github/gate-parity.toml `in_make_ci`.
     "engines-gate",
+    # PDF-82: `engines-gate` arm 2 alone, runnable on every host because the
+    # without-engines configuration needs the engines HIDDEN rather than
+    # installed. It is what the manifest's `without-engines` entries point at,
+    # and it joins `ci`'s prerequisite list no more than the three above do.
+    "engines-hidden",
     "licenses-check",
     "artifacts-check",
     # PDF-29: the gate-timing protocol. Deliberately NOT in `ci`'s prerequisite

@@ -40,8 +40,8 @@ endif
 
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
-        samples-gate engines-gate licenses-check artifacts-check gate-timing \
-        docs-gate shim-reap ci clean
+        samples-gate engines-gate engines-hidden licenses-check artifacts-check \
+        gate-timing docs-gate shim-reap ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -270,7 +270,25 @@ engines-gate: ## Run both engine configurations (present + hidden) with skip-vis
 	@echo "engines-gate 1/2: engines present -- cover + zero-skip assertion"
 	$(MAKE) cover PYTEST_ARGS="--junitxml=.scratch/junit-engines-present.xml"
 	$(UV_RUN) python scripts/assert_skips.py .scratch/junit-engines-present.xml --expect-zero
-	@echo "engines-gate 2/2: engines hidden -- test + skip-visibility assertion"
+	@echo "engines-gate 2/2: engines hidden -- the engines-hidden target, verbatim"
+	$(MAKE) engines-hidden
+
+# PDF-82 D6. Arm 2 ALONE, and it refuses on nothing. The without-engines
+# configuration does not need the engines INSTALLED, it needs them HIDDEN, and
+# tests/conftest.py's PATH shim manufactures that on any host -- including one
+# that has them, which is every host `make ci`'s epilogue was read on. This is
+# the target .github/gate-parity.toml's three `without-engines` entries point
+# at: the pointer they used to carry was `engines-gate`, which REFUSES at arm 1
+# on an engine-less host, so the pointer was false exactly where a contributor
+# most needed it to be true.
+#
+# A prerequisite of NOTHING -- not `ci`, not `test`, not `cover`, not
+# `docs-gate`. `engines-gate` CALLS it from its own recipe one level down, so
+# arm 2 and the pointer cannot drift apart, and `engines-gate` keeps both arms
+# and keeps its refusal: it will not exit 0 pretending it ran the engine paths.
+engines-hidden: ## Run the without-engines configuration on ANY host (engines PATH-hidden, nothing to install)
+	@mkdir -p .scratch
+	@echo "engines-hidden: engines hidden -- test + skip-visibility assertion"
 	PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice $(MAKE) test PYTEST_ARGS="--junitxml=.scratch/junit-without-engines.xml"
 	$(UV_RUN) python scripts/assert_skips.py .scratch/junit-without-engines.xml
 

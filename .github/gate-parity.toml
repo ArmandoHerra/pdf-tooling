@@ -92,28 +92,34 @@ in_make_ci = false
 reason = "needs-engine-configuration"
 
 # --- without-engines --------------------------------------------------------- #
+#
+# PDF-82: these three carry NO `reason`, and the absence is a decision rather
+# than an omission. They used to say `needs-engine-configuration`, which is
+# FALSE here and was false on every host it was ever printed on: this job needs
+# the engines HIDDEN, not installed, and tests/conftest.py's PATH shim
+# manufactures that anywhere. `reason` is required only where `local` is absent
+# (scripts/gate_parity.py), and all three name one. A false tag is worse than no
+# tag. The two `engines-present` entries above keep the reason: that job does
+# need the binaries, and `engines-gate` arm 1 genuinely refuses without them.
 
 [[check]]
 job = "without-engines"
 step = "verify tesseract and soffice are ABSENT"
-local = "engines-gate"
+local = "engines-hidden"
 in_make_ci = false
-reason = "needs-engine-configuration"
 
 [[check]]
 job = "without-engines"
 step = "make test PYTEST_ARGS=--junitxml=junit-without-engines.xml"
-local = "engines-gate"
+local = "engines-hidden"
 in_make_ci = false
-reason = "needs-engine-configuration"
-note = "identical command since PDF-28; ci.yml invoked pytest directly until then (changelog.md:123). Not `in_make_ci` because `test` alone does not hide the engines -- that is what `engines-gate` arm 2 adds via PDF_TOOLING_TEST_HIDE_ENGINES."
+note = "identical command since PDF-28; ci.yml invoked pytest directly until then (changelog.md:123). Not `in_make_ci` because `test` alone does not hide the engines -- that is what `engines-hidden` (and `engines-gate` arm 2, which calls it) adds via PDF_TOOLING_TEST_HIDE_ENGINES."
 
 [[check]]
 job = "without-engines"
 step = "uv run python scripts/assert_skips.py junit-without-engines.xml"
-local = "engines-gate"
+local = "engines-hidden"
 in_make_ci = false
-reason = "needs-engine-configuration"
 
 # --- sast / vulncheck ------------------------------------------------------- #
 

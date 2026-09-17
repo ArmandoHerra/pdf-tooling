@@ -62,6 +62,11 @@ registry or a live enum, never typed beside it:
   crossed against, derived off ``consumes`` alone, and carrying a FITNESS
   statement beside its provenance one. ``out_dir_batch_verbs()`` is NOT it: its
   operand-arity filter is irrelevant to value shape and drops ``split``.
+* ``destination_cell_engine()`` — PDF-82's per-CELL engine answer for that same
+  population, so the two matrices crossing it gate their cells from one place
+  and neither types a verb name or a node id. Per cell and never per verb: the
+  measured exception beside it is a cell of an engine-backed verb that refuses
+  before the engine resolves, and marking it would cost coverage silently.
 
 `PDF-17` exports and pins these. It does not cross them, cap them, or write a
 single secret-leak case: the cardinality budget is `PDF-22`'s own deliverable.
@@ -2779,6 +2784,63 @@ def destination_flag_cases(root: object | None = None) -> tuple[tuple[str, str],
         for verb in leaves
         if flag in verb.consumes
     )
+
+
+#: PDF-82 D2 — the ``@pytest.mark.requires(...)`` spelling for each engine port
+#: a destination cell can depend on. Hand-written, and it cannot go stale
+#: silently in either direction: `tests/conftest.py::_resolve_port` raises
+#: ``ValueError`` naming an unknown spelling AT COLLECTION TIME, so a wrong key
+#: errors every gated cell in the matrix rather than skipping one quietly, and
+#: `tests/test_engine_gating_census.py` asserts the spelling is one
+#: `scripts/assert_skips.py` classifies as ``engine-gated``. The FRIENDLY name
+#: and not the port name, for that second reason: the port name reaches that
+#: classifier only through the platform-dependent install hint, which is the
+#: same accidental truth `PDF-82` E5 found underneath ``ocr``'s cells.
+ENGINE_MARKER_SPELLINGS: Final[dict[str, str]] = {
+    "OcrEngine": "tesseract",
+    "OfficeConverter": "soffice",
+}
+
+#: PDF-82 E4 — the destination cells whose OUTCOME does not depend on the engine
+#: even though their verb does. MEASURED PER CELL, never per verb, and this
+#: entry is the disproof of the per-verb shortcut: driven at `3aedef8` with the
+#: engines present and again with them hidden, the ``--output`` ×
+#: ``nonexistent-parent`` cell's four envelopes (dry and real, both
+#: configurations) are BYTE-IDENTICAL — the destination refusal fires at the
+#: safety tier BEFORE the engine resolves, so the cell exercises the same code
+#: path either way. Gating it would turn a genuinely engine-free cell into a
+#: permanent skip, and that loss is invisible to every instrument in this
+#: repository (`PDF-82` D2's asymmetry table). Its ``--out-dir`` sibling is
+#: deliberately absent: that limb CREATES the directory and proceeds to the
+#: engine, which is why it reds under absence and this one does not.
+ENGINE_FREE_DESTINATION_CELLS: Final[frozenset[tuple[str, str, str]]] = frozenset(
+    {("convert", "--output", "nonexistent-parent")}
+)
+
+
+def destination_cell_engine(verb: str, flag: str, spelling_id: str | None = None) -> str | None:
+    """The engine a ``(verb, flag[, spelling])`` destination cell's OUTCOME needs,
+    or ``None`` when the cell answers the same question with the engine absent.
+
+    PROVENANCE. :data:`INVOCATIONS`'s own ``requires_engine`` field names the
+    port (``convert`` declares ``OfficeConverter``; ``ocr`` declares ``None``
+    deliberately, because its cells drive ``--skip-text-pages``, that verb's
+    engine-free path), minus the measured per-cell exceptions above. Consumed by
+    `tests/integration/test_value_shape.py` and `tests/test_derived_dimensions.py`
+    at their PARAMETRIZE, so the mark rides the cell rather than the function and
+    neither module has to type a node id.
+
+    A verb with no invocation row answers ``None`` — under-marking, which
+    `make engines-gate` arm 2 reds loudly, rather than over-marking, which
+    nothing in this repository can see.
+    """
+    invocation = INVOCATIONS.get(verb)
+    port = None if invocation is None else invocation.requires_engine
+    if port is None:
+        return None
+    if spelling_id is not None and (verb, flag, spelling_id) in ENGINE_FREE_DESTINATION_CELLS:
+        return None
+    return ENGINE_MARKER_SPELLINGS[port]
 
 
 #: Every ``VerbSpec`` field a population may read WITHOUT narrowing the

@@ -737,6 +737,48 @@ def test_ac4_no_observed_seam_escapes_all_three_enumerators(
     )
 
 
+#: The `error.kind` the product returns when a verb's engine does not resolve --
+#: `README.md`'s exit-code table's code `3`, and `PDF-67`/`OR-19`'s contract.
+_ENGINE_MISSING_KIND: Final = "engine_missing"
+
+
+def _skip_if_a_cell_never_drove(sweeps: dict[str, seams.Sweep]) -> None:
+    """PDF-82 D3 -- the AC5 residue's PREMISE, read off the OBSERVED sweep.
+
+    The arm below measures UNDRIVEN read seams against a ceiling that encodes
+    *the drive happened*. Its premise is therefore not "soffice exists on this
+    host" -- it is "every cell in `sweeps` actually drove", which is a fact about
+    the drive and is read here from the cell's own un-raced control rather than
+    from the host. A cell whose control refused with `engine_missing` never
+    reached the adapter at all, so its module's residue is not a smaller number
+    that a narrowed assertion could absorb: it is an **unanswerable question**,
+    and the honest answer to one is a VISIBLE skip.
+
+    Deliberately NOT `@pytest.mark.requires("soffice")` (`X-757`, `PDF-82` D3).
+    Two reasons, the second load-bearing: the marker would state a fact about the
+    host where this arm needs a fact about the drive; and the arm reaches its
+    drive through the `sweeps` FIXTURE, spelling no verb of its own, so it is not
+    in `tests/test_engine_gating_census.py`'s population and a marker here would
+    red that module's own fitness assertion.
+
+    The reason text names the engine, so `scripts/assert_skips.py` counts the
+    skip in its `engine-gated` class rather than in the unclassified remainder.
+    """
+    for label, sweep in sorted(sweeps.items()):
+        envelope = sweep.control.envelope or {}
+        error = envelope.get("error")
+        kind = error.get("kind") if isinstance(error, dict) else None
+        if kind == _ENGINE_MISSING_KIND:
+            pytest.skip(
+                f"soffice unavailable: the {label!r} cell's un-raced control refused with "
+                f"exit {sweep.control.exit_code} ({kind}), so that drive never reached the "
+                f"adapter and this module's undriven residue is an unanswerable question "
+                f"rather than a smaller number. tests/test_read_seams.py's RESIDUE_CEILING "
+                f"(not tests/test_docs_antirot.py's) encodes a configuration in which every "
+                f"cell drove, and X-757 rules that it stays where it is"
+            )
+
+
 def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow(
     sweeps: dict[str, seams.Sweep],
 ) -> None:
@@ -747,6 +789,13 @@ def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow
     would make the instrument lie -- but it is counted, and it **may not grow**
     (`PDF-30`'s `RESIDUE_CEILING` precedent, X-373/X-421).
 
+    **THE PREMISE, made explicit (`PDF-82` D3).** This count is taken against a
+    configuration in which every cell in `sweeps` actually drove. A configuration
+    where one could not -- `convert`'s cell with `soffice` absent, which refuses
+    at the engine gate before the adapter is ever opened -- does not produce a
+    smaller residue; it produces an unanswerable question, and
+    `_skip_if_a_cell_never_drove` above skips visibly rather than counting it.
+
     RED: add an unreached `open(path)` in `ops/` -> residue +1 -> over ceiling ->
     red naming the module and the site.
 
@@ -755,6 +804,7 @@ def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow
     the list to the PM. The ratchet ships; the number stays visible at its size.
     """
     _skip_as_root()
+    _skip_if_a_cell_never_drove(sweeps)
     static = seams.static_read_sites(SRC_ROOT)
     observed: list[str] = []
     for sweep in sweeps.values():
@@ -1024,6 +1074,7 @@ def test_x715s_reasoning_survives_the_refactor_onto_the_genesis_record() -> None
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.requires("soffice")
 def test_convert_zip_claim_branch_and_the_oserror_catch_reachability(tmp_path: Path) -> None:
     """The `PK`-claiming branch of `ensure_source_loadable`, driven directly.
 

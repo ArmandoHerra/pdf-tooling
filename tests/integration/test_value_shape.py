@@ -88,6 +88,7 @@ from registry import (  # noqa: E402
     OUTPUT_FLAG_INVOCATIONS,
     TILDE_SPELLING,
     PathSpelling,
+    destination_cell_engine,
     destination_flag_cases,
     discover_verbs,
     out_dir_batch_verbs,
@@ -120,6 +121,23 @@ CASES: Final[tuple[tuple[str, str, PathSpelling], ...]] = tuple(
 
 def _cell_id(verb: str, flag: str, spelling: PathSpelling) -> str:
     return f"{verb.replace(' ', '-')}-{flag.lstrip('-')}-{spelling.id}"
+
+
+def _cell_marks(verb: str, flag: str, spelling: PathSpelling) -> tuple[pytest.MarkDecorator, ...]:
+    """PDF-82 D2 — the engine marks THIS CELL carries, derived per cell.
+
+    The population is `registry.destination_cell_engine()`'s answer and nothing
+    else, so this module types no verb name (`test_no_verb_name_is_written_down_
+    anywhere_in_this_module` below would red if it did) and no node id. The mark
+    rides the PARAMETRIZE rather than the function because the classification is
+    PER CELL: fifteen of the sixteen `--out-dir`/`--output` cells of the
+    engine-backed verb assert an outcome the engine decides, and the sixteenth
+    refuses at the safety tier before the engine resolves and is byte-identical
+    in both configurations (`PDF-82` E4). A blanket per-verb marker would turn
+    that one into a permanent skip and nothing here would report the loss.
+    """
+    engine = destination_cell_engine(verb, flag, spelling.id)
+    return () if engine is None else (pytest.mark.requires(engine),)
 
 
 # --------------------------------------------------------------------------- #
@@ -498,7 +516,7 @@ def assert_real_run_purity(cell: Cell) -> None:
 @pytest.mark.e2e
 @pytest.mark.parametrize(
     ("verb", "flag", "spelling"),
-    [pytest.param(*case, id=_cell_id(*case)) for case in CASES],
+    [pytest.param(*case, id=_cell_id(*case), marks=_cell_marks(*case)) for case in CASES],
 )
 def test_the_value_shape_cell_holds(
     verb: str, flag: str, spelling: PathSpelling, corpus: Any, tmp_path: Path
@@ -524,10 +542,31 @@ def test_the_value_shape_cell_holds(
     * **disclosure** — a real run that exits 0 over a destination that exists on
       disk reports its size rather than `bytes_after: null` (`PDF-80` D10.1 —
       the limb all five oracles above pass on, measured).
-    * **engine gating** — `convert`'s and `ocr`'s cells assert a DERIVED
-      relation (dry agrees with real) rather than a hard-coded code, so an
-      engine-absent leg answers the same question without a skip. No cell here
-      is skipped; `scripts/assert_skips.py --expect-zero` stays true.
+    * **engine gating** — RETRACTED AND REPLACED (`PDF-82` D5). What stood here
+      claimed that the `convert` and `ocr` cells assert a derived relation
+      rather than a hard-coded code, *"so an engine-absent leg answers the same
+      question without a skip"*. The derived relation is the part that survives
+      absence; the answer it returns is an `engine_missing` envelope with no
+      `items` array at all, so echo has no destination to render, effect has no
+      bytes to find and disclosure has no item to read — measured, and fifteen
+      `convert` cells failed under the shim for eight engineers' worth of runs.
+      What is the case instead, measured at `3aedef8`:
+
+      1. `convert` has no engine-free path (`tests/registry.py`'s single
+         `requires_engine` row says so in its own comment), so its cells carry
+         `@pytest.mark.requires(...)` from `_cell_marks` above and SKIP VISIBLY
+         when the engine does not resolve.
+      2. `ocr`'s cells answer under absence because their invocation drives
+         `--skip-text-pages`, that verb's engine-free path. The reason lives in
+         a flag in the fixture table, not in this sentence.
+      3. One `convert` cell is NOT gated: the `--output` × nonexistent-parent
+         cell refuses at the safety tier before the engine resolves, and its
+         four envelopes (dry and real, engines present and hidden) are
+         byte-identical. Gating it would cost real coverage invisibly.
+      4. `scripts/assert_skips.py --expect-zero` stays true — not by intent but
+         by construction: `tests/conftest.py` adds a skip only when
+         `ports.resolve()` reports the engine unavailable, so with the engines
+         present these marks produce no skip at all.
     """
     cell = build_cell(verb, flag, spelling, corpus, tmp_path / "cell")
     label = _cell_id(verb, flag, spelling)

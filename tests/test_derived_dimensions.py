@@ -59,6 +59,7 @@ from registry import (
     OUTPUT_FLAGS,
     PDF_08_VERBS,
     REPO_ROOT,
+    destination_cell_engine,
     destination_flag_cases,
     discover_verbs,
     output_formats,
@@ -609,11 +610,33 @@ def _destination_index(argv: list[str], flag: str) -> int:
     return next(index for index, token in enumerate(argv) if token in tokens)
 
 
+def _axis_cell_marks(verb: str, flag: str) -> tuple[pytest.MarkDecorator, ...]:
+    """PDF-82 D2 — the engine marks THIS (verb, flag) axis cell carries.
+
+    Derived from `registry.destination_cell_engine()`, the same per-cell answer
+    `tests/integration/test_value_shape.py` consumes, so neither module types a
+    verb name or a node id. No spelling is passed: this cell drives BOTH an
+    absolute and a relative spelling of one destination, and both legs of the
+    engine-backed verb's two cells failed under the engine-hiding shim (`PDF-82`
+    E1) — the payload named no destination, because the engine-missing envelope
+    carries no `items` array to read one from.
+    """
+    engine = destination_cell_engine(verb, flag)
+    return () if engine is None else (pytest.mark.requires(engine),)
+
+
 @pytest.mark.e2e
 @pytest.mark.parametrize(
     ("verb", "flag"),
-    DESTINATION_CELLS,
-    ids=[f"{verb.replace(' ', '-')}-{flag.lstrip('-')}" for verb, flag in DESTINATION_CELLS],
+    [
+        pytest.param(
+            verb,
+            flag,
+            id=f"{verb.replace(' ', '-')}-{flag.lstrip('-')}",
+            marks=_axis_cell_marks(verb, flag),
+        )
+        for verb, flag in DESTINATION_CELLS
+    ],
 )
 def test_the_value_shape_axis_still_changes_the_products_answer(
     verb: str, flag: str, corpus: object, tmp_path: Path
