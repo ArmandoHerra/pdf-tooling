@@ -25,8 +25,25 @@
 # and (c) any step whose command is self-neutralizing (ends in `|| true` --
 # an artifact-generation report step that cannot fail regardless). `uses:`
 # steps (checkout, setup-uv, upload-artifact) have no `run:` key and are
-# excluded automatically. Applying this at 2d19bcb/PDF-28-HEAD yields 19
-# gating steps across the 10 jobs -- reproduced by
+# excluded automatically.
+#
+# THE COUNT THAT RULE PRODUCES IS NOT A LITERAL HERE, and the reason is this
+# file's own history (PDF-72). The sentence that used to sit at this spot welded
+# a HISTORICAL measurement to a PRESENT-TENSE reproduction -- "Applying this at
+# 2d19bcb/PDF-28-HEAD yields ... -- reproduced by `uv run python
+# scripts/gate_parity.py check`" -- so when PDF-34 added the `docs-gate` job the
+# measurement stayed true, the reproduction stopped being true, and the
+# difference was invisible because the two shared a verb. The frozen arms in
+# tests/test_gate_parity.py recorded the move as `10/17/19 -> 11/18/20` on the
+# very commit that made it: the product knew the right answer in a test, and
+# this file was in nothing's scope. Refreshing the literal would only restart
+# that clock, so the sentence below is DERIVED instead -- recomputed from ci.yml
+# by tests/test_docs_antirot.py's derived-figure registry, which reds if this
+# file and the workflow ever disagree -- and this file now also sits inside
+# tests/test_gate_parity.py's stale-count guard.
+#
+# Applying this rule to ci.yml yields 20 gating steps across the 11 jobs --
+# reproduced, today and at every commit, by
 # `uv run python scripts/gate_parity.py check`.
 #
 # `in_make_ci` is a separate boolean from `local`, deliberately: a check with

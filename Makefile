@@ -355,28 +355,32 @@ export DOCS_GATE_ENGINES_ASSERT
 # measured wall clock ever argues for inclusion, that is a number for the PM,
 # not a decision taken in this recipe (decision.md §5 R-1).
 #
-# THE ARMS THAT CANNOT ALWAYS RUN SAY SO. MEASURED at PDF-34 HEAD by running
-# the thing in each condition, because the previous figures here ("two" and
-# "four") were BOTH wrong and nothing checked them -- a stale count in the
-# comment above a skip census is the same defect this target exists to end:
-#   FIVE  arms read the maintainer's planning tree (`PDF_TOOLING_PLANNING_DIR`);
-#         recipe: PDF_TOOLING_PLANNING_DIR=/nonexistent make docs-gate
-#   ELEVEN arms read git history deeper than a shallow checkout, in TWO classes
-#         -- 10 against MINIMUM_HISTORY_DEPTH, plus 1 that cannot check a depth
-#         precondition against a checkout never given the depth to check it;
-#         recipe: run the three arm-3 files inside `git clone --depth 1`.
-# `ci.yml`'s `test` job has neither, so in CI all SIXTEEN skip -- and a skipped
+# THE ARMS THAT CANNOT ALWAYS RUN SAY SO -- and the census below is DERIVED at
+# test time rather than measured once and retyped (PDF-72). It had to become
+# derived: the figures that stood here were wrong THREE TIMES. The preamble this
+# replaces recorded that the previous two ("two" and "four") "were BOTH wrong
+# and nothing checked them -- a stale count in the comment above a skip census
+# is the same defect this target exists to end", and then stated a third wrong
+# figure ("FIVE") in the very next line, which nothing checked either. A comment
+# that diagnoses its own defect class and then commits it again is not a
+# documentation problem; it is an instrument gap with a paragraph where the
+# instrument should be. Each claim below is now a registered entry in
+# tests/test_docs_antirot.py's DERIVED_FIGURES registry, recomputed from the
+# test sources on every `make test`, so a fourth drift is a red and not a word.
+#   NINE arms read the maintainer's planning tree (`PDF_TOOLING_PLANNING_DIR`)
+#         and skip when it is absent; the recipe prints the census itself:
+#         PDF_TOOLING_PLANNING_DIR=/nonexistent make docs-gate
+#   TWELVE arms read git history deeper than a shallow checkout, in TWO classes
+#         -- the arms guarded by require_full_history(), plus the arms that
+#         cannot check a precondition against a checkout never given the depth
+#         to check it; recipe: run the three arm-3 files inside
+#         `git clone --depth 1`.
+# `ci.yml`'s `test` job has neither, so in CI all 21 skip -- and a skipped
 # arm is NEVER agreement. `-rs` prints every skip reason and the epilogue below
 # repeats the count, so "it ran" and "it could not run" can never be read as
 # the same green (X-153).
-#
-# PDF-34 D3: `DOCS_GATE_STRICT=1` turns that sentence into an exit code. Unset
-# (the default) is byte-for-byte today's behaviour -- skips are printed and
-# counted and the target still exits 0 -- because the five planning arms
-# LEGITIMATELY cannot run in CI, which checks out this repository alone. The
-# cadence that CAN see both trees runs it strict, where zero arms may skip.
 define DOCS_GATE_EPILOGUE
-import os, re, sys
+import re, sys
 text = sys.stdin.read()
 sys.stdout.write(text)
 # pytest AGGREGATES identical skip reasons as `SKIPPED [N] <reason>`, so
@@ -394,25 +398,22 @@ if skipped:
     print("  A SKIPPED ARM IS NOT AGREEMENT. Re-run with PDF_TOOLING_PLANNING_DIR")
     print("  pointed at the planning tree, and in a full (non-shallow) clone, to")
     print("  turn these into real comparisons. `make ci` does not run this target.")
-# PDF-34 D3. For as long as this epilogue has existed it has PRINTED
-# "A SKIPPED ARM IS NOT AGREEMENT" and then exited 0 anyway -- the rule stated
-# in prose, by the gate, about itself, with nothing enforcing it. Strict mode
-# is that sentence as an exit code, and it is opt-in for one measured reason:
-# CI checks out this repository alone, so the five planning arms skip there for
-# a reason that is not a defect, and a strict CI run would fail honestly-shaped
-# but wrongly. The Tier-2 cadence runs where BOTH trees exist, so zero arms may
-# skip and any skip is real news.
-if skipped and os.environ.get("DOCS_GATE_STRICT", "").strip() not in ("", "0", "false", "no"):
-    print("")
-    print("  DOCS_GATE_STRICT=1: %d skipped arm(s) in %d class(es) is a FAILURE."
-          % (arms, len(skipped)))
-    print("  A SKIPPED ARM IS NOT AGREEMENT -- and under this posture that is an")
-    print("  exit code, not a paragraph. Classes above name what could not run.")
-    sys.exit(1)
+# PDF-72 D8. An opt-in STRICT POSTURE used to live at this spot: an environment
+# flag that turned the paragraph above into an exit code. It is DELETED, name and
+# all, and the reason is stated in this target's `##` help text rather than left
+# to commit archaeology. It had exactly one reader -- this block -- no writer
+# anywhere in the tree, and no test pinning it; the maintainer-host cadence that
+# would have been its only consumer is deferred and carried by `B-316`. Dead
+# enforcement reads as LIVE enforcement to the next person, which is the same
+# class of defect as the stale counts this file has now stopped writing. The
+# deletion is reversible and `B-316` records the condition: an operator who wants
+# the posture back must take the cadence with it. What STAYS is everything that
+# was doing work -- the census, the class listing, and the paragraph that names a
+# skipped arm as a non-agreement. Only the exit-code branch went.
 endef
 export DOCS_GATE_EPILOGUE
 
-docs-gate: ## Re-run the documented commands and compare the figures the docs quote (PDF-30; NOT part of `ci`)
+docs-gate: ## Re-run the documented figures and compare them (PDF-30). NOT a prereq of `ci`, but it IS a CI job. PDF-72 deleted its opt-in strict posture: one reader, no writer, no test, and the cadence that would have set it is deferred to B-316
 	@mkdir -p .scratch
 	@echo "docs-gate 1/3: the documented engines-hidden command, run VERBATIM"
 	@PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice $(UV_RUN) pytest \

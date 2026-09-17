@@ -113,6 +113,32 @@ still fully structural, still classifies a new verb automatically, and
 correctly reports `version`/`doctor`/`info` as non-mutating today. See
 `tests/registry.py`'s module docstring for the full account.
 
+**The argument value-shape dimension.** Every other matrix here is built over
+dimensions enumerable from the command tree, so none of them could see the shape
+of the value a user actually types: for most of this project's life essentially
+every argument value in the suite was an absolute `str(tmp_path / …)`, because
+`tmp_path` is absolute. `PDF-64` found a `--dry-run` with a relative,
+not-yet-existing `--out-dir` crashing with a raw `ValueError` while the
+identical argv without `--dry-run` succeeded — under a green suite.
+`tests/registry.py::path_spellings()` is the dimension that closes it, crossed
+against `destination_flag_cases()` and against dry/real in
+`tests/integration/test_value_shape.py`. The quantity that matters is not how
+many spellings exist but the **maximum, over all verb × destination-flag cells,
+of the distinct spellings driven at that cell** — and that maximum is derived by
+`tests/test_derived_dimensions.py`'s collapse tie, which is why it is not quoted
+here.
+
+**Exhaustive verb × flag coverage is not a goal of this suite, and the gap
+between the cells that exist and the cells that are driven is not a work
+queue.** Cells are chosen by risk. `--version` is eager and exits before the
+callback ever runs, so a cell pairing it with a verb asserts nothing about that
+verb — the flag is gone before the verb's code is reached. `--yes` decides
+whether a destructive run proceeds at all, so it earns cells on its own. The
+current census lives in the maintainer's audit (`AUDIT.md` and
+`IMPROVEMENT-REPORT.md` under `qa/` in the planning tree) rather than here,
+because a ratio that moves every time a cell is covered is wrong the day after
+it is written — which is this document's rule about counts, applied to itself.
+
 ## The `samples` fixture — `PLAN.md` §10.1
 
 ```bash
@@ -364,38 +390,59 @@ that read the maintainer's planning tree:
 | docstring pointers | `tests/test_docstring_pointers.py` — every `tests/…py` path named under `src/` resolves |
 | planning artifacts | spec header ↔ `SPEC-INDEX.md` roster agreement, and the README's known-issues sweep pointer |
 
-**It is not a prerequisite of `make ci` and it is not a CI job**, deliberately:
-`ci.yml` checks out this repository alone and shallow, so the planning-tree and
-history arms cannot run there. **Where an arm cannot run it SKIPS with a reason
-and the target says so — a skipped arm is never reported as agreement**, and the
-skip classes it can report — `planning directory absent` and `shallow clone` —
-are named in `scripts/assert_skips.py`'s own verdict rather than absorbed into
-its remainder. Point `PDF_TOOLING_PLANNING_DIR` at the planning tree to run the
-arms that need it. Its real enforcement is therefore local, this target, and the
-`qa-sentinel`.
+**It is not a prerequisite of `make ci`** — `Makefile`'s `ci` recipe does not
+name it, and `.github/gate-parity.toml`'s own entry for this target records
+`in_make_ci = false`. **But `make docs-gate` IS a CI job**: `ci.yml` defines a
+top-level `docs-gate` job whose gating step is this target, and that job checks
+out at `fetch-depth: 0` — so the **history** arms run there, and it is the only
+place outside a maintainer's own full clone where they ever have. What still
+skips in CI is the **planning-tree** half alone, and for a narrower reason than
+depth: that checkout is this repository and no other, while the maintainer's
+planning tree lives in a repository of its own.
 
-### The strict posture — `DOCS_GATE_STRICT`
+Until `PDF-72` measured them, this paragraph asserted the opposite on both
+counts — it placed the target outside `ci.yml`'s job set, and it placed the
+history arms beyond CI's reach. Neither claim was a stale number, which is a
+large part of why nothing caught either: the
+residue backstop reads digits and a boolean has none. A sentence in this
+document asserting that some target does or does not belong to `ci.yml`'s job
+set is now a **registered categorical claim** in `tests/test_docs_antirot.py`,
+resolved against the job set derived from that workflow, and any such sentence
+the detector finds with no entry behind it reds naming the file and the
+sentence.
 
-By default this target prints its skip census and still exits `0`. That default
-is unchanged and the reason is not inertia: `ci.yml` checks out this repository
-alone, so the planning arms skip there for a reason that is not a defect, and a
-gate that failed on them would be honestly shaped and wrongly aimed.
+**Where an arm cannot run it SKIPS with a reason and the target says so — a
+skipped arm is never reported as agreement**, and the skip classes it can
+report — `planning directory absent` and `shallow clone` — are named in
+`scripts/assert_skips.py`'s own verdict rather than absorbed into its
+remainder. Point `PDF_TOOLING_PLANNING_DIR` at the planning tree to run the
+arms that need it. This target prints its skip census and still exits `0` on a
+skipping run; a failing arm still fails it.
 
-Set `DOCS_GATE_STRICT=1` and a skipped arm becomes an exit code rather than a
-paragraph:
+### The suite's own size, anchored
 
-```bash
-DOCS_GATE_STRICT=1 make docs-gate
-```
+A whole-suite figure is true at the commit it was taken at and at no other, and
+it moves with every spec that adds an arm. So it is **anchored here rather than
+gated**, on exactly the rule the coverage totals below follow: a figure that
+would red on every landing is a figure that gets edited to green as a reflex,
+and a gate nobody believes is worse than no gate at all. The definition lives in
+a single machine-readable place, `perf/suite-size.md`, which records the
+observable, the exact command, the interpreter, the host and the commit; the
+sentence below is rendered from that record by `tests/test_docs_antirot.py`'s
+derived-figure registry, so the document cannot drift away from the definition.
 
-The target already printed `A SKIPPED ARM IS NOT AGREEMENT` and then exited `0`
-anyway — the rule stated by the gate, about the gate, with nothing enforcing it.
-This setting is that sentence made enforceable. Use it wherever the clone is
-full **and** the planning tree is present: a maintainer checkout, or a cadence
-that runs where both trees exist. That is the only posture in which *every arm
-ran* is a fair expectation, so a skip there is news rather than weather. Where
-either precondition is missing the unset default stays correct, and the census
-still names every class it could not run.
+Measured with `uv run pytest --collect-only -q`, on a clean tree —
+**the suite collected 5348 tests at c76f0db.**
+The observable is `collected`, and it is named deliberately: `passed` varies
+with engine presence, interpreter availability and the odd load flake, which is
+how the same suite came to circulate under several different figures at once,
+none of them saying which quantity or which commit they meant. For the figure at
+the commit you are on, run the command; never carry the figure above forward.
+
+A single site in this repository states a whole-suite size, and
+`tests/test_docs_antirot.py` asserts that. `changelog.md` is excluded by name:
+a landed entry is never edited, so it must stay free to quote a past figure
+verbatim.
 
 ## Safety-spine test arms (`PDF-04`)
 

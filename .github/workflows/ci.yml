@@ -374,10 +374,14 @@ jobs:
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
-      # Non-strict (DOCS_GATE_STRICT unset): the five planning arms legitimately
-      # skip here, because this checkout is `apps/pdf-tooling` alone and the
-      # maintainer's planning tree lives in a separate repository (D8 Tier 1 /
-      # Tier 2 split). The Tier-2 cadence that CAN see both trees runs it strict.
+      # The nine PLANNING arms legitimately skip here, because this checkout is
+      # `apps/pdf-tooling` alone and the maintainer's planning tree lives in a
+      # separate repository. The HISTORY arms do NOT skip: `fetch-depth: 0`
+      # above is what lets them run, and this is the only place outside a
+      # maintainer's own full clone where they ever have (PDF-72 corrected this
+      # comment, which had said "five" and had implied the history arms could
+      # not run here either). The opt-in strict posture this comment used to
+      # name is deleted; see the Makefile's `docs-gate` help text and `B-316`.
       - run: make docs-gate
 
   license-gate:

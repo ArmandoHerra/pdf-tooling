@@ -444,7 +444,25 @@ def test_no_claim_site_states_a_count_of_checks_or_targets() -> None:
         r"\b(seven|10|17|19|ten|seventeen|nineteen)\b\s+(check|target|job|gat(e|ing))",
         re.IGNORECASE,
     )
-    for rel in ("README.md", "CLAUDE.md", "CONTRIBUTING.md", "Makefile"):
+    # `.github/gate-parity.toml` joins the four documents above because it is a
+    # CLAIM SITE like any other -- PDF-72, and it was the only one of the five
+    # that nothing scanned. Its header read "Applying this at 2d19bcb/PDF-28-HEAD
+    # yields 19 gating steps across the 10 jobs -- reproduced by `uv run python
+    # scripts/gate_parity.py check`": a historical measurement and a present-tense
+    # reproduction welded into one sentence, so the half that stopped being true
+    # at PDF-34 read as current. The arms above have frozen 11/18/20 since that
+    # commit, which means THE PRODUCT KNEW THE RIGHT ANSWER IN A TEST the whole
+    # time; the file simply was not in anything's scope. Appending this path
+    # reddened on the uncorrected file, naming `'10 job'`, before a word of the
+    # correction was written -- a red taken against the defect rather than
+    # against a plant.
+    for rel in (
+        "README.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "Makefile",
+        ".github/gate-parity.toml",
+    ):
         text = (REPO_ROOT / rel).read_text()
         m = count_pattern.search(text)
         assert m is None, f"{rel}: states a count ({m.group(0)!r})"

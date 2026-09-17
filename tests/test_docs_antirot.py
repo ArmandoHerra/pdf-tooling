@@ -530,6 +530,223 @@ def branch_and_line_coverage_span() -> str:
     )
 
 
+# --------------------------------------------------------------------------- #
+# PDF-72 — the shapes the closure rule could not see
+# --------------------------------------------------------------------------- #
+#
+# The closure rule ("derived, gated by a run, or absent") was written about
+# CARDINALS, and four claims on this product had rotted in shapes that are not
+# cardinals: a boolean about CI-job membership, a count living in a document the
+# guard does not scan, a figure anchored to a two-wave-old commit and then read
+# in the present tense, and a suite size circulating in three renderings with no
+# site naming its observable. The readers below give those shapes derivations.
+#
+# THE CROSS-MODULE CONSUMPTION IS DELIBERATE AND SO IS THE CHOICE OF SOURCE.
+# `ci.yml`'s job set is already derived TWICE on purpose -- structurally by
+# `scripts/gate_parity.py` (PyYAML) and from scratch by
+# `tests/test_gate_parity.py` (regex, importing nothing from the first), so that
+# "a shared-parser bug cannot make both sides agree wrongly". A THIRD parser here
+# would spend that design, so nothing below parses `ci.yml`. Which of the two is
+# consumed is decided per claim, and the FITNESS statement -- what property the
+# population is being used for, and why the source's own filter is relevant to it
+# -- is written beside each reader rather than left as provenance.
+
+
+def _scripts_module(name: str):  # type: ignore[no-untyped-def]
+    """Import *name* from `scripts/`, which carries no `__init__.py`.
+
+    The same three lines `tests/test_gate_parity.py` already uses to reach
+    `gate_parity`, and deliberately a SIBLING of `_tests_module` rather than a
+    widening of it: the two directories are on `sys.path` for different reasons
+    and a single helper would hide which one a caller meant.
+    """
+    import importlib
+    import sys
+
+    scripts_dir = str(REPO_ROOT / "scripts")
+    if scripts_dir not in sys.path:  # pragma: no cover - import plumbing
+        sys.path.insert(0, scripts_dir)
+    return importlib.import_module(name)
+
+
+def ci_job_membership() -> tuple[frozenset[str], frozenset[str]]:
+    """(`ci.yml`'s top-level job names, the `make` targets its gating steps run).
+
+    FITNESS. The claim this feeds is *"is `X` a CI job"*, and the consumed
+    population is exactly `ci.yml`'s top-level job names plus the `make` targets
+    those jobs actually invoke -- which is what "a CI job" means to a reader of
+    these documents. The filter `derive_from_ci` carries (setup steps,
+    `continue-on-error`, self-neutralizing commands) narrows the GATING-STEP
+    population and is fit here for the same reason it is fit there: a
+    provisioning step is not a check, and a claim about job membership is a claim
+    about checks. Had the claim been about the NUMBER of gating steps, the same
+    population would have been unfit without that filter's rationale being
+    restated -- which is the distinction a bare provenance note never makes.
+
+    `scripts/gate_parity.py` is the side consumed because it is the only one of
+    the two that publishes the `run:` text of each gating step, and the predicate
+    below has to resolve a `make` target to its job, not only a job name to
+    itself: `TESTING.md`'s subject is `make docs-gate`, and `docs-gate` is both.
+    """
+    job_names, gating_steps, _legs = _scripts_module("gate_parity").derive_from_ci()
+    invoked = {target for step in gating_steps for target in MAKE_TARGET.findall(step.run)}
+    return frozenset(job_names), frozenset(invoked)
+
+
+def gate_parity_span() -> str:
+    """`.github/gate-parity.toml`'s own claim about what its rule yields.
+
+    FITNESS, and it is a DIFFERENT fitness from the reader above. The sentence
+    this renders credits `scripts/gate_parity.py` with reproducing the figure, so
+    deriving it FROM that script would make the claim self-fulfilling: the file
+    would agree with the parser it names no matter what either did. It is
+    therefore derived from `tests/test_gate_parity.py`'s from-scratch scan --
+    the side the sentence does NOT credit -- which is the same reason that scan
+    exists at all.
+    """
+    module = _tests_module("test_gate_parity")
+    names, _legs, gating_counts = module.independent_derive_from_ci()
+    return f"{sum(gating_counts.values())} gating steps across the {len(names)} jobs"
+
+
+def _raises_guarded_spans(tree: ast.AST) -> list[tuple[int, int]]:
+    """Every `with pytest.raises(...)` block, as (first line, last line).
+
+    An arm that ASSERTS a skip is not an arm that SUFFERS one, and the census
+    below counts the second kind.
+    """
+    spans: list[tuple[int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.With) and any(
+            "raises" in ast.dump(item.context_expr) for item in node.items
+        ):
+            spans.append((node.lineno, node.end_lineno or node.lineno))
+    return spans
+
+
+def skipping_arms(module_relpath: str, helper: str, reason_constant: str) -> tuple[str, ...]:
+    """Test functions in *module_relpath* that SKIP when a precondition is absent.
+
+    Read by `ast` rather than by grep, because the grep answer is WRONG here and
+    measurably so: `tests/test_docs_antirot.py` carries ten textual
+    `require_planning_dir()` call sites and only NINE of them skip anything. The
+    tenth sits inside `with pytest.raises(...)` in the arm that proves the helper
+    skips at all -- it asserts the skip instead of suffering it, and counting it
+    would make this census report one arm more than `make docs-gate` does. A
+    census that disagrees with the target it describes is the exact defect the
+    `Makefile` comment above `docs-gate` has now committed three times.
+
+    A function counts if, outside any `pytest.raises` block, it calls *helper* or
+    calls `pytest.skip` with *reason_constant* in the call. The second limb is
+    what catches an arm that skips on its own precondition without routing
+    through the shared helper.
+    """
+    path = REPO_ROOT / module_relpath
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    guarded = _raises_guarded_spans(tree)
+
+    def shielded(node: ast.AST) -> bool:
+        line = getattr(node, "lineno", 0)
+        return any(low <= line <= high for low, high in guarded)
+
+    found: list[str] = []
+    for func in tree.body:
+        if not isinstance(func, ast.FunctionDef) or not func.name.startswith("test_"):
+            continue
+        for node in ast.walk(func):
+            if not isinstance(node, ast.Call) or shielded(node):
+                continue
+            target = node.func
+            if isinstance(target, ast.Name) and target.id == helper:
+                found.append(func.name)
+                break
+            if (
+                isinstance(target, ast.Attribute)
+                and target.attr == "skip"
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "pytest"
+                and reason_constant in (ast.get_source_segment(source, node) or "")
+            ):
+                found.append(func.name)
+                break
+    return tuple(found)
+
+
+def planning_gated_arms() -> tuple[str, ...]:
+    """The arms that skip with `planning directory absent`.
+
+    The reason token is the CONSTANT'S NAME rather than its value, because that
+    is what appears in the source being walked -- every skip in this module
+    builds its message as ``f"{SKIP_PLANNING_ABSENT}: ..."``, and a walker
+    looking for the rendered string would find nothing.
+    """
+    return skipping_arms(
+        "tests/test_docs_antirot.py", "require_planning_dir", "SKIP_PLANNING_ABSENT"
+    )
+
+
+def history_gated_arms() -> tuple[str, ...]:
+    """The arms that skip with `shallow clone`, across the three arm-3 files.
+
+    `tests/test_changelog_history.py` keeps its own copy of the helper and its
+    own spelling of the reason, so both spellings are asked for.
+    """
+    arms: list[str] = []
+    for relpath in (
+        "tests/test_docs_antirot.py",
+        "tests/test_changelog_history.py",
+        "tests/test_docstring_pointers.py",
+    ):
+        arms.extend(
+            f"{relpath}::{name}"
+            for name in skipping_arms(relpath, "require_full_history", "SKIP_SHALLOW_CLONE")
+        )
+    return tuple(arms)
+
+
+#: `perf/suite-size.md` — the ONE definition of the whole-suite figure. Same
+#: record shape as `perf/branch-partials.md` (`PDF-73`) and read by the same
+#: `_PARTIALS_FIELD` row reader, because a second shape for a second
+#: commit-anchored figure is how two artefacts start disagreeing about what a
+#: field means.
+SUITE_SIZE_RECORD = REPO_ROOT / "perf" / "suite-size.md"
+
+
+def suite_size_fields() -> dict[str, str]:
+    """The machine-read rows of `perf/suite-size.md`."""
+    assert SUITE_SIZE_RECORD.is_file(), (
+        "perf/suite-size.md is missing. It is the one definition of the whole-suite "
+        "size and the only committed source of the figure TESTING.md quotes; restore "
+        "it rather than re-deriving the number from prose."
+    )
+    fields = dict(_PARTIALS_FIELD.findall(SUITE_SIZE_RECORD.read_text()))
+    for key in ("commit", "observable", "command", "collected"):
+        assert key in fields, (
+            f"perf/suite-size.md carries no `{key}` row. Re-take the measurement and "
+            f"write the record, rather than annotating the one that is there."
+        )
+    assert fields["observable"] == "collected", (
+        f"perf/suite-size.md declares observable {fields['observable']!r}. The figure "
+        "this product publishes is the COLLECTED count, which is host-independent; "
+        "`passed` varies with engine presence, interpreter availability and the odd "
+        "load flake, and that is how one suite came to circulate under three figures."
+    )
+    return fields
+
+
+def suite_size_span() -> str:
+    """TESTING.md's whole-suite sentence, rendered from the record.
+
+    Deliberately carries NO backticks: `cardinal_residue` blanks code spans
+    before it masks a registered figure, so a rendered claim containing one could
+    never be found in the masked text and the figure it states would be counted
+    as unregistered residue -- in the document with zero headroom.
+    """
+    fields = suite_size_fields()
+    return f"the suite collected {int(fields['collected'])} tests at {fields['commit'][:7]}"
+
+
 #: D1. Each entry binds a span of a document to a callable that recomputes the
 #: same value from source, in the rendering the document uses. `anchor` locates
 #: the claim and is asserted to occur EXACTLY ONCE — an anchor that matches
@@ -655,6 +872,92 @@ DERIVED_FIGURES: tuple[DerivedFigure, ...] = (
             "renaming the PUBLISHED key reds here even if a constant were added later."
         ),
     ),
+    DerivedFigure(
+        document="Makefile",
+        anchor="arms read the maintainer's planning tree",
+        derive=lambda: (
+            f"{cardinal(len(planning_gated_arms())).upper()} arms read the "
+            f"maintainer's planning tree"
+        ),
+        note=(
+            "PDF-72, and the registry's FIRST entry over a non-document file. The skip "
+            "census in the comment above `docs-gate` drifted THREE times: its own "
+            "preamble recorded that the previous figures ('two' and 'four') 'were BOTH "
+            "wrong and nothing checked them -- a stale count in the comment above a skip "
+            "census is the same defect this target exists to end', and then stated a "
+            "third wrong figure ('FIVE') in the next line. Nothing checked that one "
+            "either, because `Makefile` is in neither the guarded-document set nor, "
+            "until now, this registry. The oracle the comment names -- "
+            "PDF_TOOLING_PLANNING_DIR=/nonexistent make docs-gate -- has printed the "
+            "true figure the whole time. Registering the claim is what makes a fourth "
+            "drift a red instead of a fourth wrong word."
+        ),
+    ),
+    DerivedFigure(
+        document="Makefile",
+        anchor="arms read git history deeper than a shallow checkout",
+        derive=lambda: (
+            f"{cardinal(len(history_gated_arms())).upper()} arms read git history "
+            f"deeper than a shallow checkout"
+        ),
+        note=(
+            "PDF-72. The history half of the same census, and it drifts for a different "
+            "reason than the planning half: its arms live in THREE files, so a new one "
+            "lands where nobody is looking at this comment. Derived across all three."
+        ),
+    ),
+    DerivedFigure(
+        document="Makefile",
+        anchor="so in CI all",
+        derive=lambda: (
+            f"so in CI all {len(planning_gated_arms()) + len(history_gated_arms())} skip"
+        ),
+        note=(
+            "PDF-72. The DERIVED TOTAL was wrong with its summands and by the same "
+            "arithmetic: the comment read SIXTEEN, which is 5 + 11 with the stale five. "
+            "A total carried beside two figures that each drift independently is a third "
+            "thing to get wrong, so it is computed from both rather than written down."
+        ),
+    ),
+    DerivedFigure(
+        document=".github/gate-parity.toml",
+        anchor="gating steps across the",
+        derive=gate_parity_span,
+        note=(
+            "PDF-72's POSITIONAL claim. The file said 'Applying this at "
+            "2d19bcb/PDF-28-HEAD yields 19 gating steps across the 10 jobs -- reproduced "
+            "by `uv run python scripts/gate_parity.py check`' -- a historical measurement "
+            "and a present-tense reproduction in one sentence, so when PDF-34 added the "
+            "`docs-gate` job the measurement stayed true and the reproduction did not. "
+            "tests/test_gate_parity.py has frozen 11/18/20 since that very commit, which "
+            "means the product knew the right answer IN A TEST while its own manifest "
+            "said otherwise; no guard scanned the file. Refreshing the literal would have "
+            "restarted the same clock, so the sentence is derived -- and from the "
+            "from-scratch scan rather than from the script the sentence credits, because "
+            "a claim derived from the parser it names is self-fulfilling. The file also "
+            "joined tests/test_gate_parity.py's stale-count guard, which reddened on the "
+            "uncorrected text naming `'10 job'` before the correction was written."
+        ),
+    ),
+    DerivedFigure(
+        document="TESTING.md",
+        anchor="the suite collected",
+        derive=suite_size_span,
+        note=(
+            "PDF-72's PROVENANCE claim, and the one that was never a falsehood. `4486`, "
+            "`4490` and `4526` were all circulating and ALL TRUE: 4486 passed and 4526 "
+            "collected at one commit, 4490 collected at another. Not one site said which "
+            "observable or which commit, so a reader comparing them concluded the product "
+            "could not count itself. The remedy is an ANCHOR, not a gate -- the suite size "
+            "moves with every spec that adds an arm, and a figure that reds on every "
+            "landing gets edited to green as a reflex. `perf/suite-size.md` is the one "
+            "definition; this entry renders TESTING.md's sentence from it, and separate "
+            "arms hold the claim unique and the anchor resolvable. The rendering carries "
+            "NO backticks on purpose: cardinal_residue blanks code spans before it masks "
+            "a registered figure, so a rendered claim containing one would be counted as "
+            "unregistered residue in the document with zero headroom."
+        ),
+    ),
 )
 
 
@@ -715,6 +1018,430 @@ def test_the_registry_can_fail_on_a_scratch_document(tmp_path: Path) -> None:
     # (c) an empty registry -> the non-empty check fails
     empty: tuple[DerivedFigure, ...] = ()
     assert not empty, "an empty registry is falsy, which is what AC1 asserts against"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-72 D1/D2 — THE CATEGORICAL-CLAIM REGISTRY: a boolean is derived, or it is
+# not a claim
+# --------------------------------------------------------------------------- #
+#
+# The residue backstop above sees DIGITS AND NUMBER-WORDS. It is blind to
+# booleans by construction, and that is not a bug in it -- the closure rule was
+# written about counts. From the commit that made it false, `TESTING.md` said
+# `make docs-gate` "is not a CI job" while `ci.yml` defined a top-level
+# `docs-gate` job whose sole gating step is that target, and no instrument on
+# this product could have seen it: there is no number in the sentence. A wider
+# regex would not have helped either, because the failure is not that the claim
+# is unregistered; it is that a yes/no has no derivation to be compared against.
+#
+# So the shape gets an instrument of its own, deliberately built to the same
+# three-arm plan as DERIVED_FIGURES so the module reads as one idea: the anchor
+# occurs exactly once, the claim equals its derivation, and the registry is
+# neither empty nor incomplete.
+#
+# THE POPULATION IS DETECTED, NEVER TYPED (D2). A hand-typed registry would be
+# the fourth drift of the very disease this section exists to end. The audit
+# that produced this item predicted FOUR such sentences across the four guarded
+# documents; the detector below measures TWO, and the difference is not an
+# error in either -- the other family asserts `make ci` TARGET membership, which
+# is a different predicate already instrumented by the manifest's `in_make_ci`
+# field, and the detector is self-tested on exactly that distinction before it is
+# believed. A registry sized to a sentence in a report would have shipped eight
+# false members on day one.
+
+
+@dataclass(frozen=True)
+class CategoricalClaim:
+    """One documented yes/no, bound to the source that decides it."""
+
+    document: str
+    #: The sentence span, asserted to occur EXACTLY ONCE.
+    anchor: str
+    #: `docs-gate`, `samples-check` -- a bare target or job name, no `make `.
+    subject: str
+    #: "is-ci-job" | "is-not-ci-job"
+    predicate: str
+    #: Why this claim exists -- the failure it remembers.
+    note: str
+
+
+_CI_JOB_PREDICATES: Final[tuple[str, ...]] = ("is-ci-job", "is-not-ci-job")
+
+#: A sentence of the shape "`X` is / is never / is not a CI job". The subject is
+#: matched backticked OR bare, and bare is load-bearing rather than tolerant: the
+#: sentence this section exists to remember said "and it is not a CI job", with a
+#: PRONOUN for a subject, and a detector that required a code span would have
+#: walked straight past the only claim that was wrong.
+CI_JOB_CLAIM: Final = re.compile(
+    r"(?P<subject>`[^`\n]{1,60}`|[A-Za-z][\w.-]{0,40})"
+    r"\s+(?:is|are)\s+(?P<negation>never\s+|not\s+)?an?\s+CI\s+job",
+    re.IGNORECASE,
+)
+
+
+def ci_job_claims(text: str) -> list[tuple[int, str, str, str]]:
+    """Every CI-job claim in *text*, as (line, sentence, subject, predicate)."""
+    found: list[tuple[int, str, str, str]] = []
+    for match in CI_JOB_CLAIM.finditer(text):
+        line = text[: match.start()].count("\n") + 1
+        subject = re.sub(r"^make\s+", "", match.group("subject").strip("`").strip())
+        predicate = "is-not-ci-job" if match.group("negation") else "is-ci-job"
+        found.append((line, normalise(match.group(0)), subject, predicate))
+    return found
+
+
+def resolve_ci_job(subject: str) -> bool | None:
+    """Whether *subject* is a CI job -- or `None` when nothing can decide it.
+
+    `None` is the third outcome and it is a FAILURE at every call site below,
+    never a pass: a categorical claim about a subject this repository does not
+    define cannot be checked, and unverifiable is not the same as true. It is
+    what the original sentence's `it` resolves to.
+
+    Resolution is on BOTH limbs, because a document's subject is a `make` target
+    while `ci.yml`'s is a job: `make docs-gate` names a target, `docs-gate` names
+    a job, and the job's only gating step is `make docs-gate`. `make
+    samples-check` is neither a job nor any job's step, but it IS a target, so it
+    resolves -- to False, which is what its sentence claims.
+    """
+    jobs, invoked_targets = ci_job_membership()
+    if subject in jobs or subject in invoked_targets:
+        return True
+    if subject in makefile_targets():
+        return False
+    return None
+
+
+#: The MEASURED population (D2), not the predicted one. Two, across the four
+#: guarded documents.
+CATEGORICAL_CLAIMS: Final[tuple[CategoricalClaim, ...]] = (
+    CategoricalClaim(
+        document="TESTING.md",
+        anchor="`make samples-check` is never a CI job",
+        subject="samples-check",
+        predicate="is-not-ci-job",
+        note=(
+            "TRUE, and corroborated by a second source: `.github/gate-parity.toml`'s "
+            "own `[[rejected]]` block carries it as `B-R01`. It is registered anyway "
+            "rather than left alone, because a registry holding only the claim that "
+            "was wrong would have nothing to prove it can accept a correct one -- and "
+            "because the anchor arm is what notices this sentence being DELETED, which "
+            "no detector over live text can do."
+        ),
+    ),
+    CategoricalClaim(
+        document="TESTING.md",
+        anchor="`make docs-gate` IS a CI job",
+        subject="docs-gate",
+        predicate="is-ci-job",
+        note=(
+            "THE CLAIM THAT WAS FALSE, and false in a shape nothing on this product "
+            "could see. `TESTING.md` said 'It is not a prerequisite of `make ci` and it "
+            "is not a CI job' -- a compound sentence, half true. The `make ci` half is "
+            "true (`Makefile`'s `ci` recipe does not name the target, and the manifest "
+            "records `in_make_ci = false`). The CI-job half had been false since PDF-34 "
+            "added the top-level `docs-gate` job, whose sole gating step is `make "
+            "docs-gate`. The paragraph beneath was wrong a SECOND way, and more "
+            "damagingly: it said `ci.yml` checks out shallow so the history arms cannot "
+            "run there, while that job sets `fetch-depth: 0` precisely so they can -- "
+            "its own comment calls it 'the first job in the repository's history to run "
+            "those arms anywhere but a maintainer's own full clone'. A reader following "
+            "the document would have believed the changelog-history arms had never run "
+            "in CI, when they have run in every `docs-gate` job since it landed."
+        ),
+    ),
+)
+
+
+def test_the_categorical_claim_registry_is_not_empty() -> None:
+    """The anti-lapse assertion, mirroring the derived-figure registry's own.
+
+    An empty registry passes the anchor arm and the agreement arm vacuously, so
+    emptiness is asserted against directly rather than inferred.
+    """
+    assert CATEGORICAL_CLAIMS, "the categorical registry is empty; every arm below is vacuous"
+    assert {c.predicate for c in CATEGORICAL_CLAIMS} <= set(_CI_JOB_PREDICATES)
+
+
+@pytest.mark.parametrize(
+    "claim", CATEGORICAL_CLAIMS, ids=lambda c: f"{c.document}:{c.subject}:{c.predicate}"
+)
+def test_every_categorical_anchor_occurs_exactly_once(claim: CategoricalClaim) -> None:
+    """An anchor that matches nothing is a guard that guards nothing.
+
+    A FAILURE and never a skip, on the same grounds as
+    `test_every_registry_anchor_occurs_exactly_once`: the interesting way for a
+    documented claim to go wrong is for the sentence to be reworded or deleted,
+    and a guard that quietly stopped applying would report that as agreement.
+    """
+    body = normalise(read(claim.document))
+    count = body.count(normalise(claim.anchor))
+    assert count == 1, (
+        f"{claim.document}: categorical anchor {claim.anchor!r} occurs {count} time(s), "
+        f"expected exactly 1. Why this claim exists: {claim.note}"
+    )
+
+
+@pytest.mark.parametrize(
+    "claim", CATEGORICAL_CLAIMS, ids=lambda c: f"{c.document}:{c.subject}:{c.predicate}"
+)
+def test_every_registered_categorical_claim_agrees_with_ci(claim: CategoricalClaim) -> None:
+    """The registered predicate, against the job set derived from `ci.yml`."""
+    jobs, invoked_targets = ci_job_membership()
+    verdict = resolve_ci_job(claim.subject)
+    assert verdict is not None, (
+        f"{claim.document} registers a CI-job claim about {claim.subject!r}, which is "
+        f"neither a `ci.yml` job nor a `make` target this repository defines, so nothing "
+        f"can decide it. Jobs derived from ci.yml: {sorted(jobs)}. "
+        f"Why this claim exists: {claim.note}"
+    )
+    expected = "is-ci-job" if verdict else "is-not-ci-job"
+    assert claim.predicate == expected, (
+        f"{claim.document} states {claim.anchor!r}, i.e. `{claim.subject}` is "
+        f"{claim.predicate}. Derived from .github/workflows/ci.yml, it is {expected}: "
+        f"the job set is {sorted(jobs)} and the `make` targets CI's gating steps run are "
+        f"{sorted(invoked_targets)}. Why this claim exists: {claim.note}"
+    )
+
+
+@pytest.mark.parametrize("doc", GUARDED_DOCS)
+def test_every_ci_job_sentence_in_the_guarded_documents_is_true(doc: str) -> None:
+    """THE TRUTH ARM, and it is driven off the DETECTOR rather than the registry.
+
+    A registry can only check the claims somebody remembered to register; this
+    arm checks every sentence of the shape, registered or not, against the live
+    derivation. It is the arm that would have caught the original defect on the
+    day `docs-gate` became a job.
+    """
+    jobs, invoked_targets = ci_job_membership()
+    wrong: list[str] = []
+    for line, sentence, subject, predicate in ci_job_claims(read(doc)):
+        verdict = resolve_ci_job(subject)
+        if verdict is None:
+            wrong.append(
+                f"  {doc}:{line} {sentence!r} -- subject {subject!r} is neither a "
+                f"`ci.yml` job nor a `make` target, so this claim cannot be checked "
+                f"at all. Name the target the sentence is about."
+            )
+            continue
+        derived = "is-ci-job" if verdict else "is-not-ci-job"
+        if derived != predicate:
+            wrong.append(
+                f"  {doc}:{line} {sentence!r} -- the document says `{subject}` is "
+                f"{predicate}; ci.yml derives {derived}."
+            )
+    assert not wrong, (
+        f"{doc} states a CI-job claim that .github/workflows/ci.yml contradicts. The "
+        f"derived job set is {sorted(jobs)} and the `make` targets its gating steps run "
+        f"are {sorted(invoked_targets)}:\n" + "\n".join(wrong)
+    )
+
+
+def test_every_detected_ci_job_sentence_has_a_registry_entry() -> None:
+    """D2's no-ungoverned-member arm: the population is DETECTED, never typed.
+
+    An unregistered hit reds naming the file and the sentence, so the registry
+    cannot silently fall behind the documents it governs -- which is how a
+    hand-typed population becomes decoration.
+    """
+    registered = {(c.document, c.subject, c.predicate) for c in CATEGORICAL_CLAIMS}
+    ungoverned: list[str] = []
+    detected = 0
+    for doc in GUARDED_DOCS:
+        for line, sentence, subject, predicate in ci_job_claims(read(doc)):
+            detected += 1
+            if (doc, subject, predicate) not in registered:
+                ungoverned.append(f"  {doc}:{line} {sentence!r} -> ({subject!r}, {predicate!r})")
+    assert not ungoverned, (
+        "a CI-job claim is registered in CATEGORICAL_CLAIMS or it does not exist. "
+        "These sentences are governed by nothing:\n" + "\n".join(ungoverned)
+    )
+    assert detected == len(CATEGORICAL_CLAIMS), (
+        f"the detector finds {detected} CI-job sentence(s) across {list(GUARDED_DOCS)} but "
+        f"the registry carries {len(CATEGORICAL_CLAIMS)} entr(ies). A registry larger than "
+        f"the detected population is a guard over sentences that no longer exist."
+    )
+
+
+def test_the_ci_job_detector_is_self_tested_before_it_is_trusted(tmp_path: Path) -> None:
+    """House doctrine, applied to the new scanner (B-088).
+
+    A scanner is not believed because it returned a number; it is believed
+    because it was shown to find a known needle first -- AND, here, because it
+    was shown NOT to find the near-miss. The negative half is the load-bearing
+    one: `make ci` TARGET membership is a DIFFERENT predicate, asserted in at
+    least half a dozen live sentences across these documents and the `Makefile`,
+    and a detector that swallowed it would have handed the registry a crowd of
+    false members on the day it shipped.
+    """
+    scratch = tmp_path / "SCRATCH.md"
+    scratch.write_text(
+        "**`make widget-gate` is never a CI job** for good reasons.\n"
+        "\n"
+        "It is not a prerequisite of `make ci` and it is not a CI job.\n"
+        "\n"
+        "`make sprocket` is not part of `make ci`, which is a different thing.\n"
+        "Running `make sprocket` is not a prerequisite of `make ci` either.\n"
+    )
+    hits = ci_job_claims(scratch.read_text())
+
+    subjects = [(subject, predicate) for _line, _sentence, subject, predicate in hits]
+    assert ("widget-gate", "is-not-ci-job") in subjects, (
+        f"the detector must find a planted backticked CI-job claim; it found {subjects}"
+    )
+    assert ("it", "is-not-ci-job") in subjects, (
+        "the detector must find a CI-job claim whose subject is a PRONOUN -- that is "
+        f"the exact sentence this instrument exists to remember; it found {subjects}"
+    )
+    assert "sprocket" not in [subject for subject, _ in subjects], (
+        "`make ci` TARGET membership is a DIFFERENT predicate and must NOT be detected "
+        f"as a CI-job claim; the detector returned {subjects}"
+    )
+    assert len(subjects) == 2, f"expected exactly the two planted claims, got {subjects}"
+
+    # And the resolution half: the pronoun resolves to nothing, which is the
+    # failure the truth arm reports rather than a quiet pass.
+    assert resolve_ci_job("it") is None
+    assert resolve_ci_job("docs-gate") is True
+    assert resolve_ci_job("samples-check") is False
+
+
+# --------------------------------------------------------------------------- #
+# PDF-72 D5 — the suite's own size: one definition, one claim site, one anchor
+# --------------------------------------------------------------------------- #
+#
+# NOT A GATE, and the asymmetry with the engines-hidden figure is the design.
+# `make docs-gate` arm 1 re-runs the documented engines-hidden command and
+# compares it because that figure changes rarely. The whole-suite size changes in
+# EVERY spec that adds a test, so a gated whole-suite figure would red on every
+# landing and would be edited to green as a reflex -- a gate nobody believes,
+# which is worse than no gate. What is guarded instead is that the figure is
+# UNIQUE, that it names its OBSERVABLE, and that its ANCHOR is real.
+
+#: Documents scanned for a whole-suite-size claim. `changelog.md` is excluded BY
+#: NAME, not by omission, on the idiom `tests/test_gate_parity.py:421-429`
+#: already establishes on this product: a landed entry is never edited, so it
+#: must stay free to quote a past figure verbatim -- and the only in-repo site
+#: before this spec WAS a changelog entry. A guard that reddened on history would
+#: order the engineer to commit the one edit this product most forbids.
+SUITE_SIZE_SCAN: Final[tuple[str, ...]] = (
+    *GUARDED_DOCS,
+    "Makefile",
+    ".github/workflows/ci.yml",
+)
+
+#: A claim about the size of the suite AS A WHOLE. Deliberately keyed on the
+#: `collected` observable and on the word "suite" rather than on any `N passed,
+#: M skipped` tail: those tails are SCOPED figures about a named subset (the
+#: engines-hidden run, the safety-spine files), each already gated or anchored by
+#: its own instrument, and folding them in here would make this arm red on claims
+#: it has no business ruling on.
+SUITE_SIZE_CLAIM: Final = re.compile(
+    r"\bcollect(?:s|ed|ing)\s+(?:a\s+)?\d{3,5}\b"
+    r"|\b\d{3,5}\s+(?:tests?|items?)\s+(?:were\s+|are\s+)?collected\b"
+    r"|\bsuite\b[^.\n]{0,70}?\b\d{3,5}\s+tests?\b"
+    r"|\b\d{3,5}\s+tests?\b[^.\n]{0,45}?\bsuite\b",
+    re.IGNORECASE,
+)
+
+
+def suite_size_claim_sites() -> list[tuple[str, int, str]]:
+    """Every whole-suite-size claim across `SUITE_SIZE_SCAN`, as (file, line, text)."""
+    sites: list[tuple[str, int, str]] = []
+    for rel in SUITE_SIZE_SCAN:
+        text = read(rel)
+        lines = text.splitlines()
+        for match in SUITE_SIZE_CLAIM.finditer(text):
+            line = text[: match.start()].count("\n") + 1
+            sites.append((rel, line, lines[line - 1].strip()))
+    return sites
+
+
+def test_exactly_one_site_states_the_size_of_the_whole_suite() -> None:
+    """D5. Three renderings of this figure were in circulation and every one of
+    them was TRUE -- two observables at one commit, and one of those observables
+    at another. The defect was never truth; it was that no site said WHICH
+    quantity or WHICH commit, so a reader comparing them concluded the product
+    could not count itself. One site, naming both, is the whole remedy."""
+    sites = suite_size_claim_sites()
+    listing = "\n".join(f"  {rel}:{line} {text[:100]}" for rel, line, text in sites)
+    assert len(sites) == 1, (
+        f"the whole-suite size is stated at {len(sites)} site(s); it is stated at exactly "
+        f"one, in TESTING.md, rendered from perf/suite-size.md by the derived-figure "
+        f"registry. A second site is a second thing to keep true:\n{listing}"
+    )
+    rel, _line, _text = sites[0]
+    assert rel == "TESTING.md", f"the one site must be TESTING.md; it is {rel}"
+
+
+def test_the_suite_size_claim_detector_is_self_tested_before_it_is_trusted() -> None:
+    """The scanner is shown finding its needle -- and shown NOT finding the
+    SCOPED run figures this document legitimately quotes, which is the half that
+    keeps the uniqueness arm from ruling on claims it does not own."""
+    positives = (
+        "the suite collected 5348 tests at c76f0db",
+        "5348 tests collected",
+        "the whole suite is 5348 tests at that commit",
+    )
+    for probe in positives:
+        assert SUITE_SIZE_CLAIM.search(probe), f"must detect a whole-suite claim: {probe!r}"
+    negatives = (
+        "and it reports `12 passed, 22 skipped`",
+        "**259 passed, 0 skipped, 1 xfailed** with `-rs`",
+        "the 84-test band moved from 66.24% to 71.49%",
+        "CI was never affected (run 33287428715)",
+    )
+    for probe in negatives:
+        assert not SUITE_SIZE_CLAIM.search(probe), (
+            f"a SCOPED run figure is not a whole-suite claim and must not be detected: {probe!r}"
+        )
+
+
+def test_the_suite_size_anchor_resolves_to_an_ancestor_of_head() -> None:
+    """A commit anchor nothing can resolve is decoration, not provenance.
+
+    On a clone too shallow to answer this SKIPS with the module's existing
+    `shallow clone` class rather than passing -- a control that cannot be run
+    must be visible as skipped, never silently absent (X-153) -- and never
+    invents a new class, because `scripts/assert_skips.py` names the classes it
+    can report and a new one would land outside its verdict.
+    """
+    sha = suite_size_fields()["commit"]
+    resolves = subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if resolves.returncode != 0:
+        if is_shallow_repository():
+            pytest.skip(
+                f"{SKIP_SHALLOW_CLONE}: perf/suite-size.md anchors the figure at {sha}, "
+                f"which this checkout does not carry. A shallow clone cannot tell a bad "
+                f"sha from an unfetched one, so this arm reports as skipped rather than "
+                f"guessing; it is enforced locally, by `make docs-gate` and by the "
+                f"qa-sentinel."
+            )
+        raise AssertionError(
+            f"perf/suite-size.md anchors the whole-suite figure at {sha}, which does not "
+            f"resolve to a commit in this repository, and this checkout is NOT shallow. "
+            f"An anchor nothing can resolve makes the figure unattributable, which is the "
+            f"exact defect the record exists to end: re-take the measurement and write "
+            f"the commit it was taken at."
+        )
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", sha, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ancestor.returncode == 0, (
+        f"perf/suite-size.md anchors the whole-suite figure at {sha}, which resolves but "
+        f"is NOT an ancestor of HEAD -- so the figure was taken on a tree this one does "
+        f"not descend from. Re-take it here."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1424,9 +2151,8 @@ def planning_dir() -> Path | None:
 
     The enforcement did not disappear; it MOVED, from accidental to declared.
     With the variable set, every arm runs and asserts exactly as before. With it
-    unset they skip **visibly, with a reason**, `make docs-gate` prints the class
-    count, and ``DOCS_GATE_STRICT=1`` turns that into an exit code for the
-    cadence that can see both trees. A skipped arm is not agreement (X-153).
+    unset they skip **visibly, with a reason** and `make docs-gate` prints the
+    class count. A skipped arm is not agreement (X-153).
     """
     override = os.environ.get(PLANNING_DIR_ENV)
     if override:
