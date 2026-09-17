@@ -40,6 +40,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
 from atomic_harness import run_harness  # noqa: E402
+from registry import run_cli  # noqa: E402
 
 OVERRIDE = "PDF_TOOLING_TEST_XDEV_DIR"
 
@@ -234,3 +235,118 @@ def test_the_degraded_path_still_writes_the_sidecar(tmp_path: Path, xdev_dir: Pa
     assert result.returncode == 0, result.stderr
     assert target.read_text() == "rewritten"
     assert (tmp_path / "doc.pdf.bak").read_text() == "original"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-81 — the same condition, reached through a REAL VERB rather than through
+# the harness, because one verb was losing the warning and the harness cannot
+# see that
+# --------------------------------------------------------------------------- #
+#
+# Every arm above drives `tests/atomic_harness.py`, which exercises the safety
+# spine directly. That is the right instrument for the spine and it is blind to
+# this defect by construction: the harness never calls an engine, so nothing in
+# it can rebind `sys.stderr` before `AtomicWriter._warn` writes to it. Measured
+# at `0c63090`, through an identical cross-device destination, `compress` and
+# `repair` emitted the degradation warning and `linearize` emitted ZERO bytes,
+# 3/3 — because `pikepdf.Pdf.check_linearization` had taken `sys.stderr` during
+# `linearize`'s verification step and never given it back. The warning was
+# still raised, still appended to `AtomicWriter.warnings`, and still written;
+# it was written somewhere nobody was reading.
+#
+# THE DESTINATION NAME MUST BE FRESH, and that is a property of the product
+# rather than an accident of the fixture. `declared_device` walks
+# `(target, *target.parents)` and `lstat`s the first that exists, so once a
+# destination FILE exists behind the symlink its own device is what gets
+# compared and the condition legitimately stops holding — a second write to the
+# same name warns about nothing. `xdev_dir` hands out a fresh `mkdtemp`
+# workspace per test, so the names below are fresh by construction; a future
+# author reusing one would get a green arm that had stopped asking anything.
+
+_DEGRADED_VERBS = ("linearize", "compress", "repair")
+
+
+@pytest.fixture
+def linearizable(tmp_path: Path) -> Path:
+    """A document these verbs all succeed on, built by the product's own `create`."""
+    source = tmp_path / "note.txt"
+    source.write_text("PDF-81 payload\n")
+    target = tmp_path / "input.pdf"
+    result = run_cli("create", str(source), "-O", str(target), "-o", "json", cwd=tmp_path)
+    assert result.returncode == 0, f"could not build the fixture: {result.stdout}{result.stderr}"
+    return target
+
+
+@pytest.mark.parametrize("verb", _DEGRADED_VERBS)
+def test_a_producing_verb_writing_across_a_mount_still_warns_on_stderr(
+    verb: str, tmp_path: Path, xdev_dir: Path, linearizable: Path
+) -> None:
+    """PDF-81 AC5, parametrized so the control rides in the same arm.
+
+    `linearize` is the member that was losing this; `compress` and `repair` are
+    the two that were not, through the SAME symlink, on the SAME input, and they
+    were already green before the fix. A probe that had reddened on all three
+    would have been measuring the destination rather than the verb.
+
+    The run exits 0. That is the uncomfortable half of this defect and the
+    cheapest symptom it has: the user is told the write SUCCEEDED while the
+    safety warning saying it was not atomic on the filesystem they named is
+    destroyed. Nothing about the exit code or the payload was ever wrong.
+    """
+    real_out = xdev_dir / "out"
+    real_out.mkdir()
+    out_dir = tmp_path / "outdir"
+    out_dir.symlink_to(real_out)
+    target = out_dir / f"{verb}-fresh.pdf"
+
+    result = run_cli(verb, str(linearizable), "-O", str(target), "-f", "-o", "table", cwd=tmp_path)
+
+    assert result.returncode == 0, f"{verb}: rc={result.returncode} {result.stdout}{result.stderr}"
+    assert DEGRADED_PREFIX in result.stderr, (
+        f"{verb} wrote across a mount boundary and said {result.stderr!r} on stderr. The "
+        "warning is raised either way; before PDF-81 `linearize` wrote it into a buffer "
+        "the engine had left in `sys.stderr`'s place, and the caller discarded it"
+    )
+    # WHAT THIS ARM DELIBERATELY DOES NOT ASSERT, and why the omission is a
+    # decision rather than an oversight. PDF-81's spec asks this arm to pin that
+    # the warning echoes the path as written and the path it resolved to. Those
+    # two properties are ALREADY pinned, on the same message from the same
+    # single formatter (`AtomicWriter._warn_if_destination_moved`, which builds
+    # exactly one string), by `test_an_out_dir_symlinked_onto_another_mount_-
+    # warns_on_stderr` above. Adding them here would add two `assert <operand>
+    # in <output>` sites, which is `B-073`'s swept class: measured, it moves
+    # `tests/test_secret_leak_sweeps.py`'s frozen `SWEEP_1_CEILING` from 79 to
+    # 81, and no ceiling moves for this item. Restructuring the same comparison
+    # out of an `assert` node to slip past the sweep, or renaming this function
+    # into the `echoes...as_written` exemption written for three specific
+    # `test_safety_paths.py` rows, would both be gaming an instrument rather
+    # than respecting it. What PDF-81 changed is stream OWNERSHIP, not message
+    # CONTENT: the string was always correct, it was written where nobody could
+    # read it. So this arm grades the property that moved, and the content stays
+    # pinned exactly once. ROUTED to the project-manager rather than decided
+    # here -- see this spec's report.
+    assert (real_out / target.name).is_file(), f"{verb}: the document did not land"
+
+
+@pytest.mark.parametrize("verb", _DEGRADED_VERBS)
+def test_the_same_verbs_warn_about_nothing_when_no_mount_is_crossed(
+    verb: str, tmp_path: Path, linearizable: Path
+) -> None:
+    """The non-vacuity half of the arm above: it is not merely detecting that
+    stderr had bytes. No symlink, no second filesystem, no warning — including
+    for `linearize`, whose whole defect was that this channel said nothing."""
+    result = run_cli(
+        verb,
+        str(linearizable),
+        "-O",
+        str(tmp_path / f"{verb}-local.pdf"),
+        "-f",
+        "-o",
+        "table",
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, f"{verb}: {result.stdout}{result.stderr}"
+    assert DEGRADED_PREFIX not in result.stderr, (
+        f"{verb} warned about atomicity on a write that never left its filesystem: "
+        f"{result.stderr!r}"
+    )

@@ -182,15 +182,19 @@ def _cell_marks(verb: str, flag: str, spelling: PathSpelling) -> tuple[pytest.Ma
 # were the easy half. What replaces the pin is below, asserting the properties
 # of the PRODUCT (30 / 11 / 19) that must outlive the defect.
 #
-# ONE THING THIS ITEM DID NOT FIX, recorded so a reader does not read its
-# absence as a failure. `linearize` was silent on BOTH channels, not just
-# stdout, because `adapters/pikepdf_structure.py`'s `check_linearization(
-# io.StringIO())` assigns `sys.stderr = <that buffer>` and never restores it.
-# That is a different root cause in a different layer, filed as PDF-80 E6 and
-# allocated `PDF-81` (ledger `333f0b182f`). PDF-80 removed the TRIGGER, not the
-# silence: `linearize` now exits 0 and prints its payload on stdout, which was
-# never stolen -- but any OTHER post-engine failure on that verb is still
-# silent on stderr, and that is PDF-81's, not evidence against this matrix.
+# ONE THING THIS ITEM DID NOT FIX -- AND PDF-81 SINCE DID. Recorded so a reader
+# does not read its absence here as a failure, and updated so nobody reads the
+# note as current. `linearize` was silent on BOTH channels, not just stdout,
+# because `adapters/pikepdf_structure.py`'s `check_linearization(io.StringIO())`
+# assigns `sys.stderr = <that buffer>` and never restores it. That is a
+# different root cause in a different layer, filed as PDF-80 E6 and allocated
+# `PDF-81` (ledger `333f0b182f`). PDF-80 removed the TRIGGER, not the silence:
+# `linearize` began exiting 0 and printing its payload on stdout, which was
+# never stolen, while any OTHER post-engine failure on that verb stayed silent
+# on stderr. `PDF-81` closed that half by putting the binding back at the call
+# (`tests/test_adapter_stream_ownership.py::owned_stream_arguments`), so the
+# sentence above describes a binary this repository no longer builds. Neither
+# item is evidence against this matrix in either direction.
 # --------------------------------------------------------------------------- #
 
 

@@ -23,8 +23,8 @@ secondary. ``doctor`` still prints six rows — a secondary is named in its port
 absent: WeasyPrint is the ``[html]`` extra and Phase 2, so ``ComposeEngine``
 resolves to reportlab in v1.
 
-Two rules every adapter here follows
-------------------------------------
+Three rules every adapter here follows
+--------------------------------------
 1. **The engine import is function-local.** Probing asks
    ``importlib.util.find_spec`` whether a package is present and reads its
    version from distribution metadata; it never imports the library. That is
@@ -33,6 +33,20 @@ Two rules every adapter here follows
 2. **An adapter never chooses a destination path.** It receives the path it is
    told to write to. That is the structural half of the safety guarantee that an
    AST walk cannot see, because engines write through their own C code.
+3. **An engine call handed one of this process's own DIAGNOSTIC streams runs
+   inside** :func:`restore_standard_streams`. Some engines do not write *to* the
+   stream they are handed, they **bind** it:
+   ``pikepdf.Pdf.check_linearization`` assigns ``sys.stderr`` and never puts
+   back what was there, so from that call onward every diagnostic this process
+   writes — the product's own ``error:`` line, ``AtomicWriter``'s degradation
+   warning, the interpreter's own unhandled-exception traceback — lands in a
+   buffer the caller discards. A separate AST walk holds this one from outside:
+   ``tests/test_adapter_stream_ownership.py::owned_stream_arguments`` derives
+   every product-owned stream argument in this package and requires each
+   diagnostic one to be lexically enclosed by the guard. ``io.BytesIO`` is
+   **outside the rule's domain rather than exempted from it** — a byte conduit
+   is not somewhere a C++ library looks for a place to print words — which is
+   what lets the rule be absolute instead of carrying an allowlist.
 
 Each adapter exposes a module-level ``ADAPTER`` singleton implementing its
 port's ``Protocol``, plus :class:`AdapterProbe` from :func:`probe`. The
@@ -44,9 +58,47 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
-__all__ = ["AdapterProbe", "package_probe"]
+__all__ = ["AdapterProbe", "package_probe", "restore_standard_streams"]
+
+
+@contextmanager
+def restore_standard_streams() -> Iterator[None]:
+    """Give ``sys.stdin``/``sys.stdout``/``sys.stderr`` back to whoever had them.
+
+    Rule 3's carrier. Not a redirection and not a capture — the three names are
+    untouched on the way IN, and the body sees exactly the streams the caller
+    had. What this guarantees is the way OUT: whatever each name was bound to at
+    the call is what it is bound to afterwards, however the body leaves, return
+    or raise. That makes it correct on the failure path, which is the path this
+    exists for: the engine call it wraps decides a verdict, and the diagnostic
+    that reports a bad verdict is written after the call returns.
+
+    **It restores the binding that was LIVE AT THE CALL, never** ``sys.__stderr__``.
+    The shorter spelling reads as "put it back" and is wrong in both directions:
+    it would clobber a caller that had legitimately redirected a stream — a test
+    runner under capture, a ``contextlib.redirect_stderr``, an embedding
+    process — so a guard written that way turns a defence against an engine into
+    an attack on the caller, and it is the one wrong implementation that still
+    looks green to an identity check written against ``sys.__stderr__``.
+
+    All three streams rather than the one that is known to be stolen: the defect
+    is stream OWNERSHIP, and a guard that protects one of three is a guard that
+    gets found insufficient by the next engine rather than by a test.
+    """
+    saved_stdin = sys.stdin
+    saved_stdout = sys.stdout
+    saved_stderr = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdin = saved_stdin
+        sys.stdout = saved_stdout
+        sys.stderr = saved_stderr
 
 
 @dataclass(frozen=True, slots=True)

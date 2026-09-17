@@ -4566,6 +4566,15 @@ def test_c23_the_refusal_holds_under_every_output_shape(verb, corpus, tmp_path: 
 # `linearize`'s pre-fix binary, which is silent on BOTH streams (E4) -- that
 # is demonstrated once by hand against the unmodified tree and recorded in
 # this spec's Implementation Log, not re-encoded as a shipped assertion here.
+#
+# WHICH SILENCE, because there were two and only one of them is this one.
+# PDF-81 closed a SECOND, unrelated silence on the same verb: an engine call
+# was taking `sys.stderr` and not giving it back, which lost every diagnostic
+# written AFTER the engine ran. This cell is not that cell. The refusal below
+# is raised by `plan_filesystem` BEFORE `engine.linearize` is reached, so its
+# stderr was never stolen -- measured at `0c63090` on both binaries, 221 bytes
+# and byte-identical. The sentence above is about THIS spec's own pre-fix
+# binary and stays historical; PDF-81 moved nothing here.
 # --------------------------------------------------------------------------- #
 
 

@@ -38,7 +38,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from pdf_tooling.adapters import AdapterProbe, package_probe
+from pdf_tooling.adapters import AdapterProbe, package_probe, restore_standard_streams
 from pdf_tooling.errors import AuthError, FailureError
 from pdf_tooling.output.logging import get_logger
 from pdf_tooling.ports.structure import (
@@ -315,7 +315,20 @@ class PikepdfStructureAdapter:
             with pikepdf.Pdf.open(io.BytesIO(output)) as candidate:
                 if candidate.is_linearized:
                     try:
-                        verified = bool(candidate.check_linearization(io.StringIO()))
+                        # PDF-81. This call does not write TO the sink it is
+                        # handed -- it assigns `sys.stderr = <that sink>` and
+                        # never puts back what was there (the parameter's
+                        # documented DEFAULT is `sys.stderr`, which is what an
+                        # API implemented that way looks like from outside).
+                        # Without the guard every diagnostic this process writes
+                        # after this line lands in a buffer discarded on return,
+                        # four lines below included: the `FailureError` raised
+                        # on `not verified` is rendered to a `sys.stderr` that
+                        # is no longer the user's. Rule 3 in this package's
+                        # docstring; the guard restores the binding that was
+                        # live HERE, never `sys.__stderr__`.
+                        with restore_standard_streams():
+                            verified = bool(candidate.check_linearization(io.StringIO()))
                     except RuntimeError:
                         verified = False
         except pikepdf.PdfError as error:
