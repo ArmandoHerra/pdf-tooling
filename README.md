@@ -167,7 +167,7 @@ Uniform across every verb.
 
 | Code | Name | Meaning |
 |---|---|---|
-| 0 | `OK` | Success — including an empty-but-valid report. A `--dry-run` mirrors the code the real run would return, so it is not always `0` — except where an out-of-process engine decides the operand at load time, which a preview may not start; see the note below this table. |
+| 0 | `OK` | Success — including an empty-but-valid report. A `--dry-run` mirrors the code the real run would return, so it is not always `0` — except where an out-of-process engine decides the operand at load time, which a preview may not start, and except where a supplied password's correctness would decide it, which a preview declines to test; see the notes below this table. |
 | 1 | `FAILURE` | The operation ran and failed — corrupt input, engine error, unwritable destination. |
 | 2 | `USAGE` | Bad invocation — unknown flag, mutually exclusive flags, malformed page range, unknown subcommand, a global flag at a command group, or global flags with no command. |
 | 3 | `ENGINE_MISSING` | A required engine or binary is unavailable. The message always carries an install hint. |
@@ -176,6 +176,8 @@ Uniform across every verb.
 | 6 | `AUTH` | Password required, incorrect, or of the wrong kind. |
 
 **The carve-out on code `0`, and its limit.** `convert` and `ocr` hand the operand to a system binary — `soffice` and `tesseract` — and a `--dry-run` may not start either: a preview writes nothing, anywhere, and starting an engine to look would break that. The spawn-free triage a preview does run decides the container, not the engine's verdict on the package inside it, so a readable, marker-bearing office document that `soffice` then refuses at load time predicts `0` and really exits `1`. Every dry item of those verbs therefore carries `engine_verified` set to `false` in its `detail`, so the preview never reads as an unqualified success. The limit is exact: the carve-out covers an out-of-process engine's decision about an operand, and nothing else.
+
+**The carve-out on code `0` for a supplied password, and its limit.** Whether a password can be *resolved* — a flag, an environment variable, a terminal to prompt at — is decidable from existence alone, so a preview predicts it: an encrypted operand with no password to resolve predicts `6` and exits `6`. Whether a resolved password is *correct* is decidable only by trying it, and a preview that tried it would have read the secret inside the planning path and published a right-or-wrong verdict into plans that land in CI artifacts — **a preview must not become an oracle.** So an encrypted document reached with a resolvable but wrong password predicts `0` and really exits `6`, wherever the preview plans without opening it. Every dry item that names a password source therefore also carries `password_verified` set to `false` in its `detail`, so the preview never reads as a verified success. The limit is exact: the carve-out covers a supplied password's correctness, and nothing else.
 
 ## Safety contract
 

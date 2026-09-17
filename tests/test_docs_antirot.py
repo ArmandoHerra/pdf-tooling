@@ -464,6 +464,24 @@ def engine_disclosure_key() -> str:
     return f"`{ENGINE_VERIFIED_KEY}`"
 
 
+def password_disclosure_key() -> str:
+    """The disclosure key as `README.md` renders it, FROM the CONSTRUCTOR.
+
+    PDF-83, the second carve-out on the code-`0` row (`X-89`'s oracle limit).
+    Deliberately NOT a constant: `password_detail` merges no caller-supplied
+    `detail`, so with no sources the disclosure key is the only key it emits
+    and the shipped constructor can simply be ASKED. That is stronger than
+    the sibling above -- a constant reds only when the CONSTANT is renamed,
+    while this reds when the key the payload actually PUBLISHES moves, which
+    is the thing `README.md` makes a promise about. It also means `src/`
+    needs no edit for this arm to exist, which keeps a documentation-only
+    item behaviour-neutral by construction rather than by discipline.
+    """
+    from pdf_tooling.ops.document_password import password_detail
+
+    return f"`{next(iter(password_detail((), verified=False)))}`"
+
+
 def branch_and_line_coverage_span() -> str:
     """TESTING.md's line/branch pair, rendered from the artefacts that measured it.
 
@@ -613,6 +631,28 @@ DERIVED_FIGURES: tuple[DerivedFigure, ...] = (
             "delete or reword the carve-out and the anchor count moves off 1; rename "
             "ENGINE_VERIFIED_KEY in src/ alone, or reword README's rendering of it alone, "
             "and the derivation stops occurring in the document."
+        ),
+    ),
+    DerivedFigure(
+        document="README.md",
+        anchor="the carve-out covers a supplied password's correctness",
+        derive=lambda: f"carries {password_disclosure_key()} set to `false` in its `detail`",
+        note=(
+            "PDF-83 / X-89, and the SECOND exception on the same frozen row. An encrypted "
+            "operand reached with a RESOLVABLE BUT WRONG password predicts `0` and really "
+            "exits `6`, because a preview that decided correctness would have read the "
+            "secret inside the planning path -- ops/crypto.py's own words, 'a preview must "
+            "not become an oracle'. The behaviour is CORRECT and pinned as correct "
+            "(test_password_file_contract.py::test_pdf52_a6_the_correctness_tier_is_still_"
+            "not_predicted reds if the divergence ever CLOSES), so the remedy was a "
+            "DISCLOSURE: the payload half shipped with PDF-52 and the published sentence "
+            "did not, which is how a row frozen as public API from v1.0.0 stayed false at "
+            "the version that froze it. This entry is the binding the gap consisted of. It "
+            "is kept SEPARATE from the engine carve-out above on purpose -- two rulings, "
+            "two grounds, two notes, two keys, and driven over the dry items of every "
+            "honoured verb the two keys never co-occur. Unlike its sibling the derivation "
+            "reads the key off password_detail() itself rather than off a constant, so "
+            "renaming the PUBLISHED key reds here even if a constant were added later."
         ),
     ),
 )
