@@ -4352,3 +4352,446 @@ def test_the_vacuous_rendering_extractor_fails_if_the_heading_is_deleted() -> No
     without_heading = _vacuous_migration_fixture().replace(MIGRATION_HEADING, "## Nothing here")
     with pytest.raises(AssertionError):
         _migration_section_body_of(without_heading)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-79 / OR-21 — `-o table` is NOT public API, recorded where a user reads it
+#
+# `tests/golden/envelope_keys.json` freezes `json`, `ndjson_line` and
+# `error_json`. It carries no `table` arm — while `auto_format()` returns
+# `TABLE` whenever stdout is a terminal, so the one shape every interactive
+# user sees is the one shape nothing freezes. That is not a falsehood in the
+# documentation, it is a SILENCE, and a structural one: a three-row shape table
+# sits directly under a heading called `## Output contract`, and the sentence
+# that enumerates what the contract actually is ("the structured shapes and the
+# exit-code table below") sits far below it, inside a sub-section. A reader who
+# stops at the table has been told that all three shapes are the product's
+# shapes, and has been told nothing that contradicts it.
+#
+# OR-21 rules the silence rather than closing it the expensive way: `-o table`
+# is NOT public API. It is a human convenience, machine consumers are already
+# pointed at the structured shapes, and freezing its columns would forbid
+# improving the display. So NOTHING HERE FREEZES A COLUMN SET — not a name, not
+# an order, not a width, not a count — and no `table` arm is added to the
+# register. What ships is the ruling, in the section a user actually reads,
+# plus these arms.
+#
+# WHAT THE RULING DOES NOT FREE. It frees the columns as a PROMISE TO USERS. It
+# does not free them of test-internal coupling. Contract row C22 —
+# `test_cli_contract.py::test_c22_the_prediction_holds_under_every_output_shape`
+# — parses the rendered table and pins three column coordinates: `assert "ok"
+# not in header`, `header.index("exit code")` and `header.index("detail")`,
+# measured at `tests/test_cli_contract.py` lines 4255, 4259 and 4260 when this
+# section was written (re-derive: coordinates rot, X-411). A column change WILL
+# red those three, and that red is CORRECT — a parse coordinate, never a user
+# promise. Re-derive C22's parse coordinates; do not conclude that the ruling
+# makes the red wrong.
+#
+# WHAT THIS SECTION DELIBERATELY DOES NOT ASSERT. `render_table` TOTALITY —
+# that it renders every publishing leaf without raising — is not asserted here,
+# and no module anywhere in `tests/` has the renderer as its subject. That is
+# carried, scoped and sequenced rather than forgotten: `B-311` /
+# `IMPROVEMENT-REPORT.md` I-15 `P-C` (in the planning tree's `qa/` directory),
+# which MAY assert totality but must NOT freeze a column set, and which needs
+# PDF-77's hypothesis profile before a counterexample is recoverable at all.
+# A reader who asks "so nothing asserts the renderer works?" gets the answer,
+# an owner and a revisit condition at the point they ask it.
+#
+# WHY NOT PDF-72's CATEGORICAL-CLAIM REGISTRY, though this claim is categorical.
+# That registry derives its boolean from `ci.yml`'s live job set via
+# `resolve_ci_job`; its emptiness arm asserts every member's predicate is one of
+# `_CI_JOB_PREDICATES`; and its completeness arm asserts the DETECTED population
+# equals the registered one. A member reading "`-o table` is not public API"
+# satisfies none of the three: its oracle is the register, not `ci.yml`, so
+# `resolve_ci_job` returns `None` — which that registry treats as a FAILURE,
+# correctly. Registering it there would hand a registry built to refuse
+# underivable members exactly such a member. Measured, not reasoned: planted,
+# it reds three arms at once. `DERIVED_FIGURES` is the other near-neighbour and
+# is also wrong — its agreement arm asserts `derive()`'s STRING is rendered in
+# the document, and this ruling is deliberately cardinal-free, so it renders no
+# figure for a derivation to equal. What is reused is the module's VOCABULARY —
+# anchor uniqueness checked separately, paraphrase patterns rather than one
+# literal (B-106), every detector shown to find a known needle before it is
+# believed (B-088) — and not its registries.
+# --------------------------------------------------------------------------- #
+
+#: The section heading, and the sliced body's closing sub-heading.
+OUTPUT_CONTRACT_HEADING = "## Output contract"
+COLLECTION_KEY_SUBHEADING = "### The collection key"
+
+#: LINE-ANCHORED, and that is a deliberate divergence from
+#: `_schema_version_section_body_of`'s bare `str.split`/`str.count`, recorded
+#: here because it was measured rather than preferred. The bare substring
+#: `## Output contract` occurs TWICE in `README.md`: once as this heading, and
+#: once inside PDF-65's migration prose, which names "the `-o table` row under
+#: `## Output contract`". The unanchored idiom therefore counts two and slices
+#: from the PROSE mention, returning the migration table as the "section body".
+#: `^...$` is what the spec's own acceptance criterion measures anyway
+#: (`grep -c "^## Output contract"`), so the guard and its criterion agree.
+_OUTPUT_CONTRACT_ANCHOR: Final = re.compile(
+    rf"^{re.escape(OUTPUT_CONTRACT_HEADING)}$", re.MULTILINE
+)
+
+
+def _output_contract_body_of(text: str) -> str:
+    """*text*'s `## Output contract` section, bounded by the NEXT `## ` heading.
+
+    Whether the anchor occurs exactly once is checked SEPARATELY
+    (`test_pdf79_the_output_contract_anchor_occurs_exactly_once`) rather than
+    folded in here — the same reason `_schema_version_section_body_of` gives:
+    folding it in would silently return the wrong span on a duplicate instead
+    of failing. A MISSING anchor is an `AssertionError` here rather than an
+    `IndexError`, so the extractor's own red is assertable.
+    """
+    match = _OUTPUT_CONTRACT_ANCHOR.search(text)
+    assert match is not None, (
+        f"the document carries no {OUTPUT_CONTRACT_HEADING!r} heading of its own line; "
+        "OR-21's ruling has nowhere to live and every arm below is vacuous"
+    )
+    return text[match.end() :].split("\n## ", 1)[0]
+
+
+def output_contract_body() -> str:
+    return _output_contract_body_of(read("README.md"))
+
+
+def _pdf79_scan(text: str) -> str:
+    """*text* as the patterns below read it: whitespace collapsed, then markdown
+    emphasis and code ticks removed.
+
+    So a claim may wrap across lines, may be bolded, and may render `-o json`
+    as a code span or as bare prose without changing whether a pattern sees it.
+    Self-tested by `test_pdf79_the_scanner_is_self_tested_before_it_is_trusted`
+    before anything believes it (B-088).
+    """
+    return normalise(text).replace("`", "").replace("*", "")
+
+
+#: D3's paraphrase set, and there are three of them rather than one literal
+#: because a guard that answers "is this STRING gone" rather than "is this CLAIM
+#: gone" is the B-106 failure this module exists to stop repeating. Each covers
+#: one limb of the ruling: the shape is for a person; its columns may move
+#: without a major version bump; a program reads the structured shapes instead.
+#: Each is proven to match the shipped paragraph AND to miss the pre-ruling
+#: section by `test_pdf79_the_exclusion_patterns_can_fail`.
+#:
+#: NOTE WHAT IS ABSENT: no pattern names a column, an order or a width. A
+#: pattern here that read a rendered header row would be this section
+#: contradicting the ruling it records.
+PDF79_EXCLUSION_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"-o table[^.]{0,80}\bfor a (?:person|human)\b", re.IGNORECASE),
+    re.compile(
+        r"\bcolumns\b[^.]{0,160}\bmay change\b[^.]{0,80}\bwithout a major version bump\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:parses|parsing|reads|reading|consumes)\b[^.]{0,100}-o json[^.]{0,60}-o ndjson",
+        re.IGNORECASE,
+    ),
+)
+
+#: D3's contrary set — the patterns that match the ROT rather than the claim.
+#: They are the answer to the limitation PDF-83 reported against its own arm
+#: (the bite is on the anchor phrase, so a merge performed by WIDENING rather
+#: than rewriting is invisible to it): these sweep whole documents, so a
+#: contradiction appended to the ruling's own paragraph — which every exclusion
+#: pattern above would still match — reds here. Proven by
+#: `test_pdf79_a_widening_that_keeps_the_claim_is_still_caught`.
+#:
+#: Each is narrow in a specific, load-bearing way. The first requires a
+#: UNIVERSAL QUANTIFIER, because `README.md` and `CLAUDE.md` both carry a true
+#: sentence about "the structured (output) shapes" being public API and a
+#: pattern without the quantifier would red a correct tree. The second requires
+#: the TABLE SHAPE by name rather than the bare word `table`, because the same
+#: true sentence names "the exit-code table".
+PDF79_CONTRARY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(
+        r"\b(?:all|every|each)\b[^.]{0,60}\bshapes?\b[^.]{0,60}"
+        r"\b(?:public api|frozen|stable|contract)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:-o table|table shape|table output|table renderer)[^.]{0,100}"
+        r"\b(?:is|are|remains?|stays?|becomes?)\b[^.]{0,60}"
+        r"\b(?:public api|frozen|stable|part of the contract|covered by the register)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\btable\b\s+arm\b|\b(?:register|envelope keys)\b[^.]{0,80}\b(?:-o table|table shape)\b",
+        re.IGNORECASE,
+    ),
+)
+
+#: The contrary set's positive control. INVENTED — no text this product ever
+#: shipped said any of this, which is precisely why the patterns need a fixture
+#: of their own to prove they can fire at all. One sentence per pattern, in
+#: order.
+PDF79_SYNTHETIC_CONTRARY_LITERAL: Final[str] = (
+    "All three output shapes are public API from v1.0.0. "
+    "The `-o table` shape is frozen at `v1.0.0` and its columns may not be renamed. "
+    "The frozen envelope register carries a `table` arm beside `json` and `ndjson_line`."
+)
+
+#: The fourth arm OR-21 declined. Named here so the agreement arm's message and
+#: its own red speak about the same member.
+PDF79_DECLINED_REGISTER_ARM: Final[str] = "table"
+
+
+def _pdf79_ruling_paragraphs(body: str) -> list[str]:
+    """Every paragraph of *body* carrying the WHOLE ruling.
+
+    A paragraph qualifies only when EVERY exclusion pattern matches it, so a
+    paragraph that merely mentions `-o table` does not qualify and the removal
+    control below cannot delete the wrong prose. Located by CONTENT rather than
+    by position, so the ruling may be reworded, merged or moved within the
+    section without this helper needing an edit — and so no line coordinate
+    enters this section (X-411).
+    """
+    return [
+        paragraph
+        for paragraph in body.split("\n\n")
+        if all(pattern.search(_pdf79_scan(paragraph)) for pattern in PDF79_EXCLUSION_PATTERNS)
+    ]
+
+
+def _pdf79_table_arm_complaint(arms: Sequence[object]) -> str | None:
+    """The register-agreement predicate, as a pure function of *arms*.
+
+    Extracted so the `..._can_fail` twin can drive it against a scratch mapping
+    instead of the shipped register — which must stay byte-identical across
+    this spec's landing, and does.
+    """
+    if PDF79_DECLINED_REGISTER_ARM not in [str(arm) for arm in arms]:
+        return None
+    return (
+        f"tests/golden/envelope_keys.json's `_meta.arms` now carries a "
+        f"{PDF79_DECLINED_REGISTER_ARM!r} arm: {list(arms)}. Operator ruling OR-21 says "
+        "`-o table` is NOT public API — it is a human convenience, machine consumers are "
+        "pointed at the structured shapes, and freezing its columns would forbid improving "
+        "the display. README.md's `## Output contract` states that ruling to users. THE "
+        "REPAIR IS A PROJECT-MANAGER RULING PLUS AN AMENDED README.md, NEVER AN EDIT TO "
+        "THIS ARM and never a quiet regeneration of the register: a fourth arm added here "
+        "reverses OR-21 without a decision record, and leaves the document promising the "
+        "opposite of what the register freezes."
+    )
+
+
+def test_pdf79_the_scanner_is_self_tested_before_it_is_trusted() -> None:
+    """B-088, applied to `_pdf79_scan` before any pattern is believed through it.
+
+    The load-bearing half is the markup half: the shipped ruling renders its
+    flags as code spans, and a scanner that left the ticks in would make every
+    pattern below depend on markup the author is free to change.
+    """
+    assert _pdf79_scan("a  b\nc") == "a b c"
+    assert _pdf79_scan("ask for `-o json` or\n`-o ndjson`") == "ask for -o json or -o ndjson"
+    assert _pdf79_scan("**public API** from `v1.0.0`") == "public API from v1.0.0"
+
+
+def test_pdf79_the_output_contract_anchor_occurs_exactly_once() -> None:
+    """AC3. An anchor that matches nothing — or matches twice — is a guard that
+    guards nothing, so a heading rename is a HARD FAILURE here, never a skip.
+
+    Counted line-anchored: the bare substring occurs twice in `README.md`, the
+    second inside PDF-65's migration prose. See `_OUTPUT_CONTRACT_ANCHOR`.
+    """
+    count = len(_OUTPUT_CONTRACT_ANCHOR.findall(read("README.md")))
+    assert count == 1, (
+        f"README.md carries the {OUTPUT_CONTRACT_HEADING!r} heading {count} time(s), expected "
+        "exactly 1. OR-21's ruling is delivered inside that section; a renamed, deleted or "
+        "duplicated heading leaves it guarding nothing."
+    )
+
+
+def test_pdf79_the_anchor_check_fails_rather_than_skips_if_the_heading_changes() -> None:
+    """AC3's RED, on a scratch copy — never the real `README.md`."""
+    real = read("README.md")
+    altered = re.sub(_OUTPUT_CONTRACT_ANCHOR, "## Output shapes", real)
+    assert altered != real, "the scratch mutation did not fire"
+    assert len(_OUTPUT_CONTRACT_ANCHOR.findall(altered)) == 0
+    with pytest.raises(AssertionError):
+        _output_contract_body_of(altered)
+
+    duplicated = real.replace(
+        f"{OUTPUT_CONTRACT_HEADING}\n", f"{OUTPUT_CONTRACT_HEADING}\n\n{OUTPUT_CONTRACT_HEADING}\n"
+    )
+    assert len(_OUTPUT_CONTRACT_ANCHOR.findall(duplicated)) == 2
+
+
+def test_pdf79_the_output_contract_rules_the_table_shape_out_of_contract() -> None:
+    """AC1/AC2. OR-21, stated where the belief is formed.
+
+    Asserted by INDEX WITHIN THE SLICED BODY and never by line number (X-411):
+    the ruling sits inside `## Output contract` and ahead of that body's
+    `### The collection key` sub-heading, which is the granularity the ruling
+    itself has.
+    """
+    body = output_contract_body()
+    scanned = _pdf79_scan(body)
+    sub_heading_index = scanned.find(COLLECTION_KEY_SUBHEADING)
+    assert sub_heading_index != -1, (
+        f"the `## Output contract` body no longer carries {COLLECTION_KEY_SUBHEADING!r}, so "
+        "AC2's placement bound cannot be evaluated at all"
+    )
+
+    for pattern in PDF79_EXCLUSION_PATTERNS:
+        match = pattern.search(scanned)
+        assert match is not None, (
+            "README.md's `## Output contract` no longer records operator ruling OR-21 — that "
+            "`-o table` is NOT public API, that its columns, their names, their order and the "
+            "layout may change in any release without a major version bump, and that anything "
+            f"parsing output should ask for `-o json` or `-o ndjson`. Pattern "
+            f"{pattern.pattern!r} matches nothing in the section body. A reader who stops at "
+            "that section's shape table is otherwise told that all three shapes are this "
+            "product's shapes, and told nothing that contradicts it. REPAIR THE SECTION, never "
+            "this pattern."
+        )
+        assert match.start() < sub_heading_index, (
+            f"README.md states OR-21's ruling ({pattern.pattern!r} matches at {match.start()}) "
+            f"but BELOW the section's {COLLECTION_KEY_SUBHEADING!r} sub-heading (at "
+            f"{sub_heading_index}). The ruling belongs where the belief is formed — beside the "
+            "shape table — not after a reader has already stopped reading."
+        )
+
+    paragraphs = _pdf79_ruling_paragraphs(body)
+    assert len(paragraphs) == 1, (
+        f"the whole of OR-21's ruling should sit in exactly one paragraph of `## Output "
+        f"contract`; {len(paragraphs)} paragraph(s) carry every limb of it. A ruling split "
+        "across the section is one a later edit can half-delete without reddening anything."
+    )
+
+
+def test_pdf79_the_exclusion_patterns_can_fail() -> None:
+    """AC4/AC5's RED, on a SCRATCH copy of the located span — never the tree.
+
+    Two directions, and the second is the load-bearing one. (a) With the ruling
+    removed, EVERY pattern must miss — a pattern that still matched would be
+    passing on text that never made the claim. (b) The text it is removed from
+    IS the pre-ruling section, so (a) is also the proof that no pattern matched
+    the section before this ruling was written into it.
+    """
+    body = output_contract_body()
+    paragraphs = _pdf79_ruling_paragraphs(body)
+    assert len(paragraphs) == 1, "the scratch mutation has no single paragraph to remove"
+
+    pre_ruling = body.replace(paragraphs[0], "")
+    assert pre_ruling != body, "the scratch mutation did not fire"
+    scanned = _pdf79_scan(pre_ruling)
+
+    for pattern in PDF79_EXCLUSION_PATTERNS:
+        assert pattern.search(scanned) is None, (
+            f"pattern {pattern.pattern!r} still matches the section with OR-21's ruling "
+            "REMOVED, so it is matching text that never made the claim and would stay green "
+            "through the ruling's deletion"
+        )
+
+
+def test_pdf79_no_guarded_document_claims_the_table_shape_is_contract() -> None:
+    """AC6. The ruling written down in one place and quietly contradicted in
+    another is the second failure mode this section is designed against.
+
+    Swept over all four GUARDED_DOCS rather than AC6's two prime documents:
+    the wider net is green today, measured, and a contradiction in `TESTING.md`
+    or `CONTRIBUTING.md` would be exactly as wrong as one in `README.md`.
+    """
+    contradictions: list[str] = []
+    for doc in GUARDED_DOCS:
+        scanned = _pdf79_scan(read(doc))
+        for pattern in PDF79_CONTRARY_PATTERNS:
+            match = pattern.search(scanned)
+            if match is not None:
+                contradictions.append(f"  {doc}: {match.group(0)!r} (pattern {pattern.pattern!r})")
+    assert not contradictions, (
+        "a guarded document asserts that the table shape — or every output shape — is public "
+        "API, frozen, stable or covered by the frozen register. Operator ruling OR-21 says "
+        "`-o table` is NOT public API, and README.md's `## Output contract` states that "
+        "ruling to users:\n" + "\n".join(contradictions)
+    )
+
+
+def test_pdf79_the_contrary_patterns_fire_on_their_own_fixture() -> None:
+    """AC6's other half. A contrary pattern that cannot fire guards nothing; a
+    contrary pattern broad enough to fire on the SHIPPED text would red a
+    correct tree. Both are asserted, rather than one being inferred from the
+    other's green."""
+    fixture = _pdf79_scan(PDF79_SYNTHETIC_CONTRARY_LITERAL)
+    shipped = _pdf79_scan(output_contract_body())
+    for pattern in PDF79_CONTRARY_PATTERNS:
+        assert pattern.search(fixture), (
+            f"contrary pattern {pattern.pattern!r} cannot fire even on its own invented "
+            "fixture, so it would never notice the ruling being contradicted"
+        )
+        false_positive = pattern.search(shipped)
+        hit = false_positive.group(0) if false_positive else ""
+        assert false_positive is None, (
+            f"contrary pattern {pattern.pattern!r} matches the SHIPPED section at {hit!r}, so "
+            "it is broad enough to red a correct tree"
+        )
+
+
+def test_pdf79_a_widening_that_keeps_the_claim_is_still_caught() -> None:
+    """The limitation PDF-83 reported against its own arm, answered.
+
+    PDF-83's registry arm bites on an ANCHOR PHRASE, so a later editor who
+    WIDENS the guarded sentence while preserving that phrase — rather than
+    rewriting it — leaves the arm green while the claim has been reversed. The
+    exclusion arm above inherits exactly that weakness on its own: a widening
+    that keeps all three limbs matchable keeps it green.
+
+    What closes it is that the contrary sweep reads the WHOLE document rather
+    than the anchor: the widening is new text, and new text that reverses the
+    ruling is what the contrary patterns are for. Demonstrated here on a
+    scratch copy against the real shipped paragraph, not argued.
+    """
+    body = output_contract_body()
+    paragraphs = _pdf79_ruling_paragraphs(body)
+    assert len(paragraphs) == 1, "the scratch mutation has no single paragraph to widen"
+
+    widened = body.replace(
+        paragraphs[0],
+        paragraphs[0].rstrip()
+        + " That said, the `-o table` shape is public API from `v1.0.0` all the same.",
+    )
+    assert widened != body, "the scratch mutation did not fire"
+
+    scanned = _pdf79_scan(widened)
+    assert all(pattern.search(scanned) for pattern in PDF79_EXCLUSION_PATTERNS), (
+        "the widening must leave every exclusion pattern matching — otherwise this control "
+        "proves nothing about the weakness it exists to answer"
+    )
+    assert any(pattern.search(scanned) for pattern in PDF79_CONTRARY_PATTERNS), (
+        "a widening that preserves every limb of the ruling and then reverses it must be "
+        "caught by at least one contrary pattern; otherwise this section inherits PDF-83's "
+        "anchor-phrase limitation whole"
+    )
+
+
+def test_pdf79_the_ruling_agrees_with_the_frozen_register() -> None:
+    """AC7, and the load-bearing arm of the section.
+
+    A prose guard proves a sentence is still PRESENT. It cannot prove the
+    sentence is still TRUE. The one artefact a future engineer would touch on
+    deciding that `table` IS contract is the register, so the two are bound.
+
+    Read through `test_envelope_contract.load_register_document()` — the
+    register's OWN reader — and never re-opened here (X-157): a second reader
+    is a second thing to drift.
+    """
+    document = _tests_module("test_envelope_contract").load_register_document()
+    arms = document["_meta"]["arms"]
+    complaint = _pdf79_table_arm_complaint(arms)
+    assert complaint is None, complaint
+
+
+def test_pdf79_the_register_agreement_arm_can_fail() -> None:
+    """AC7's RED, against a SCRATCH MAPPING — the shipped register is
+    byte-identical across this spec's landing and is not touched even to prove
+    its own guard bites."""
+    real = _tests_module("test_envelope_contract").load_register_document()
+    scratch_arms = [*real["_meta"]["arms"], PDF79_DECLINED_REGISTER_ARM]
+
+    complaint = _pdf79_table_arm_complaint(scratch_arms)
+    assert complaint is not None, "the agreement predicate is vacuous"
+    assert "OR-21" in complaint
+    assert "README.md" in complaint
+    assert "NEVER AN EDIT TO THIS ARM" in complaint

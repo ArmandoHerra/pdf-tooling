@@ -120,6 +120,8 @@ Rendered payloads go to **stdout**; diagnostics, warnings and progress go to **s
 | `-o json` | One object, carrying `schema_version`. |
 | `-o ndjson` | One object per item, one per line, **each line carrying its own `schema_version`** so a single streamed line is self-describing. |
 
+`-o table` is the shape meant for a person reading a terminal. Its columns, their names, their order and the whole layout may change in any release, without a major version bump, so anything that parses output should ask for `-o json` or `-o ndjson` instead — the structured shapes this section freezes.
+
 Errors are the one deliberate asymmetry: with `-o table` an error is a one-line `error: …` on stderr, but with `-o json`/`-o ndjson` it is an object on **stdout**, so a machine consumer reading stdout never has to also read stderr to learn that the run failed. That holds for **every** failure you can reach, an unknown flag and a missing argument included: those are usage errors (exit 2) carrying the same envelope, not a human `Usage:` block.
 
 **A command group does not take the global block.** `meta` groups `meta get` and `meta set`, and the global flags are declared at the root and on every verb, never on a group — so `pdftooling meta -o json` is a usage error (exit 2) rather than a run. It names the two positions that do work: `pdftooling -o json meta get FILE` (before the group) and `pdftooling meta get FILE -o json` (after the subcommand).
