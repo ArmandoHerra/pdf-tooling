@@ -11,62 +11,47 @@ selectable with ``-k property`` and nothing else.
 Hypothesis storage: this file uses ``st.text()``/``st.characters()`` (P1),
 which — on a modern Hypothesis — writes a Unicode-charmap cache into
 ``.hypothesis/`` in the working directory on first use, in addition to the
-usual example database. Neither belongs in a git-tracked repo (PDF-01's
-``.gitignore`` has no ``.hypothesis/`` entry, and appending one is a PM
-decision, not this spec's — see the task's "one known conflict"). Resolved
-here, self-contained, with no new dependency and no ``conftest.py``:
-Hypothesis's storage directory is redirected to a process-temp location
-before any ``@settings`` decorator is evaluated, and the example database is
-swapped for an in-memory one. Both calls must run at module import time,
-before the first test function definition below.
+usual example database. Neither belongs in a git-tracked repo. The redirect
+that keeps them out used to live at the head of THIS module, and it reached
+``tests/unit/test_name_template.py`` only because this file sorts earlier
+during collection -- run that module on its own and hypothesis wrote into the
+repository root, which ``PLAN.md`` §10 forbids in terms (``B-147``). PDF-77
+moved the redirect, and the profile beside it, into ``tests/conftest.py``,
+which pytest imports before any test module regardless of what is selected.
+``.gitignore`` still deliberately carries no ``.hypothesis/`` entry: ignoring
+the directory would hide the write instead of stopping it.
 
-That mechanism shipped without a teardown, which is finding ``d8233d4cc9``:
+What stays here is the pair of controls that watch that mechanism from the
+outside, both re-aimed at the new owner:
+``test_the_hypothesis_home_dir_is_removed_at_interpreter_exit`` (finding
+``d8233d4cc9`` -- the redirect once shipped with no teardown at all, leaking
 one directory per suite run, per developer, per CI leg, per sentinel sweep,
-forever. PDF-27 adds the teardown and its control
-(``test_the_hypothesis_home_dir_is_removed_at_interpreter_exit``) without
-adding a dependency, without a ``conftest.py`` edit, and without ever
-globbing ``TMPDIR`` -- see the comment on the ``atexit`` registration below.
+forever), and the arm that reddens if a hypothesis directory turns up at the
+repository root at all.
 """
 
 from __future__ import annotations
 
 import ast
-import atexit
 import json
 import logging
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
-from hypothesis import assume, event, given, settings
+from hypothesis import Phase, assume, event, given, settings
 from hypothesis import strategies as st
-from hypothesis.configuration import set_hypothesis_home_dir
-from hypothesis.database import InMemoryExampleDatabase
+from hypothesis.database import DirectoryBasedExampleDatabase
 
 from pdf_tooling import errors, models
 from pdf_tooling.ops import pagerange
 
-# --- Hypothesis storage: repo-local-write-free, self-contained (see module
-# docstring). Must execute before any @settings(...)-decorated test below.
-#
-# `d8233d4cc9`: the mkdtemp() below used to run with no teardown at all. The
-# atexit hook removes THIS interpreter's directory and nothing else --
-# deliberately not a glob over `pdf-toolkit-pagerange-hypothesis-*`, which
-# would reach directories this process never created. Those belong to whoever
-# ran the suite before (OR-13), and a glob-and-delete is how a resource-leak
-# fix turns into someone else's data loss.
-HYPOTHESIS_HOME_DIR: str = tempfile.mkdtemp(prefix="pdf-toolkit-pagerange-hypothesis-")
-set_hypothesis_home_dir(HYPOTHESIS_HOME_DIR)
-atexit.register(shutil.rmtree, HYPOTHESIS_HOME_DIR, ignore_errors=True)
-settings.register_profile("pdf_tooling_pagerange", database=InMemoryExampleDatabase())
-settings.load_profile("pdf_tooling_pagerange")
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ===========================================================================
@@ -988,7 +973,9 @@ def test_syntax_oracle_agrees_with_parse(spec: str, page_count: int) -> None:
 
 
 # ===========================================================================
-# `d8233d4cc9` -- the Hypothesis home dir must not outlive the interpreter
+# Hypothesis storage, watched from outside the mechanism that owns it.
+# `d8233d4cc9` -- the home dir must not outlive the interpreter.
+# `B-147` -- nothing may write a hypothesis directory into the repo tree.
 # ===========================================================================
 
 
@@ -1004,9 +991,14 @@ def test_the_hypothesis_home_dir_is_removed_at_interpreter_exit() -> None:
     alive, and this process asserts the path is gone once the child has
     exited. Both directions are pinned, so a child that failed to create a
     directory at all fails the test instead of passing it vacuously.
+
+    PDF-77 re-aims the probe at the mechanism's NEW owner. The child imports
+    `tests/conftest.py` directly rather than this module, so the control
+    measures the file that actually performs the redirect; pointing it at this
+    module after the move would have left it green while measuring nothing.
     """
     probe = (
-        "import json, os, test_pagerange as m; "
+        "import json, os, conftest as m; "
         "print(json.dumps({'dir': m.HYPOTHESIS_HOME_DIR, "
         "'existed': os.path.isdir(m.HYPOTHESIS_HOME_DIR)}))"
     )
@@ -1026,3 +1018,60 @@ def test_the_hypothesis_home_dir_is_removed_at_interpreter_exit() -> None:
         f"{payload['dir']} outlived the interpreter that made it -- d8233d4cc9 is back, "
         "and every suite run leaks one directory into TMPDIR again"
     )
+
+
+def test_no_hypothesis_directory_is_written_into_the_repository_root() -> None:
+    """`B-147`, and it names ONE directory on purpose.
+
+    The working-tree guard in `tests/conftest.py` hashes tracked files only
+    (`git ls-files`), so an untracked directory appearing mid-run is outside
+    what it can observe by construction -- which is why `B-147` stood for
+    months behind an empty `git status`: hypothesis writes its own nested
+    `.gitignore` into the directory it creates, so the tree reads clean while
+    the write is happening.
+
+    Widening the guard to untracked paths is NOT the fix (it would red on
+    `.pytest_cache/`, the coverage data files and `.scratch/`, as its own
+    comment already says). This arm names a single directory instead, so it
+    cannot false-positive on any of those, and the real fix is upstream of it:
+    the redirect in `conftest.py` means nothing creates this path in the first
+    place.
+    """
+    leaked = REPO_ROOT / ".hypothesis"
+    assert not leaked.exists(), (
+        f"{leaked} exists -- something wrote hypothesis storage into the repository "
+        "tree, which PLAN.md §10 forbids (B-147). The redirect in tests/conftest.py "
+        "is what prevents it; a module that registers its own hypothesis storage, or "
+        "an entry point that bypasses conftest.py, is how it comes back. Remove the "
+        "directory with `make clean` and find what created it -- do NOT add a "
+        ".gitignore entry, which hides the write instead of stopping it"
+    )
+
+
+def test_the_conftest_profile_reaches_this_modules_properties() -> None:
+    """The profile is in force at DECORATION time, and brings only its own.
+
+    `test_ac10_named_invariants_are_selectable_and_number_five` above reads
+    `max_examples` and `deadline` off each of P1-P5 and requires the
+    decorator's values; this arm reads the same settings object and requires
+    the PROFILE's values for the fields the decorator does not set. Together
+    they pin both halves of the inheritance: had the profile carried
+    `max_examples`, the older control would have gone red rather than this one
+    going green.
+    """
+    import conftest
+
+    configured = test_property_p1_totality._hypothesis_internal_use_settings
+    assert configured.print_blob is True, (
+        "print_blob is off, so a property failure prints no @reproduce_failure token "
+        "and a counterexample found on a CI leg is observed once and lost"
+    )
+    assert isinstance(configured.database, DirectoryBasedExampleDatabase), (
+        f"the example database is {type(configured.database).__name__}; an in-memory "
+        "database is discarded at process exit, so Phase.reuse has nothing to replay"
+    )
+    assert Path(configured.database.path) == conftest.HYPOTHESIS_DATABASE_DIR
+    assert Phase.explicit in configured.phases, "no @example would be guaranteed"
+    assert Phase.reuse in configured.phases, "a persisted counterexample would never replay"
+    assert configured.max_examples == 1000, "the decorator's own value did not survive"
+    assert configured.deadline is None, "the decorator's own value did not survive"

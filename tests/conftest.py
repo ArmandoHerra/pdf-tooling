@@ -1,12 +1,18 @@
 """The fixture wiring: the generated corpus, the golden primitive, engine
-markers, the engines-hiding PATH shim, the working-tree guard, and the
-`samples` fixture (`PLAN.md` §10 / §10.1). `tests/fs_snapshot.py` says this
-file does not exist yet on purpose — the fixture wiring is PDF-06's.
+markers, the engines-hiding PATH shim, the working-tree guard, the hypothesis
+profile, and the `samples` fixture (`PLAN.md` §10 / §10.1).
+`tests/fs_snapshot.py` says this file does not exist yet on purpose — the
+fixture wiring is PDF-06's.
 
 The `PLAN.md` §10.1 originals-integrity guard (rule 3) lives in its own module,
 `tests/samples_guard.py`, and is registered here as a plugin
 (`pytest_plugins`) rather than defined inline — see that module's docstring
 for why.
+
+The hypothesis block below is PDF-77's and belongs HERE rather than in a test
+module: it is in force for every property in the suite whatever is selected
+and whatever order collection lands in, which is the property the arrangement
+it replaced did not have.
 """
 
 from __future__ import annotations
@@ -23,6 +29,9 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+from hypothesis import settings
+from hypothesis.configuration import set_hypothesis_home_dir
+from hypothesis.database import DirectoryBasedExampleDatabase
 
 from corpus import Corpus, build_corpus
 
@@ -32,6 +41,133 @@ REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 GOLDEN_DIR: Final[Path] = REPO_ROOT / "tests" / "golden"
 
 __all__: list[str] = []
+
+# --------------------------------------------------------------------------- #
+# Hypothesis: the storage redirect, the profile, and the example database.
+#
+# THIS BLOCK BELONGS TO THE SUITE, NOT TO A MODULE, AND THE PLACEMENT IS THE
+# FIX. `conftest.py` is imported before any test module is collected, so a
+# profile loaded here is in force for every `@settings(...)` decorator in the
+# suite regardless of which modules are selected or what order they sort in.
+# The same block lived at the head of `tests/test_pagerange.py` until PDF-77,
+# where it reached `tests/unit/test_name_template.py` only because that module
+# sorts LATER: `pytest tests/unit/test_name_template.py` on its own wrote
+# hypothesis's cache into the repository root, which `PLAN.md` §10 forbids in
+# terms (`B-147`). A fix in a second module would have rebuilt the same
+# alphabetical accident one file over.
+#
+# `d8233d4cc9`: the mkdtemp() below used to run with no teardown at all. The
+# atexit hook removes THIS interpreter's directory and nothing else --
+# deliberately not a glob over `pdf-toolkit-pagerange-hypothesis-*`, which
+# would reach directories this process never created. Those belong to whoever
+# ran the suite before (OR-13), and a glob-and-delete is how a resource-leak
+# fix turns into someone else's data loss. The prefix keeps its original
+# spelling byte-for-byte on the move: it is part of a frozen population
+# (`tests/test_brand_surfaces.py`'s class H), so re-spelling it here would move
+# a count this spec has no business moving.
+# --------------------------------------------------------------------------- #
+
+HYPOTHESIS_HOME_DIR: str = tempfile.mkdtemp(prefix="pdf-toolkit-pagerange-hypothesis-")
+set_hypothesis_home_dir(HYPOTHESIS_HOME_DIR)
+atexit.register(shutil.rmtree, HYPOTHESIS_HOME_DIR, ignore_errors=True)
+
+#: An explicit location for the example database, in the house `PDF_TOOLING_*`
+#: spelling that `PDF_TOOLING_TEST_HIDE_ENGINES` and `PDF_TOOLING_TEST_KEEP_SHIM`
+#: already use.
+HYPOTHESIS_DB_ENV: Final[str] = "PDF_TOOLING_HYPOTHESIS_DB"
+
+#: Selects a registered profile by name. The default is the only one any gate
+#: surface loads; the derandomized sibling exists for bisecting a suspected
+#: flake by hand and is never a default, because freezing every property into
+#: one permanent set of inputs trades away the search that found this project's
+#: only property-discovered defect (PDF-77 D5).
+HYPOTHESIS_PROFILE_ENV: Final[str] = "PDF_TOOLING_HYPOTHESIS_PROFILE"
+
+DEFAULT_HYPOTHESIS_PROFILE: Final[str] = "pdf_tooling"
+
+
+def hypothesis_database_dir() -> Path:
+    """Where shrunk counterexamples persist -- outside the repository, always.
+
+    The home directory above holds rebuildable caches (the Unicode charmap,
+    the constants cache) and is reclaimed at interpreter exit. The example
+    database holds the counterexamples that make a property failure
+    RECOVERABLE, so it must survive the process; conflating the two is why
+    reclaiming the home directory used to destroy the database with it. They
+    are resolved independently here.
+
+    A database inside the checkout would re-open `B-147` wearing a different
+    name, so a path that lands there is refused at import time, loudly, rather
+    than silently relocated to somewhere safe.
+    """
+    raw = os.environ.get(HYPOTHESIS_DB_ENV)
+    if raw:
+        resolved = Path(raw).expanduser().resolve()
+    else:
+        cache_home = os.environ.get("XDG_CACHE_HOME")
+        base = Path(cache_home).expanduser() if cache_home else Path.home() / ".cache"
+        resolved = (base / "pdf-tooling" / "hypothesis-examples").resolve()
+    if resolved.is_relative_to(REPO_ROOT):
+        raise RuntimeError(
+            f"the hypothesis example database resolves to {resolved}, which is INSIDE "
+            f"the repository tree at {REPO_ROOT}. No test may write into the checkout "
+            f"(PLAN.md §10). Point {HYPOTHESIS_DB_ENV} somewhere outside the "
+            "repository, or unset it to use $XDG_CACHE_HOME/pdf-tooling/."
+        )
+    # Created here rather than left to hypothesis's first write, so the path
+    # the run header names is a path that exists: a developer told where the
+    # replay came from should not have to work out whether the directory is
+    # missing or merely empty. Strictly AFTER the containment check above, so
+    # a hostile override never gets as far as creating anything.
+    resolved.mkdir(parents=True, exist_ok=True)
+    return resolved
+
+
+HYPOTHESIS_DATABASE_DIR: Final[Path] = hypothesis_database_dir()
+
+# The profile carries ONLY what the decorators do not set. `max_examples`,
+# `deadline` and `phases` are deliberately absent: the property decorators own
+# the first two and `tests/test_pagerange.py`'s named-invariant control reads
+# them back off each of P1-P5, and the default phase list is what makes an
+# `@example` guaranteed (`Phase.explicit`) and a persisted database worth
+# having (`Phase.reuse`). A profile that narrowed `phases` would silently
+# disarm both.
+settings.register_profile(
+    DEFAULT_HYPOTHESIS_PROFILE,
+    database=DirectoryBasedExampleDatabase(str(HYPOTHESIS_DATABASE_DIR)),
+    print_blob=True,
+)
+# No `database=` on this one, and that is hypothesis's rule rather than a
+# choice: `derandomize=True` implies `database=None`, and passing both is an
+# InvalidArgument at registration. Measured, not assumed -- the first draft of
+# this block passed both and failed at collection.
+settings.register_profile(
+    "pdf_tooling_derandomized",
+    print_blob=True,
+    derandomize=True,
+)
+
+ACTIVE_HYPOTHESIS_PROFILE: Final[str] = (
+    os.environ.get(HYPOTHESIS_PROFILE_ENV) or DEFAULT_HYPOTHESIS_PROFILE
+)
+settings.load_profile(ACTIVE_HYPOTHESIS_PROFILE)
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    """Name the example database in the run's own output.
+
+    A persisted database means a developer can inherit a red from an EARLIER
+    run's counterexample while CI is green. That is the feature working as
+    designed, and it is only diagnosable if the reader can see where the
+    replay came from and how to clear it without opening this file.
+    """
+    return (
+        f"hypothesis: profile {ACTIVE_HYPOTHESIS_PROFILE}, example database at "
+        f"{HYPOTHESIS_DATABASE_DIR} -- a property that reds here may be replaying a "
+        "counterexample recorded by an earlier run; remove that directory to clear "
+        f"it, or set {HYPOTHESIS_DB_ENV} to relocate it"
+    )
+
 
 # --------------------------------------------------------------------------- #
 # pytest options

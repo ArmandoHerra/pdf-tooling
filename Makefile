@@ -411,7 +411,7 @@ ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local
 	@uv run python scripts/gate_parity.py epilogue
 
 clean: ## Remove build, cache and coverage artefacts
-	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage coverage.xml .scratch .make-cover.lock
+	rm -rf dist build .pytest_cache .ruff_cache .mypy_cache .hypothesis htmlcov .coverage coverage.xml .scratch .make-cover.lock
 	rm -f .coverage.*
 
 # PDF-46 D5. The engine-hiding shim used to leak one directory per pytest

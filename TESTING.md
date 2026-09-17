@@ -565,7 +565,17 @@ nothing in this repository claims otherwise.
 
 ## Determinism
 
-Every test writes into pytest's own temporary directory and never into the repository tree (enforced, not just intended — see the working-tree guard above). Nothing that a test asserts depends on wall-clock timing, on the order tests run in, or on which machine runs them — with one deliberate exception: the startup-budget test measures real elapsed time. It takes the **fastest** of several runs rather than the mean, so scheduler noise cannot turn it red while a genuine regression still will.
+Every test writes into pytest's own temporary directory and never into the repository tree. The working-tree guard above hashes **tracked** files, so it observes a tracked file changing and cannot observe an untracked directory appearing — which is how hypothesis's own storage came to sit inside the checkout behind a clean `git status`, hidden by the nested `.gitignore` the library writes for itself. The storage redirect and the example-database path are therefore both resolved in `tests/conftest.py`, outside the checkout; a `PDF_TOOLING_HYPOTHESIS_DB` that points back inside the repository is refused at collection rather than honoured, and a standing arm reddens if a `.hypothesis` directory turns up at the repository root.
+
+Nothing that a test asserts depends on wall-clock timing, on the order tests run in, or on which machine runs them — with two deliberate exceptions. The startup-budget test measures real elapsed time; it takes the **fastest** of several runs rather than the mean, so scheduler noise cannot turn it red while a genuine regression still will. The property-based arms draw fresh random input on every run, by design — that search is the mechanism rather than a defect in it, and the recovery path when the search finds something is the section below.
+
+## Techniques these sections do not otherwise name
+
+**Property-based testing.** Some arms state a law rather than an expected value and let hypothesis search for input that breaks it: the page-range invariants in `tests/test_pagerange.py`, and the `--name` renderer's containment invariant in `tests/unit/test_name_template.py`. The search is what makes them worth having — it is what found the pathologically long numeral that runs into CPython's `int()` conversion limit — and it is also why their inputs differ from run to run.
+
+Recovery from a failure that only a search found is `print_blob`, set in the profile: the failure prints a `@reproduce_failure(...)` decorator that pastes straight onto the test and replays the exact input on any machine, from a CI log alone. The counterexample also persists in the example database whose path the run header names, so the same failure replays locally until it is fixed or that directory is removed. Adversarial inputs that must run every time are pinned with `@example` instead, built as the cross-product of a seed roster and a template roster, so that adding a seed cannot leave it guaranteed under some shapes and missing under others.
+
+**Hand-driven mutation.** Where an instrument's own blindness is the hazard, the arm is driven red by planting the defect it claims to catch, and the plant and the failure it produced are recorded rather than described. Plants live on scratch copies wherever a scratch copy will do, and never in a landed commit. An arm that has never been observed failing is decoration, and is treated here as decoration rather than counted as a control.
 
 ## The coverage floor — status after the PDF-06 fix-forward commit
 
