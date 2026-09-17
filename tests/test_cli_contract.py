@@ -69,6 +69,7 @@ from registry import (
     INVOCATIONS,
     OUTPUT_FLAG_INVOCATIONS,
     REPO_ROOT,
+    destructive_verbs,
     discover_groups,
     discover_verbs,
     engine_blind_verbs,
@@ -126,8 +127,31 @@ ENVELOPE_KEYS: Final[tuple[str, ...]] = ("schema_version", "verb", "dry_run")
 PAGE_ADDRESSING = tuple(verb for verb in VERBS if verb.is_page_addressing)
 TAKES_INPUT_PATHS = tuple(verb for verb in VERBS if verb.takes_input_paths)
 REGISTERED = tuple(verb for verb in VERBS if verb.name in INVOCATIONS)
-DESTRUCTIVE = tuple(
-    verb for verb in VERBS if verb.name in INVOCATIONS and INVOCATIONS[verb.name].destructive
+#: PDF-75, C13's population -- DERIVED off `registry.destructive_verbs()` and no
+#: longer read off `INVOCATIONS[...].destructive`, which was the LAST transcribed
+#: dimension in an otherwise fully derived harness. A hand-set boolean cannot
+#: tell the difference between *this verb is not bulk-destructive* and *nobody
+#: typed `destructive=True` on that row*, and the difference was three verbs of
+#: five: `delete`, `reorder` and `rotate` each consume `--in-place`, each take a
+#: variadic operand, and each call `require_confirmation` with a REAL resolved
+#: input count -- they qualified on the product's own rule and were absent from
+#: the row that asserts it. The literal survives beside the derivation as a
+#: RECONCILED one (`test_the_destructive_literal_and_the_derivation_agree_both_ways`
+#: below, on C14's precedent), because it is the human-readable statement of
+#: intent next to the row and it now fails BY NAME when the surface moves.
+_DESTRUCTIVE_NAMES = frozenset(destructive_verbs())  # resolved ONCE: the derivation walks the tree
+DESTRUCTIVE = tuple(verb for verb in VERBS if verb.name in _DESTRUCTIVE_NAMES)
+
+#: The derivation's answer at `52ec164`, written out ONCE so a silent widening or
+#: narrowing fails by NAME rather than by a count. Both factors of the
+#: intersection are twelve and the product is FIVE -- the report this item came
+#: from carried "~12" forward, and a count-only pin would accept either.
+DERIVED_DESTRUCTIVE_NAMES: Final[tuple[str, ...]] = (
+    "compress",
+    "delete",
+    "ocr",
+    "reorder",
+    "rotate",
 )
 #: B-054, C15 — "producing" widened from C11's `--output`-only lens to every
 #: destination-naming flag a mutating, registered verb declares consuming
@@ -1126,7 +1150,17 @@ def test_c13_bulk_destructive_requires_y_on_a_non_tty(verb, corpus, tmp_path: Pa
     before = {op: op.read_bytes() for op in operands}
 
     refused = run_cli(verb.name, *args)
-    assert refused.returncode == 5
+    # PDF-75/AC7 -- the exit code alone does not identify the gate. Exit 5 is
+    # OVERLOADED: `delete <one-page.pdf> --pages 1` returns 5 for the zero-page
+    # refusal and an existing `.bak` returns 5 from the sidecar tier, both with
+    # `kind: "refused"`. `the_gate_refused` demands `require_confirmation`'s own
+    # words as well, so widening this population could not turn a row green on
+    # somebody else's refusal.
+    assert the_gate_refused(refused), (
+        f"{verb.name}: a bulk `--in-place` run without -y on a non-TTY must be refused by "
+        f"the CONFIRMATION GATE, carrying {_GATE_SIGNATURE} -- got {refused.returncode}: "
+        f"{refused.stdout}{refused.stderr}"
+    )
     for op in operands:
         assert op.read_bytes() == before[op], f"{verb.name}: a refused bulk run mutated {op}"
 
@@ -1190,7 +1224,194 @@ def test_c13_dry_run_predicts_the_bulk_destructive_refusal(verb, corpus, tmp_pat
         run_cli(verb.name, "-o", "json", "--dry-run", *args, cwd=tmp_path).stdout
     )
     assert dry_payload["error"]["kind"] == "refused", dry_payload
-    assert "-y" in dry_payload["error"]["message"]
+    # PDF-75/AC7 -- `kind: "refused"` is not the gate's fingerprint either: the
+    # zero-page and stale-`.bak` refusals carry the same kind and the same code.
+    for token in _GATE_SIGNATURE:
+        assert token in dry_payload["error"]["message"], (
+            f"{verb.name}: the predicted refusal is exit 5 but not the confirmation gate's "
+            f"-- {token!r} is absent from {dry_payload['error']['message']!r}"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-75 -- the `-y` PARTITION. C13 above asserts the gate's INTERIOR; this is
+# its BOUNDARY.
+#
+# `-y` is declared on all twenty-six leaves (the whole global flag block is
+# attached to every verb, `cli/common.py::global_options`), and the product
+# answers for it in THREE different ways. Until now the suite asserted only the
+# first: nothing anywhere said what `-y` does on the twenty-one verbs where it is
+# not load-bearing, so a regression that made it silently consumed-with-effect on
+# a non-destructive verb would have been invisible -- and "a user who learns `-y`
+# is harmless on `info` has learned the single most expensive thing this CLI can
+# teach" is `_check_safety_flag_consumption`'s own sentence about exactly that.
+#
+# The three bands are DERIVED from the declared surface (`consumes` and
+# `variadic_operands`) and never from `INVOCATIONS[...].destructive`, which would
+# make the partition agree with the literal by construction and assert nothing.
+# The partition is TOTAL: `test_the_yes_partition_is_total_and_disjoint` fails by
+# name when a verb lands in zero bands or in two, so a verb registered tomorrow
+# is classified or the suite stops.
+# --------------------------------------------------------------------------- #
+
+#: Band B -- `-y` is ACCEPTED AND INERT on the registered invocation. Every verb
+#: that consumes at least one output flag and is not bulk-`--in-place`-capable.
+#:
+#: SCOPED TO THE REGISTERED INVOCATION, and the scope is not a hedge. `merge`,
+#: `compose` and `convert` reach the confirmation gate by its OTHER route --
+#: they pass `clobbered=` rather than `in_place=True` -- so for those three `-y`
+#: IS load-bearing when the destination already exists (measured: `merge a.pdf
+#: b.pdf -O <existing> --force` on a non-TTY without `-y` exits 5). Their
+#: registered rows write to a FRESH destination, where `destructive` is False and
+#: the gate returns at `confirm.py:122` regardless. The arm says so in its own
+#: docstring rather than leaving a reader to discover the exception.
+YES_INERT = tuple(verb for verb in VERBS if verb.consumes and verb not in DESTRUCTIVE)
+
+#: Band C -- `-y` is REFUSED, exit 2. `cli/common.py::_check_safety_flag_consumption`'s
+#: own already-derived rule, consumed rather than restated: the condition is
+#: exactly `consumes == ()`, and a sixth such verb inherits both the product's
+#: refusal and this arm with zero author action.
+YES_REFUSING = tuple(verb for verb in VERBS if not verb.consumes)
+
+#: `_check_safety_flag_consumption`'s verbatim user-visible text
+#: (`cli/common.py`). Asserted whole, because "exit 2" alone would be satisfied
+#: by any usage error -- including one that never looked at `--yes`.
+_NO_YES_MESSAGE: Final[str] = "does not accept --yes (this verb writes no files)"
+
+#: `require_confirmation`'s own non-TTY branch, in its own words, plus the
+#: re-run hint token the refusal hands back (`test_pages_cli.py`'s AC21
+#: precedent). BOTH, because exit 5 is OVERLOADED on this product -- the
+#: zero-page refusal and the pre-existing-`.bak` refusal both return 5 from
+#: other tiers -- so `returncode == 5` alone does not prove the gate fired.
+_GATE_SIGNATURE: Final[tuple[str, ...]] = ("stdin is not a terminal", "-y")
+
+
+def the_gate_refused(result) -> bool:
+    """Whether *result* is the CONFIRMATION GATE's exit 5 and not some other one."""
+    combined = result.stdout + result.stderr
+    return result.returncode == 5 and all(token in combined for token in _GATE_SIGNATURE)
+
+
+def _fresh_anchor(tmp_path: Path, label: str) -> Path:
+    """A per-run directory for a builder to materialise its inputs into.
+
+    Band B runs the SAME registered invocation twice and compares the two exit
+    codes, so the two runs must not share a destination: several rows write to
+    `-O <tmp_path>/registered-invocation-<verb>.pdf`, and a second run over the
+    first run's output is a no-clobber refusal (exit 5) rather than a statement
+    about `-y`. Measured while writing this arm.
+    """
+    anchor = tmp_path / label
+    anchor.mkdir(parents=True, exist_ok=True)
+    return anchor
+
+
+@pytest.mark.parametrize("verb", VERBS, ids=_ids(VERBS))
+def test_the_yes_partition_holds_at_every_leaf(verb, corpus, tmp_path: Path) -> None:
+    """AC8 -- what `-y` does at all twenty-six leaves, one band at a time.
+
+    * **Band A** (bulk-`--in-place`-capable): load-bearing. The registered
+      `destructive_build` argv exits 5 WITH the gate's own signature without
+      `-y`, and does not exit 5 with it. This overlaps C13 deliberately: it is
+      the partition's own non-vacuity anchor, and a band A that stopped
+      reproducing C13's answer would mean the two disagree about the boundary.
+    * **Band B** (consumes something, not band A): accepted and inert ON THE
+      REGISTERED INVOCATION -- the two runs return the SAME exit code. `merge`,
+      `compose` and `convert` are the named exception to how far this claim
+      reaches: their clobber route is live and `-y` IS load-bearing there, but
+      it is unreachable from a row that writes to a fresh destination. See
+      `YES_INERT`'s own note.
+    * **Band C** (`consumes == ()`): refused, exit 2, with
+      `_check_safety_flag_consumption`'s verbatim text.
+
+    One arm rather than three because the CLAIM is one claim -- *`-y` is
+    load-bearing, inert, or refused, never silently consumed with an effect* --
+    and three arms over three populations would let a verb fall out of all of
+    them unnoticed. Totality is asserted separately, below, for that reason.
+    """
+    invocation = INVOCATIONS[verb.name]
+
+    if verb in YES_REFUSING:
+        args = invocation.build(corpus, _fresh_anchor(tmp_path, "refused"))
+        result = run_cli(verb.name, *args, "-y")
+        assert result.returncode == 2, (
+            f"{verb.name} declares no output flag, so -y is a usage error (exit 2); "
+            f"got {result.returncode}: {result.stdout}{result.stderr}"
+        )
+        assert _NO_YES_MESSAGE in result.stdout + result.stderr, (
+            f"{verb.name} refused -y without naming why -- the message is what stops a "
+            f"user concluding the flag is harmless here: {result.stdout}{result.stderr}"
+        )
+        return
+
+    if verb in DESTRUCTIVE:
+        refused = run_cli(
+            verb.name,
+            *destructive_argv(invocation, verb.name, corpus, _fresh_anchor(tmp_path, "refused")),
+        )
+        assert the_gate_refused(refused), (
+            f"{verb.name} is bulk-`--in-place`-capable, so a bulk run without -y on a "
+            f"non-TTY must be the CONFIRMATION GATE's exit 5, carrying {_GATE_SIGNATURE}: "
+            f"got {refused.returncode}: {refused.stdout}{refused.stderr}"
+        )
+        confirmed = run_cli(
+            verb.name,
+            "-y",
+            *destructive_argv(invocation, verb.name, corpus, _fresh_anchor(tmp_path, "confirmed")),
+        )
+        assert confirmed.returncode != 5, (
+            f"{verb.name}: -y is the flag that lets the bulk destructive run proceed and it "
+            f"did not: {confirmed.stdout}{confirmed.stderr}"
+        )
+        return
+
+    _skip_unless_engine_available(invocation)
+    without = run_cli(verb.name, *invocation.build(corpus, _fresh_anchor(tmp_path, "without-y")))
+    with_y = run_cli(verb.name, "-y", *invocation.build(corpus, _fresh_anchor(tmp_path, "with-y")))
+    assert without.returncode == with_y.returncode, (
+        f"{verb.name} is not bulk-`--in-place`-capable, so -y has nothing to confirm on its "
+        f"registered invocation and must change nothing -- got {without.returncode} without "
+        f"it and {with_y.returncode} with it. Either the verb grew a destructive route this "
+        f"population does not describe, or -y is being consumed with an effect on a verb "
+        f"where a user has been taught it is harmless.\n"
+        f"without: {without.stdout}{without.stderr}\nwith: {with_y.stdout}{with_y.stderr}"
+    )
+
+
+def test_the_yes_partition_is_total_and_disjoint() -> None:
+    """AC8's other half, and the one that makes the arm above more than three
+    lists that happen to be non-empty.
+
+    Without this, a verb registered tomorrow that matched NO band would simply
+    take a branch nobody wrote and assert nothing, which is `DESTRUCTIVE`'s own
+    two-member history in a new costume.
+    """
+    bands = {
+        "A (load-bearing)": {verb.name for verb in DESTRUCTIVE},
+        "B (inert)": {verb.name for verb in YES_INERT},
+        "C (refused)": {verb.name for verb in YES_REFUSING},
+    }
+    leaves = {verb.name for verb in VERBS}
+
+    counted = {name: sum(name in members for members in bands.values()) for name in leaves}
+    unclassified = sorted(name for name, seen in counted.items() if seen == 0)
+    overlapping = sorted(name for name, seen in counted.items() if seen > 1)
+    assert unclassified == [], (
+        f"{unclassified} fall in NO `-y` band, so `test_the_yes_partition_holds_at_every_leaf` "
+        f"asserts nothing at all about them. The three predicates are `--in-place` + variadic, "
+        f"`consumes != ()`, and `consumes == ()`; a leaf outside all three means the product's "
+        f"surface moved under them"
+    )
+    assert overlapping == [], (
+        f"{overlapping} fall in MORE THAN ONE `-y` band {bands}, so the arm's own branch order "
+        f"decides which claim is asserted and the other is silently dropped"
+    )
+    assert set().union(*bands.values()) == leaves, (
+        f"the bands cover {sorted(set().union(*bands.values()))} but the live tree has "
+        f"{sorted(leaves)} -- a band names a verb that no longer exists"
+    )
+    for label, members in bands.items():
+        assert members, f"band {label} is empty, so its branch in the arm above is unreachable"
 
 
 # --------------------------------------------------------------------------- #
@@ -1854,12 +2075,55 @@ POPULATIONS: Final[tuple[Population, ...]] = (
     Population(
         "DESTRUCTIVE",
         DESTRUCTIVE,
-        "C13",
+        "C13,the `-y` partition's band A",
         1,
         "the population that sat EMPTY from PDF-06 through PDF-14, which is why the bulk "
         "confirmation gate went unwired on five verbs with the suite green throughout. "
-        "NOT 2: `compress` and `ocr` both qualify today, but a pin that fails when a verb "
-        "is legitimately retired gets lowered rather than investigated",
+        "NOT 5, and the reason changed with PDF-75: this is no longer a count of rows "
+        "somebody typed `destructive=True` on -- it is `registry.destructive_verbs()`, the "
+        "`--in-place` consumer set intersected with variadic operand arity, so its "
+        "cardinality is the PRODUCT's to move and pinning it here would be pinning the "
+        "product's shape in the wrong file. What keeps it honest above 1 is the derivation "
+        "plus `test_the_derived_destructive_population_is_the_five_it_names`, which names "
+        "the five, and the two-direction reconcile against the literal",
+    ),
+    Population(
+        "DERIVED_DESTRUCTIVE_NAMES",
+        DERIVED_DESTRUCTIVE_NAMES,
+        "test_the_derived_destructive_population_is_the_five_it_names",
+        1,
+        "PDF-75 -- the roster the derivation is asserted against BY NAME. Empty makes that "
+        "equality trivially satisfiable by an empty derivation, which is the exact failure "
+        "a widened safety population must not be able to hide",
+    ),
+    Population(
+        "YES_INERT",
+        YES_INERT,
+        "the `-y` partition's band B",
+        1,
+        "PDF-75 -- the sixteen verbs where `-y` is accepted and does nothing on the "
+        "registered invocation. Zero makes the partition's largest band unreachable and "
+        "leaves the twenty-one non-load-bearing cells asserted nowhere, which is the state "
+        "this item found",
+    ),
+    Population(
+        "YES_REFUSING",
+        YES_REFUSING,
+        "the `-y` partition's band C",
+        1,
+        "PDF-75 -- the `consumes == ()` verbs, where `-y` is exit 2. Zero means the "
+        "product's own already-derived refusal population emptied, which would take "
+        "`_check_safety_flag_consumption` out of the suite's reach entirely",
+    ),
+    Population(
+        "_GATE_SIGNATURE",
+        _GATE_SIGNATURE,
+        "C13 (both arms), the `-y` partition's band A, the exit-5 discrimination control",
+        1,
+        "PDF-75 -- a literal rather than a derivation, and pinned anyway: `the_gate_refused` "
+        "is `all(token in combined for token in _GATE_SIGNATURE)`, so an EMPTY tuple makes "
+        "it `returncode == 5` again and every discrimination above collapses back to the "
+        "overloaded exit code it exists to tell apart",
     ),
     Population(
         "_DESTINATION_FLAGS",
@@ -2373,6 +2637,104 @@ def test_a_destructive_row_supplies_its_own_bulk_argv(verb) -> None:
     )
 
 
+@pytest.mark.parametrize("verb", DESTRUCTIVE, ids=_ids(DESTRUCTIVE))
+def test_the_gate_signature_rejects_an_exit_5_from_another_tier(
+    verb, corpus, tmp_path: Path
+) -> None:
+    """AC7's discrimination proof -- that `the_gate_refused` is not just
+    `returncode == 5` wearing a longer name.
+
+    The counter-example is DERIVED over the same population rather than typed
+    at one verb: every member consumes `--in-place`, so planting a `.bak`
+    sidecar beside the first operand and re-running WITH `-y` reaches a
+    different exit 5 entirely -- `"<name>.bak already exists beside ...; pass
+    --force to replace the sidecar"`, `kind: "refused"`, code 5, and none of
+    `require_confirmation`'s own words. The gate cannot be what refused: `-y`
+    was given. If `the_gate_refused` accepted this, C13's refusal arm would be
+    satisfiable by any tier that happens to return 5, which is exactly what a
+    widened population makes more likely rather than less.
+    """
+    invocation = INVOCATIONS[verb.name]
+    args = destructive_argv(invocation, verb.name, corpus, tmp_path)
+    operands = [Path(tok) for tok in args if not tok.startswith("-")]
+    operands = [op for op in operands if op.is_file()]
+    assert operands, f"{verb.name}: destructive invocation names no discoverable operand file"
+    operands[0].with_suffix(operands[0].suffix + ".bak").write_bytes(
+        b"an earlier backup nobody should lose"
+    )
+
+    other = run_cli(verb.name, "-y", *args)
+    assert other.returncode == 5, (
+        f"{verb.name}: the counter-example is supposed to be a DIFFERENT exit 5 -- it "
+        f"returned {other.returncode}, so this control no longer discriminates anything: "
+        f"{other.stdout}{other.stderr}"
+    )
+    assert not the_gate_refused(other), (
+        f"{verb.name}: an exit 5 raised with -y ALREADY GIVEN was accepted as the "
+        f"confirmation gate's own refusal, so C13's signature check is satisfied by any "
+        f"tier that returns 5: {other.stdout}{other.stderr}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-75 -- the literal is RECONCILED, in BOTH directions.
+#
+# `Invocation.destructive` stays. It is the human-readable statement of intent
+# beside the row, `destructive_build`'s own docstring keys off it, and a
+# reconciled literal is strictly more informative than none -- it fails BY NAME
+# when the product's surface moves. What it no longer is, is the SOURCE of C13's
+# population.
+#
+# Both directions, on `test_the_honoured_population_matches_the_declared_registry`'s
+# precedent (`"C14's own pytest.fail catches one direction, this catches both"`).
+# A one-way check lets the literal rot silently in whichever direction it does
+# not look, and "silently" is the entire defect: the failure shape this module
+# already names at `destructive_argv` -- a row that stops discriminating while
+# the suite reports green.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_destructive_literal_and_the_derivation_agree_both_ways() -> None:
+    """AC4. Named per side, because the two sides are different mistakes with
+    different fixes and a set-difference dump makes the reader work them out."""
+    derived = set(destructive_verbs())
+    declared = {name for name, invocation in INVOCATIONS.items() if invocation.destructive}
+
+    missing_literal = sorted(derived - declared)
+    assert missing_literal == [], (
+        f"{missing_literal} consume `--in-place` and take a variadic operand, so they are "
+        f"bulk-destructive-capable on the product's own rule (`safety/confirm.py`: bulk is "
+        f"`input_count > 1`, destructive is `in_place or clobbered`) -- set "
+        f"`destructive=True` and add a `destructive_build` in tests/registry.py::INVOCATIONS"
+    )
+
+    stale_literal = sorted(declared - derived)
+    assert stale_literal == [], (
+        f"{stale_literal} declare `destructive=True` but do not qualify: each either stopped "
+        f"consuming `--in-place` or lost its variadic operand. The literal has rotted, or "
+        f"the verb's surface changed and C13 is now asserting a refusal the verb can no "
+        f"longer produce"
+    )
+
+
+def test_the_derived_destructive_population_is_the_five_it_names() -> None:
+    """AC2. By NAME, never by count.
+
+    A count pin accepts any five verbs, and the report this item came from
+    asked for twelve: `--in-place` consumers are twelve and variadic operands
+    are twelve, and the INTERSECTION is five. A derivation that silently widened
+    to a factor's size, or narrowed to the two that were transcribed, would pass
+    `len(...) >= 1` and every other pin in this module.
+    """
+    assert destructive_verbs() == DERIVED_DESTRUCTIVE_NAMES, (
+        f"the bulk-destructive derivation moved: {destructive_verbs()} != "
+        f"{DERIVED_DESTRUCTIVE_NAMES}. That is INFORMATION, not necessarily an error -- "
+        f"re-derive from `registry.destructive_verbs()`, confirm the new member consumes "
+        f"`--in-place` and takes a variadic operand, give it a `destructive_build`, and "
+        f"move this roster deliberately"
+    )
+
+
 def test_the_destructive_argv_guard_fires_on_a_missing_row(corpus, tmp_path: Path) -> None:
     """AC8's red, automated against a synthetic Invocation -- the manual
     version (setting `compress`'s row to None in the real file, observing the
@@ -2404,8 +2766,18 @@ _CREDITED_NODE_ID = re.compile(r"`(tests/[\w/]+\.py)::(\w+)`")
 
 #: The specific claim AC9 is about, located by its own words so the tie moves
 #: with the sentence rather than with a line number.
+#:
+#: PDF-75 moved the sentence. The comment used to argue FOUR verbs out of C13's
+#: population ("these three DO honour"); the derivation overturned that for
+#: `delete`/`rotate`/`reorder` and left it standing for `extract` alone, so the
+#: words this pattern anchors on moved with it. The TIE did not move: the claim
+#: still credits a node id, `test_every_node_id_the_registry_credits_still_resolves`
+#: still resolves it, and a rewrite that had DROPPED the credit would have
+#: converted a tied claim back into an untied one -- which is the regression
+#: PDF-17/AC9 exists to prevent, and the reason the sentence and this pattern
+#: were changed in the same commit.
 _ROUTING_CLAIM = re.compile(
-    r"posture these three DO honour is asserted directly by `(tests/[\w/]+\.py)::(\w+)`"
+    r"posture the OTHER THREE honour is asserted directly by `(tests/[\w/]+\.py)::(\w+)`"
 )
 
 
@@ -2463,10 +2835,21 @@ def test_every_node_id_the_registry_credits_still_resolves() -> None:
 def test_the_pdf_08_destructive_routing_claim_names_a_test_that_exists() -> None:
     """AC9's tie, on the specific claim.
 
-    `registry.py` routes `extract`/`delete`/`rotate`/`reorder` away from C13's
-    population and justifies it by crediting a test elsewhere. Until PDF-17 the
-    credit named a whole MODULE and nothing checked it, so the routing decision
-    could outlive the test that justified it.
+    `registry.py` routes `extract` away from C13's population -- it is variadic
+    but consumes no `--in-place`, so the gate has nothing to refuse there -- and
+    credits a test elsewhere with asserting the bulk `--in-place` posture the
+    OTHER three PDF-08 verbs honour. Until PDF-17 the credit named a whole
+    MODULE and nothing checked it, so the routing decision could outlive the
+    test that justified it.
+
+    PDF-75 REWROTE the claim rather than removing it. The old sentence argued
+    all four verbs out of C13 on the grounds that the registered invocation is a
+    single input writing to `-O`; that is true about the `build` and false about
+    the verb, and `delete`/`rotate`/`reorder` are now C13 members with their own
+    `destructive_build`. The credited arm is KEPT (it asserts a per-verb posture
+    at a second tier, with a `.bak` sidecar check C13 does not make), so this
+    tie survives the widening instead of being deleted with the argument it
+    used to defend.
     """
     import registry
 
@@ -2474,8 +2857,9 @@ def test_the_pdf_08_destructive_routing_claim_names_a_test_that_exists() -> None
     credit = routing_claim_credit(source)
     assert credit is not None, (
         "tests/registry.py's PDF-08 routing comment no longer credits a node id -- the "
-        "argument for keeping extract/delete/rotate/reorder out of C13's population is "
-        "back to being an untied claim"
+        "argument for keeping `extract` out of C13's population, and for where the OTHER "
+        "three PDF-08 verbs' bulk `--in-place` posture is additionally asserted, is back "
+        "to being an untied claim"
     )
     relative, test_name = credit
     module = REPO_ROOT / relative
@@ -2483,9 +2867,11 @@ def test_the_pdf_08_destructive_routing_claim_names_a_test_that_exists() -> None
     functions = _test_functions(module)
     assert test_name in functions, (
         f"tests/registry.py credits {relative}::{test_name} with asserting PDF-08's "
-        "bulk `--in-place` non-TTY posture, and that test no longer exists. Either "
-        "the credit is stale or the coverage it stands for is gone -- the routing "
-        "decision it justifies (destructive=False for four verbs) cannot outlive it."
+        "bulk `--in-place` non-TTY posture at a second tier, and that test no longer "
+        "exists. Either the credit is stale or the coverage it stands for is gone -- "
+        "and PDF-75 KEPT that arm precisely because it makes a `.bak` sidecar check "
+        "C13's own widened rows do not, so its loss is a real one rather than a "
+        "duplicate being tidied away."
     )
     # `ast.unparse` normalizes string quoting, so the tokens are compared
     # against a quote-normalized body rather than the source's own quote style.
@@ -2511,10 +2897,17 @@ def test_the_credited_node_id_parser_can_find_and_miss() -> None:
     assert credited_node_ids('NODE = "`tests/test_x.py::test_y`"') == []
     # The specific claim survives being wrapped across lines, and disappears
     # when the sentence does -- which is the failure mode AC9 is about.
+    #
+    # PDF-75 -- this synthetic carries the claim's CURRENT wording, and it had
+    # to move in the same commit as `_ROUTING_CLAIM` and the comment itself.
+    # It reddened here first, which is the tie working: a pattern whose own red
+    # proof still quotes the retired sentence proves the parser against text
+    # that no longer exists anywhere, and would go on passing after the real
+    # credit had stopped resolving.
     wrapped = (
-        "    # posture these three DO honour is asserted directly by\n"
+        "    # posture the OTHER THREE honour is asserted directly by\n"
         "    # `tests/integration/test_pages_cli.py::test_ac21_x`\n"
-        "    # instead of by giving C13 a row it would pass vacuously.\n"
+        "    # at a second tier -- with a `.bak` sidecar check C13 does not make.\n"
     )
     assert routing_claim_credit(wrapped) == (
         "tests/integration/test_pages_cli.py",

@@ -46,7 +46,7 @@ from typing import Any, Final
 
 import pytest
 
-from registry import operand_metavars, out_dir_batch_verbs, run_cli
+from registry import engine_blind_verbs, operand_metavars, out_dir_batch_verbs, run_cli
 
 # --------------------------------------------------------------------------- #
 # The derived population, resolved ONCE at import so a parametrize set that
@@ -228,6 +228,35 @@ def _collection(payload: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     )
 
 
+def _batch_argv(
+    verb: str,
+    operands: list[Path],
+    out_dir: Path,
+    *,
+    dry_run: bool = False,
+    threads: int | None = None,
+    assume_yes: bool = True,
+) -> list[str]:
+    """The argv :func:`_drive` runs, built apart so a test can ASSERT ON IT.
+
+    PDF-75 -- ``-y`` used to be appended here unconditionally, which meant every
+    batch arm in this module ran with the bulk-destructive confirmation gate
+    ALREADY SATISFIED and no leaf asserted anything about the flag. The default
+    keeps all thirteen existing call sites byte-identical; the inertness arm
+    below is the one caller that passes ``False``, and it asserts the ABSENCE of
+    the token in THIS function's output rather than only an exit code -- an arm
+    that checked exit codes alone would still pass if this line went back to
+    appending ``-y`` on every call, which is precisely the defect.
+    """
+    argv = [verb, *(str(p) for p in operands), "--out-dir", str(out_dir), *_EXTRA_ARGV[verb]]
+    if threads is not None:
+        argv += ["--threads", str(threads)]
+    if dry_run:
+        argv.append("--dry-run")
+    argv += (["-y"] if assume_yes else []) + ["-o", "json"]
+    return argv
+
+
 def _drive(
     verb: str,
     operands: list[Path],
@@ -235,13 +264,11 @@ def _drive(
     *,
     dry_run: bool = False,
     threads: int | None = None,
+    assume_yes: bool = True,
 ) -> tuple[int, dict[str, Any], str]:
-    argv = [verb, *(str(p) for p in operands), "--out-dir", str(out_dir), *_EXTRA_ARGV[verb]]
-    if threads is not None:
-        argv += ["--threads", str(threads)]
-    if dry_run:
-        argv.append("--dry-run")
-    argv += ["-y", "-o", "json"]
+    argv = _batch_argv(
+        verb, operands, out_dir, dry_run=dry_run, threads=threads, assume_yes=assume_yes
+    )
     result = run_cli(*argv)
     try:
         payload = json.loads(result.stdout)
@@ -386,6 +413,169 @@ def _assert_payload_agrees_with_disk(
     assert exit_code == 1, f"{verb}/{kind}: expected exit 1, got {exit_code}"
     assert payload["exit_code"] == 1, f"{verb}/{kind}: payload exit_code {payload['exit_code']}"
     assert payload["schema_version"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# PDF-75 -- `-y` was PRE-SATISFYING the gate at every leaf in this module.
+#
+# `_batch_argv` appended `-y` unconditionally, so every arm above ran with the
+# bulk-destructive confirmation gate already answered and no leaf could tell
+# *"the gate was correctly inert"* apart from *"the gate would have fired and
+# `-y` hid it"*. The arm below removes the flag and asserts the run is
+# UNCHANGED.
+#
+# INERTNESS, NOT A REFUSAL, AND THE DIFFERENCE IS THE WHOLE POINT. It is
+# tempting to read the masking as "the refusal is untested here" and write an
+# arm expecting exit 5. There is no refusal to assert: this module writes into a
+# FRESH `--out-dir` and never passes `--in-place`, so `confirm.py`'s
+# `destructive = in_place or bool(clobbered)` is False and the gate returns at
+# its first branch whatever `-y` says. Measured -- `delete a.pdf b.pdf --out-dir
+# <fresh> --pages 1 -o json` without `-y` exits 0.
+#
+# What IS untested without this arm is `confirm.py`'s own stated promise, in its
+# own words: *"A single-input run never refuses on this ground, and neither does
+# a create-only run, however large; both negatives are asserted, because a gate
+# that fires when it should not is a gate people route around with `-y` in a
+# shell profile, and then it protects nobody."* A three-operand batch is the
+# "however large" half, and nothing in this module asserted it.
+# --------------------------------------------------------------------------- #
+
+#: The inertness arm's population. `BATCH_VERBS` minus `engine_blind_verbs()`,
+#: DERIVED on both sides and never typed.
+#:
+#: WHY NARROWER THAN `BATCH_VERBS`, STATED RATHER THAN QUIETLY DONE. This arm's
+#: claim is a COMPARISON between two runs, and for a verb whose operand only an
+#: out-of-process engine can finally judge the comparison degrades on a host
+#: without that engine to *"two identical engine failures"* -- an equality that
+#: holds for a reason unrelated to `-y`. The same two verbs' `-y` inertness IS
+#: asserted, at a tier where it is engine-honest:
+#: `tests/test_cli_contract.py::test_the_yes_partition_holds_at_every_leaf`
+#: band B drives their registered invocations with and without the flag.
+#:
+#: The exclusion is also what keeps this module inside `PDF-82`'s frozen
+#: ungated-engine-blind-drive ceiling, which stands at its measured value with
+#: ZERO headroom (`tests/test_engine_gating_census.py`): two more string-param
+#: cells naming an engine-blind verb would breach it, and the only sanctioned
+#: remedies are a false `@pytest.mark.requires` on an engine-free drive
+#: (over-marking -- the harm that instrument cannot catch) or a PM ruling
+#: raising the ceiling. Both are refused here; the narrowing is recorded in
+#: PDF-75's report for the PM rather than absorbed silently.
+#: Resolved ONCE at import: `engine_blind_verbs()` walks the import graph under
+#: `src/` and is measured at ~2s per call, so evaluating it inside the
+#: comprehension's condition would pay it once per batch verb on every worker.
+_ENGINE_BLIND: Final[frozenset[str]] = frozenset(engine_blind_verbs())
+
+INERT_GATE_VERBS: Final[tuple[str, ...]] = tuple(
+    verb for verb in BATCH_VERBS if verb not in _ENGINE_BLIND
+)
+
+
+def _without_durations(value: Any) -> Any:
+    """*value* with every ``duration``-bearing key removed, at any depth.
+
+    Two runs of the same batch differ in exactly one respect that is not a
+    fact about the run: how long each item took.
+    """
+    if isinstance(value, dict):
+        return {
+            key: _without_durations(item) for key, item in value.items() if "duration" not in key
+        }
+    if isinstance(value, list):
+        return [_without_durations(item) for item in value]
+    return value
+
+
+def _comparable(rows: list[dict[str, Any]], out_dir: Path) -> list[dict[str, Any]]:
+    """*rows* with durations dropped and *out_dir* erased.
+
+    The two runs share their OPERANDS -- one batch, driven twice -- and differ
+    only in where they were told to write, so the destination is the one thing
+    that legitimately differs and the only thing normalized. Building two
+    separate batches instead was tried and REJECTED on measurement: the
+    generated PDFs carry their own creation timestamp, so two batches built
+    seconds apart compress to different sizes (`3530 -> 2349` vs `3530 -> 2346`)
+    and the arm would have failed for a reason that has nothing to do with `-y`.
+    """
+    return json.loads(json.dumps(_without_durations(rows)).replace(str(out_dir), "<out>"))
+
+
+def test_pdf75_the_inertness_population_is_derived_and_non_empty() -> None:
+    """The pin for the arm below, and the statement of what it does NOT cover.
+
+    A population that derived empty would make the inertness arm collect zero
+    cases and report green having asserted nothing -- this module's own named
+    failure mode (`test_ac1_population_is_derived_and_non_empty`).
+    """
+    assert INERT_GATE_VERBS, "the gate-inertness population derived empty"
+    excluded = sorted(set(BATCH_VERBS) - set(INERT_GATE_VERBS))
+    assert excluded == sorted(set(engine_blind_verbs()) & set(BATCH_VERBS)), (
+        f"the inertness population excludes {excluded}, which is not the engine-blind "
+        f"set -- the exclusion has stopped being derived and become a list"
+    )
+
+
+@pytest.mark.parametrize("verb", INERT_GATE_VERBS)
+def test_pdf75_the_argv_this_module_drives_omits_y_when_it_says_it_does(verb: str) -> None:
+    """The arm's non-vacuity guard, and the one that reds on the ORIGINAL defect.
+
+    Asserting only the exit codes below would pass unchanged if `_batch_argv`
+    went back to appending `-y` on every call: both runs would carry the flag,
+    both would exit the same, and the arm would agree with itself about nothing.
+    The token's ABSENCE from the argv is what makes the comparison a comparison.
+    """
+    with_flag = _batch_argv(verb, [Path("a.pdf")], Path("out"), assume_yes=True)
+    without_flag = _batch_argv(verb, [Path("a.pdf")], Path("out"), assume_yes=False)
+    assert "-y" in with_flag, f"{verb}: the default call site lost its -y"
+    assert "-y" not in without_flag, (
+        f"{verb}: _batch_argv still appends -y with assume_yes=False, so the inertness arm "
+        f"drives a PRE-SATISFIED gate and its agreement means nothing: {without_flag}"
+    )
+    assert [token for token in with_flag if token != "-y"] == without_flag, (
+        f"{verb}: the two argvs differ by more than the -y token, so the arm below is no "
+        f"longer comparing the same run twice: {with_flag} vs {without_flag}"
+    )
+
+
+@pytest.mark.parametrize("verb", INERT_GATE_VERBS)
+def test_pdf75_a_fresh_out_dir_batch_runs_identically_without_y(
+    verb: str, tmp_path: Path, restore_modes: list[Path]
+) -> None:
+    """The gate is INERT on a bulk `--out-dir` run: same exit code, same items.
+
+    ONE batch, driven twice -- once as every other arm in this module drives it
+    and once with `-y` withheld -- into two fresh `--out-dir`s. A difference in
+    either direction is a finding: the gate firing here would be `confirm.py`'s
+    stated negative broken, and the payload differing would mean `-y` reaches
+    the batch's own reporting, which nothing claims it does.
+    """
+    _skip_unless_engine_available(verb)
+    operands = _build_batch(tmp_path, "corrupt", restore_modes, verb)
+
+    confirmed_out = tmp_path / "out-confirmed"
+    confirmed_code, confirmed_payload, _ = _drive(verb, operands, confirmed_out, assume_yes=True)
+
+    bare_out = tmp_path / "out-bare"
+    bare_code, bare_payload, bare_stderr = _drive(verb, operands, bare_out, assume_yes=False)
+
+    assert bare_code == confirmed_code, (
+        f"{verb}: a bulk run into a FRESH --out-dir clobbers nothing and mutates no input, "
+        f"so it is not destructive and the confirmation gate must not fire -- with -y it "
+        f"exited {confirmed_code}, without it {bare_code}. If this is 5, `confirm.py`'s own "
+        f"promise that a create-only run never refuses 'however large' is broken, and the "
+        f"thirteen call sites above have been hiding it: {bare_stderr}"
+    )
+
+    confirmed_key, confirmed_rows = _collection(confirmed_payload)
+    bare_key, bare_rows = _collection(bare_payload)
+    assert bare_key == confirmed_key, (
+        f"{verb}: the payload changed its collection key when -y was withheld "
+        f"({confirmed_key!r} -> {bare_key!r})"
+    )
+    assert _comparable(bare_rows, bare_out) == _comparable(confirmed_rows, confirmed_out), (
+        f"{verb}: the batch reported DIFFERENT items with and without -y. The flag answers "
+        f"the confirmation gate and nothing else; reaching the per-item report means it is "
+        f"being consumed with an effect nobody documented"
+    )
 
 
 @pytest.mark.parametrize("verb", BATCH_VERBS)

@@ -67,6 +67,12 @@ registry or a live enum, never typed beside it:
   and neither types a verb name or a node id. Per cell and never per verb: the
   measured exception beside it is a cell of an engine-backed verb that refuses
   before the engine resolves, and marking it would cost coverage silently.
+* ``destructive_verbs()`` — PDF-75's bulk-destructive dimension: the verbs the
+  product's own confirmation gate (C13, exit 5) can actually refuse. The LAST
+  transcribed dimension in this file became a derived one here;
+  ``Invocation.destructive`` survives as a RECONCILED literal beside it, not as
+  the source. Two already-derived factors intersected, and a product of 5 that
+  neither factor's size predicts — see the function's own docstring.
 
 `PDF-17` exports and pins these. It does not cross them, cap them, or write a
 single secret-leak case: the cardinality budget is `PDF-22`'s own deliverable.
@@ -111,6 +117,7 @@ __all__ = [
     "console_script",
     "derive_password_file_pairs",
     "destination_flag_cases",
+    "destructive_verbs",
     "discover_groups",
     "discover_verbs",
     "engine_blind_verbs",
@@ -724,6 +731,58 @@ def out_dir_batch_verbs(root: object | None = None) -> tuple[str, ...]:
     )
 
 
+def destructive_verbs(root: object | None = None) -> tuple[str, ...]:
+    """Every verb whose bulk `--in-place` run the confirmation gate can refuse.
+
+    THE TWO-FACTOR ARITHMETIC, WRITTEN OUT BECAUSE THE REPORT THIS CAME FROM
+    GOT IT WRONG. Measured at `52ec164`: the ``--in-place`` consumer set is
+    TWELVE and the variadic-operand set is TWELVE, and it is tempting to carry
+    one of those numbers forward as the answer. **Their intersection is FIVE.**
+    An engineer arriving with "~12" in hand will report a shortfall that does
+    not exist; an engineer who PRODUCES twelve has widened the derivation past
+    the product's own rule.
+
+    The rule is `safety/confirm.py::require_confirmation`'s, read back off the
+    surface each verb declares:
+
+    * ``bulk`` is ``input_count > 1``, so a verb whose operand is single
+      (``nargs == 1``) cannot reach it FROM ITS OPERAND at all. That is what
+      excludes the seven single-operand ``--in-place`` consumers -- by the
+      product's rule, never by a skip list.
+    * ``destructive`` is ``in_place or bool(clobbered)``. This derivation takes
+      the ``--in-place`` route ONLY. The clobber route reaches three further
+      verbs through a different declaration (`merge`, `compose`, `convert` pass
+      ``clobbered=``), and deriving it would need a fact about the RUN -- which
+      targets already exist -- rather than a fact about the verb.
+
+    Both inputs are themselves derived and neither is typed here: ``consumes``
+    off ``cli.common.consumed_output_flags`` and ``variadic_operands`` off the
+    live command's own ``nargs``. So the answer moves when the PRODUCT moves.
+
+    THE ANTI-ROT PROPERTY, WHICH IS THE POINT. Seven ``--in-place`` consumers
+    pass a LITERAL ``input_count=1`` at their call site today -- correct, since
+    their operand cannot resolve to more. The day one of them grows a variadic
+    operand, that literal keeps the gate dead while this derivation puts the
+    verb straight into C13's population and reds BY NAME. A transcribed
+    ``destructive=True`` cannot do that, which is the whole reason this stopped
+    being one (`Invocation.destructive` is now reconciled against this function
+    in BOTH directions -- see `tests/test_cli_contract.py`).
+
+    Keyed on the VERB name off the live command tree, like
+    :func:`out_dir_batch_verbs` and :func:`engine_blind_verbs`, never on a
+    module basename: `cli/cmd_office.py` registers `convert`, and a
+    module-keyed population is a different population from the one a user
+    types.
+    """
+    return tuple(
+        sorted(
+            verb.name
+            for verb in discover_verbs(root)
+            if not verb.is_group and "--in-place" in verb.consumes and verb.variadic_operands
+        )
+    )
+
+
 def discover_groups(root: object | None = None) -> tuple[tuple[str, ...], ...]:
     """Every **non-root** grouping parent's path, e.g. ``("meta",)``.
 
@@ -1145,6 +1204,48 @@ def _reorder_invocation(corpus: object, tmp_path: Path) -> list[str]:
 # `-O` here keeps Click's last-scalar-wins behaviour landing on C11's target
 # instead of tripping the `--output`/`--out-dir` mutual exclusion.
 # --------------------------------------------------------------------------- #
+
+
+#: PDF-75 -- the three C13 rows the derivation added. Each is the shape
+#: `_compress_destructive_invocation` and `_ocr_destructive_invocation` already
+#: set: TWO `tmp_path`-local COPIES of a corpus fixture (never the shared
+#: session-scoped fixture itself -- `--in-place` would corrupt it for every
+#: downstream test, `_copy_corpus_fixture`'s own hazard note), the operands
+#: LEADING before the first flag (C13 discovers operands generically by
+#: `token.startswith("-")`, so the ordering is load-bearing), and the verb's own
+#: required selection tail. `ten_page_text` rather than `single_page`, because
+#: `delete --pages 1` over a ONE-page document reaches §D5's zero-page refusal
+#: -- which is ALSO exit 5, from a different tier, and a C13 row that returned 5
+#: for that reason would look green while asserting nothing about the gate.
+#: HC-2 applies exactly as it does to every other builder here: no row names an
+#: operator-corpus document.
+
+
+def _delete_destructive_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`delete`'s bulk `--in-place` argv -- SET selection over a TEN-page
+    operand, so the survivors are non-empty and the zero-page refusal is not
+    reached (`_delete_invocation`'s own reasoning, in the bulk shape)."""
+    first = _copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "c13-delete-a.pdf")
+    second = _copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "c13-delete-b.pdf")
+    return [str(first), str(second), "--pages", "1", "--in-place"]
+
+
+def _rotate_destructive_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`rotate`'s bulk `--in-place` argv. `--angle` is the flag this file's own
+    module docstring names as the thing a generic walk cannot invent."""
+    first = _copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "c13-rotate-a.pdf")
+    second = _copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "c13-rotate-b.pdf")
+    return [str(first), str(second), "--pages", "1", "--angle", "90", "--in-place"]
+
+
+def _reorder_destructive_invocation(corpus: object, tmp_path: Path) -> list[str]:
+    """`reorder`'s bulk `--in-place` argv -- ORDERED and total, so a ten-page
+    operand yields ten pages in a different order (`_reorder_invocation`'s own
+    reasoning). The reordering is what makes the confirmed run's mutation real
+    rather than a byte-identical round trip."""
+    first = _copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "c13-reorder-a.pdf")
+    second = _copy_corpus_fixture(corpus, tmp_path, "ten_page_text", "c13-reorder-b.pdf")
+    return [str(first), str(second), "--pages", "last,1", "--in-place"]
 
 
 def _meta_get_invocation(corpus: object, tmp_path: Path) -> list[str]:
@@ -1637,13 +1738,25 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
         no_input_build=_permissions_no_input_build,
     ),
     # PDF-08. All four are producing, multi-input-capable verbs over
-    # `StructureEngine`. `destructive=False` like every other producing verb:
-    # the registered invocation is a single input writing to `-O`, which is
-    # neither bulk nor destructive, so C13 would have nothing to refuse. The
-    # bulk `--in-place` non-TTY posture these three DO honour is asserted
-    # directly by
+    # `StructureEngine`, and PDF-75 SPLIT them. The old argument here routed
+    # all four away from C13 on the grounds that "the registered invocation is
+    # a single input writing to `-O`, which is neither bulk nor destructive".
+    # That sentence is TRUE ABOUT THE REGISTERED `build` AND FALSE ABOUT THREE
+    # OF THE VERBS -- which is exactly the confusion `destructive_verbs()`
+    # removes: `destructive` is a property of the verb's DECLARED SURFACE
+    # (`--in-place` consumed, operand variadic), and `destructive_build` is the
+    # argv that reaches it. `delete`/`rotate`/`reorder` qualify on the
+    # product's own rule and now carry both.
+    #
+    # `extract` is the one the derivation still routes OUT, and for the
+    # product's reason rather than by a list: it is variadic but does not
+    # consume `--in-place` at all, so its refusal comes from the OR-3
+    # declaration alone and C13 would have nothing to refuse. The bulk
+    # `--in-place` non-TTY posture the OTHER THREE honour is asserted directly by
     # `tests/integration/test_pages_cli.py::test_ac21_a_bulk_in_place_run_fails_closed_on_a_non_tty`
-    # instead of by giving C13 a row it would pass vacuously.
+    # at a second tier -- with a `.bak` sidecar check C13 does not make -- and
+    # that arm is KEPT rather than deleted for the overlap: dropping coverage
+    # to tidy a duplicate is how a widening becomes a net loss.
     #
     # PDF-17/AC9 -- THAT SENTENCE IS NOW TIED TO THE TEST IT NAMES. It used to
     # credit a whole module and nothing checked the credit, so the routing
@@ -1655,13 +1768,22 @@ INVOCATIONS: Final[dict[str, Invocation]] = {
         build=_extract_invocation, destructive=False, no_input_build=_extract_no_input_build
     ),
     "delete": Invocation(
-        build=_delete_invocation, destructive=False, no_input_build=_delete_no_input_build
+        build=_delete_invocation,
+        destructive=True,
+        destructive_build=_delete_destructive_invocation,
+        no_input_build=_delete_no_input_build,
     ),
     "rotate": Invocation(
-        build=_rotate_invocation, destructive=False, no_input_build=_rotate_no_input_build
+        build=_rotate_invocation,
+        destructive=True,
+        destructive_build=_rotate_destructive_invocation,
+        no_input_build=_rotate_no_input_build,
     ),
     "reorder": Invocation(
-        build=_reorder_invocation, destructive=False, no_input_build=_reorder_no_input_build
+        build=_reorder_invocation,
+        destructive=True,
+        destructive_build=_reorder_destructive_invocation,
+        no_input_build=_reorder_no_input_build,
     ),
     # PDF-14. `meta get` is NON-PRODUCING, same shape as `permissions`.
     # `meta set`/`watermark`/`stamp` are single-target producing verbs over
