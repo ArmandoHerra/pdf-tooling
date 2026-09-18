@@ -1875,6 +1875,83 @@ def test_the_startup_cost_ceiling_reddens_when_it_loses_its_class_or_control(
     )
 
 
+#: PDF-86 D4, and it is the SAME shape two constants up for the same reason.
+#:
+#: `STARTUP_COST_RATIO_CEILING_PER_MILLE` is `1.25x` the loaded p95 of a
+#: statistic measured in ONE cell of an EIGHT-cell matrix, and the arm asserted
+#: it in all eight. `EVIDENCE_TOKENS` above already REQUIRES every ceiling block
+#: to write down its `HOST` and its `INTERPRETER` -- and nothing in this product
+#: has ever asserted that the run MATCHES them, which is the whole finding in
+#: one coordinate pair. PDF-86's remedy leaves the ceiling's value, estimator,
+#: quorum and landed block untouched and gives it a DECLARED DOMAIN: a registry
+#: of the cells it was actually measured in, with a third verdict that REDS on a
+#: condition nobody has either measured or declared.
+#:
+#: That registry is itself a frozen record, so it carries its own derivation
+#: block and this pair asserts the two tokens that make it checkable: CONDITION
+#: (what the registry is keyed on and which cells are in it) and UNMEASURED
+#: (which cells are declared absent, and why). `PDF42_DERIVATION_TOKENS` is
+#: AGAIN not extended, for the reason the comment above it already gives about
+#: CLASS/CONTROL: that tuple is asserted over every member of `PDF42_CEILINGS`,
+#: so appending to it reddens three landed constants whose blocks predate the
+#: new tokens, and the next step from there is editing a landed derivation block
+#: to accommodate a guard. This is that trap's THIRD instance and the ruling is
+#: the one already written down beside its second.
+PDF86_REGISTRY: Final = "STARTUP_COST_CALIBRATED_CONDITIONS"
+PDF86_REGISTRY_TOKENS: Final = ("CONDITION", "UNMEASURED")
+
+
+def test_the_startup_condition_registry_carries_its_derivation() -> None:
+    """PDF-86 AC10. The registry that decides WHERE a frozen ceiling is asserted
+    is itself licensed only by naming what it is keyed on and what it declares
+    absent.
+
+    A domain with no recorded conditions is a domain nobody can audit, and a
+    declaration of ignorance with no statement of what is unmeasured is just a
+    shorter way of not asserting something.
+    """
+    value, block = ceiling_block(IMPORT_BOUNDARIES.read_text(), PDF86_REGISTRY)
+    assert value > 0, f"{PDF86_REGISTRY} records no calibrated condition at all"
+
+    missing = [token for token in PDF86_REGISTRY_TOKENS if token not in block]
+    assert missing == [], (
+        f"{PDF86_REGISTRY}'s derivation block omits {missing}. A registry that decides which "
+        "cells a frozen ceiling is asserted in is licensed by naming what it is keyed on "
+        "(CONDITION) and which cells it declares it has never measured (UNMEASURED); "
+        "without both, the domain is indistinguishable from one drawn around whatever was "
+        "red that week."
+    )
+    absent = [token for token in EVIDENCE_TOKENS if token not in block]
+    assert absent == [], (
+        f"{PDF86_REGISTRY} = {value} but its block omits {absent}. The registry's own "
+        "members are measurements, and a measurement with no host, interpreter, date or "
+        "commit beside it is the exact defect PDF-86 exists to close, one level up."
+    )
+
+
+@pytest.mark.parametrize("stripped", PDF86_REGISTRY_TOKENS)
+def test_the_startup_condition_registry_reddens_when_it_loses_a_token(
+    tmp_path: Path, stripped: str
+) -> None:
+    """AC10's RED, one case per token, against a scratch copy -- a guard over a
+    comment block is worth exactly the proof that it notices a missing line."""
+    original = IMPORT_BOUNDARIES.read_text()
+    value, block = ceiling_block(original, PDF86_REGISTRY)
+    assert stripped in block, (
+        f"{stripped!r} is not in the live block, so removing it proves nothing"
+    )
+
+    kept = [line for line in block.splitlines() if stripped not in line]
+    scratch = tmp_path / "planted_registry.py"
+    scratch.write_text("\n".join(kept) + f"\n{PDF86_REGISTRY}: Final = {value}\n")
+
+    _, damaged = ceiling_block(scratch.read_text(), PDF86_REGISTRY)
+    assert [token for token in PDF86_REGISTRY_TOKENS if token not in damaged], (
+        f"stripping every line mentioning {stripped!r} left a block the guard still "
+        "accepts; the guard is not reading what it claims to read"
+    )
+
+
 def help_imports_fields(text: str) -> list[str]:
     """Every field DECLARED on `HelpImports`, derived by parsing the class."""
     for node in ast.parse(text).body:

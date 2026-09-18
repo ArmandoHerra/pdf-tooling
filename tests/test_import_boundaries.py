@@ -87,11 +87,16 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import shutil
+import statistics
 import subprocess
 import sys
+import tomllib
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final, NamedTuple
 
 import pytest
@@ -2839,6 +2844,76 @@ HELP_MODULE_CEILING: Final = 320
 #      that quietly stops being able to see is the exact defect this section
 #      exists to end, and because the set-half already declares its own version
 #      of this ("120, not 280") one screen up.
+#   6. PDF-86, AND IT IS THE ADJACENT CASE ENTRY 4 STOPPED ONE CLAUSE SHORT OF.
+#      Entry 4 closes on the reassuring half of a pair -- "a proportional
+#      slowdown of the FLOOR ITSELF ... inflates numerator and denominator
+#      TOGETHER and cancels here as contention does" -- and stops. The case
+#      that FIRED is the opposite one: the floor moving WITHOUT the numerator.
+#      That does not cancel. It moves the statistic's LEVEL, and the LEVEL is
+#      exactly what a frozen ceiling pins. Measured across four interpreters on
+#      one host, the numerator is flat (a 9% band with no ordering) while the
+#      denominator swings 38%, and the ratio moves by a factor of 1.3688 --
+#      larger than the 1.25x safety factor the ceiling was given. About half of
+#      the denominator reads no file (frozen or builtin) against about 96% of
+#      the numerator, so any condition that prices a file-backed import
+#      differently survives the division as a PLATFORM TERM.
+#      WHICH CELLS THE CEILING NOW HOLDS IN: the four members of
+#      `STARTUP_COST_CALIBRATION` -- `(linux, 3.11)`, `(linux, 3.12)`,
+#      `(linux, 3.13)`, `(linux, 3.14)` -- which are the four `ubuntu-latest`
+#      legs, both single-configuration jobs and every local `make test`. The
+#      four `macos-14` legs are DECLARED UNMEASURED and publish instead of
+#      asserting a level. Anything else REDS.
+#      THREE RESIDUALS THIS DESIGN DECLARES AND DOES NOT CLOSE:
+#      (a) THE PATCH-LEVEL COORDINATE. The registry is keyed at interpreter
+#          MINOR granularity, so a patch bump inside a registered cell that
+#          moves the floor is not caught -- the level clause goes on asserting
+#          against a reference taken at a different patch level. Minor is
+#          deliberate: not one CI cell runs a patch level this campaign
+#          measured, so a patch-keyed registry would put all eight legs in
+#          UNDECLARED and red the whole matrix. The observation's
+#          recorded-versus-observed halves are what surface it.
+#      (b) A PLATFORM-ONLY REGRESSION IN AN UNCALIBRATED CELL. In a declared
+#          cell the LEVEL clause does not run, by construction, until a
+#          recorded distribution promotes it -- so a macOS-only import-cost
+#          regression is invisible to this arm's level clause. Nothing that was
+#          ever HELD is deleted: every figure behind the ceiling is a Linux
+#          figure, and on the macos-14 legs the assertion produced false reds
+#          and zero detections. Stopping an unearned claim is not removing
+#          coverage, but it is a residual and it is named here rather than
+#          discovered later.
+#      (c) THE INSTRUMENTED CELL. Under `make cover`, coverage.py joins both
+#          censuses (entry 5), the floor name set inflates from ~39 to ~185 and
+#          the statistic collapses to roughly a tenth of its uninstrumented
+#          value. `(linux, 3.13)` is CALIBRATED, so in that job the arm still
+#          ASSERTS -- against a statistic instrumentation has already driven far
+#          under the ceiling, and the ceiling is one-sided, so it cannot red
+#          there. It is covered on paper and blind in fact. This is the same
+#          disease in a third location and closing it means making
+#          instrumentation a registry coordinate, which is a different spec with
+#          its own campaign. The arm remains live and at full sensitivity in the
+#          eight `test` legs and in the engines-absent job, all of which run
+#          `make test` uninstrumented.
+#      AND A FOURTH, FOUND WHILE IMPLEMENTING AND NOT PREDICTED BY THE SPEC:
+#      (d) `make test PYTHON=<x.y>` MISLABELS THE CONDITION. That target runs
+#          pytest from `.venv-py<x.y>` while `VENV_CONSOLE_SCRIPT` is pinned to
+#          `.venv`, so the census measures one build while
+#          `live_startup_condition()` reports the interpreter of another. The
+#          MISMEASUREMENT is older than this item -- the arm was already
+#          censusing the wrong build under that target -- but the label is new
+#          and is this item's to declare. It cannot reach CI: every CI leg has
+#          exactly one venv. Recorded, not fixed: fixing it means deriving the
+#          condition from the console script's own interpreter, which is a
+#          second probe or a second file read, and neither is in this item.
+#      ONE THING THIS DESIGN COSTS, STATED RATHER THAN OMITTED: a RECORD cell
+#      reads as `passed` in the pass/fail column, where an abstention would have
+#      read as `s`. That is a real legibility loss. What offsets it: the arm
+#      RUNS on every leg (which is strictly more than an abstention gave, and is
+#      what the execution receipt exists to require), it still ASSERTS the
+#      declaration and the invariants in that cell, it PUBLISHES in full on a
+#      green run through a channel that survives `--tb=line`, `--tb=short` and
+#      `-q` where a skip reason reached only `-ra`, and what it does not assert
+#      is written down here. And the warning's CLASS NAME is one greppable token
+#      across a whole job log, which a skip line keyed on a path never was.
 # --------------------------------------------------------------------------- #
 
 #: PDF-55 D3. Below this, the ratio's denominator is not trusted -- roughly a
@@ -3185,7 +3260,550 @@ STARTUP_FLOOR_SANITY_FLOOR_US: Final = 1_700
 #: ratio arms GREEN on the planted tree under the default `-n auto`, floor
 #: within its own noise. The SEPARATION and the measured SENSITIVITY BOUNDARY
 #: ("reds at f >= X, green at f <= Y") are in this spec's Implementation Log.
+#: THE DOMAIN THIS VALUE IS ASSERTED IN IS DECLARED BELOW: see STARTUP_COST_CALIBRATION.
 STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = 26_500
+
+
+# --------------------------------------------------------------------------- #
+# PDF-86 -- THE CEILING'S DECLARED DOMAIN: the cells 26.500 was measured in.
+#
+# `X-803` in one sentence: recording a derivation's conditions and ASSERTING
+# them are different acts, and this product only ever did the first. The block
+# above is REQUIRED to write down its host and its interpreter
+# (`EVIDENCE_TOKENS`, `tests/test_gate_budget.py`) and NOTHING HAS EVER CHECKED
+# THAT THE RUN MATCHES THEM -- so a constant derived in ONE cell of an EIGHT-cell
+# matrix came to be asserted in all eight. Re-measured across four interpreters
+# on one host (PDF-86 AC7, the registry below), the statistic's level moves
+# 12.4120 -> 16.9894, a factor of 1.3688, which is LARGER than the 1.25x safety
+# factor the constant was given: the numerator is ~96% file-backed imports and
+# the denominator is about half frozen, so "contention multiplies both and
+# cancels" is true of contention and false of anything that prices a file-backed
+# import differently.
+#
+# THE SHAPE IS FORCED, NOT CHOSEN. `N/D <= C` is `N <= C*D`, so a bound on a
+# LEVEL needs a per-cell baseline in any algebraic form; a share, a percentage,
+# a log or a z-score is a monotone transform and compresses the cross-cell
+# spread and the signal identically. The only repair that removes the platform
+# term is restricting the denominator so both halves share a cost model, and the
+# block above already ruled that "a DIFFERENT spec ... it needs its own
+# three-arm campaign". So this constant CANNOT be made cell-invariant. It can
+# only be made honest about which cells it holds in.
+#
+# THREE VERDICTS, and the third one is the whole point:
+#
+#   CALIBRATED  the condition is in the registry below -> assert the quorum
+#               against 26.500, exactly as before. Nothing about the level
+#               changed.
+#   RECORD      the condition is declared UNMEASURED -> do not assert a LEVEL.
+#               Assert the DECLARATION and the condition-independent invariants,
+#               then PUBLISH the measurement through
+#               `UncalibratedStartupCondition`. It NEVER abstains, on any leg,
+#               and that is measured rather than preferred: the execution
+#               receipt in `tests/test_gate_budget.py` asserts over the RUNTIME
+#               JUnit XML that no Section 6 member skipped, it is green on all
+#               four macos-14 legs today, and a skip here reddens it. No
+#               source-text sanction can reach that clause -- there is no source
+#               text in a `<skipped>` element -- so the MECHANISM a missing
+#               precondition usually gets is given up and the PURPOSE is kept by
+#               four things instead: the arm RUNS everywhere, it still ASSERTS
+#               in every cell, it PUBLISHES on every run through a channel that
+#               survives `--tb=line`, `--tb=short` and `-q`, and what it does
+#               not assert is named in the register at the head of this section.
+#   UNDECLARED  neither -> RED, naming the condition and both halves. This is
+#               what closes the CLASS instead of patching one platform: a new
+#               platform, a new interpreter minor or a new runner image arrives
+#               as a red naming its own condition, never as an inherited
+#               assertion and never as a quiet pass.
+#
+# THE PLATFORM IS A REGISTRY KEY AND NEVER A CONDITIONAL. `if platform ==
+# "darwin": skip` encodes a claim ABOUT macOS -- that it is different -- which
+# nobody here has measured. `if condition not in CALIBRATED` encodes a claim
+# about THIS LOOP'S EVIDENCE, which is a fact this loop owns. The registry is a
+# POSITIVE LIST OF MEASUREMENTS and never a negative list of suspects, and the
+# two arms below make it impossible for it to become anything else.
+# --------------------------------------------------------------------------- #
+
+
+class StartupCondition(NamedTuple):
+    """The two coordinates the total-startup-cost derivation is keyed on.
+
+    Two, and no more, each for a measured reason. `sys.platform` is the
+    dimension that moves the numerator by 2.2-2.4x between this host and the
+    macos-14 legs. The interpreter's `major.minor` is the dimension that moves
+    the statistic by 1.3688x across the four interpreters measured here.
+
+    NOT the patch level, and that is deliberate: not one CI cell runs a patch
+    level this campaign measured (CI ran 3.11.9/3.12.10/3.13.15/3.14.7 on
+    darwin against this host's 3.11.15/3.12.13/3.13.14/3.14.4), so a
+    patch-keyed registry would put every leg of the matrix in UNDECLARED and
+    red all eight. The residual -- a patch bump inside a registered cell that
+    moves the floor -- is declared in this section's register and surfaced by
+    the observation's recorded-versus-observed comparison.
+    """
+
+    platform: str
+    interpreter: str
+
+    def __str__(self) -> str:
+        return f"({self.platform}, {self.interpreter})"
+
+
+def live_startup_condition() -> StartupCondition:
+    """The condition this run is actually in.
+
+    Both coordinates are properties of the RUNNER and are outside the product's
+    reach: no commit, no `uv.lock` diff, no import change and no dependency bump
+    can move a cell out of the asserting branch. That is the property that
+    separates a conditioned constant from a manufactured green, and the
+    escaping-class control grades it rather than this docstring asserting it.
+    """
+    return StartupCondition(sys.platform, f"{sys.version_info[0]}.{sys.version_info[1]}")
+
+
+class StartupCalibration(NamedTuple):
+    """One measured distribution of the startup-cost statistic, in one cell.
+
+    These are NOT ceilings and nothing fails against them -- the single ceiling
+    is still `STARTUP_COST_RATIO_CEILING_PER_MILLE` and it is still 26.500.
+    They are (a) the evidence that admits a cell to the asserting branch and
+    (b) the reference the failure message divides by, so a reader is told WHICH
+    HALF moved instead of running a four-interpreter campaign to find out.
+    """
+
+    floor_names: int
+    ratio_median: float
+    numerator_median_us: int
+    denominator_median_us: int
+    headroom: float
+    f_min_pct: float
+    provenance: str
+
+
+class StartupDeclaration(NamedTuple):
+    """A cell this loop has DECLARED it has never measured.
+
+    A reason and a promotion rule, and deliberately NO FIGURE about the
+    condition it declares. An entry carrying a macOS number would be the
+    per-platform table derived on hosts this loop does not have; an entry
+    carrying only the ABSENCE of one is the opposite act. The no-figure
+    property is asserted structurally below rather than left to review.
+    """
+
+    reason: str
+    promotion: str
+
+
+#: PDF-86 AC7. The number of cells the ceiling above has actually been measured
+#: in, written down so that a member cannot join `STARTUP_COST_CALIBRATION`
+#: without this block being re-ratified in the same edit.
+#:
+#: STATISTIC: the one the ceiling above pins, unchanged -- median of K=5 paired
+#:   readings of (attributable self time / in-run floor self time), both sums
+#:   taken from the SAME `pdftooling --help` run. Three quorums per cell; the
+#:   level recorded for a member is the median of its three quorum medians.
+#: CONDITION: keyed on `(sys.platform, interpreter major.minor)`. Every member
+#:   below is a cell in which the shipped estimator (median of K=5, warm-up
+#:   reading discarded) was run three times on one host and the whole quorum
+#:   recorded. The four members are the four `ubuntu-latest` legs of the CI
+#:   matrix plus every local `make test`; `engines-present` and
+#:   `without-engines` both land on `(linux, 3.13)`.
+#: UNMEASURED: the four `macos-14` legs. This loop has no macOS host and never
+#:   has, so no distribution of this statistic has ever been taken there. They
+#:   are DECLARED in `STARTUP_COST_UNCALIBRATED`, which carries the reason and
+#:   the promotion rule and no macOS figure at all.
+#: DATE: 2026-09-18
+#: COMMIT: 559183b (measured in a `git worktree add --detach` checkout at that
+#:   commit with its own `uv sync --locked` venv, outside the primary tree;
+#:   `git status --porcelain` empty in both trees before and after)
+#: HOST: station-01, 8 logical CPUs, Linux.
+#: INTERPRETER: four, one per member below; each leg a fresh
+#:   `uv sync --locked --python <V>` so the builds are the same
+#:   `python-build-standalone` ones CI resolves.
+#: ENGINES: irrelevant to this statistic and deliberately not held constant --
+#:   the census is `pdftooling --help`, which resolves no port.
+#:
+#: THE FIGURES, and the cross-cell spread that is the reason this registry
+#: exists. Quiet pass (1-minute load average 0.55-0.70), three quorums per cell:
+#:   linux/3.11  floor 36  ratio medians 16.9763 / 17.2273 / 16.9894 -> 16.9894
+#:   linux/3.12  floor 37  ratio medians 16.6557 / 16.6326 / 16.8414 -> 16.6557
+#:   linux/3.13  floor 39  ratio medians 12.4120 / 12.6385 / 12.2917 -> 12.4120
+#:   linux/3.14  floor 40  ratio medians 13.6174 / 13.4405 / 13.2999 -> 13.4405
+#: A LOADED corroboration pass (1-minute load average 1.77-1.99) over the same
+#: four cells reproduced every floor-name count exactly and every level within
+#: 2.4%: 17.2575 / 16.5904 / 12.7133 / 13.3120. The cell is stable; the MATRIX
+#: is not, and that is the whole shape of the defect in one line.
+#:
+#: ALL FOUR SIT UNDER THE UNCHANGED 26.500, with headroom x1.5598 / x1.5910 /
+#: x2.1350 / x1.9717 -- so no value moves. The smallest proportional growth the
+#: arm can see in each cell is 56.0% / 59.1% / 113.5% / 97.2%: the arm's
+#: sensitivity already varies by x2.03 across four cells that share one ceiling.
+#: That variation is not a defect to remove. It is the fact the instrument has
+#: to declare.
+#:
+#: WIDENING WAS REFUTED ON MEASUREMENT, not only on the rule. Clearing the worst
+#: macos-14 quorum median observed in CI (42.8907) with this constant's own
+#: 1.25x factor needs 53.61, and clearing its worst single reading (62.4069)
+#: needs 78.01 -- which would move the four figures above from 56-114% to
+#: 195-336% and 330-534% respectively. A single cross-cell constant can only be
+#: made to hold by turning an arm that catches a 1.6x-2.1x slowdown into one
+#: that catches a 3.0x-6.3x slowdown. That is not a rule broken, it is a policy
+#: call taken silently in the wrong direction.
+STARTUP_COST_CALIBRATED_CONDITIONS: Final = 4
+
+#: The cells the ceiling has been measured in, and the evidence that admits
+#: them. Every member carries its own distribution; the completeness arm below
+#: reddens naming the member and the field if one is ever added without.
+STARTUP_COST_CALIBRATION: Final[Mapping[StartupCondition, StartupCalibration]] = MappingProxyType(
+    {
+        StartupCondition("linux", "3.11"): StartupCalibration(
+            floor_names=36,
+            ratio_median=16.9894,
+            numerator_median_us=138_053,
+            denominator_median_us=7_983,
+            headroom=1.5598,
+            f_min_pct=56.0,
+            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.11.15",
+        ),
+        StartupCondition("linux", "3.12"): StartupCalibration(
+            floor_names=37,
+            ratio_median=16.6557,
+            numerator_median_us=143_421,
+            denominator_median_us=8_554,
+            headroom=1.5910,
+            f_min_pct=59.1,
+            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.12.13",
+        ),
+        StartupCondition("linux", "3.13"): StartupCalibration(
+            floor_names=39,
+            ratio_median=12.4120,
+            numerator_median_us=132_973,
+            denominator_median_us=10_536,
+            headroom=2.1350,
+            f_min_pct=113.5,
+            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.13.14",
+        ),
+        StartupCondition("linux", "3.14"): StartupCalibration(
+            floor_names=40,
+            ratio_median=13.4405,
+            numerator_median_us=141_192,
+            denominator_median_us=10_403,
+            headroom=1.9717,
+            f_min_pct=97.2,
+            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.14.4",
+        ),
+    }
+)
+
+#: The declaration itself, held OUTSIDE the registry literal below so that the
+#: registry contains no numeric constant of any kind -- which is the line
+#: between a declaration of ignorance and a per-platform table, and is asserted
+#: rather than reviewed. `B-354` is a ledger pointer, not a figure about the
+#: condition: it is the row recording that this loop has one box.
+_NO_HOST_FOR_THIS_PLATFORM: Final = StartupDeclaration(
+    reason=(
+        "this loop has no macOS host and never has (ledger B-354), so no distribution of "
+        "this statistic has ever been taken under this condition and the ceiling above was "
+        "never derived here"
+    ),
+    promotion=(
+        "a recorded distribution taken under the shipped protocol -- median of K readings, "
+        "warm-up discarded, on a quiet host -- promotes this cell into "
+        "STARTUP_COST_CALIBRATION, and nothing else does"
+    ),
+)
+
+#: The cells this loop has DECLARED it has never measured. DERIVED from the
+#: calibrated registry rather than transcribed: for every interpreter minor this
+#: loop HAS measured on the platform it has, it declares that it has NOT
+#: measured that minor on the platform it has never had. Two properties fall out
+#: of the derivation rather than out of care -- the mapping contains no numeric
+#: literal at all (AC6), and a fifth interpreter joining the campaign extends
+#: this registry with no second edit. A macos-14 leg on a minor NOBODY has
+#: measured on either platform is therefore UNDECLARED and RED, which is the
+#: correct answer and not an oversight.
+STARTUP_COST_UNCALIBRATED: Final[Mapping[StartupCondition, StartupDeclaration]] = MappingProxyType(
+    {
+        StartupCondition("darwin", condition.interpreter): _NO_HOST_FOR_THIS_PLATFORM
+        for condition in STARTUP_COST_CALIBRATION
+    }
+)
+
+#: The three verdicts, named once so the classifier, the arm and every control
+#: cannot drift apart on a string.
+STARTUP_CALIBRATED: Final[str] = "CALIBRATED"
+STARTUP_RECORD: Final[str] = "RECORD"
+STARTUP_UNDECLARED: Final[str] = "UNDECLARED"
+
+
+def classify_startup_condition(
+    condition: StartupCondition,
+    *,
+    calibrated: Mapping[StartupCondition, StartupCalibration] = STARTUP_COST_CALIBRATION,
+    declared: Mapping[StartupCondition, StartupDeclaration] = STARTUP_COST_UNCALIBRATED,
+) -> str:
+    """Which of the three verdicts *condition* earns. PURE, and that is the
+    design decision every control below rests on.
+
+    A verdict is a decision about a condition VECTOR, so constructing the vector
+    is sufficient to drive any branch and no second platform is needed to grade
+    this instrument on the one host this loop has.
+
+    Both registries are PARAMETERS defaulting to the real ones -- the shape
+    `tests/test_secret_leak_sweeps.py`'s `_sweep_1_candidates(root)` and
+    `tests/test_coverage_policy.py`'s `pragma_sites(root)` already ship. It is
+    what lets the emptied-registry control prove that RECORD is reached THROUGH
+    a declaration and never as a default, without monkeypatching a module
+    global.
+    """
+    if condition in calibrated:
+        return STARTUP_CALIBRATED
+    if condition in declared:
+        return STARTUP_RECORD
+    return STARTUP_UNDECLARED
+
+
+class UncalibratedStartupCondition(UserWarning):
+    """The channel a RECORD cell publishes through.
+
+    A DEDICATED subclass rather than a bare `UserWarning`, for a measured
+    reason: pytest renders the class name in the warnings-summary line, so every
+    published cell is greppable in one token across a whole job log -- something
+    a skip reason could never be, since a skip line is keyed on a path.
+
+    The warnings summary is not part of a traceback, so it survives
+    `--tb=line`, `--tb=short` and `-q`, which is precisely the fragility the two
+    halves had when they reached a reader only through a `NamedTuple`'s repr
+    under the default `--tb=long`. It also rides the final summary line
+    (`1 passed, 1 warning`), and it produces NO `<skipped>` element, so the
+    execution receipt's `skipped == []` clause has nothing of this arm's to
+    read.
+    """
+
+
+def nearest_recorded_condition(
+    condition: StartupCondition,
+    calibrated: Mapping[StartupCondition, StartupCalibration] = STARTUP_COST_CALIBRATION,
+) -> StartupCondition | None:
+    """The calibrated cell closest to *condition*, or None if there are none.
+
+    Same interpreter minor first, because that is the coordinate whose effect
+    this campaign measured; otherwise the lowest-sorted member, so the answer is
+    deterministic rather than dict-order dependent. Whatever it returns is
+    labelled CROSS-CONDITION at every call site: it is a diagnostic aid and
+    never a bound.
+    """
+    if not calibrated:
+        return None
+    same_minor = [key for key in calibrated if key.interpreter == condition.interpreter]
+    return sorted(same_minor or list(calibrated))[0]
+
+
+#: The remediation half of the arm's failure message, unchanged in substance
+#: from what shipped and moved here only so that ONE builder renders the whole
+#: message and the two call sites cannot drift.
+STARTUP_COST_REMEDIATION: Final[str] = (
+    "This is TOTAL attributable import self time measured in units of the in-run "
+    "interpreter floor, so a busy box moves both halves together and does NOT produce "
+    "this red -- what does is everything getting proportionally more expensive to "
+    "import: a dependency bump, a wheel rebuild, a transitive re-resolve. The import "
+    "NAMES and the COUNT can all be unchanged and both shipped ratios flat while this "
+    f"fires; that is the case this arm exists for. Find it with `python -X importtime "
+    f"{VENV_CONSOLE_SCRIPT} --help` and compare against the distribution beside "
+    "STARTUP_COST_RATIO_CEILING_PER_MILLE. Either make an import lazy, or widen the "
+    "ceiling **with a fresh measured distribution recorded beside it** -- widening a pin "
+    "without a measurement is how the wall-clock budget this section replaced came to be "
+    "defended by nothing."
+)
+
+
+def startup_cost_observation(
+    verdict: str,
+    condition: StartupCondition,
+    readings: StartupCostReadings,
+    *,
+    floor_names: int,
+    attributable: int,
+    calibrated: Mapping[StartupCondition, StartupCalibration] = STARTUP_COST_CALIBRATION,
+) -> str:
+    """ONE renderer for all three verdicts, so the assertion message, the
+    published observation and the undeclared red can never drift apart.
+
+    It prints, in this order: the verdict and the condition; the numerator
+    median and the denominator median; each as a FACTOR of this condition's
+    recorded value; the ratio median against the ceiling; the floor-name count
+    and the attributable-module count; and a one-clause verdict naming the half
+    that carries the red. Raw halves without the condition's own reference are
+    not a diagnosis -- the halves were already in one CI log, 52 lines above the
+    assertion, and the campaign still had to be run.
+
+    THE FACTOR CLAUSE IS CONDITIONED ON COMPARABILITY. A condition's recorded
+    halves are a reference only for a run whose interpreter floor is the one
+    they were taken against. Under `make cover` the floor inflates from ~39
+    names to ~185 and the denominator by ~8x, so dividing that run's halves by
+    the recorded ones would confidently blame the denominator for a red the
+    tracer caused. The gate is MECHANISM-INDEPENDENT -- it tests the shape (did
+    the floor this run measured against differ from the floor the reference was
+    taken against), not for coverage, a tracer, an environment variable or a
+    `.pth` file, so a future profiler or import hook is caught with no edit. It
+    gates MESSAGE TEXT only: it can never change a verdict, an assertion or a
+    colour, and its degradation is safe in both directions, which is why
+    equality is the right predicate and no tolerance is introduced. A tolerance
+    would be a second unmeasured constant.
+    """
+    ceiling = STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000
+    ratio_median = statistics.median(readings.ratios)
+    numerator = statistics.median(readings.numerators)
+    denominator = statistics.median(readings.denominators)
+    reference = calibrated.get(condition)
+
+    raw = (
+        f"numerator median {numerator:.0f} us over {attributable} rows, "
+        f"denominator median {denominator:.0f} us over {floor_names} rows, "
+        f"ratio median {ratio_median:.4f}, floor names {floor_names}"
+    )
+
+    if reference is None:
+        nearest = nearest_recorded_condition(condition, calibrated)
+        cross = (
+            f" nearest recorded condition {nearest}: ratio median "
+            f"{calibrated[nearest].ratio_median:.4f}, numerator median "
+            f"{calibrated[nearest].numerator_median_us} us, denominator median "
+            f"{calibrated[nearest].denominator_median_us} us, floor names "
+            f"{calibrated[nearest].floor_names} -- CROSS-CONDITION, diagnostic only, "
+            "NOT a bound."
+            if nearest is not None
+            else " no condition has been recorded at all, so there is nothing to compare against."
+        )
+        body = f"measured: {raw}.{cross}"
+    elif reference.floor_names != floor_names:
+        body = (
+            f"measured: {raw}. reference not comparable: this run's interpreter floor holds "
+            f"{floor_names} names against the {reference.floor_names} recorded for this "
+            "condition, so the recorded halves are not a reference for these and no half is "
+            "named."
+        )
+    else:
+        factor_numerator = numerator / reference.numerator_median_us
+        factor_denominator = denominator / reference.denominator_median_us
+        carries = (
+            f"the NUMERATOR carries this red (x{factor_numerator:.2f} against "
+            f"x{factor_denominator:.2f})"
+            if factor_numerator >= 1 / factor_denominator
+            else f"the DENOMINATOR carries this red (x{factor_denominator:.2f} against "
+            f"x{factor_numerator:.2f})"
+        )
+        body = (
+            f"numerator median {numerator:.0f} us = x{factor_numerator:.3f} of this "
+            f"condition's recorded {reference.numerator_median_us} us (over {attributable} "
+            f"rows); denominator median {denominator:.0f} us = x{factor_denominator:.3f} of "
+            f"its recorded {reference.denominator_median_us} us (over {floor_names} rows); "
+            f"ratio median {ratio_median:.4f} against the {ceiling:.3f} ceiling -- {carries}."
+        )
+
+    if verdict == STARTUP_CALIBRATED:
+        over = [round(value, 4) for value in readings.ratios if value > ceiling]
+        head = (
+            f"{len(over)} of {len(readings.ratios)} readings exceeded the {ceiling:.3f} "
+            f"total-startup-cost ratio ceiling in CALIBRATED condition {condition} "
+            f"(readings: {[round(value, 4) for value in readings.ratios]}; over: {over})."
+        )
+        return f"{head} {body} {STARTUP_COST_REMEDIATION}"
+    if verdict == STARTUP_RECORD:
+        declaration = STARTUP_COST_UNCALIBRATED.get(condition, _NO_HOST_FOR_THIS_PLATFORM)
+        return (
+            f"STARTUP COST NOT ASSERTED HERE: condition {condition} is DECLARED UNMEASURED, "
+            f"so the {ceiling:.3f} ceiling is not applied to it -- {declaration.reason}. "
+            f"{body} PROMOTION: {declaration.promotion}."
+        )
+    return (
+        f"UNDECLARED CONDITION {condition}: the total-startup-cost ceiling was never "
+        "calibrated here and nobody declared that it had not been, so this run is asserting "
+        "nothing and hiding nothing. Either record a distribution for this condition under "
+        "the shipped protocol and add it to STARTUP_COST_CALIBRATION, or declare it in "
+        f"STARTUP_COST_UNCALIBRATED with a reason and a promotion rule. {body}"
+    )
+
+
+def assert_startup_cost_in_its_domain(
+    condition: StartupCondition,
+    readings: StartupCostReadings,
+    *,
+    floor_names: int,
+    attributable: int,
+    calibrated: Mapping[StartupCondition, StartupCalibration] = STARTUP_COST_CALIBRATION,
+    declared: Mapping[StartupCondition, StartupDeclaration] = STARTUP_COST_UNCALIBRATED,
+) -> str:
+    """The three verdicts, executed. Returns the verdict it reached.
+
+    Held in a helper rather than inline in the arm for one reason and it is the
+    reason every criterion below is drivable on this host: a control can hand it
+    a condition vector and a reading vector and grade the REAL branch, in
+    process, with no subprocess and no second platform.
+
+    NOTHING HERE ABSTAINS, by any mechanism, and no branch returns early out of
+    a guarded block. The RECORD branch publishes and falls through; the
+    UNDECLARED branch raises. That is not a style preference: an abstention on
+    this arm reddens the execution receipt's `skipped == []` clause on every leg
+    where it is green today.
+    """
+    assert len(readings.ratios) == STARTUP_COST_READINGS, (
+        f"the startup-cost probe returned {len(readings.ratios)} reading(s), not "
+        f"{STARTUP_COST_READINGS}. A quorum over the wrong number of readings is not the "
+        "estimator this ceiling was derived against."
+    )
+    verdict = classify_startup_condition(condition, calibrated=calibrated, declared=declared)
+    observation = startup_cost_observation(
+        verdict,
+        condition,
+        readings,
+        floor_names=floor_names,
+        attributable=attributable,
+        calibrated=calibrated,
+    )
+    ceiling = STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000
+
+    if verdict == STARTUP_CALIBRATED:
+        over = [value for value in readings.ratios if value > ceiling]
+        assert len(over) * 2 <= len(readings.ratios), observation
+    elif verdict == STARTUP_RECORD:
+        # (1) THE DECLARATION. Reaching this branch at all is a positive fact
+        # about this loop's evidence, and the entry has to carry both halves of
+        # it or the branch is an early exit wearing a nice name.
+        declaration = declared[condition]
+        assert declaration.reason and declaration.promotion, (
+            f"condition {condition} is in the declared-unmeasured registry but its entry "
+            f"carries {'no reason' if not declaration.reason else 'no promotion rule'}. A "
+            "declaration without both is not a declaration; it is a hole with a key."
+        )
+        # (2) THE INVARIANTS WHOSE PRECONDITION IS PRESENT. The LEVEL is the one
+        # claim whose precondition -- a measured distribution here -- is
+        # genuinely absent. Everything else still holds, so a broken census in
+        # an uncalibrated cell REDS rather than publishing zeros.
+        assert min(readings.denominators) > STARTUP_FLOOR_SANITY_FLOOR_US, (
+            f"the in-run floor read {min(readings.denominators)} us, at or under the "
+            f"{STARTUP_FLOOR_SANITY_FLOOR_US} us sanity floor, so this census is broken "
+            f"rather than merely uncalibrated. {observation}"
+        )
+        assert floor_names > 0 and attributable > 0, (
+            f"the census is hollow -- {floor_names} floor name(s) and {attributable} "
+            f"attributable row(s) -- so there is nothing to publish. {observation}"
+        )
+        assert min(readings.numerators) > 0, (
+            f"an attributable self-time reading was {min(readings.numerators)} us, so the "
+            f"probe did not reach the real help path. {observation}"
+        )
+        # (3) THE PUBLICATION, unconditionally, on every run.
+        #
+        # NO `stacklevel`, AND THE LINTER IS OVERRULED ON A MEASUREMENT. B028's
+        # advice (`stacklevel=2`) was driven and reports `_pytest/python.py`,
+        # pytest's own call site, which localises nothing; the DEFAULT reports
+        # this file and this line, which is the arm's own module and the exact
+        # publication point. The node id pytest prints above the text names the
+        # arm, so nothing is lost and a wrong file is avoided.
+        warnings.warn(UncalibratedStartupCondition(observation))  # noqa: B028 - measured above
+    else:
+        raise AssertionError(observation)
+    return verdict
 
 
 class StartupPartition(NamedTuple):
@@ -3735,8 +4353,10 @@ def test_the_product_import_ratio_stays_under_its_ceiling(help_imports: HelpImpo
 
 def test_total_startup_import_cost_stays_under_its_ceiling(
     startup_cost: StartupCostReadings,
+    help_imports: HelpImports,
 ) -> None:
-    """PDF-68's claim-bearing arm: the proposition NO default-running arm held.
+    """PDF-68's claim-bearing arm: the proposition NO default-running arm held,
+    CONDITIONED by PDF-86 on the cells its ceiling was measured in.
 
     `PLAN §12 R-13` is a claim about `--help` startup latency. The allowlist
     holds the import NAMES, the count ceiling holds the COUNT, and the two
@@ -3758,30 +4378,25 @@ def test_total_startup_import_cost_stays_under_its_ceiling(
     it" and localises far better in the message. `min`-of-N is forbidden on the
     denominator: a small denominator's minimum is an outlier draw, and a
     min-based ratio tuned to catch a plant fires on a byte-identical tree.
+
+    WHAT PDF-86 CHANGED, AND WHAT IT DID NOT. The ceiling, the estimator, the
+    quorum predicate and the whole derivation block are untouched, and in every
+    cell that block was measured in this arm asserts exactly what it asserted
+    before. What it gained is a DOMAIN: contention cancels, but a platform that
+    prices a file-backed import differently moves the numerator and leaves half
+    the denominator where it was, so the statistic's LEVEL is a per-cell fact
+    and the constant was derived in one cell of eight. In a cell nobody has
+    measured the arm still RUNS, still ASSERTS the declaration and the
+    condition-independent invariants, and PUBLISHES its two halves through
+    `UncalibratedStartupCondition` -- which is the only path by which this loop
+    can ever earn a ceiling there. In a cell nobody has measured OR declared it
+    REDS. It abstains nowhere, on any leg, by any mechanism.
     """
-    readings = startup_cost.ratios
-    assert len(readings) == STARTUP_COST_READINGS, (
-        f"the startup-cost probe returned {len(readings)} reading(s), not "
-        f"{STARTUP_COST_READINGS}. A quorum over the wrong number of readings is not the "
-        "estimator this ceiling was derived against."
-    )
-    ceiling = STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000
-    over = [round(value, 4) for value in readings if value > ceiling]
-    assert len(over) * 2 <= len(readings), (
-        f"{len(over)} of {len(readings)} readings exceeded the {ceiling:.3f} "
-        f"total-startup-cost ratio ceiling (readings: "
-        f"{[round(value, 4) for value in readings]}; over: {over}). This is TOTAL "
-        "attributable import self time measured in units of the in-run interpreter "
-        "floor, so a busy box moves both halves together and does NOT produce this "
-        "red -- what does is everything getting proportionally more expensive to "
-        "import: a dependency bump, a wheel rebuild, a transitive re-resolve. The "
-        "import NAMES and the COUNT can all be unchanged and both shipped ratios flat "
-        "while this fires; that is the case this arm exists for. Find it with "
-        f"`python -X importtime {VENV_CONSOLE_SCRIPT} --help` and compare against the "
-        "distribution beside STARTUP_COST_RATIO_CEILING_PER_MILLE. Either make an "
-        "import lazy, or widen the ceiling **with a fresh measured distribution "
-        "recorded beside it** -- widening a pin without a measurement is how the "
-        "wall-clock budget this section replaced came to be defended by nothing."
+    assert_startup_cost_in_its_domain(
+        live_startup_condition(),
+        startup_cost,
+        floor_names=len(help_imports.floor_names),
+        attributable=help_imports.total,
     )
 
 
@@ -4144,3 +4759,595 @@ def test_a_second_module_scope_pil_import_is_detected(tmp_path: Path) -> None:
         "a TYPE_CHECKING-guarded or function-local PIL import counted as module scope; the "
         "derivation would then report sites that cost nothing at runtime"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-86's controls. Every one of them is DRIVABLE ON THIS HOST and none needs a
+# second platform, because `classify_startup_condition` and
+# `startup_cost_observation` are pure over a condition VECTOR and
+# `assert_startup_cost_in_its_domain` takes its two registries as parameters.
+# None of them abstains, by any mechanism, so they join the derived Section 6
+# roster with zero author action and the execution receipt's `skipped == []`
+# clause stays empty as it grows.
+# --------------------------------------------------------------------------- #
+
+
+#: A reading vector shaped like a real quorum, built from this host's recorded
+#: `(linux, 3.12)` halves so the controls below grade against figures that were
+#: measured rather than invented.
+def synthetic_readings(
+    numerator: int, denominator: int, repetitions: int = STARTUP_COST_READINGS
+) -> StartupCostReadings:
+    """K identical paired readings. Identical on purpose: these controls grade
+    the VERDICT and the MESSAGE, not the estimator, and a spread would put noise
+    into an assertion about text."""
+    return StartupCostReadings(
+        tuple(numerator / denominator for _ in range(repetitions)),
+        tuple(numerator for _ in range(repetitions)),
+        tuple(denominator for _ in range(repetitions)),
+    )
+
+
+#: The real `(macos-14, 3.11.9)` vector out of CI job 105447855827 -- the one
+#: the whole X-804 campaign was run to obtain, and which was in the log the
+#: ruling quoted, 52 lines above the assertion, inside a `NamedTuple`'s repr.
+#: Carried here so the RECORD branch is graded against the cell it exists for.
+MACOS_CI_NUMERATORS: Final = (256_756, 407_954, 304_968, 349_550, 359_381)
+MACOS_CI_DENOMINATORS: Final = (6_295, 6_537, 6_484, 8_431, 8_379)
+MACOS_CI_READINGS: Final = StartupCostReadings(
+    # DERIVED from the two halves rather than transcribed beside them. The log
+    # carries all three, and a transcribed ratio that disagrees with its own
+    # halves by one rounding step is a third figure to keep in step for no gain.
+    ratios=tuple(
+        numerator / denominator
+        for numerator, denominator in zip(MACOS_CI_NUMERATORS, MACOS_CI_DENOMINATORS, strict=True)
+    ),
+    numerators=MACOS_CI_NUMERATORS,
+    denominators=MACOS_CI_DENOMINATORS,
+)
+
+
+@pytest.mark.parametrize(
+    ("condition", "expected"),
+    [
+        (StartupCondition("linux", "3.11"), STARTUP_CALIBRATED),
+        (StartupCondition("linux", "3.12"), STARTUP_CALIBRATED),
+        (StartupCondition("linux", "3.13"), STARTUP_CALIBRATED),
+        (StartupCondition("linux", "3.14"), STARTUP_CALIBRATED),
+        (StartupCondition("darwin", "3.11"), STARTUP_RECORD),
+        (StartupCondition("darwin", "3.14"), STARTUP_RECORD),
+        (StartupCondition("win32", "3.12"), STARTUP_UNDECLARED),
+        (StartupCondition("linux", "3.15"), STARTUP_UNDECLARED),
+        (StartupCondition("darwin", "3.15"), STARTUP_UNDECLARED),
+    ],
+    ids=lambda value: value if isinstance(value, str) else f"{value.platform}-{value.interpreter}",
+)
+def test_the_startup_condition_verdict_roster_is_exhaustive(
+    condition: StartupCondition, expected: str
+) -> None:
+    """PDF-86 AC3. The condition is ASSERTED, and there are THREE verdicts.
+
+    A registered condition CALIBRATES, a declared-unmeasured condition RECORDS,
+    and anything else is UNDECLARED -- which is a RED, not a pass. Two verdicts
+    would make silence the default for every condition nobody thought about,
+    which is precisely how a constant derived in one cell came to be asserted in
+    eight. The last two rows are the ones that close the class: a new
+    interpreter minor arrives as a red naming its own condition on BOTH
+    platforms, never as an inherited assertion.
+    """
+    assert classify_startup_condition(condition) == expected
+
+
+def test_the_live_condition_is_one_the_matrix_can_actually_produce() -> None:
+    """The roster above is worth nothing if the live vector has a shape no
+    registry key can match -- a trailing patch level, a `linux2`, a full
+    version string. This pins the SHAPE of what the classifier is handed."""
+    condition = live_startup_condition()
+    assert condition.platform == sys.platform
+    assert condition.interpreter == f"{sys.version_info[0]}.{sys.version_info[1]}"
+    assert condition.interpreter.count(".") == 1, (
+        f"the live interpreter coordinate is {condition.interpreter!r}, which carries more "
+        "than major.minor -- a patch-keyed lookup would put every CI leg in UNDECLARED"
+    )
+    assert classify_startup_condition(condition) in (
+        STARTUP_CALIBRATED,
+        STARTUP_RECORD,
+        STARTUP_UNDECLARED,
+    )
+
+
+def test_the_record_verdict_is_reached_through_a_declaration_and_never_as_a_default() -> None:
+    """PDF-86 AC3's failing control, and the one that proves RECORD is earned.
+
+    Emptying the declared-unmeasured registry turns the macOS vector from RECORD
+    into RED. If it stayed RECORD, the verdict would be what a condition falls
+    into when nobody has thought about it -- which is the defect, not the
+    remedy. Driven through the registry PARAMETER, so nothing is monkeypatched
+    and the real function is the one under test.
+    """
+    macos = StartupCondition("darwin", "3.11")
+    assert classify_startup_condition(macos) == STARTUP_RECORD
+    assert classify_startup_condition(macos, declared={}) == STARTUP_UNDECLARED
+
+    # ...and the same one level up: with the declaration gone, the arm's own
+    # helper REDS on the identical vector instead of publishing it.
+    with pytest.raises(AssertionError, match="UNDECLARED CONDITION"):
+        assert_startup_cost_in_its_domain(
+            macos,
+            MACOS_CI_READINGS,
+            floor_names=36,
+            attributable=273,
+            declared={},
+        )
+
+
+def test_nothing_the_product_can_do_moves_a_cell_out_of_the_asserting_branch() -> None:
+    """PDF-86 AC4, the structural half: the criterion that separates a
+    CONDITIONED constant from a green-manufacture.
+
+    Both registry coordinates are properties of the RUNNER. A commit, a
+    `uv.lock` diff, an import change or a dependency bump moves neither, so the
+    class this arm exists for -- a diffuse proportional slowdown arriving from
+    a wheel rebuild or a transitive re-resolve -- arrives in a CALIBRATED cell
+    and REDS there. Graded by driving the escaping class through the real helper
+    at the measured sensitivity boundary rather than by asserting the property.
+    """
+    condition = StartupCondition("linux", "3.12")
+    recorded = STARTUP_COST_CALIBRATION[condition]
+    assert classify_startup_condition(condition) == STARTUP_CALIBRATED
+
+    # The class, at the factor this cell's own f_min says it must catch: every
+    # attributable module gets proportionally more expensive and the floor does
+    # not move. Names, counts and both shipped ratios are untouched by
+    # construction -- only the numerator scales.
+    escaped = 1 + (recorded.f_min_pct / 100) + 0.10
+    inflated = synthetic_readings(
+        int(recorded.numerator_median_us * escaped), recorded.denominator_median_us
+    )
+    with pytest.raises(AssertionError, match="readings exceeded the 26.500"):
+        assert_startup_cost_in_its_domain(
+            condition, inflated, floor_names=recorded.floor_names, attributable=273
+        )
+
+    # ...and BELOW the boundary it stays green, which is what makes the red
+    # above a detection rather than a ceiling that fires on anything.
+    contained = synthetic_readings(
+        int(recorded.numerator_median_us * (1 + (recorded.f_min_pct / 100) - 0.10)),
+        recorded.denominator_median_us,
+    )
+    assert (
+        assert_startup_cost_in_its_domain(
+            condition, contained, floor_names=recorded.floor_names, attributable=273
+        )
+        == STARTUP_CALIBRATED
+    )
+
+
+def calibration_defects(registry: Mapping[StartupCondition, StartupCalibration]) -> list[str]:
+    """Every (member, field) pair in *registry* whose recorded value is vacuous.
+
+    DERIVED over `StartupCalibration._fields` rather than over a hand-written
+    list, so an eighth field added to the record is required of every member
+    with no second edit -- the same contract `section_six_test_names` gives the
+    execution receipt one file over. *registry* is a parameter defaulting to the
+    real one so the red control can hand it a damaged copy, which is the shape
+    `pragma_sites(root)` already ships.
+    """
+    defects: list[str] = []
+    for condition, calibration in registry.items():
+        for field in StartupCalibration._fields:
+            value = getattr(calibration, field)
+            vacuous = not value.strip() if isinstance(value, str) else value <= 0
+            if vacuous:
+                defects.append(f"{condition} carries no {field}")
+    return defects
+
+
+def test_every_calibrated_condition_carries_a_recorded_distribution() -> None:
+    """PDF-86 AC5. The calibrated registry cannot gain a member without one.
+
+    A cell is admitted to the ASSERTING branch by evidence and by nothing else,
+    so every member has to carry the floor-name count, the quiet ratio median,
+    both halves' medians, the headroom, the smallest growth it can see and where
+    the reading came from. A member without them would be a per-platform ceiling
+    with the measurement filed off, which is the act this whole design exists to
+    refuse.
+    """
+    assert STARTUP_COST_CALIBRATION, "the calibrated registry is empty; nothing asserts a level"
+    assert calibration_defects(STARTUP_COST_CALIBRATION) == []
+    assert len(STARTUP_COST_CALIBRATION) == STARTUP_COST_CALIBRATED_CONDITIONS, (
+        f"the registry holds {len(STARTUP_COST_CALIBRATION)} member(s) against the "
+        f"{STARTUP_COST_CALIBRATED_CONDITIONS} its derivation block was ratified for. A "
+        "member cannot join without that block being re-ratified in the same edit, which "
+        "is the whole mechanism keeping the registry a list of MEASUREMENTS."
+    )
+
+
+@pytest.mark.parametrize("field", StartupCalibration._fields)
+def test_a_calibrated_member_missing_a_field_reddens_naming_both(field: str) -> None:
+    """AC5's RED, one case per required field, against a scratch copy.
+
+    A guard over a record is worth exactly the proof that it notices a missing
+    entry, and "it would notice" is the kind of claim this file exists to stop
+    accepting. Parametrized over the DERIVED field tuple, so a new field arrives
+    with its own red control already written.
+    """
+    condition, calibration = next(iter(STARTUP_COST_CALIBRATION.items()))
+    blank = "" if isinstance(getattr(calibration, field), str) else 0
+    damaged = {condition: calibration._replace(**{field: blank})}
+
+    defects = calibration_defects(damaged)
+    assert defects == [f"{condition} carries no {field}"], (
+        f"stripping {field!r} from {condition} left a record the guard still accepts: "
+        f"{defects}. The guard is not reading what it claims to read."
+    )
+
+
+def registry_numeric_literals(text: str, name: str) -> list[str]:
+    """Every numeric constant inside the module-level assignment to *name*.
+
+    `ast` rather than a grep, because a grep over a diff is a one-time act and
+    this property has to hold for every future editor of the registry. Booleans
+    are excluded deliberately: `True` is an `int` to `isinstance` and is not a
+    figure about anything.
+    """
+    for node in ast.parse(text).body:
+        targets = (
+            [node.target]
+            if isinstance(node, ast.AnnAssign)
+            else node.targets
+            if isinstance(node, ast.Assign)
+            else []
+        )
+        if any(isinstance(item, ast.Name) and item.id == name for item in targets):
+            assigned = node.value
+            assert assigned is not None, f"{name} is declared without a value"
+            return [
+                f"line {child.lineno}: {child.value!r}"
+                for child in ast.walk(assigned)
+                if isinstance(child, ast.Constant)
+                and isinstance(child.value, int | float)
+                and not isinstance(child.value, bool)
+            ]
+    raise AssertionError(f"{name} is not assigned at module scope in the text supplied")
+
+
+def test_the_declared_unmeasured_registry_carries_no_figure_about_what_it_declares() -> None:
+    """PDF-86 AC6, and this is the line between two opposite acts.
+
+    An entry that contained a macOS figure would be a per-platform ceiling
+    derived on a host this loop does not have -- exactly the thing that is
+    forbidden, wearing a declaration's clothes. An entry that contains only the
+    ABSENCE of one is the opposite act: it declares ignorance and names what
+    would end it. The mapping is DERIVED from the calibrated registry's own
+    interpreter minors, so the no-figure property falls out of the construction
+    rather than out of care, and this arm keeps it true for the next editor.
+    """
+    literals = registry_numeric_literals(Path(__file__).read_text(), "STARTUP_COST_UNCALIBRATED")
+    assert literals == [], (
+        f"the declared-unmeasured registry carries {len(literals)} numeric literal(s): "
+        f"{literals}. A declaration of ignorance that carries a number about the condition "
+        "it declares has stopped being a declaration and become the per-platform table this "
+        "design refuses."
+    )
+    for condition, declaration in STARTUP_COST_UNCALIBRATED.items():
+        assert declaration.reason and declaration.promotion, (
+            f"{condition} is declared unmeasured without both a reason and a promotion rule"
+        )
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        'STARTUP_COST_UNCALIBRATED = {K: StartupDeclaration("r", "p", ratio_median=42.8907)}\n',
+        'STARTUP_COST_UNCALIBRATED = {K: StartupDeclaration("r", "p", floor_names=36)}\n',
+    ],
+    ids=["a-float-figure", "an-integer-figure"],
+)
+def test_a_figure_planted_in_the_declared_unmeasured_registry_reddens(planted: str) -> None:
+    """AC6's RED. Both numeric shapes, because a float and an int reach
+    `ast.Constant` by different literal syntax and a walk that caught only one
+    would be half a guard."""
+    found = registry_numeric_literals(planted, "STARTUP_COST_UNCALIBRATED")
+    assert found, f"a planted figure survived the walk: {planted!r}"
+
+
+@pytest.mark.parametrize(
+    ("numerator_factor", "denominator_factor", "carrier", "passenger"),
+    [
+        (1.68, 0.99, "the NUMERATOR carries this red (x1.68 against x0.99)", "DENOMINATOR"),
+        (0.99, 0.55, "the DENOMINATOR carries this red (x0.55 against x0.99)", "NUMERATOR"),
+    ],
+    ids=["numerator-side", "denominator-collapse"],
+)
+def test_the_observation_names_the_half_that_moved(
+    numerator_factor: float, denominator_factor: float, carrier: str, passenger: str
+) -> None:
+    """PDF-86 AC1, both directions, through the arm's own helper.
+
+    The whole cost of the campaign this item closes was that a reader met a
+    ratio and no halves. The halves alone are not enough either: they were
+    already in one CI log, inside a `NamedTuple`'s repr, 52 lines above the
+    assertion, and the ruling still cost four interpreters -- because raw halves
+    WITHOUT THE CONDITION'S OWN REFERENCE are not a diagnosis. So the message
+    prints FACTORS, and names the half that carries the red, and it does that
+    without being told which one moved: the same builder reaches the opposite
+    verdict on the opposite plant.
+    """
+    condition = StartupCondition("linux", "3.12")
+    recorded = STARTUP_COST_CALIBRATION[condition]
+    readings = synthetic_readings(
+        int(recorded.numerator_median_us * numerator_factor),
+        int(recorded.denominator_median_us * denominator_factor),
+    )
+
+    with pytest.raises(AssertionError) as red:
+        assert_startup_cost_in_its_domain(
+            condition, readings, floor_names=recorded.floor_names, attributable=273
+        )
+
+    message = str(red.value)
+    assert carrier in message, f"the message does not name the half that moved:\n{message}"
+    assert f"{passenger} carries" not in message, (
+        f"the message names BOTH halves as the carrier:\n{message}"
+    )
+    assert f"of this condition's recorded {recorded.numerator_median_us} us" in message
+    assert f"of its recorded {recorded.denominator_median_us} us" in message
+    assert "readings exceeded the 26.500" in message
+
+
+def test_the_observation_refuses_a_reference_this_run_does_not_share() -> None:
+    """PDF-86 D5's comparability gate, against the vector that forced it.
+
+    A condition's recorded halves are a reference only for a run whose
+    interpreter floor is the one they were taken against. Under coverage
+    instrumentation the floor inflates from ~39 names to ~185 and the
+    denominator by roughly 8x, so dividing that run's halves by the recorded
+    ones would print a numerator factor near x0.9 and a denominator factor near
+    x8 and confidently blame the denominator for a red the tracer caused. The
+    gate is on the SHAPE -- did the floor this run measured against differ from
+    the floor the reference was taken against -- so a future profiler or import
+    hook is caught with no edit, and it degrades the MESSAGE and never the
+    verdict.
+    """
+    condition = StartupCondition("linux", "3.13")
+    recorded = STARTUP_COST_CALIBRATION[condition]
+    instrumented = synthetic_readings(122_014, 89_067)
+
+    message = startup_cost_observation(
+        STARTUP_CALIBRATED,
+        condition,
+        instrumented,
+        floor_names=185,
+        attributable=273,
+    )
+    assert "reference not comparable" in message
+    assert f"185 names against the {recorded.floor_names} recorded" in message
+    assert "carries this red" not in message, (
+        f"the message named a half against a reference this run does not share:\n{message}"
+    )
+    assert "numerator median 122014 us" in message and "denominator median 89067 us" in message
+
+    # ...and the SAME builder, on the same condition with a floor the reference
+    # WAS taken against, does name a half. Degradation, not deletion.
+    comparable = startup_cost_observation(
+        STARTUP_CALIBRATED,
+        condition,
+        synthetic_readings(recorded.numerator_median_us * 3, recorded.denominator_median_us),
+        floor_names=recorded.floor_names,
+        attributable=273,
+    )
+    assert "carries this red" in comparable and "reference not comparable" not in comparable
+
+
+def test_the_record_verdict_publishes_through_the_warning_channel() -> None:
+    """PDF-86 AC16 (i). The RECORD cell's whole payoff, driven in process.
+
+    Graded against the REAL `(macos-14, 3.11.9)` vector from CI, so the four
+    lines this design exists to harvest are proven to render before any of them
+    is read off a job log. A dedicated subclass, not a bare `UserWarning`: the
+    class name renders in the summary line, which makes every published cell
+    greppable in one token across a whole job log -- something a skip reason,
+    keyed on a path, never was.
+    """
+    condition = StartupCondition("darwin", "3.11")
+    with pytest.warns(UncalibratedStartupCondition, match="floor names 36") as published:
+        verdict = assert_startup_cost_in_its_domain(
+            condition, MACOS_CI_READINGS, floor_names=36, attributable=273
+        )
+
+    assert verdict == STARTUP_RECORD
+    assert len(published) == 1, f"the branch published {len(published)} time(s), not once"
+    text = str(published[0].message)
+    assert "STARTUP COST NOT ASSERTED HERE" in text
+    assert "(darwin, 3.11)" in text
+    assert "numerator median 349550 us" in text and "denominator median 6537 us" in text
+    assert "ratio median 42.8907" in text
+    assert "CROSS-CONDITION, diagnostic only, NOT a bound" in text
+    assert "PROMOTION:" in text
+    assert published[0].filename.endswith("test_import_boundaries.py"), (
+        f"the warning was attributed to {published[0].filename}, not to this module -- a "
+        "`stacklevel` was passed and it mislocated the publication"
+    )
+
+
+@pytest.mark.parametrize(
+    ("readings", "expected"),
+    [
+        (
+            StartupCostReadings(ratios=(40.0,), numerators=(256_756,), denominators=(6_419,)),
+            "reading(s), not 5",
+        ),
+        (
+            synthetic_readings(256_756, STARTUP_FLOOR_SANITY_FLOOR_US),
+            "at or under the 1700 us sanity floor",
+        ),
+        (synthetic_readings(0, 6_419), "did not reach the real help path"),
+    ],
+    ids=["short-quorum", "collapsed-floor", "empty-numerator"],
+)
+def test_the_record_verdict_reds_on_a_hollow_census_rather_than_publishing_zeros(
+    readings: StartupCostReadings, expected: str
+) -> None:
+    """PDF-86 AC16 (ii), and it is what stops RECORD from being an early return
+    with a nice name.
+
+    The LEVEL is the ONE claim whose precondition -- a measured distribution in
+    this condition -- is genuinely absent. Every other clause still has its
+    precondition present, so it still binds: a broken census in an uncalibrated
+    cell REDS, it does not publish zeros and call that a measurement.
+    """
+    with pytest.raises(AssertionError, match=re.escape(expected)):
+        assert_startup_cost_in_its_domain(
+            StartupCondition("darwin", "3.11"), readings, floor_names=36, attributable=273
+        )
+
+
+def test_an_undeclared_condition_reds_naming_the_condition_and_both_halves() -> None:
+    """PDF-86 AC3's third verdict, which is the one that closes the CLASS.
+
+    A new platform, a new interpreter minor or a new runner image arrives as a
+    red NAMING ITS OWN CONDITION, never as an inherited assertion and never as a
+    quiet pass. The message has to carry enough for the reader to act: the
+    condition, both halves, and the two sanctioned responses.
+    """
+    with pytest.raises(AssertionError) as red:
+        assert_startup_cost_in_its_domain(
+            StartupCondition("win32", "3.12"),
+            synthetic_readings(143_421, 8_554),
+            floor_names=37,
+            attributable=273,
+        )
+
+    message = str(red.value)
+    assert "UNDECLARED CONDITION (win32, 3.12)" in message
+    assert "numerator median 143421 us" in message and "denominator median 8554 us" in message
+    assert "STARTUP_COST_CALIBRATION" in message and "STARTUP_COST_UNCALIBRATED" in message
+    assert "CROSS-CONDITION, diagnostic only, NOT a bound" in message
+
+
+#: The project's own pytest configuration, READ and never written. Adding a
+#: `filterwarnings` entry to protect the channel would be a fourth file and a
+#: weaker guarantee than an arm that notices its absence.
+PYPROJECT: Final = REPO_ROOT / "pyproject.toml"
+
+#: Spellings of "turn the warnings plugin off" that pytest accepts on the
+#: command line, and therefore in `addopts`. Stated as a set of SHAPES rather
+#: than one literal for the same reason `LOAD_SENSING_LITERAL_PATTERN` one file
+#: over gives: a pattern tuned to exactly the known spelling is the same defect
+#: in different clothes.
+WARNING_SILENCING_OPTIONS: Final = ("-p no:warnings", "-pno:warnings", "-W ignore")
+
+#: Categories a blanket filter names that would capture this channel's own
+#: class. Matched on the dotted TAIL, so `builtins.UserWarning`, `UserWarning`
+#: and a bare `Warning` all count.
+CHANNEL_CATEGORIES: Final = frozenset(
+    {"", "Warning", "UserWarning", UncalibratedStartupCondition.__name__}
+)
+
+
+def publication_channel_defects(config: Mapping[str, object]) -> list[str]:
+    """Every setting in *config* that would stop a RECORD cell from publishing.
+
+    Two failure modes, opposite in direction and both fatal. A
+    `filterwarnings = ["error"]` turns every published cell into a RED on four
+    legs; a `-p no:warnings` turns it into SILENCE. **The silent one is the
+    dangerous one**, because a channel that has stopped publishing looks exactly
+    like a channel with nothing to publish -- which is the failure this whole
+    item exists to stop being invisible.
+
+    Deliberately NOT a blanket refusal of `filterwarnings`: an entry scoped to a
+    category this channel's class is not a member of changes nothing here, and a
+    guard that reddened on it would be widened or deleted by the first person
+    who needed one. The red controls drive both directions and the scoped case.
+    """
+    tool = config.get("tool")
+    section = tool.get("pytest", {}).get("ini_options", {}) if isinstance(tool, dict) else {}
+    if not isinstance(section, dict):
+        return ["[tool.pytest.ini_options] is not a table; the channel cannot be graded"]
+
+    defects: list[str] = []
+    addopts = str(section.get("addopts", ""))
+    for option in WARNING_SILENCING_OPTIONS:
+        if option in addopts:
+            defects.append(
+                f"addopts carries {option!r}, which turns the summary this channel publishes "
+                "through OFF. A RECORD cell would then be indistinguishable from a cell with "
+                "nothing to publish, which kills the observation without a symptom."
+            )
+    entries = section.get("filterwarnings", [])
+    for entry in entries if isinstance(entries, list) else []:
+        parts = str(entry).split(":")
+        action = parts[0].strip()
+        category = (parts[2] if len(parts) > 2 else "").strip().rpartition(".")[2]
+        if action in ("error", "ignore") and category in CHANNEL_CATEGORIES:
+            defects.append(
+                f"filterwarnings carries {entry!r}, whose {action!r} action reaches "
+                f"{UncalibratedStartupCondition.__name__}. An 'error' action turns every "
+                "published cell into a red on the legs that publish; an 'ignore' action "
+                "turns it into silence. Scope the entry to a category this channel is not "
+                "a member of, or record why the observation is no longer wanted."
+            )
+    return defects
+
+
+def test_the_publication_channel_is_not_disabled_by_the_project_configuration() -> None:
+    """PDF-86 AC16 (iii). The channel is ASSERTED live, never assumed.
+
+    The publication is worth exactly what the configuration lets it render, and
+    it renders today because nothing turns it off: this project carries no
+    `filterwarnings` entry at all and its `addopts` does not disable the
+    warnings plugin. That is a fact about one file, which means it is a fact
+    that can change in a commit nobody connects to this arm -- so it is read
+    rather than trusted. Source text over one file, no subprocess.
+    """
+    config = tomllib.loads(PYPROJECT.read_text())
+    assert publication_channel_defects(config) == []
+
+    section = config["tool"]["pytest"]["ini_options"]
+    assert "filterwarnings" not in section, (
+        "pyproject.toml has grown a `filterwarnings` entry. That is not forbidden, but it "
+        "has to be graded against this channel rather than arriving unnoticed."
+    )
+
+
+@pytest.mark.parametrize(
+    ("section", "expected", "reds"),
+    [
+        ({"filterwarnings": ["error"]}, "turns every published cell into a red", True),
+        (
+            {"filterwarnings": ["ignore::UserWarning"]},
+            "turns it into silence",
+            True,
+        ),
+        (
+            {"addopts": "--strict-markers -ra -n auto -p no:warnings"},
+            "turns the summary this channel publishes through OFF",
+            True,
+        ),
+        ({"filterwarnings": ["ignore::DeprecationWarning"]}, "", False),
+        ({"addopts": "--strict-markers -ra -n auto"}, "", False),
+    ],
+    ids=["escalated", "ignored-by-category", "plugin-disabled", "scoped-elsewhere", "live-shape"],
+)
+def test_the_channel_guard_reddens_on_a_silencing_configuration(
+    section: Mapping[str, object], expected: str, reds: bool
+) -> None:
+    """AC16 (iii)'s RED, in BOTH directions, plus the two cases that must NOT
+    red.
+
+    The failing control that matters is the SILENT one: a channel that has
+    stopped publishing is indistinguishable from a cell with nothing to publish,
+    so an arm that only caught the noisy `error` direction would leave the
+    dangerous half uncovered. The two green rows are what stop the guard from
+    being a blanket refusal that the first person with a legitimate
+    `filterwarnings` entry would delete.
+    """
+    defects = publication_channel_defects({"tool": {"pytest": {"ini_options": dict(section)}}})
+    if reds:
+        assert defects, f"a silencing configuration went unnoticed: {section}"
+        assert any(expected in defect for defect in defects), (
+            f"the guard reddened but not for the right reason: {defects}"
+        )
+    else:
+        assert defects == [], f"an innocuous configuration reddened: {section} -> {defects}"
