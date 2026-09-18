@@ -216,6 +216,7 @@ def _resolve_single_target(source: Path, *, output: Path | None, in_place: bool,
 
 def _plan(
     *,
+    input_path: Path,
     target: Path,
     policy: SafetyPolicy,
     pre_refusal: PdfToolingError | None,
@@ -229,7 +230,8 @@ def _plan(
 
     1. ``pre_refusal`` — the invocation-shape refusal the CLI layer computed
        (`encrypt --in-place`'s plaintext-``.bak`` gate). Exit 5.
-    2. The filesystem tier — no-clobber, unwritable destination. Exit 5 or 1.
+    2. The filesystem tier — no-clobber, unwritable destination, and
+       (PDF-89) *target* is not *input_path* itself. Exit 5 or 1.
     3. ``document_refusal`` — already-encrypted (5) or not-encrypted (4),
        read from the document itself.
     4. Password **resolvability**. Exit 6.
@@ -239,7 +241,9 @@ def _plan(
     """
     if pre_refusal is not None:
         return _Prediction(refusal=pre_refusal)
-    filesystem = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    filesystem = plan_filesystem(
+        [target], out_dir=None, policy=policy, kind="pdf", sources=[input_path]
+    )
     if filesystem.refusal is not None:
         return _Prediction(refusal=filesystem.refusal)
     if document_refusal is not None:
@@ -330,6 +334,7 @@ def encrypt_run(
 
     passwords = [owner] if user is None else [owner, user]
     plan = _plan(
+        input_path=source,
         target=target,
         policy=policy,
         pre_refusal=pre_refusal,
@@ -457,6 +462,7 @@ def decrypt_run(
     document_refusal = None if facts.encrypted else NoInputError(_NOT_ENCRYPTED, path=str(source))
 
     plan = _plan(
+        input_path=source,
         target=target,
         policy=policy,
         pre_refusal=None,

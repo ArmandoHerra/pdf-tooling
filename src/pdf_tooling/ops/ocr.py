@@ -287,7 +287,9 @@ def ocr_run(
     # spawns tesseract to find that out (the same ordering rationale
     # `ensure_destination_writable`'s own docstring states: "before an
     # engine runs").
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf", confirm=confirm)
+    plan = plan_filesystem(
+        targets, out_dir=out_dir, policy=policy, kind="pdf", sources=sources, confirm=confirm
+    )
 
     structure_engine = require_structure()
     resolver = PasswordResolver(password)

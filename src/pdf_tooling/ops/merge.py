@@ -219,7 +219,8 @@ def merge_documents(
             )
 
             refusal = None
-            with AtomicWriter(output, policy=policy, kind="pdf") as atomic:
+            merge_sources = tuple(merge_input.path for merge_input in inputs)
+            with AtomicWriter(output, policy=policy, kind="pdf", sources=merge_sources) as atomic:
                 if atomic.is_dry_run:
                     refusal = atomic.planned_refusal
                 else:

@@ -41,6 +41,7 @@ from typing import Final
 
 from pdf_tooling.errors import (
     BackupExistsError,
+    DestinationIsInputError,
     DestinationUnwritableError,
     FailureError,
     NoInputError,
@@ -61,6 +62,7 @@ __all__ = [
     "classify_operand",
     "declared_device",
     "ensure_backup_sidecar_free",
+    "ensure_destination_is_not_an_input",
     "ensure_destination_writable",
     "ensure_no_clobber",
     "ensure_within",
@@ -188,6 +190,77 @@ def ensure_no_clobber(target: Path | str, *, force: bool, in_place: bool = False
             f"{target} exists; pass --force to overwrite it",
             path=str(target),
         )
+
+
+def ensure_destination_is_not_an_input(
+    target: Path | str,
+    *,
+    sources: Sequence[Path | str],
+    in_place: bool,
+    as_written: Path | str | None = None,
+) -> None:
+    """Refuse (exit 5) when *target* is one of THIS RUN'S OWN *sources* (PDF-89).
+
+    ``safety/paths.py:1-12``'s own module docstring names *"is the destination
+    the same file as the input"* as one of the three identity guarantees this
+    module exists to provide, and :func:`same_destination` answers it
+    correctly — from zero call sites, until this one. A destination that IS an
+    input passes every OTHER gate the product owns: ``ensure_no_clobber``
+    correctly admits it once ``--force`` is given, because it only asks
+    *does the target exist*, and the bulk-destructive confirmation gate
+    correctly admits it once ``-y``/an operator's *yes* is given, because it
+    only asks *did you agree to overwrite existing files*. Neither asks
+    *is the target also one of the run's own inputs*, so a confirmation gate
+    cannot answer this question and this class exists precisely because
+    neither can be widened to ask it.
+
+    ``in_place`` suppresses the check BY THE FIELD, never by the flag
+    (`PDF-89` D5): ``cli/common.py``'s central
+    ``_check_in_place_output_conflict`` already refuses (exit 2) any verb
+    invoked with ``--in-place`` together with a destination flag, so
+    ``policy.in_place is True`` at this seam implies no destination flag ever
+    reached it, which implies every target IS the input it was derived from —
+    the by-design case ``--in-place`` exists for, not an accident this
+    function should catch.
+
+    Every *source* is compared through :func:`same_destination` — inode
+    identity, never a string comparison — so a hard link or a symlink to an
+    input is caught exactly as the literal spelling is, and two genuinely
+    distinct paths with identical bytes are not. This is the ONLY
+    ``same_destination(`` call site in ``src/`` (constraint 1): every sibling
+    raiser in this module compares targets against each other or against
+    themselves; this is the one that compares a target against the run's own
+    operands, and it is why it takes a *sources* parameter no sibling does.
+
+    The message names BOTH the destination and the input it collides with —
+    the user is about to be told to pass ``--force``, at which point they are
+    refused again, so the second message has to end the confusion rather than
+    extend it (`PDF-89` D4).
+
+    Args:
+        target: The destination under consideration, spelled as the user
+            spelled it (unless *as_written* overrides the echo).
+        sources: Every one of this run's own input operands. Never a target
+            set — that population is :func:`check_output_collisions`'s.
+        in_place: The resolved posture's own field. ``True`` suppresses the
+            check entirely; see this function's own note above for why the
+            field, and never the flag, is what scopes it off.
+        as_written: The spelling to echo when it differs from *target*.
+
+    Raises:
+        DestinationIsInputError: Exit 5 — *target* resolves to one of
+            *sources*.
+    """
+    if in_place:
+        return
+    shown = str(as_written if as_written is not None else target)
+    for source in sources:
+        if same_destination(target, source):
+            raise DestinationIsInputError(
+                f"{shown} names one of this run's own inputs ({source}); "
+                f"refusing to use an input as a destination",
+                path=shown,
+            )
 
 
 def ensure_destination_writable(

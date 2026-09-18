@@ -5351,3 +5351,123 @@ def test_the_channel_guard_reddens_on_a_silencing_configuration(
         )
     else:
         assert defects == [], f"an innocuous configuration reddened: {section} -> {defects}"
+
+
+# --------------------------------------------------------------------------- #
+# Section 6 -- PDF-89 constraint 1 / AC12 / AC13(b): exactly one identity-
+# comparison call site, and exactly three named `AtomicWriter` constructions
+# pass `sources=`.
+#
+# APPENDED, never rewritten, per this file's own header rule; reuses
+# `iter_python_files`, `module_name` and `dotted` rather than starting a
+# sixth walk.
+#
+# AC12. `safety/paths.py::ensure_destination_is_not_an_input` is the ONE
+# wired raiser wrapping `same_destination` -- every sibling raiser in that
+# module (`ensure_within`, `ensure_no_clobber`, `check_output_collisions`,
+# `ensure_backup_sidecar_free`) compares targets against each other or
+# against themselves; this is the one that compares a target against the
+# run's own INPUTS, and constraint 1 is a rule on the COMPARISON, never on
+# the number of callers -- the shape that satisfies it is exactly one
+# `same_destination(` call site in `src/`, inside the one raiser that wraps
+# it.
+#
+# AC13(b). `sources` is REQUIRED and keyword-only on the two module-level
+# planners (`plan_output_set`, `plan_filesystem`, PDF-89 D7) -- the
+# interpreter is that half's own control (a `TypeError` at call time, not a
+# silent gap), so no AST arm is written for it. On `AtomicWriter` it is
+# OPTIONAL with a default of `()`, because 15 of its 18 constructions
+# already have their answer from the planner tier and must not be touched
+# (D2); this allowlist pins the exact three that may pass it, by NAME, so a
+# fourth site or a dropped one both red naming the site.
+# --------------------------------------------------------------------------- #
+
+_SAME_DESTINATION: Final = "same_destination"
+_ATOMIC_WRITER: Final = "AtomicWriter"
+
+#: The two modules `AC13(b)` allows to pass `sources=` -- `merge.py` once,
+#: `compose.py` twice (`merge`/`compose`/`create`, the three no-planner
+#: verbs, D2).
+_SOURCES_ALLOWED_MODULES: Final = ("pdf_tooling.ops.merge", "pdf_tooling.ops.compose")
+
+
+def _same_destination_call_sites(root: Path) -> list[str]:
+    """Every ``same_destination(`` CALL site under *root* -- never its own
+    ``def``, and never a prose mention (those live in ``ast.Constant``
+    string nodes this walk never visits)."""
+    sites: list[str] = []
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        tree = ast.parse(path.read_text(), filename=module)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and dotted(node.func).split(".")[-1] == _SAME_DESTINATION:
+                sites.append(f"{module}:{node.lineno}")
+    return sites
+
+
+def test_ac12_exactly_one_same_destination_call_site_exists() -> None:
+    sites = _same_destination_call_sites(SRC)
+    assert len(sites) == 1 and sites[0].startswith("pdf_tooling.safety.paths:"), (
+        f"expected exactly one call site inside safety.paths, got {sites}"
+    )
+
+
+def test_ac12_a_second_call_site_fails_the_walk(tmp_path: Path) -> None:
+    """Copy src/, plant a second `same_destination(` call, confirm red."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / "pdf_tooling" / "ops" / "_pdf89_planted.py"
+    planted.write_text(
+        "from pdf_tooling.safety.paths import same_destination\n\n\n"
+        "def probe(a, b):\n    return same_destination(a, b)\n"
+    )
+    sites = _same_destination_call_sites(scratch)
+    assert len(sites) == 2, f"the walk did not notice the planted second call site: {sites}"
+
+
+def _atomic_writer_construction_sites(root: Path) -> dict[str, bool]:
+    """Every real ``AtomicWriter(`` CONSTRUCTION call under *root*, mapped to
+    whether it passes ``sources=``. Never a docstring or prose mention --
+    ``atomic.py``'s own module docstring and ``procpool.py``'s prose both
+    say the words ``AtomicWriter(...)`` and neither is a ``Call`` node."""
+    sites: dict[str, bool] = {}
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        tree = ast.parse(path.read_text(), filename=module)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and dotted(node.func).split(".")[-1] == _ATOMIC_WRITER:
+                carries_sources = any(kw.arg == "sources" for kw in node.keywords)
+                sites[f"{module}:{node.lineno}"] = carries_sources
+    return sites
+
+
+def test_ac13b_exactly_three_atomicwriter_constructions_pass_sources() -> None:
+    sites = _atomic_writer_construction_sites(SRC)
+    assert len(sites) == 18, (
+        f"expected 18 AtomicWriter construction sites (D2), found {len(sites)}: {sorted(sites)}"
+    )
+    carrying_modules = sorted(site.split(":")[0] for site, has in sites.items() if has)
+    assert carrying_modules == [
+        "pdf_tooling.ops.compose",
+        "pdf_tooling.ops.compose",
+        "pdf_tooling.ops.merge",
+    ], f"exactly compose (x2) + merge (x1) may pass sources=; got {carrying_modules}"
+    assert set(carrying_modules) <= set(_SOURCES_ALLOWED_MODULES)
+
+
+def test_ac13b_a_fourth_sources_bearing_construction_fails_the_walk(tmp_path: Path) -> None:
+    """Copy src/, plant a fourth `AtomicWriter(..., sources=...)` construction
+    outside the allowlisted pair, confirm red."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / "pdf_tooling" / "ops" / "_pdf89_planted_writer.py"
+    planted.write_text(
+        "from pdf_tooling.safety.atomic import AtomicWriter\n\n\n"
+        "def probe(target, policy):\n"
+        "    return AtomicWriter(target, policy=policy, sources=(target,))\n"
+    )
+    sites = _atomic_writer_construction_sites(scratch)
+    carrying = sorted(site for site, has in sites.items() if has)
+    assert len(carrying) == 4, (
+        f"the walk did not notice the planted fourth sources=-bearing construction: {carrying}"
+    )

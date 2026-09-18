@@ -231,7 +231,7 @@ def meta_set_run(
     if target is None:
         raise UsageError(f"{VERB_META_SET} requires -O/--output or --in-place")
 
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
 
     if policy.dry_run:
         refusal = plan.refusal

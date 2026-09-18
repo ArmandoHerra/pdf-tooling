@@ -174,6 +174,7 @@ from pdf_tooling.safety.paths import (
     canonical,
     declared_device,
     ensure_backup_sidecar_free,
+    ensure_destination_is_not_an_input,
     ensure_destination_writable,
     ensure_no_clobber,
     nearest_existing_ancestor,
@@ -447,6 +448,7 @@ def plan_output_set(
     *,
     out_dir: Path | None,
     policy: SafetyPolicy,
+    sources: Sequence[Path],
     confirm: BulkContext | None = None,
 ) -> PlannedOutputs:
     """The filesystem tier for a multi-target ``--out-dir`` run (B-054).
@@ -461,12 +463,25 @@ def plan_output_set(
     1. :func:`_ensure_out_dir` — now able to refuse in both modes (PDF-18).
     2. :func:`~pdf_tooling.safety.paths.ensure_destination_writable`.
     3. per *target*, in order:
-       :func:`~pdf_tooling.safety.paths.ensure_no_clobber`.
+       :func:`~pdf_tooling.safety.paths.ensure_no_clobber`, then
+       :func:`~pdf_tooling.safety.paths.ensure_destination_is_not_an_input`
+       (PDF-89) — **after**, and inside the same per-target step, never
+       before: placed one line earlier it would rewrite the no-clobber
+       message on the path `PDF-89` D4 calls out by name.
 
     ``out_dir`` is ``Path | None`` so a future caller with no shared directory
     (a single-target run) can still route its per-target no-clobber check
     through the same planner; every ``--out-dir`` verb today always supplies
     one, since the CLI declares it required for this shape.
+
+    ``sources`` (PDF-89, D7) is REQUIRED and keyword-only, unlike
+    ``AtomicWriter``'s own optional carrier of the same name: all 14 external
+    callers already hold their own inputs one line above this call, so a
+    site that forgot it is a ``TypeError`` at call time — the interpreter is
+    the control, and no allowlist arm is written for this half. Every
+    *source* is compared against every *target*, never against ``out_dir``
+    itself: the run's inputs are what a destination must not collide with,
+    not the directory a destination merely lives inside.
 
     **Trap 1, and this is the one thing to read before touching this
     function.** A ``--out-dir`` that does not exist yet must not be predicted
@@ -561,6 +576,7 @@ def plan_output_set(
             if confirm is not None and not policy.in_place and target_exists(target):
                 clobbered.append(str(target))
             ensure_no_clobber(target, force=policy.force, in_place=policy.in_place)
+            ensure_destination_is_not_an_input(target, sources=sources, in_place=policy.in_place)
     except PdfToolingError as refusal:
         if not policy.dry_run:
             raise
@@ -581,6 +597,7 @@ def plan_filesystem(
     out_dir: Path | None,
     policy: SafetyPolicy,
     kind: str,
+    sources: Sequence[Path],
     confirm: BulkContext | None = None,
 ) -> PlannedOutputs:
     """The ONE filesystem-tier planner (PDF-18 Design D1), reached by every
@@ -648,8 +665,16 @@ def plan_filesystem(
     where `PDF-84`'s clobber gate fires; this wrapper adds no tier of its own for
     it. See that function's docstring for why the gate lives at the planner and
     why the ``in_place`` limb is not collected there.
+
+    ``sources`` (PDF-89) is relayed to :func:`plan_output_set` UNCHANGED — this
+    is the internal forward :func:`plan_output_set`'s own docstring carves out
+    by name from the 14 external, required-keyword call sites, because this
+    one is a required POSITIONAL relay rather than a fifteenth site that could
+    itself forget the keyword.
     """
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy, confirm=confirm)
+    plan = plan_output_set(
+        targets, out_dir=out_dir, policy=policy, sources=sources, confirm=confirm
+    )
     if plan.refusal is not None:
         return plan
     if out_dir is None:
@@ -690,6 +715,15 @@ class AtomicWriter:
             there rather than at the spelling.**
         policy: The resolved safety posture for this invocation.
         kind: A short label for the artefact, used in diagnostics.
+        sources: **PDF-89, D7.** This run's own input operands, so
+            :func:`~pdf_tooling.safety.paths.ensure_destination_is_not_an_input`
+            can refuse a *target* that is also one of them. Keyword-only with
+            a default of ``()`` — unlike the two module-level planners'
+            REQUIRED keyword of the same name — because 15 of this class's 18
+            constructions already have their answer from the planner tier
+            (D2) and must not be touched; the three that call no planner at
+            all (`merge.py:222`, `compose.py:837`, `compose.py:968`) are the
+            only callers that pass it, and `AC13` pins that allowlist by name.
         warn: Where warnings go. Injectable so a test can capture them without
             parsing stderr; defaults to stderr.
         _temp_dir: **Test-only.** Forces the temp onto a chosen directory so the
@@ -703,12 +737,14 @@ class AtomicWriter:
         *,
         policy: SafetyPolicy,
         kind: str = "pdf",
+        sources: Sequence[Path | str] = (),
         warn: Callable[[str], None] | None = None,
         _temp_dir: Path | str | None = None,
     ) -> None:
         self.target = Path(target)
         self.policy = policy
         self.kind = kind
+        self.sources: tuple[Path | str, ...] = tuple(sources)
         self.warnings: list[str] = []
         self.backup_path: Path | None = None
         #: X-67. Under ``--dry-run``, the refusal the real run *would* have
@@ -882,6 +918,11 @@ class AtomicWriter:
             ensure_no_clobber(
                 self.target,
                 force=self.policy.force,
+                in_place=self.policy.in_place,
+            )
+            ensure_destination_is_not_an_input(
+                self.target,
+                sources=self.sources,
                 in_place=self.policy.in_place,
             )
             ensure_destination_writable(

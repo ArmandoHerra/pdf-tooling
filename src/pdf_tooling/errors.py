@@ -29,6 +29,7 @@ __all__ = [
     "BackupWithoutInPlaceError",
     "ConfirmationDeclinedError",
     "ConfirmationRequiredError",
+    "DestinationIsInputError",
     "DestinationUnwritableError",
     "EngineMissingError",
     "FailureError",
@@ -331,3 +332,22 @@ class ConfirmationRequiredError(RefusedError):
 
 class ConfirmationDeclinedError(RefusedError):
     """Exit 5 — the interactive confirmation prompt was answered no."""
+
+
+class DestinationIsInputError(RefusedError):
+    """Exit 5 — the resolved destination is one of this run's own inputs.
+
+    PDF-89 (`a44a845dbe`). Additive by construction, like every class in this
+    block: the eighth subclass of :class:`RefusedError`, so it introduces no
+    new integer and inherits ``kind: "refused"`` unchanged. Raised by
+    :func:`~pdf_tooling.safety.paths.ensure_destination_is_not_an_input`, the
+    single ``same_destination`` call site this refusal exists to wrap.
+
+    A confirmation gate cannot answer this question: ``--force``/``-y``
+    satisfy ``ensure_no_clobber`` and the bulk-destructive gate correctly,
+    because both ask *does the target exist* and *did the operator agree to
+    overwrite it* — neither asks *is the target also one of the run's own
+    inputs*. This class exists because those two gates cannot be widened to
+    ask a question they were never designed to answer, and lifts on no flag
+    that reaches either of them.
+    """

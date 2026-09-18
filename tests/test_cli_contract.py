@@ -51,6 +51,7 @@ import ast
 import json
 import os
 import re
+import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -1979,6 +1980,80 @@ def test_c15_dry_run_predicts_an_occupied_target_refusal(verb, corpus, tmp_path:
         f"{verb.name}: dry={dry.returncode} real={real.returncode} (expected both 5) -- "
         f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
     )
+
+
+def test_ac15_the_tilde_readback_agreement_c15_could_not_cover(corpus, tmp_path: Path) -> None:
+    """PDF-89 AC15 -- PDF-80's own constraint 7 (first half), WITHDRAWN as
+    written (X-888) and re-scoped here rather than dropped: the constraint
+    named *"no-clobber readback agreement (dry 5 / real 5, `~` expanding in
+    both modes)"*, and no pytest node in this suite drives that exact
+    combination -- `test_value_shape.py`'s tilde cell is built by
+    `_prepare_nothing` (`tests/registry.py`'s `TILDE_SPELLING` wiring), so it
+    can never present an OCCUPIED destination, and `test_c15_...` above never
+    spells a tilde. The behaviour the withdrawn constraint described is
+    nonetheless real and driveable directly from the CLI (E9), and this arm
+    supplies it, driven RED first (a tree that does not expand `~` in
+    `canonical()` -- `PDF-80`'s own defect -- fails this exact arm)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    out_dir = home / "out"
+    out_dir.mkdir()
+    target = out_dir / "in.pdf"
+    seed = b"AC15-SEEDED-BYTES"
+    target.write_bytes(seed)
+
+    source = tmp_path / "in.pdf"
+    shutil.copy(corpus.path("single_page"), source)
+
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+
+    dry = run_cli(
+        "extract",
+        str(source),
+        "--out-dir",
+        "~/out",
+        "--pages",
+        "1",
+        "--dry-run",
+        "-o",
+        "json",
+        env=env,
+        cwd=tmp_path,
+    )
+    assert target.read_bytes() == seed, "the dry run must not touch the occupied target"
+    assert not (tmp_path / "~").exists(), "no literal '~' directory may be created"
+
+    real = run_cli(
+        "extract",
+        str(source),
+        "--out-dir",
+        "~/out",
+        "--pages",
+        "1",
+        "-o",
+        "json",
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert dry.returncode == real.returncode == 5, (
+        f"dry={dry.returncode} real={real.returncode} (expected both 5) -- "
+        f"dry: {dry.stdout}{dry.stderr} / real: {real.stdout}{real.stderr}"
+    )
+    assert not (tmp_path / "~").exists(), "no literal '~' directory may be created"
+    assert target.read_bytes() == seed, "$HOME/out/in.pdf must be untouched"
+
+    expected_message = "~/out/in.pdf exists; pass --force to overwrite it"
+    dry_payload = json.loads(dry.stdout)
+    real_payload = json.loads(real.stdout)
+    dry_detail = dry_payload["items"][0]["detail"]
+    assert dry_detail["would_exit"] == 5
+    assert dry_detail["would_refuse"]["path"] == "~/out/in.pdf"
+    assert dry_payload["items"][0]["message"] == expected_message, dry_payload
+    real_error_path = real_payload["error"]["path"]
+    assert real_error_path == "~/out/in.pdf"
+    assert real_payload["error"]["message"] == expected_message, real_payload
 
 
 @pytest.mark.parametrize("verb", PRODUCING, ids=_ids(PRODUCING))

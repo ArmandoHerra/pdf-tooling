@@ -399,6 +399,7 @@ D8_TABLE = (
     (errors.OutputEscapesDirError, REFUSED, "refused"),
     (errors.ConfirmationRequiredError, REFUSED, "refused"),
     (errors.ConfirmationDeclinedError, REFUSED, "refused"),
+    (errors.DestinationIsInputError, REFUSED, "refused"),
     (errors.BackupWithoutInPlaceError, USAGE, "usage"),
     (errors.DestinationUnwritableError, FAILURE, "failure"),
     (errors.SourceUnreadableError, FAILURE, "failure"),
@@ -717,7 +718,7 @@ def test_plan_output_set_a_clean_plan_predicts_nothing(tmp_path: Path) -> None:
     """The non-vacuity control: would_exit must not be a constant refusal."""
     out_dir = tmp_path / "out"
     targets = [out_dir / "a.pdf", out_dir / "b.pdf"]
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=())
     assert plan.refusal is None
     assert plan.would_exit == OK
     assert plan.would_refuse is None
@@ -731,7 +732,7 @@ def test_plan_output_set_predicts_an_occupied_target(tmp_path: Path) -> None:
     occupied.write_bytes(b"already here")
     targets = [out_dir / "a.pdf", occupied]
 
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=())
     assert isinstance(plan.refusal, errors.TargetExistsError)
     assert plan.would_exit == REFUSED
     assert plan.would_refuse == plan.refusal.to_dict()
@@ -739,7 +740,7 @@ def test_plan_output_set_predicts_an_occupied_target(tmp_path: Path) -> None:
     # The OUTCOME: a real run over the identical plan raises the SAME class,
     # same message, and leaves the occupied file untouched.
     with pytest.raises(errors.TargetExistsError, match="pass --force to overwrite it"):
-        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False), sources=())
     assert occupied.read_bytes() == b"already here"
 
 
@@ -752,13 +753,15 @@ def test_plan_output_set_predicts_an_unwritable_out_dir(tmp_path: Path) -> None:
         if os.access(out_dir, os.W_OK):
             pytest.skip("this user can write to a mode-0500 directory (root?)")
         targets = [out_dir / "a.pdf"]
-        plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+        plan = plan_output_set(
+            targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=()
+        )
         assert isinstance(plan.refusal, errors.DestinationUnwritableError)
         assert plan.would_exit == FAILURE
         assert plan.would_refuse == plan.refusal.to_dict()
 
         with pytest.raises(errors.DestinationUnwritableError):
-            plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+            plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False), sources=())
     finally:
         out_dir.chmod(0o700)
 
@@ -776,7 +779,7 @@ def test_plan_output_set_a_nonexistent_out_dir_is_not_predicted_as_a_refusal(
     """
     out_dir = tmp_path / "not-created-yet"
     targets = [out_dir / "a.pdf"]
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=())
     assert plan.refusal is None
     assert plan.would_exit == OK
     assert not out_dir.exists()
@@ -789,7 +792,7 @@ def test_plan_output_set_a_real_run_creates_the_out_dir_and_predicts_nothing(
     create-then-succeed path is exactly what the dry run's silence predicted."""
     out_dir = tmp_path / "created-for-real"
     targets = [out_dir / "a.pdf"]
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy())
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(), sources=())
     assert plan.refusal is None
     assert out_dir.is_dir()
 
@@ -811,7 +814,9 @@ def test_plan_output_set_stops_at_the_first_refusal(tmp_path: Path) -> None:
     try:
         if os.access(out_dir, os.W_OK):
             pytest.skip("this user can write to a mode-0500 directory (root?)")
-        plan = plan_output_set([occupied], out_dir=out_dir, policy=make_policy(dry_run=True))
+        plan = plan_output_set(
+            [occupied], out_dir=out_dir, policy=make_policy(dry_run=True), sources=()
+        )
         assert isinstance(plan.refusal, errors.DestinationUnwritableError)
     finally:
         out_dir.chmod(0o700)
@@ -821,7 +826,7 @@ def test_plan_output_set_a_real_run_over_a_clean_plan_raises_nothing(tmp_path: P
     """Real-run behaviour is UNCHANGED by B-054: a clean plan just returns."""
     out_dir = tmp_path / "out"
     targets = [out_dir / "a.pdf", out_dir / "b.pdf"]
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy())
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(), sources=())
     assert plan.refusal is None
     assert plan.would_exit == OK
     assert plan.would_refuse is None
@@ -880,13 +885,15 @@ def test_plan_output_set_predicts_a_nonexistent_out_dir_under_an_unwritable_pare
     try:
         if os.access(parent, os.W_OK):
             pytest.skip("this user can write to a mode-0500 directory (root?)")
-        plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+        plan = plan_output_set(
+            targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=()
+        )
         assert isinstance(plan.refusal, errors.DestinationUnwritableError)
         assert plan.would_exit == FAILURE
         assert not out_dir.exists(), "the dry run must not create the directory it refuses"
 
         with pytest.raises(errors.DestinationUnwritableError):
-            plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+            plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False), sources=())
         assert not out_dir.exists(), "a refused real run must not leave a partial directory"
     finally:
         parent.chmod(0o700)
@@ -901,11 +908,11 @@ def test_plan_output_set_real_run_wraps_enotdir_instead_of_crashing(tmp_path: Pa
     out_dir = blocker / "sub"
     targets = [out_dir / "a.pdf"]
 
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=())
     assert isinstance(plan.refusal, errors.DestinationUnwritableError)
 
     with pytest.raises(errors.DestinationUnwritableError):
-        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False), sources=())
     assert blocker.read_bytes() == b"x", "the blocking file must survive untouched"
 
 
@@ -922,12 +929,12 @@ def test_plan_output_set_real_run_wraps_eexist_as_file_instead_of_crashing(
     blocker.write_bytes(b"i am a regular file")
     targets = [blocker / "a.pdf"]
 
-    plan = plan_output_set(targets, out_dir=blocker, policy=make_policy(dry_run=True))
+    plan = plan_output_set(targets, out_dir=blocker, policy=make_policy(dry_run=True), sources=())
     assert isinstance(plan.refusal, errors.DestinationUnwritableError)
     assert plan.would_exit == FAILURE
 
     with pytest.raises(errors.DestinationUnwritableError):
-        plan_output_set(targets, out_dir=blocker, policy=make_policy(dry_run=False))
+        plan_output_set(targets, out_dir=blocker, policy=make_policy(dry_run=False), sources=())
     assert blocker.read_bytes() == b"i am a regular file"
 
 
@@ -942,7 +949,7 @@ def test_plan_output_set_predicts_a_path_component_that_is_too_long(tmp_path: Pa
     out_dir = tmp_path / too_long
     targets = [out_dir / "a.pdf"]
 
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=())
     assert isinstance(plan.refusal, errors.DestinationUnwritableError)
     # `out_dir.exists()` itself raises OSError for a too-long component (the
     # same trap `nearest_existing_ancestor` and `_predict_out_dir_creation`
@@ -951,7 +958,7 @@ def test_plan_output_set_predicts_a_path_component_that_is_too_long(tmp_path: Pa
     assert list(tmp_path.iterdir()) == []
 
     with pytest.raises(errors.DestinationUnwritableError):
-        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False))
+        plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=False), sources=())
 
 
 def test_plan_output_set_skips_the_too_long_check_when_pathconf_is_unavailable(
@@ -972,7 +979,7 @@ def test_plan_output_set_skips_the_too_long_check_when_pathconf_is_unavailable(
     monkeypatch.setattr(os_module, "pathconf", _unavailable)
     out_dir = tmp_path / "new-dir"
     targets = [out_dir / "a.pdf"]
-    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True))
+    plan = plan_output_set(targets, out_dir=out_dir, policy=make_policy(dry_run=True), sources=())
     assert plan.refusal is None
     assert not out_dir.exists()
 
@@ -1037,6 +1044,12 @@ def test_ac2_every_ops_call_site_passes_the_identical_keyword_set() -> None:
     delete ``confirm=confirm`` from a batch verb's call (its function still
     declares the parameter -> red), or add ``confirm=None`` to a
     single-destination one (its function declares none -> red).
+
+    PDF-89 D7: ``sources`` is REQUIRED and keyword-only on the planner, so it
+    joins the UNCONDITIONAL half of ``expected`` below rather than the
+    ``confirm``-shaped conditional half -- every one of these 12+ call sites
+    must carry it, with no enclosing-parameter test to gate it on, because
+    the interpreter itself is the control for a site that forgets it.
     """
     calls = _plan_filesystem_call_sites()
     assert len(calls) >= 12, f"found only {len(calls)} plan_filesystem call site(s) under ops/"
@@ -1053,7 +1066,7 @@ def test_ac2_every_ops_call_site_passes_the_identical_keyword_set() -> None:
             f"(a Sequence[Path]), got {len(call.args)}"
         )
         keywords = {kw.arg for kw in call.keywords}
-        expected = {"out_dir", "policy", "kind"}
+        expected = {"out_dir", "policy", "kind", "sources"}
         if _CONFIRM_KWARG in parameters:
             expected |= {_CONFIRM_KWARG}
             carrying += 1
@@ -1093,7 +1106,7 @@ def test_plan_filesystem_precedence_ancestor_unwritable_beats_occupied_out_dir_t
         if os.access(parent, os.W_OK):
             pytest.skip("this user can write to a mode-0500 directory (root?)")
         plan = plan_filesystem(
-            [occupied], out_dir=parent, policy=make_policy(dry_run=True), kind="pdf"
+            [occupied], out_dir=parent, policy=make_policy(dry_run=True), kind="pdf", sources=()
         )
         assert isinstance(plan.refusal, errors.DestinationUnwritableError)
     finally:
@@ -1117,7 +1130,9 @@ def test_plan_filesystem_out_dir_exists_defers_to_ensure_destination_writable(
     blocker = tmp_path / "blocker.file"
     blocker.write_bytes(b"x")
     targets = [blocker / "a.pdf"]
-    plan = plan_filesystem(targets, out_dir=blocker, policy=make_policy(dry_run=True), kind="pdf")
+    plan = plan_filesystem(
+        targets, out_dir=blocker, policy=make_policy(dry_run=True), kind="pdf", sources=()
+    )
     assert isinstance(plan.refusal, errors.DestinationUnwritableError)
     assert plan.message == f"destination directory does not exist: {blocker}"
 
@@ -1136,7 +1151,9 @@ def test_plan_filesystem_real_run_still_wraps_the_mkdir_attempt_on_an_existing_f
     blocker.write_bytes(b"x")
     targets = [blocker / "a.pdf"]
     with pytest.raises(errors.DestinationUnwritableError) as caught:
-        plan_filesystem(targets, out_dir=blocker, policy=make_policy(dry_run=False), kind="pdf")
+        plan_filesystem(
+            targets, out_dir=blocker, policy=make_policy(dry_run=False), kind="pdf", sources=()
+        )
     assert caught.value.exit_code == FAILURE
     assert caught.value.kind == "failure"
 
@@ -1156,11 +1173,15 @@ def test_plan_filesystem_ancestor_walk_catches_a_non_directory_component_at_0o75
     out_dir = blocker / "sub"
     targets = [out_dir / "a.pdf"]
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=make_policy(dry_run=True), kind="pdf")
+    plan = plan_filesystem(
+        targets, out_dir=out_dir, policy=make_policy(dry_run=True), kind="pdf", sources=()
+    )
     assert isinstance(plan.refusal, errors.DestinationUnwritableError)
 
     with pytest.raises(errors.DestinationUnwritableError):
-        plan_filesystem(targets, out_dir=out_dir, policy=make_policy(dry_run=False), kind="pdf")
+        plan_filesystem(
+            targets, out_dir=out_dir, policy=make_policy(dry_run=False), kind="pdf", sources=()
+        )
 
 
 def test_plan_filesystem_precedence_no_clobber_beats_the_writer_tier(tmp_path: Path) -> None:
@@ -1177,7 +1198,9 @@ def test_plan_filesystem_precedence_no_clobber_beats_the_writer_tier(tmp_path: P
     try:
         if os.access(parent, os.W_OK):
             pytest.skip("this user can write to a mode-0500 directory (root?)")
-        plan = plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf")
+        plan = plan_filesystem(
+            [target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf", sources=()
+        )
         assert isinstance(plan.refusal, errors.TargetExistsError)
     finally:
         parent.chmod(0o700)
@@ -1196,11 +1219,15 @@ def test_plan_filesystem_widens_the_writer_tier_into_both_modes(tmp_path: Path) 
     try:
         if os.access(parent, os.W_OK):
             pytest.skip("this user can write to a mode-0500 directory (root?)")
-        dry = plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf")
+        dry = plan_filesystem(
+            [target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf", sources=()
+        )
         assert isinstance(dry.refusal, errors.DestinationUnwritableError)
 
         with pytest.raises(errors.DestinationUnwritableError):
-            plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=False), kind="pdf")
+            plan_filesystem(
+                [target], out_dir=None, policy=make_policy(dry_run=False), kind="pdf", sources=()
+            )
     finally:
         parent.chmod(0o700)
 
@@ -1326,7 +1353,7 @@ def test_plan_filesystem_predicts_an_occupied_sidecar(tmp_path: Path) -> None:
     target = _seed_in_place(tmp_path, sidecar=True)
     policy = make_policy(dry_run=True, in_place=True)
 
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=())
 
     assert isinstance(plan.refusal, errors.BackupExistsError)
     assert plan.would_exit == REFUSED
@@ -1335,7 +1362,9 @@ def test_plan_filesystem_predicts_an_occupied_sidecar(tmp_path: Path) -> None:
     assert plan.refusal.to_dict()["path"] == str(tmp_path / "doc.pdf.bak")
 
     with pytest.raises(errors.BackupExistsError):
-        plan_filesystem([target], out_dir=None, policy=make_policy(in_place=True), kind="pdf")
+        plan_filesystem(
+            [target], out_dir=None, policy=make_policy(in_place=True), kind="pdf", sources=()
+        )
 
 
 def test_plan_filesystem_sidecar_tier_predicts_the_writers_exact_refusal(tmp_path: Path) -> None:
@@ -1346,7 +1375,11 @@ def test_plan_filesystem_sidecar_tier_predicts_the_writers_exact_refusal(tmp_pat
     target = _seed_in_place(tmp_path, sidecar=True)
 
     predicted = plan_filesystem(
-        [target], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+        [target],
+        out_dir=None,
+        policy=make_policy(dry_run=True, in_place=True),
+        kind="pdf",
+        sources=(),
     ).refusal
     assert predicted is not None
 
@@ -1372,7 +1405,7 @@ def test_plan_filesystem_sidecar_tier_stays_silent_where_it_must(
     for every verb at once while passing every positive arm above."""
     target = _seed_in_place(tmp_path, sidecar=True)
     policy = make_policy(**{"dry_run": True, "in_place": True, **overrides})
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=())
     assert plan.refusal is None, f"{why}, but the tier refused: {plan.refusal}"
 
 
@@ -1388,7 +1421,9 @@ def test_plan_filesystem_sidecar_tier_is_an_in_place_tier_and_nothing_else(
     to have a `.bak` file beside it.
     """
     target = _seed_in_place(tmp_path, sidecar=True)
-    plan = plan_filesystem([target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf")
+    plan = plan_filesystem(
+        [target], out_dir=None, policy=make_policy(dry_run=True), kind="pdf", sources=()
+    )
     assert isinstance(plan.refusal, errors.TargetExistsError), (
         f"expected the no-clobber tier to answer, got {plan.refusal!r}"
     )
@@ -1399,7 +1434,11 @@ def test_plan_filesystem_sidecar_tier_is_silent_when_no_sidecar_exists(tmp_path:
     """The ordinary path, which is most of every in-place run this tool makes."""
     target = _seed_in_place(tmp_path, sidecar=False)
     plan = plan_filesystem(
-        [target], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+        [target],
+        out_dir=None,
+        policy=make_policy(dry_run=True, in_place=True),
+        kind="pdf",
+        sources=(),
     )
     assert plan.refusal is None
 
@@ -1414,7 +1453,11 @@ def test_plan_filesystem_sidecar_tier_visits_every_target(tmp_path: Path) -> Non
     (tmp_path / "second.pdf.bak").write_bytes(b"an older backup")
 
     plan = plan_filesystem(
-        [first, second], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+        [first, second],
+        out_dir=None,
+        policy=make_policy(dry_run=True, in_place=True),
+        kind="pdf",
+        sources=(),
     )
     assert isinstance(plan.refusal, errors.BackupExistsError)
     assert plan.refusal.to_dict()["path"] == str(tmp_path / "second.pdf.bak")
@@ -1445,7 +1488,11 @@ def test_ac16_an_unwritable_parent_still_answers_before_the_sidecar(tmp_path: Pa
         if os.access(parent, os.W_OK):
             pytest.skip("this user can write to a mode-0500 directory (root?)")
         plan = plan_filesystem(
-            [target], out_dir=None, policy=make_policy(dry_run=True, in_place=True), kind="pdf"
+            [target],
+            out_dir=None,
+            policy=make_policy(dry_run=True, in_place=True),
+            kind="pdf",
+            sources=(),
         )
         assert isinstance(plan.refusal, errors.DestinationUnwritableError), (
             f"the sidecar tier answered first: {plan.refusal!r} -- it is placed one tier "
@@ -1456,7 +1503,9 @@ def test_ac16_an_unwritable_parent_still_answers_before_the_sidecar(tmp_path: Pa
         assert "not writable" in plan.refusal.message
 
         with pytest.raises(errors.DestinationUnwritableError):
-            plan_filesystem([target], out_dir=None, policy=make_policy(in_place=True), kind="pdf")
+            plan_filesystem(
+                [target], out_dir=None, policy=make_policy(in_place=True), kind="pdf", sources=()
+            )
     finally:
         parent.chmod(0o700)
 
@@ -1605,7 +1654,9 @@ def test_pdf74_out_dir_predicts_and_creates_the_path_the_spelling_denotes(
         "operation in order to measure it is not a prediction"
     )
 
-    plan = plan_output_set([Path(value) / "part.pdf"], out_dir=Path(value), policy=make_policy())
+    plan = plan_output_set(
+        [Path(value) / "part.pdf"], out_dir=Path(value), policy=make_policy(), sources=()
+    )
     assert plan.refusal is None, f"[{spelling.id}] the real run refused: {plan.refusal!r}"
     assert denoted.is_dir(), (
         f"[{spelling.id}] the real run reported success over {value!r} but nothing exists at "
@@ -1685,12 +1736,12 @@ def test_pdf74_output_absolutizes_the_key_and_echoes_the_spelling(
         assert str(anchor) not in str(writer.target), str(writer.target)
 
     dry_plan = plan_filesystem(
-        [Path(value)], out_dir=None, policy=make_policy(dry_run=True), kind="pdf"
+        [Path(value)], out_dir=None, policy=make_policy(dry_run=True), kind="pdf", sources=()
     )
     assert not os.path.lexists(denoted), f"[{spelling.id}] the dry plan created {denoted}"
     real_refused = False
     try:
-        plan_filesystem([Path(value)], out_dir=None, policy=make_policy(), kind="pdf")
+        plan_filesystem([Path(value)], out_dir=None, policy=make_policy(), kind="pdf", sources=())
     except errors.PdfToolingError:
         real_refused = True
     assert dry_plan.refused == real_refused, (

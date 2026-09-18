@@ -562,7 +562,9 @@ def extract_text_run(
     # identically in both modes -- the same rule `split` follows.
     check_output_collisions(targets)
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="text", confirm=confirm)
+    plan = plan_filesystem(
+        targets, out_dir=out_dir, policy=policy, kind="text", sources=sources, confirm=confirm
+    )
 
     if not planned:
         # PDF-18: `out_dir` is always `None` here (`_plan_text_targets`'s own
@@ -809,7 +811,9 @@ def extract_tables_run(
     # The two paths stay distinct, and a test proves they stay distinct.
     check_output_collisions(targets)
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="table", confirm=confirm)
+    plan = plan_filesystem(
+        targets, out_dir=out_dir, policy=policy, kind="table", sources=sources, confirm=confirm
+    )
 
     if not targets:
         # PDF-18/AC13: `tables` is the one verb whose own targets can be

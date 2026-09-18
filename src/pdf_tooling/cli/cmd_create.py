@@ -152,6 +152,7 @@ def create_command(
         margin_pt=margin_pt,
         title=title,
         policy=config.safety,
+        source_path=None if from_stdin else source,
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

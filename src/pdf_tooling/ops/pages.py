@@ -607,7 +607,9 @@ def _run_with_resolver(
         )
 
     # Tier 2 -- the filesystem.
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf", confirm=confirm)
+    plan = plan_filesystem(
+        targets, out_dir=out_dir, policy=policy, kind="pdf", sources=sources, confirm=confirm
+    )
 
     if policy.dry_run:
         fs_detail = plan.detail()

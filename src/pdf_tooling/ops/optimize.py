@@ -314,7 +314,9 @@ def compress_run(
     # identically in both modes, mirroring `split`'s own AC10 convention.
     check_output_collisions(targets)
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf", confirm=confirm)
+    plan = plan_filesystem(
+        targets, out_dir=out_dir, policy=policy, kind="pdf", sources=sources, confirm=confirm
+    )
 
     if policy.dry_run:
         refusal = plan.refusal
@@ -550,7 +552,7 @@ def repair_run(
     _validate_sources([source])
     target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_REPAIR)
 
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
 
     if policy.dry_run:
         refusal = plan.refusal
@@ -655,7 +657,7 @@ def linearize_run(
     _validate_sources([source])
     target = _resolve_single_target(source, output=output, in_place=in_place, verb=VERB_LINEARIZE)
 
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
 
     if policy.dry_run:
         refusal = plan.refusal

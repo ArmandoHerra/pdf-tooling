@@ -218,7 +218,7 @@ def watermark_run(
     """
     reject_missing_sources([source])
     target = _resolve_target(source, output=output, in_place=in_place, verb=VERB_WATERMARK)
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
     if policy.dry_run:
         return _dry_run_result(
             VERB_WATERMARK, source=source, target=target, plan=plan, password=password
@@ -384,7 +384,7 @@ def stamp_run(
     selected pages of *source* (Design D4.5)."""
     reject_missing_sources([source])
     target = _resolve_target(source, output=output, in_place=in_place, verb=VERB_STAMP)
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf")
+    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
     if policy.dry_run:
         return _dry_run_result(
             VERB_STAMP, source=source, target=target, plan=plan, password=password

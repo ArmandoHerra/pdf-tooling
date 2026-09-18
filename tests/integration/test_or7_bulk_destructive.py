@@ -448,3 +448,138 @@ def test_pdf84_the_clobber_gate_outranks_the_engine_tier_for_both_engine_blind_v
             f"{confirmed.stdout}{confirmed.stderr}"
         )
         assert engine_payload["error"]["kind"] == "engine_missing", engine_payload
+
+
+# --------------------------------------------------------------------------- #
+# PDF-89 -- `convert` and `ocr`, engine-independent, D10/X-891 census
+# authorization: `+1 AND NO MORE`. Both verbs are members of E2's `-O` AND
+# `--out-dir` identity-defect populations, and both are excluded from
+# `tests/integration/test_pdf89_destination_is_input.py`'s AC2/AC3 arms
+# because naming either verb in a NEW module joins the frozen engine-gating
+# census a second time. This is `PDF-84`'s own split repeated verbatim
+# one item later: ONE non-parametrized arm, in this EXISTING module, carrying
+# both verbs -- `population()` charges one `Member` per COLLECTED ITEM, so
+# this costs +1 in one module rather than +2.
+#
+# ENGINE-INDEPENDENCE IS MEASURED HERE, NOT INHERITED FROM `X-781`
+# ------------------------------------------------------------------
+# `X-781`'s ledger record measured that THAT gate (bulk-destructive
+# confirmation) is engine-independent. `PDF-89`'s refusal fires at PLAN TIME,
+# strictly earlier than `X-781`'s gate (which fires only after the filesystem
+# tier has already cleared) -- earlier firing makes engine-independence more
+# plausible, which is exactly why it is not assumed here. `PATH` is pointed
+# at a directory neither `soffice` nor `tesseract` resolves from
+# (`hidden_engine_env`, already proven to hide the named binary before it is
+# trusted), and the refusal's own `-o json` stdout is asserted BYTE-IDENTICAL
+# ("cmp clean") between the engine-present and the engine-hidden run.
+# --------------------------------------------------------------------------- #
+
+
+def _pdf89_convert_source(tmp_path: Path) -> Path:
+    source = tmp_path / "pdf89-convert-in.txt"
+    source.write_text("PDF-89 convert identity probe\n")
+    return source
+
+
+def _pdf89_ocr_source(corpus, tmp_path: Path) -> Path:
+    source = tmp_path / "pdf89-ocr-in.pdf"
+    shutil.copy(corpus.path("single_page"), source)
+    return source
+
+
+def test_pdf89_convert_and_ocr_refuse_when_the_destination_is_their_own_input(
+    corpus, tmp_path: Path
+) -> None:
+    """RED at `0283279`: both verbs exit 0, `ok: true`, destroying the input,
+    on both the `-O` and the `--out-dir` shape (E2). `convert`'s default
+    `--out-dir` naming derives a different leaf (`.pdf` from a `.txt`
+    operand) so `--name` is forced to the operand's own filename to reach
+    the collision; `ocr`'s default naming already collides (E2's table)."""
+    for verb, binary, extra_out_dir_args, make_source in (
+        (
+            "convert",
+            "soffice",
+            ["--name", "pdf89-convert-in.txt"],
+            lambda: _pdf89_convert_source(tmp_path),
+        ),
+        ("ocr", "tesseract", [], lambda: _pdf89_ocr_source(corpus, tmp_path)),
+    ):
+        source = make_source()
+        present_env = dict(os.environ)
+        hidden_env = hidden_engine_env(binary, tmp_path=tmp_path)
+
+        # The `-O` shape.
+        present_o = run_cli(
+            verb, str(source), "-f", "-O", str(source), "-o", "json", env=present_env
+        )
+        hidden_o = run_cli(verb, str(source), "-f", "-O", str(source), "-o", "json", env=hidden_env)
+        assert present_o.returncode == hidden_o.returncode == REFUSED, (
+            f"{verb} -O: present={present_o.returncode} hidden={hidden_o.returncode}, "
+            f"expected both {REFUSED}: {present_o.stdout}{present_o.stderr} / "
+            f"{hidden_o.stdout}{hidden_o.stderr}"
+        )
+        assert present_o.stdout == hidden_o.stdout, (
+            f"{verb} -O: the refusal is not engine-independent -- present and hidden "
+            f"stdout differ: {present_o.stdout!r} != {hidden_o.stdout!r}"
+        )
+        assert "names one of this run's own inputs" in present_o.stdout
+        assert "refusing to use an input as a destination" in present_o.stdout
+
+        # The `--out-dir` shape, over the SAME source (still untouched: the
+        # `-O` refusal above wrote nothing).
+        present_d = run_cli(
+            verb,
+            str(source),
+            "--out-dir",
+            str(tmp_path),
+            "--force",
+            *extra_out_dir_args,
+            "-o",
+            "json",
+            env=present_env,
+        )
+        hidden_d = run_cli(
+            verb,
+            str(source),
+            "--out-dir",
+            str(tmp_path),
+            "--force",
+            *extra_out_dir_args,
+            "-o",
+            "json",
+            env=hidden_env,
+        )
+        assert present_d.returncode == hidden_d.returncode == REFUSED, (
+            f"{verb} --out-dir: present={present_d.returncode} hidden={hidden_d.returncode}, "
+            f"expected both {REFUSED}: {present_d.stdout}{present_d.stderr} / "
+            f"{hidden_d.stdout}{hidden_d.stderr}"
+        )
+        assert present_d.stdout == hidden_d.stdout, (
+            f"{verb} --out-dir: the refusal is not engine-independent -- present and "
+            f"hidden stdout differ: {present_d.stdout!r} != {hidden_d.stdout!r}"
+        )
+        assert "names one of this run's own inputs" in present_d.stdout
+
+        # And the negative that proves the engine's absence is genuinely
+        # reachable on this exact command (X-781's own discriminator): the
+        # SAME occupied-target shape, over a target that is NOT one of the
+        # run's inputs, with `-y` added and the engine hidden, must reach the
+        # engine tier rather than this refusal.
+        distinct_target = tmp_path / f"pdf89-{verb}-distinct-out.pdf"
+        distinct_probe = run_cli(
+            verb,
+            str(source),
+            "-f",
+            "-y",
+            "-O",
+            str(distinct_target),
+            "-o",
+            "json",
+            env=hidden_env,
+        )
+        assert distinct_probe.returncode == ENGINE_MISSING, (
+            f"{verb}: a distinct target with the engine hidden must reach the engine "
+            f"tier ({ENGINE_MISSING}), proving the refusal above is the gate outranking "
+            f"the engine and not the engine being irrelevant: {distinct_probe.stdout}"
+            f"{distinct_probe.stderr}"
+        )

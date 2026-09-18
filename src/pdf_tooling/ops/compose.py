@@ -834,7 +834,7 @@ def compose_document(
 
     refusal = None
     would_exit = 0
-    with AtomicWriter(output, policy=policy, kind="pdf") as atomic:
+    with AtomicWriter(output, policy=policy, kind="pdf", sources=tuple(sources)) as atomic:
         if atomic.is_dry_run:
             refusal = atomic.planned_refusal
             would_exit = atomic.would_exit
@@ -923,6 +923,7 @@ def create_document(
     margin_pt: float,
     title: str | None,
     policy: SafetyPolicy,
+    source_path: Path | None = None,
 ) -> OperationResult:
     """Render one plain-text input into one PDF.
 
@@ -930,6 +931,14 @@ def create_document(
     the label the item row reports (a path, or ``-`` for standard input); the
     reading itself belongs to the CLI, because "is this a terminal?" is not a
     question this layer can answer honestly.
+
+    *source_path* (PDF-89) is the same operand as a real filesystem
+    :class:`Path`, or ``None`` when *source* is standard input — there is no
+    filesystem input to protect in that case, so the identity refusal must
+    never be asked to compare against the literal string ``"-"``. ``None`` is
+    also the correct default for every existing caller that passes only a
+    label (this module's own unit tests), which is why it defaults to it
+    rather than being required.
     """
     started = time.monotonic()
     if font not in BASE14_FONTS:
@@ -965,7 +974,8 @@ def create_document(
 
     refusal = None
     would_exit = 0
-    with AtomicWriter(output, policy=policy, kind="pdf") as atomic:
+    create_sources = () if source_path is None else (source_path,)
+    with AtomicWriter(output, policy=policy, kind="pdf", sources=create_sources) as atomic:
         if atomic.is_dry_run:
             refusal = atomic.planned_refusal
             would_exit = atomic.would_exit

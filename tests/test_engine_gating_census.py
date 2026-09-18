@@ -275,51 +275,96 @@ _PDF_82_GENESIS: Final[_GatingRatification] = _GatingRatification(
 
 #: PDF-82 D4 — THE RATIFICATION LEDGER, append-only. The live ceiling below is
 #: the NEWEST record's mapping and never a separately-writable literal.
+#: PDF-89's own record derives its mapping from THIS one (`{**previous, key:
+#: value}`), never from `_PDF_82_GENESIS` directly -- the genesis mapping
+#: still carries this same key's PRE-PDF-84 value, and spreading it again
+#: would silently revert PDF-84's own movement.
+_PDF_84_RATIFICATION: Final[_GatingRatification] = _GatingRatification(
+    date="2026-09-17",
+    spec="PDF-84",
+    direction="up",
+    ruling="X-781",
+    ceilings=MappingProxyType(
+        {**_PDF_82_GENESIS.ceilings, "tests/integration/test_or7_bulk_destructive.py": 13}
+    ),
+    reason=(
+        "PDF-84 wires the clobber route into the bulk-destructive gate at every "
+        "batch verb, and X-772 makes an occupied-`--out-dir` REFUSAL assertion for "
+        "`convert` AND `ocr` a required criterion -- that pair being exactly "
+        "`engine_blind_verbs() & out_dir_batch_verbs()`, and exactly the pair "
+        "`tests/test_batch_continuation.py`'s INERT_GATE_VERBS excludes, so an "
+        "inertness arm there would have pinned the defect as CORRECT. The new arm "
+        "lands in tests/integration/test_or7_bulk_destructive.py, which already "
+        "carries this idiom at :275 and :293; the key "
+        "tests/integration/test_or7_bulk_destructive.py moves 12 -> 13 and no other "
+        "key moves, total 134 -> 135 across the same 16 modules. "
+        "THE DRIVE IS ENGINE-INDEPENDENT, MEASURED RATHER THAN ASSERTED: with PATH "
+        "pointed at a directory the engine does not resolve from, the refusal is "
+        "BYTE-IDENTICAL to the engine-present one -- PM-measured at 402 bytes, `cmp` "
+        "clean, and re-driven here byte-identical at 700 (convert) and 692 (ocr) "
+        "bytes, the absolute figure being a function of the fixture path length the "
+        "re-run hint echoes rather than of the engine -- while "
+        "the same command over an EMPTY `--out-dir` returns code 3 / kind "
+        "engine_missing for BOTH verbs, so the engine's absence is genuinely reachable "
+        "on that exact command and the gate is outranking the engine tier rather than "
+        "the engine being irrelevant. A `@pytest.mark.requires(...)` would therefore be "
+        "a FALSE declaration, and under `engines-hidden` it would not weaken the arm but "
+        "DELETE it -- in the without-engines job release.yml:44 gates the tag on, "
+        "where a vacuous safety criterion is no criterion. The per-verb discriminator "
+        "holds the out-dir occupancy CONSTANT and varies only the flag under test: "
+        "engine hidden, same occupied-`--out-dir` command, 5 with the gate's message "
+        "signature without `-y` and 3 engine_missing WITH it -- the `-y` -> 3 flip. "
+        "`convert` read 5 -> 3 before this item; `ocr` read 3 -> 3, the engine tier "
+        "owning both answers because the gate was absent, and reads 5 -> 3 after it. "
+        "+1 AND NO MORE: `population()` appends one Member per ARM, so the four runs "
+        "live in ONE non-parametrized function. Parametrizing them over the two verbs "
+        "would cost 2, is NOT authorized by X-781, and is a blocker back to the PM "
+        "rather than an engineer's call; and swapping the `ocr` member of `_ENGINES` "
+        "to the clobbering builder to reach +0 is refused in advance, because it buys "
+        "the ceiling by deleting the `--in-place` coverage D4/AC11 require to survive."
+    ),
+)
+
 ENGINE_GATING_LEDGER: Final[tuple[_GatingRatification, ...]] = (
     _PDF_82_GENESIS,
+    _PDF_84_RATIFICATION,
     _GatingRatification(
-        date="2026-09-17",
-        spec="PDF-84",
+        date="2026-09-18",
+        spec="PDF-89",
         direction="up",
-        ruling="X-781",
+        ruling="X-891",
         ceilings=MappingProxyType(
-            {**_PDF_82_GENESIS.ceilings, "tests/integration/test_or7_bulk_destructive.py": 13}
+            {**_PDF_84_RATIFICATION.ceilings, "tests/integration/test_or7_bulk_destructive.py": 14}
         ),
         reason=(
-            "PDF-84 wires the clobber route into the bulk-destructive gate at every "
-            "batch verb, and X-772 makes an occupied-`--out-dir` REFUSAL assertion for "
-            "`convert` AND `ocr` a required criterion -- that pair being exactly "
-            "`engine_blind_verbs() & out_dir_batch_verbs()`, and exactly the pair "
-            "`tests/test_batch_continuation.py`'s INERT_GATE_VERBS excludes, so an "
-            "inertness arm there would have pinned the defect as CORRECT. The new arm "
-            "lands in tests/integration/test_or7_bulk_destructive.py, which already "
-            "carries this idiom at :275 and :293; the key "
-            "tests/integration/test_or7_bulk_destructive.py moves 12 -> 13 and no other "
-            "key moves, total 134 -> 135 across the same 16 modules. "
-            "THE DRIVE IS ENGINE-INDEPENDENT, MEASURED RATHER THAN ASSERTED: with PATH "
-            "pointed at a directory the engine does not resolve from, the refusal is "
-            "BYTE-IDENTICAL to the engine-present one -- PM-measured at 402 bytes, `cmp` "
-            "clean, and re-driven here byte-identical at 700 (convert) and 692 (ocr) "
-            "bytes, the absolute figure being a function of the fixture path length the "
-            "re-run hint echoes rather than of the engine -- while "
-            "the same command over an EMPTY `--out-dir` returns code 3 / kind "
-            "engine_missing for BOTH verbs, so the engine's absence is genuinely reachable "
-            "on that exact command and the gate is outranking the engine tier rather than "
-            "the engine being irrelevant. A `@pytest.mark.requires(...)` would therefore be "
-            "a FALSE declaration, and under `engines-hidden` it would not weaken the arm but "
-            "DELETE it -- in the without-engines job release.yml:44 gates the tag on, "
-            "where a vacuous safety criterion is no criterion. The per-verb discriminator "
-            "holds the out-dir occupancy CONSTANT and varies only the flag under test: "
-            "engine hidden, same occupied-`--out-dir` command, 5 with the gate's message "
-            "signature without `-y` and 3 engine_missing WITH it -- the `-y` -> 3 flip. "
-            "`convert` read 5 -> 3 before this item; `ocr` read 3 -> 3, the engine tier "
-            "owning both answers because the gate was absent, and reads 5 -> 3 after it. "
-            "+1 AND NO MORE: `population()` appends one Member per ARM, so the four runs "
-            "live in ONE non-parametrized function. Parametrizing them over the two verbs "
-            "would cost 2, is NOT authorized by X-781, and is a blocker back to the PM "
-            "rather than an engineer's call; and swapping the `ocr` member of `_ENGINES` "
-            "to the clobbering builder to reach +0 is refused in advance, because it buys "
-            "the ceiling by deleting the `--in-place` coverage D4/AC11 require to survive."
+            "PDF-89 refuses a destination that resolves onto one of the run's own "
+            "inputs, and `convert`/`ocr` are 2 of the 19 `-O` cells and 2 of the 11 "
+            "`--out-dir` cells the defect reaches (E2) -- an acceptance bar that "
+            "silently dropped the two verbs hardest to drive is `PDF-84`'s own lesson "
+            "recurring one item later (X-772). The new arm lands in "
+            "tests/integration/test_or7_bulk_destructive.py, which already carries "
+            "this idiom; the key tests/integration/test_or7_bulk_destructive.py moves "
+            "13 -> 14 and no other key moves, total 135 -> 136 across the same 16 "
+            "modules. "
+            "THE DRIVE IS ENGINE-INDEPENDENT, MEASURED HERE RATHER THAN INHERITED FROM "
+            "X-781: PDF-89's refusal fires at PLAN TIME, strictly before X-781's own "
+            "bulk-destructive gate is ever consulted, which makes engine-independence "
+            "MORE plausible and therefore exactly the thing not to assume. With `PATH` "
+            "pointed at a directory neither soffice nor tesseract resolves from, the "
+            "refusal is BYTE-IDENTICAL to the engine-present one on both flag shapes: "
+            "288 bytes, `cmp` clean, for `convert` on both `-O` and `--out-dir`; 279 "
+            "bytes, `cmp` clean, for `ocr` on both `-O` and `--out-dir`. The same "
+            "command over a DISTINCT target (not one of the run's inputs), with the "
+            "engine hidden, reaches code 3 / kind engine_missing for both verbs, so the "
+            "engine's absence is genuinely reachable on this exact command and the new "
+            "refusal is the gate outranking the engine tier rather than the engine "
+            "being irrelevant. A `@pytest.mark.requires(...)` would therefore be a "
+            "FALSE declaration and would DELETE the arm under `engines-hidden`, in the "
+            "without-engines job release.yml:44 gates the tag on. "
+            "+1 AND NO MORE, carried forward verbatim from X-781: `population()` "
+            "appends one Member per ARM, so both verbs and both flag shapes live in "
+            "ONE non-parametrized function. Parametrizing over the two verbs would "
+            "cost 2 and is not authorized by this ruling any more than by X-781."
         ),
     ),
 )
@@ -869,6 +914,18 @@ def test_an_empty_ledger_is_refused() -> None:
 
 
 def test_a_downward_ratification_is_accepted_with_no_ruling() -> None:
+    """PDF-89 correction: the synthetic step is derived from
+    ``ENGINE_GATING_LEDGER[0]``'s OWN ceilings, never from the live
+    ``UNGATED_CEILING`` -- a key touched by more than one prior upward
+    ratification (`test_or7_bulk_destructive.py`, now moved twice: PDF-84
+    then PDF-89) makes ``UNGATED_CEILING[key] - 1`` land ABOVE genesis for
+    that key once two raises have happened, which this test's own two-record
+    synthetic ledger (genesis at index 0, as ``_RATIFICATION_DIRECTIONS``
+    requires) would then read as an undeclared RISE rather than the DOWN this
+    arm exists to prove accepted. Deriving from genesis directly makes every
+    key a uniform one-tick-down from record 0, independent of how many real
+    ratifications the live ledger has since accumulated.
+    """
     ledger = (
         ENGINE_GATING_LEDGER[0],
         _GatingRatification(
@@ -876,7 +933,7 @@ def test_a_downward_ratification_is_accepted_with_no_ruling() -> None:
             spec="PDF-XX",
             direction="down",
             ceilings=MappingProxyType(
-                {key: max(value - 1, 0) for key, value in UNGATED_CEILING.items()}
+                {key: max(value - 1, 0) for key, value in ENGINE_GATING_LEDGER[0].ceilings.items()}
             ),
             reason="a drive was gated, so the debt it represented is paid",
         ),

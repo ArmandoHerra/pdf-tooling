@@ -423,7 +423,9 @@ def _rasterize_planned(
     # run raises exactly as before (see the block below); a dry run captures
     # the first refusal instead (X-67, extended to a multi-target --out-dir
     # run).
-    plan = plan_output_set(targets, out_dir=out_dir, policy=policy, confirm=confirm)
+    plan = plan_output_set(
+        targets, out_dir=out_dir, policy=policy, sources=sources, confirm=confirm
+    )
 
     if policy.dry_run:
         # A run-level refusal (an unwritable --out-dir) is not attributable

@@ -172,7 +172,7 @@ def convert_run(
     targets = [item.target for item in planned]
     check_output_collisions(targets)
 
-    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf")
+    plan = plan_filesystem(targets, out_dir=out_dir, policy=policy, kind="pdf", sources=sources)
 
     if policy.dry_run:
         # OR-7 / D12.1 (B-096) -- an ABSENT engine is knowable at plan time, so
