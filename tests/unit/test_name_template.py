@@ -62,6 +62,7 @@ from __future__ import annotations
 import errno
 import os
 import sys
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +76,7 @@ import pytest  # noqa: E402
 from hypothesis import HealthCheck, Phase, event, example, given, settings  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
 from hypothesis.database import DirectoryBasedExampleDatabase  # noqa: E402
+from hypothesis.errors import InvalidArgument  # noqa: E402
 
 import conftest  # noqa: E402
 from pdf_tooling.errors import OutputEscapesDirError  # noqa: E402
@@ -178,12 +180,50 @@ _stem_strategy = st.one_of(_ordinary_text, _hostile_text)
 _REFUSED: Final[str] = "render_name refused the rendered component"
 _RETURNED: Final[str] = "render_name returned a contained component"
 
-#: The meter's THIRD outcome (PDF-85 D6), and the one nothing asserts. It
-#: cannot fire on a filesystem that accepts every encodable name, so an arm
-#: requiring it to fire would be an acceptance criterion this loop has no host
-#: to drive; where it does fire, ``--hypothesis-show-statistics`` names it and
-#: the operator sees the observation without reading a spec.
+#: The meter's THIRD outcome (PDF-85 D6), emitted where ``event()`` is in
+#: domain and guarded where it is not (PDF-88 D6).
+#:
+#: **PDF-88 CORRECTS THE CLAIM THIS COMMENT USED TO MAKE.** It said that where
+#: this event fires, ``--hypothesis-show-statistics`` names it and the operator
+#: sees the observation without reading a spec. Measured, and false for the only
+#: firing pattern that matters: the statistics block tallies the GENERATE phase,
+#: and the pinned counterexample is reachable only through the EXPLICIT-example
+#: phase -- ``Phase.explicit``, which is precisely the carry PDF-85 chose so the
+#: counterexample replays everywhere, CI runners included. Under a faithful
+#: component-scoped refusal the recorded branch fired six times and the
+#: statistics block named it ZERO times; only an artificial blanket refusal,
+#: which refuses ordinary generated components too, makes the meter report it.
+#:
+#: So the event stays for the one caller that is inside its domain -- the
+#: property -- and the channel the OPERATOR actually reads is the
+#: ``_EncodingRefusalRecorded`` warning the oracle publishes beside it, which
+#: renders in the warnings summary on every host, on red runs and green ones,
+#: and is the instrument the arms below assert AGREEMENT against.
 _ENCODING_REFUSED: Final[str] = "the filesystem refused the component's ENCODING, not its length"
+
+#: The publication's text, INVARIANT and spelled once (PDF-88 D4).
+#:
+#: **Invariant is a declared divergence from PDF-86's precedent, on a measured
+#: reason.** PDF-86's message embeds its measured numbers because it fires at
+#: most once per leg. This one is reachable from the property, which draws a
+#: ``Cn`` codepoint in roughly 44% of examples, so a message carrying the
+#: component would scatter the warnings summary into hundreds of distinct lines
+#: on a refusing host. The varying detail stays where it belongs -- in the
+#: ``_DEFECT`` and ``_UNCLASSIFIED`` assertion messages, which already name the
+#: component, the byte count and the errno. What rides here is the invariant
+#: citation, and the errno by SYMBOLIC name for the reason
+#: ``_ENCODING_REFUSAL_ERRNOS`` states below: the integer is wrong on one half
+#: of this product's CI matrix whichever half it was copied from.
+_ENCODING_REFUSAL_PUBLICATION: Final[str] = (
+    "THE FILESYSTEM REFUSED THE COMPONENT'S ENCODING and this run RECORDED it rather than "
+    "reddening: there is no pathconf for which codepoints a kernel's table knows, so the "
+    "renderer is not contracted to predict it. Refusal errno, symbolic: "
+    f"{errno.errorcode[errno.EILSEQ]}. The measured counterexample this verdict was derived "
+    "from is U+1239A, category Cn (unassigned), four UTF-8 bytes, an eight-byte rendered "
+    "component. The product consequence -- a bare OSError escaping "
+    "safety/atomic.py::AtomicWriter._replace onto cli/main.py's bug path -- is filed at "
+    "ledger 2b88707a36, carrier B-352, and is NOT closed by the arm that published this."
+)
 
 #: The one refusal class this oracle RECORDS instead of reddening on, held as a
 #: named frozenset of SYMBOLIC ``errno`` constants — the shape
@@ -338,10 +378,178 @@ def _the_filesystem_accepts(candidate: Path, *, out_dir: Path) -> None:
     except OSError as error:
         verdict = _classify_filesystem_refusal(error, name=candidate.name, out_dir=out_dir)
         if verdict.kind == _RECORDED:
-            event(verdict.event_name)
+            # THE PUBLICATION (PDF-88 D4), on every recorded refusal and on
+            # every host. It is not decoration: it is the instrument that makes
+            # half 1's two worlds distinguishable at all, because
+            # `assert not candidate.exists()` is TRUE IN BOTH -- a refused
+            # `touch()` never created the file an accepted one is unlinked
+            # from. It is also the ONLY channel that can carry this
+            # observation, since `--hypothesis-show-statistics` tallies the
+            # generate phase and the pinned counterexample is reachable only
+            # through the explicit-example phase (see `_ENCODING_REFUSED`).
+            #
+            # NO `stacklevel`, and the linter is overruled on the same
+            # measurement `tests/test_import_boundaries.py` records at its own
+            # publication: B028's advice reports `_pytest/python.py`, which
+            # localises nothing, while the default reports this module and this
+            # line, which is the exact publication point.
+            warnings.warn(  # noqa: B028 - measured, see the comment above
+                conftest._EncodingRefusalRecorded(_ENCODING_REFUSAL_PUBLICATION)
+            )
+            # `event()`'s DOMAIN is the hypothesis build context, and FOUR of
+            # this oracle's five call sites are outside it. The call is kept
+            # rather than dropped -- half 2 below substitutes its own in-domain
+            # `event` and asserts the emission -- and guarded by the narrowest
+            # thing that works.
+            #
+            # EXCEPTION-SHAPED, NOT PREDICATE-SHAPED, and that was measured
+            # rather than chosen: `currently_in_test_context()` asks "am I
+            # inside a build context?", answers no under half 2's substituted
+            # callable, and skips a channel the caller had already put in
+            # domain -- which reds half 2 with `recorded == []`. The narrow
+            # question is "did THIS channel refuse THIS call", and a
+            # substituted in-domain `event` never refuses it.
+            try:
+                event(verdict.event_name)
+            except InvalidArgument:
+                pass
             return
         raise AssertionError(verdict.message) from error
     candidate.unlink()
+
+
+# --------------------------------------------------------------------------- #
+# PDF-88 — the premise is DERIVED from the host, and the branch is ASSERTED
+# --------------------------------------------------------------------------- #
+
+#: The two legal answers a host can give, named once so the helper below, the
+#: arms that call it and its own failure messages cannot drift apart on a
+#: string.
+_HOST_ACCEPTED: Final[str] = "accepted"
+_HOST_RECORDED: Final[str] = "recorded"
+_HOST_BRANCHES: Final[tuple[str, ...]] = (_HOST_ACCEPTED, _HOST_RECORDED)
+
+
+def _published_refusals(caught: list[warnings.WarningMessage]) -> list[str]:
+    """The channel's own messages out of a ``catch_warnings`` record, and nothing else.
+
+    Filtering by CLASS rather than by text is what makes the reader specific to
+    this channel: an unrelated ``UserWarning`` from anywhere in the call path
+    would otherwise be counted as a published encoding refusal, and an arm that
+    counts the wrong warnings agrees with the probe by accident.
+    """
+    return [
+        str(entry.message)
+        for entry in caught
+        if isinstance(entry.message, conftest._EncodingRefusalRecorded)
+    ]
+
+
+def _host_refusal_for(candidate: Path, *, out_dir: Path) -> OSError | None:
+    """Ask THIS host the same question the oracle is about to ask, one call earlier.
+
+    Returns the ``OSError`` a refusing filesystem raised, or ``None`` on a
+    filesystem that took the name -- in which case the file it created is
+    removed again, so the probe leaves the directory exactly as it found it.
+
+    **It calls nothing from hypothesis, so its domain is every caller.** That
+    is the whole point of splitting it out: the oracle's own refusal happens
+    inside a `try` whose `except` has already decided what to do about it, so
+    a caller outside a build context cannot see WHICH answer came back. This
+    performs the same syscall one call earlier, where the answer can be
+    branched on, exactly as PDF-85's pure classifier does one layer down.
+
+    **The filesystem stays the authority, and that is why this is not a
+    platform branch.** It does not ask which platform is running or which
+    codepoint is in the name -- there is no `pathconf` for "which codepoints
+    does this kernel's table know", and transcribing a rule here would pin a
+    premise to itself. It asks the filesystem, which is the only observer that
+    has ever answered this question on either host.
+    """
+    assert _is_single_component(candidate, out_dir=out_dir), (
+        f"the probe would create {candidate} outside {out_dir}; a helper that writes to "
+        "disk asserts its own containment before it writes, never after"
+    )
+    try:
+        candidate.touch()
+    except OSError as error:
+        return error
+    candidate.unlink()
+    return None
+
+
+def _the_hosts_answer_for(candidate: Path, *, out_dir: Path) -> str:
+    """Branch on the measured premise, assert WHICH branch was taken, and name it.
+
+    **Two instruments, independently derived, asserted to AGREE — and that is
+    the clause that closes this class rather than patching it.** The premise
+    comes from :func:`_host_refusal_for`; the branch evidence comes from the
+    publication channel. If the channel is ever silenced, the probe still says
+    *refused* while the channel says *nothing*, and this reds. If the probe is
+    ever stubbed to claim acceptance, the channel still publishes, and this
+    reds the other way. A design that took the premise from the channel alone
+    would read "accepted" on a refusing host the moment the channel went
+    quiet, which is this defect rebuilt one level up.
+
+    **The stated assumption, rather than a hidden one:** the two calls hit the
+    same path microseconds apart, so if a filesystem's answer changed between
+    them the agreement assertion fails. The helper cannot pass vacuously in
+    either direction.
+
+    **Both observers set their own filter state.** The channel is read through
+    `warnings.catch_warnings(record=True)` with an explicit
+    `simplefilter("always")` -- which is what `pytest.warns` does internally --
+    and never by inheriting whatever filter the ambient process happens to
+    carry. That is the channel-domain lesson applied to the READER: an observer
+    that inherits a filter is an observer whose result depends on what ran
+    before it.
+    """
+    refusal = _host_refusal_for(candidate, out_dir=out_dir)
+
+    # The third answer, handed UP as a measurement and never skipped: a host
+    # that refuses for a reason this design has never measured is information
+    # the loop does not have, and the only honest thing to do with it is red
+    # while naming it. Decided BEFORE the oracle runs so that the message the
+    # reader gets is the PREMISE's, naming the answer the host actually gave.
+    if refusal is not None and refusal.errno not in _ENCODING_REFUSAL_ERRNOS:
+        raise AssertionError(
+            f"UNCLASSIFIED host answer: the filesystem under {out_dir} refused the probe "
+            f"with errno {refusal.errno} "
+            f"({errno.errorcode.get(refusal.errno, 'no symbolic name')}), which this arm "
+            f"neither predicts nor has ever measured ({refusal}). It reds on purpose: a "
+            "two-way split would take an unwritable tmp_path for a measured encoding "
+            "refusal. Read the errno NAME out of this message and take it back to the PM "
+            "as a measurement -- it is a data point this loop does not have"
+        )
+
+    with warnings.catch_warnings(record=True) as published:
+        warnings.simplefilter("always")
+        _the_filesystem_accepts(candidate, out_dir=out_dir)
+    recorded = _published_refusals(published)
+
+    if refusal is None:
+        assert recorded == [], (
+            f"the probe measured this host ACCEPTING the component, and the oracle then "
+            f"published {len(recorded)} encoding refusal(s) on the same name. The two "
+            "instruments disagree, so one of them is lying and this helper cannot say "
+            f"which branch the host took: {recorded!r}"
+        )
+        assert not candidate.exists(), (
+            "the host ACCEPTED the component and the oracle left its own probe file "
+            "behind -- note that this assertion is true on a REFUSING host for a trivial "
+            "reason (nothing was ever created), which is why it is made here, inside the "
+            "branch where the file did exist, and never as the arm's only assertion"
+        )
+        return _HOST_ACCEPTED
+
+    assert len(recorded) == 1, (
+        f"the probe measured this host REFUSING the component with "
+        f"{errno.errorcode.get(refusal.errno, refusal.errno)}, and the oracle published "
+        f"{len(recorded)} encoding refusal(s) rather than exactly one. The two instruments "
+        "disagree: a silenced channel reads as an accepting host, which is the premise "
+        "PDF-88 exists to stop this arm from assuming"
+    )
+    return _HOST_RECORDED
 
 
 @_guaranteed_seed_examples
@@ -561,13 +769,26 @@ def test_the_classifier_answers_every_roster_errno_with_one_of_three_verdicts(
 def test_the_measured_counterexample_passes_here_and_is_recorded_where_it_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC3/AC10. The macos-14 observation, made executable on a host that accepts it.
+    """AC3/AC10. The macos-14 observation, made executable on BOTH kinds of host.
 
     Three halves, in the order that makes each mean something:
 
-    1. this host's filesystem ACCEPTS the pinned counterexample, so the oracle
-       passes and leaves nothing behind — which is why the property's own
-       twelfth seed is green here and was red there;
+    1. the premise is MEASURED AT RUNTIME, and both answers are asserted. A
+       probe performs the same syscall the oracle performs, one call earlier,
+       and this half asserts WHICH branch the host took: `accepted` — the
+       oracle passes, publishes nothing, and its own probe file is gone — or
+       `recorded`, where the oracle does not raise and publishes exactly one
+       `_EncodingRefusalRecorded`. Any other answer reds, naming the errno.
+
+       **Before PDF-88 this half asserted the first outcome as a fact about
+       "this host"** — an undeclared Linux premise in an arm that runs on both
+       platforms, which is what crashed the four `macos-14` legs inside
+       `event()`. The crash was the only honest thing in it: the half's one
+       surviving assertion, `assert not candidate.exists()`, passes in BOTH
+       worlds, because a refused `touch()` never created the file an accepted
+       one is unlinked from. Stopping the crash alone would have left this half
+       asserting nothing whatsoever, on the exact platform where its own claim
+       was false;
     2. a filesystem that refuses it with the measured ENCODING errno is
        RECORDED and not reddened, and the emission is OBSERVED rather than
        assumed. `event()` raises outside a hypothesis build context, so
@@ -577,13 +798,22 @@ def test_the_measured_counterexample_passes_here_and_is_recorded_where_it_is_ref
        defect. Nothing about the component changed between halves 2 and 3 — only
        the errno — which is the property that keeps a real length refusal red on
        a host this loop cannot run.
+
+    Halves 2 and 3 are byte-untouched by PDF-88. Half 2's oracle call now also
+    publishes the channel UNCAUGHT, which is what exercises the
+    worker-to-controller crossing on every leg of an ordinary `-n auto` run
+    rather than only on the four that refuse.
     """
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     candidate = render_name("{stem}.{ext}", out_dir=out_dir, stem=_MACOS_COUNTEREXAMPLE, ext="pdf")
 
-    _the_filesystem_accepts(candidate, out_dir=out_dir)
-    assert not candidate.exists(), "the oracle left its own probe file behind"
+    branch = _the_hosts_answer_for(candidate, out_dir=out_dir)
+    assert branch in _HOST_BRANCHES, (
+        f"the host's answer was classified {branch!r}, which is neither {_HOST_ACCEPTED!r} "
+        f"nor {_HOST_RECORDED!r} — an arm that cannot name the branch it took is an arm "
+        "back to having an unasserted premise"
+    )
 
     recorded: list[str] = []
     monkeypatch.setattr(sys.modules[__name__], "event", recorded.append)
@@ -604,6 +834,179 @@ def test_the_measured_counterexample_passes_here_and_is_recorded_where_it_is_ref
     assert recorded == [_ENCODING_REFUSED], (
         "the length refusal emitted the encoding event as well, so the meter can no longer "
         "tell the two refusal classes apart"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-88 — the four control arms for the host-derived premise
+# --------------------------------------------------------------------------- #
+
+
+def test_the_unmutated_host_decides_the_branch_and_both_instruments_agree(
+    tmp_path: Path,
+) -> None:
+    """AC1/AC3. NO injection anywhere: the premise is taken from the host this arm runs on.
+
+    On every Linux leg the probe accepts and the branch is `accepted`; on the
+    four `macos-14` legs the probe refuses with the measured encoding errno and
+    the branch is `recorded`. **The arm asserts the MAPPING and never the
+    value** — which of the two answers this host gave, and that the helper
+    reached the branch that answer implies. Asserting the value is precisely
+    the undeclared premise PDF-88 exists to remove, and an arm that re-asserted
+    it here would rebuild the defect one file down from where it was fixed.
+
+    The discrimination lives in the helper's two agreement assertions, and both
+    directions have been driven: stub the probe to return `None` while the
+    channel publishes and this reds on the accepting clause; silence the
+    channel while the probe refuses and it reds on the recording clause.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    candidate = render_name("{stem}.{ext}", out_dir=out_dir, stem=_MACOS_COUNTEREXAMPLE, ext="pdf")
+
+    refusal = _host_refusal_for(candidate, out_dir=out_dir)
+    expected = _HOST_ACCEPTED if refusal is None else _HOST_RECORDED
+
+    assert _the_hosts_answer_for(candidate, out_dir=out_dir) == expected, (
+        f"the probe answered {'acceptance' if refusal is None else 'refusal'} and the "
+        f"branch helper did not reach {expected!r}. The premise and the branch are the two "
+        "halves of this arm's only discriminating assertion, and they have come apart"
+    )
+    assert not candidate.exists(), (
+        "the probe or the oracle left a file behind in the caller's own out_dir"
+    )
+
+
+def test_a_refusing_host_is_recorded_and_published_rather_than_reddened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC5. The channel fires on a refusing filesystem, exactly once, with an INVARIANT text.
+
+    `_refusing_touch` is the instrument half 1 always needed and was never
+    pointed at (`X-850`): it presents a refusing filesystem on a host that
+    accepts, which is why every criterion of this item is drivable here and the
+    macOS-only reds before it were not.
+
+    The message assertions are the interesting half. It must carry the ledger
+    row, the carrier, the codepoint and its category, and the errno by SYMBOLIC
+    name; it must carry NO component text and NO errno integer. The first set
+    is what a reader needs; the second set is what keeps the warnings summary
+    to one line on a host that refuses hundreds of generated components, and
+    keeps a transcribed integer — wrong on one half of the CI matrix whichever
+    half it was copied from — out of an operator-facing string.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    candidate = render_name("{stem}.{ext}", out_dir=out_dir, stem=_MACOS_COUNTEREXAMPLE, ext="pdf")
+
+    monkeypatch.setattr(Path, "touch", _refusing_touch(errno.EILSEQ))
+
+    assert _the_hosts_answer_for(candidate, out_dir=out_dir) == _HOST_RECORDED, (
+        "a filesystem refusing with the one measured encoding errno did not reach the "
+        "recorded branch, so the oracle either reddened on it or the channel went quiet"
+    )
+
+    with warnings.catch_warnings(record=True) as published:
+        warnings.simplefilter("always")
+        _the_filesystem_accepts(candidate, out_dir=out_dir)
+    messages = _published_refusals(published)
+
+    assert len(messages) == 1, (
+        f"the recorded refusal published {len(messages)} times, not once: {messages!r}"
+    )
+    message = messages[0]
+    for token in ("2b88707a36", "B-352", "U+1239A", "Cn", errno.errorcode[errno.EILSEQ]):
+        assert token in message, (
+            f"the publication dropped {token!r}, so the operator who reads this line in a "
+            f"job log cannot get from it to the row it is filed under: {message}"
+        )
+    assert str(errno.EILSEQ) not in message, (
+        f"the publication carries the errno INTEGER ({errno.EILSEQ}), which resolves to a "
+        f"different number on the other half of this product's CI matrix: {message}"
+    )
+    for varying in (_MACOS_COUNTEREXAMPLE, candidate.name):
+        assert varying not in message, (
+            f"the publication carries component text ({varying!r}), so a host that refuses "
+            "many generated components scatters the warnings summary into one distinct "
+            "line per component instead of one line per host"
+        )
+
+
+def test_an_unclassified_host_answer_reds_the_branch_helper_naming_its_errno(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC4. A host answer this design has never measured is handed UP, never skipped.
+
+    The third verdict is what keeps the host-derived premise from becoming a
+    swallow: a two-way split would take an unwritable `tmp_path` for a measured
+    encoding refusal and return `recorded` from it. Driven the other way as
+    well — widen `_ENCODING_REFUSAL_ERRNOS` to admit `EACCES` and this arm goes
+    green with `DID NOT RAISE`, which is exactly the swallow the verdict exists
+    to prevent, and the roster arm's width assertion reds alongside it.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    candidate = render_name("{stem}.{ext}", out_dir=out_dir, stem=_MACOS_COUNTEREXAMPLE, ext="pdf")
+
+    monkeypatch.setattr(Path, "touch", _refusing_touch(errno.EACCES))
+
+    with pytest.raises(AssertionError) as caught:
+        _the_hosts_answer_for(candidate, out_dir=out_dir)
+
+    message = str(caught.value)
+    assert str(errno.EACCES) in message, (
+        f"the unclassified host answer did not name the errno it could not classify, which "
+        f"is the entire value it has: {message}"
+    )
+    assert errno.errorcode[errno.EACCES] in message, (
+        f"the unclassified host answer named a number and not its symbolic name, so the "
+        f"reader on the other host has to look it up: {message}"
+    )
+
+
+def test_the_publication_channel_is_defined_where_every_process_can_import_it() -> None:
+    """AC6. WHERE the class lives decides whether the channel works at all.
+
+    When a warning escapes uncaught under this project's own `-n auto`,
+    pytest-xdist ships it worker → controller and the CONTROLLER rebuilds the
+    class with `importlib.import_module(<the class's __module__>)`. A class
+    defined in THIS module carries `__module__ == "test_name_template"`, and
+    `tests/unit/` is on no controller's `sys.path` — measured, that kills the
+    run 3 of 3 with `INTERNALERROR … ModuleNotFoundError: No module named
+    'test_name_template'` → `node down` → `KeyError: <WorkerController gw0>`,
+    which is an `INTERNALERROR` shipped straight at the four legs this item
+    exists to turn green. `tests/conftest.py` is loaded in every process, so
+    `tests/` — and only `tests/` — is on the controller's `sys.path`.
+
+    The rule is NOT "a custom subclass is unsafe in a test module":
+    `tests/test_import_boundaries.py` sits directly under `tests/` and renders
+    its own subclass cleanly on all four `macos-14` legs. The rule is that the
+    class must be defined where every process that may have to render it can
+    import it, and the failing control for this arm is one move of the class.
+    """
+    channel = conftest._EncodingRefusalRecorded
+
+    assert channel.__module__ == "conftest", (
+        f"the publication channel is defined in {channel.__module__!r}. Under `-n auto` "
+        "the xdist CONTROLLER rebuilds a reported warning by importing that module, and "
+        "only `tests/` is on its sys.path — so this ships an INTERNALERROR, not a warning"
+    )
+    assert channel.__module__ != __name__, (
+        "the channel is defined in the arm's own module, which is under `tests/unit/` and "
+        "on no controller's sys.path"
+    )
+    # `UserWarning`, not bare `Warning`, and the subclassing is the MECHANISM
+    # rather than a style choice: PDF-86's landed `publication_channel_defects`
+    # guard reads `pyproject.toml` and matches a `filterwarnings` entry's dotted
+    # TAIL against a category name-set containing `"UserWarning"`. This channel
+    # inherits that protection only for as long as it subclasses `UserWarning`;
+    # a rebase onto bare `Warning` would drop it with nothing to say so. (The
+    # one residual, handed up rather than closed: a filter scoped to this
+    # class's OWN dotted name slips that category clause — it does not slip the
+    # arm, which refuses any `filterwarnings` entry at all.)
+    assert issubclass(channel, UserWarning), (
+        f"the channel's base is {channel.__mro__[1].__name__}, not UserWarning, so it has "
+        "silently left the category set PDF-86's landed liveness guard matches on"
     )
 
 

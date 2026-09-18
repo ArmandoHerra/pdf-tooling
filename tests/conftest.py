@@ -170,6 +170,61 @@ def pytest_report_header(config: pytest.Config) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# The encoding-refusal publication channel (PDF-88 D5).
+#
+# WHY THIS CLASS IS DEFINED HERE AND NOT IN THE ARM THAT RAISES IT. When a
+# warning escapes uncaught under this project's own `-n auto`, pytest-xdist
+# ships it worker -> controller, and the CONTROLLER rebuilds the class with
+# `importlib.import_module(<the class's __module__>)`
+# (`xdist/workermanage.py:447` -> `:474`). Both `tests/` and `tests/unit/` are
+# package-less, so a class defined in either registers a bare top-level
+# `__module__`. But `tests/conftest.py` is loaded by pytest in EVERY process,
+# which puts `tests/` -- and only `tests/` -- on the controller's `sys.path`;
+# `tests/unit/` reaches the `sys.path` of the worker that collects it and of no
+# other process.
+#
+# MEASURED, one warning, three homes, one command, three trials each: a module
+# directly under `tests/` is clean 3/3; a module under `tests/unit/` crashes
+# 3/3 with `INTERNALERROR ... ModuleNotFoundError: No module named
+# 'test_name_template'` -> `node down` -> `KeyError: <WorkerController gw0>`;
+# this file, imported from `tests/unit/`, is clean 3/3 with
+# `__module__ == 'conftest'`. So the rule is NOT "a custom subclass is unsafe
+# in a test module" -- `tests/test_import_boundaries.py`'s
+# `UncalibratedStartupCondition` is exactly that and renders cleanly on all
+# four `macos-14` legs of this product's own CI. The rule is: the class must be
+# defined where EVERY process that may have to render it can import it.
+#
+# AND THIS IS THE RULE THIS FILE ALREADY STATES ABOUT ITSELF, one word
+# substituted. The hypothesis block above lives here because a thing that must
+# be in force in every MODULE belongs in the file every module loads (`B-147`).
+# A warning class is that shape with PROCESS substituted for module.
+#
+# `tests/unit/test_name_template.py` reaches it as a module attribute through
+# the `import conftest` it already carries, so the reference costs no new
+# import. The leading underscore says the same thing the name says: it is that
+# module's channel, kept here for the one reason above.
+# --------------------------------------------------------------------------- #
+
+
+class _EncodingRefusalRecorded(UserWarning):
+    """The channel `tests/unit/test_name_template.py`'s oracle publishes on.
+
+    A DEDICATED subclass rather than a bare `UserWarning`, following the
+    shipped idiom at `tests/test_import_boundaries.py`: pytest renders the
+    class name in the warnings-summary line, so every recorded refusal is
+    greppable in one token across a whole job log, and the warnings summary is
+    not part of a traceback, so it survives `-q`, `--tb=line` and `--tb=short`.
+
+    **`UserWarning` is the base by MEASUREMENT, not by habit, and the arm pins
+    it.** `PDF-86`'s landed `publication_channel_defects` guard matches a
+    `filterwarnings` entry's dotted TAIL against a category name-set that
+    contains `"UserWarning"`, so this channel inherits that protection only for
+    as long as it subclasses `UserWarning`; a rebase onto bare `Warning` would
+    drop the inherited guard silently, with nothing to say so.
+    """
+
+
+# --------------------------------------------------------------------------- #
 # pytest options
 # --------------------------------------------------------------------------- #
 
