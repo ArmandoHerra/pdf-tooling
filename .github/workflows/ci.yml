@@ -196,7 +196,25 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is load-bearing here, not cosmetic -- and for a reason
+      # distinct from secret-scan's below. This job runs the WHOLE suite, and the
+      # suite carries commit-anchored provenance arms that resolve a sha with
+      # `git cat-file -e`: `_meta.generated_at_commit` in the envelope register
+      # (tests/test_envelope_contract.py) and `BASELINES_MEASURED_AT` in the
+      # secret-leak sweeps (tests/test_secret_leak_sweeps.py). Against the default
+      # depth-1 checkout those objects are simply ABSENT, so both arms go red on
+      # the CHECKOUT rather than on a defect -- observed, both of them, in run
+      # 35295764623.
+      #
+      # The remedy belongs HERE and never in the assertion. Those arms are written
+      # unconditionally on purpose (PDF-69): a shallow-clone disjunct would be true
+      # for every input, and so a second unfailable arm beside the repair. PDF-69
+      # checked that the job running its module sets `fetch-depth: 0` and was right
+      # about `test`; the premise was merely INCOMPLETE, because this job and
+      # `without-engines` run that module too.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
@@ -241,7 +259,14 @@ jobs:
     timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is load-bearing here for the IDENTICAL reason it is on
+      # engines-present above: this job runs the whole suite too, so the same two
+      # commit-anchored provenance arms resolve a sha here, and a depth-1 checkout
+      # reds them on the clone rather than on a defect (run 35295764623 again).
+      # Fix the checkout, never the assertion.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
@@ -377,10 +402,15 @@ jobs:
       # The nine PLANNING arms legitimately skip here, because this checkout is
       # `apps/pdf-tooling` alone and the maintainer's planning tree lives in a
       # separate repository. The HISTORY arms do NOT skip: `fetch-depth: 0`
-      # above is what lets them run, and this is the only place outside a
-      # maintainer's own full clone where they ever have (PDF-72 corrected this
-      # comment, which had said "five" and had implied the history arms could
-      # not run here either). The opt-in strict posture this comment used to
+      # above is what lets them run (PDF-72 corrected this comment, which had
+      # said "five" and had implied the history arms could not run here either).
+      # This job is no longer the ONLY place outside a maintainer's own full
+      # clone where they run, and it had already stopped being it before this
+      # sentence was edited: PDF-34 gave `test` the same depth in the same
+      # breath that it added this job, and `engines-present` /
+      # `without-engines` have it now too. The set of jobs where the history
+      # arms run is exactly the set this file hands real history to -- there is
+      # no other way into it. The opt-in strict posture this comment used to
       # name is deleted; see the Makefile's `docs-gate` help text and `B-316`.
       - run: make docs-gate
 

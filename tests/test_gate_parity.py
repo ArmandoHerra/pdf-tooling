@@ -832,13 +832,52 @@ def test_pdf59_ac1_the_maturity_classifier_is_5_production_stable() -> None:
     assert entries == [_REQUIRED_STABLE], entries
 
     _SELF = "tests/test_gate_parity.py"
+    # THE POPULATION this census counts: occurrences of the phrase in the SOURCE
+    # TEXT of the three scanned sources, minus this module. Exactly one survives
+    # -- the classifier declaration at `pyproject.toml:16` -- and that one is what
+    # the assertions below grade.
+    #
+    # COMPILED BYTECODE IS EXCLUDED, and it is not a hit that was rounded away:
+    # `tests/__pycache__/test_gate_parity.cpython-3NN-pytest-N.N.N.pyc` is a
+    # derived copy of the one file already excluded by name above, so counting it
+    # counts this instrument's own constants a second time through a build
+    # artefact. pytest's assertion rewriting writes that artefact DURING this very
+    # run (each macos-14 leg of run 35295764623 produced its own interpreter tag:
+    # cpython-311/312/313/314), so a census that sees it is answering a question
+    # about the runner's cache state rather than about the repository. The second
+    # recipe in this same test reaches the same exclusion by a different route: it
+    # is a `git grep`, a TRACKED-file scan, and bytecode is not tracked.
+    #
+    # WHY IT ONLY EVER REDDENED ON macOS, which is the whole diagnosis: GNU grep
+    # (>= 3.5) sends its binary-file diagnostic to STDERR, while BSD grep -- which
+    # is what `/usr/bin/grep` is on macos-14 -- prints "Binary file ... matches" to
+    # STDOUT, and this recipe reads stdout. The expected count was NOT widened to
+    # absorb the extra line: that line was never a hit.
+    #
+    # Both exclusions are deliberate rather than redundant: `--exclude-dir` covers
+    # the PEP 3147 cache directory, `--exclude` covers a `.pyc` anywhere else.
     grep = subprocess.run(
-        ["/usr/bin/grep", "-rn", "Development Status", "tests", "pyproject.toml", "Makefile"],
+        [
+            "/usr/bin/grep",
+            "-rn",
+            "--exclude-dir=__pycache__",
+            "--exclude=*.pyc",
+            "Development Status",
+            "tests",
+            "pyproject.toml",
+            "Makefile",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
     )
+    # 0 = matched, 1 = matched nothing, 2 = grep itself failed. Asserted because
+    # the exclusions above are the one part of this recipe that cannot be
+    # exercised on every platform from a single host: if a flag were unsupported
+    # somewhere, grep would exit 2 with an empty stdout and the count arm below
+    # would red with a mystery `0`. This reds naming the exit status instead.
+    assert grep.returncode == 0, (grep.returncode, grep.stderr, grep.stdout)
     hits = [
         line
         for line in grep.stdout.splitlines()
