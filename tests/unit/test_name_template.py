@@ -33,6 +33,23 @@ exercised the ones ordinary text can reach. Three things now hold instead:
   and a property whose interesting branch has quietly become rare is a
   vacuous control with excellent branding.
 
+**PDF-85 — what this module's oracle now discriminates, and the premise it
+corrects.** ``PDF-77`` paid out through its **oracle**, not
+through its generator: ``_ordinary_text``'s alphabet is byte-identical across
+that commit and an unassigned codepoint was drawable from it before — what
+``PDF-77`` added was this module's first filesystem-touching assertion. That
+assertion called itself a byte-length oracle and then caught **every**
+``OSError``, so on the four ``macos-14`` legs of CI run ``35295764623`` it
+reddened on an **eight-byte** component against the 255-byte limit it exists to
+police, while ``render_name`` returned the identical component here, where the
+filesystem takes it. The refusal is now classified by ``errno``: a length
+refusal is still the renderer's defect and still reds, driven by a real
+syscall; the one measured encoding refusal is RECORDED against ledger
+``2b88707a36``; and every other ``errno`` reds as unclassified, so the
+narrowing can never become a swallow. A reader who inherits the falsified
+premise goes looking for the fix in the generator, and correctly finds nothing
+there.
+
 The profile that makes a failure here recoverable — ``print_blob`` and a
 persisted example database outside the repository tree — lives in
 ``tests/conftest.py`` and reaches this module because pytest imports that file
@@ -42,9 +59,11 @@ before any test module. It used to reach here only because
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -59,11 +78,22 @@ from hypothesis.database import DirectoryBasedExampleDatabase  # noqa: E402
 
 import conftest  # noqa: E402
 from pdf_tooling.errors import OutputEscapesDirError  # noqa: E402
+from pdf_tooling.safety import naming  # noqa: E402
 from pdf_tooling.safety.naming import render_name, used_fields  # noqa: E402
+
+#: The measured ``macos-14`` counterexample, spelled ONCE so the seed roster
+#: and the control arms below cannot drift apart on it. ``U+1239A`` is category
+#: ``Cn`` (unassigned), ``unicodedata.name`` raises on it, four UTF-8 bytes,
+#: an eight-byte rendered component under ``{stem}.{ext}`` — accepted by every
+#: filesystem this loop can reach, and refused by the one it cannot.
+_MACOS_COUNTEREXAMPLE: Final[str] = "\U0001239a"
 
 #: AC8's own named seed values, always included alongside hypothesis-generated
 #: ordinary text — the property must hold on the adversarial values named in
-#: the spec, not merely on whatever hypothesis happens to draw.
+#: the spec, not merely on whatever hypothesis happens to draw. Since PDF-85
+#: this roster holds AC8's seeds **plus measured counterexamples** — values no
+#: spec named, which a real filesystem was observed to refuse — and the second
+#: kind is labelled in place so the roster's meaning cannot quietly change.
 _SEED_VALUES = (
     "../",
     "..\\",
@@ -76,6 +106,13 @@ _SEED_VALUES = (
     "",
     "a" * 300,
     "ordinary-name",
+    # PDF-85, and deliberately NOT one of AC8's named adversarial values: the
+    # counterexample all four macos-14 legs of CI run 35295764623 shrank to,
+    # identically, across four interpreters and two xdist workers. It is pinned
+    # here rather than left to the hypothesis example database because CI
+    # runners are ephemeral and carry that database nowhere — `Phase.explicit`
+    # is the only carry that replays it on every run, everywhere.
+    _MACOS_COUNTEREXAMPLE,
 )
 
 #: The template roster, lifted out of the strategy so ONE roster feeds both
@@ -141,6 +178,36 @@ _stem_strategy = st.one_of(_ordinary_text, _hostile_text)
 _REFUSED: Final[str] = "render_name refused the rendered component"
 _RETURNED: Final[str] = "render_name returned a contained component"
 
+#: The meter's THIRD outcome (PDF-85 D6), and the one nothing asserts. It
+#: cannot fire on a filesystem that accepts every encodable name, so an arm
+#: requiring it to fire would be an acceptance criterion this loop has no host
+#: to drive; where it does fire, ``--hypothesis-show-statistics`` names it and
+#: the operator sees the observation without reading a spec.
+_ENCODING_REFUSED: Final[str] = "the filesystem refused the component's ENCODING, not its length"
+
+#: The one refusal class this oracle RECORDS instead of reddening on, held as a
+#: named frozenset of SYMBOLIC ``errno`` constants — the shape
+#: ``safety/atomic.py:205``'s ``_LINK_FALLBACK_ERRNOS`` already uses one layer
+#: down, because it is the same idea one layer up. **One member, measured.** A
+#: second joins it when a run produces one, and not before.
+#:
+#: **Symbolic, never the integer, and that is the load-bearing choice.**
+#: ``errno.EILSEQ`` resolves to a different number here than it does on the
+#: host that produced the measurement, and ``errno.ENAMETOOLONG`` likewise, so
+#: a transcribed integer is wrong on one half of this product's CI matrix
+#: whichever half it was copied from — and a transcribed length number would
+#: retire the renderer-defect verdict exactly where it has already fired once.
+#: The interpreter resolves these names on the host it runs on, which is the
+#: only spelling that is correct on both.
+_ENCODING_REFUSAL_ERRNOS: Final[frozenset[int]] = frozenset({errno.EILSEQ})
+
+#: The three verdicts, named once so the oracle and the control arms cannot
+#: drift apart on a string. Two of them red; the middle one is the whole of
+#: what PDF-85 moved.
+_DEFECT: Final[str] = "the renderer's defect"
+_RECORDED: Final[str] = "recorded, not the renderer's contract"
+_UNCLASSIFIED: Final[str] = "unclassified, and therefore still red"
+
 
 def _guaranteed_seed_examples(test: Callable[..., None]) -> Callable[..., None]:
     """Pin every seed under every template — the cross-product, DERIVED.
@@ -165,6 +232,89 @@ def _is_single_component(candidate: Path, *, out_dir: Path) -> bool:
     return resolved_parent == resolved_base
 
 
+@dataclass(frozen=True)
+class _Verdict:
+    """What :func:`_classify_filesystem_refusal` decided about one ``OSError``.
+
+    Exactly one of ``message`` and ``event_name`` is ever populated, and that
+    is the structural form of "this is a narrowing, not a swallow": a verdict
+    carrying neither would be a refusal the oracle returns from having neither
+    reddened nor recorded. The roster arm asserts the exclusive-or on every
+    member rather than trusting this sentence.
+    """
+
+    kind: str
+    message: str = ""
+    event_name: str = ""
+
+
+def _classify_filesystem_refusal(error: OSError, *, name: str, out_dir: Path) -> _Verdict:
+    """Which of THREE verdicts a refusal from ``candidate.touch()`` carries.
+
+    A pure function over the exception, and module-level rather than an ``if``
+    chain inside the ``except`` block, because the two readers need different
+    things from it: the oracle runs inside a hypothesis property, where
+    assertions shrink and ``event()`` is available, while the control arms
+    below need to interrogate the verdict deterministically, once, with no
+    property around them. Splitting the decision from the syscall gives both
+    without either compromising the other.
+
+    **A declared deviation from PDF-85 §D2, in one detail.** §D2 has the
+    recorded branch emit its ``event()`` here. It does not: ``event()`` raises
+    ``InvalidArgument("Cannot record events outside of a test")`` when there is
+    no hypothesis build context, which every deterministic arm below is, so a
+    classifier that emitted would be a classifier no control could call. The
+    decision — including WHICH event — stays wholly here; the oracle performs
+    the one line this function names.
+    """
+    encoded = len(name.encode("utf-8", "surrogateescape"))
+    if error.errno == errno.ENAMETOOLONG:
+        return _Verdict(
+            kind=_DEFECT,
+            message=(
+                f"render_name returned a component of {encoded} bytes that the filesystem "
+                f"under {out_dir} refuses as ENAMETOOLONG ({error}); the renderer handed a "
+                "name to a caller that AtomicWriter could only fail on with a bare OSError"
+            ),
+        )
+    if error.errno in _ENCODING_REFUSAL_ERRNOS:
+        # THE MEASURED OBSERVATION, CARRIED WHERE IT IS READ (PDF-85 D5).
+        #
+        # Ledger row `2b88707a36`, carrier `B-352`, CI run 35295764623 and its
+        # four `test (3.1x, macos-14)` jobs. `render_name` returned
+        # `'\U0001239a.pdf'` — U+1239A, category `Cn` (unassigned), four UTF-8
+        # bytes, an eight-byte component — every clause of the §D6 containment
+        # invariant held, and macOS's filesystem refused it with that host's
+        # own `errno.EILSEQ`. Nothing in §D6, in README.md's frozen section, or
+        # in `naming.py`'s own docstring promises that an arbitrary filesystem
+        # will accept a returned component; the only filesystem-facing promise
+        # the module makes is the byte-length one, and there is no `pathconf`
+        # for "which codepoints does this kernel's table know", so the renderer
+        # is not contracted to predict this and is not asked to here.
+        #
+        # WHAT IS STILL BROKEN, AND WHERE IT IS FILED — a citation, never a fix.
+        # The product consequence of this refusal is a bare `OSError` escaping
+        # `safety/atomic.py::AtomicWriter._replace` onto `cli/main.py`'s bug
+        # path: a traceback and exit 1 with no error envelope. It is filed as a
+        # `low` row at `2b88707a36`/`B-352` and is DELIBERATELY unspecced —
+        # this loop has no host that can drive it red, and a spec would ship
+        # with an acceptance criterion nobody here could satisfy. Editing
+        # `atomic.py` is that row's work, not this arm's.
+        return _Verdict(kind=_RECORDED, event_name=_ENCODING_REFUSED)
+    return _Verdict(
+        kind=_UNCLASSIFIED,
+        message=(
+            f"UNCLASSIFIED errno {error.errno} "
+            f"({errno.errorcode.get(error.errno, 'no symbolic name')}): the filesystem under "
+            f"{out_dir} refused the {encoded}-byte component {name!r} ({error}) for a reason "
+            "this oracle neither predicts nor has ever measured. It reds on purpose: a "
+            "two-way split would pass here, which is how an oracle goes green on an "
+            "unwritable tmp_path. Read the errno name out of this message and take it back "
+            "to the PM as a measurement — it is the second data point this loop does not have"
+        ),
+    )
+
+
 def _the_filesystem_accepts(candidate: Path, *, out_dir: Path) -> None:
     """A behavioural oracle for the byte-length refusal, not a copy of it.
 
@@ -175,16 +325,22 @@ def _the_filesystem_accepts(candidate: Path, *, out_dir: Path) -> None:
     would pin the constant to itself. Creating the file asks the filesystem
     instead — which is the authority the limit exists to keep the product away
     from — inside this test's own `tmp_path`, and removes it again.
+
+    **PDF-85: the docstring above and the code below now agree.** This block
+    caught every ``OSError`` and called them all the renderer's fault, so a
+    255-byte oracle reddened on an eight-byte name. It still asks the same
+    filesystem the same question — the authority is unchanged and the limit is
+    still not transcribed — and :func:`_classify_filesystem_refusal` decides
+    which of the three answers came back.
     """
     try:
         candidate.touch()
     except OSError as error:
-        encoded = len(candidate.name.encode("utf-8", "surrogateescape"))
-        raise AssertionError(
-            f"render_name returned a component of {encoded} bytes that the filesystem "
-            f"under {out_dir} refuses ({error}); the renderer handed a name to a caller "
-            "that AtomicWriter could only fail on with a bare OSError"
-        ) from error
+        verdict = _classify_filesystem_refusal(error, name=candidate.name, out_dir=out_dir)
+        if verdict.kind == _RECORDED:
+            event(verdict.event_name)
+            return
+        raise AssertionError(verdict.message) from error
     candidate.unlink()
 
 
@@ -249,6 +405,205 @@ def test_every_seed_value_is_guaranteed_under_every_template() -> None:
         f"{len(examples)} explicit examples for {len(_SEED_VALUES)} seeds x "
         f"{len(_TEMPLATES)} templates -- the cross-product is the contract, so this is "
         "either a duplicate pairing or a missing one"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-85 — the three control arms for the re-scoped oracle
+# --------------------------------------------------------------------------- #
+
+
+def _refusing_touch(errno_value: int) -> Callable[..., None]:
+    """A ``Path.touch`` that refuses with *errno_value*, and refuses nothing else.
+
+    The injection point is the ``touch`` the oracle itself calls — never
+    ``errno``, whose numbers are the one thing in this design that must stay
+    the interpreter's to resolve, and never a branch on which host is running,
+    which would encode a rule about a filesystem nobody in this loop has
+    measured. Only the ONE arm that cannot be driven against a real syscall
+    here uses this; the byte-length arm above deliberately does not.
+    """
+
+    def touch(self: Path, *args: object, **kwargs: object) -> None:
+        raise OSError(errno_value, os.strerror(errno_value), str(self))
+
+    return touch
+
+
+def test_an_over_long_component_still_reds_the_oracle_on_a_real_syscall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC2. The byte-length branch is LIVE, and the filesystem is still the authority.
+
+    Driven exactly as the oracle's own docstring prescribes: raise the
+    product's byte limit so an over-long component is RETURNED, then hand it to
+    a real `tmp_path`. **Nothing is injected anywhere in this arm's path** — the
+    errno in the message is the one the kernel produced, which is what makes
+    this arm evidence about a filesystem rather than about a stand-in.
+
+    The first half is this arm's own red-of-the-red: at the SHIPPED limit the
+    case cannot be constructed at all, because `render_name` refuses first. The
+    arm asserts that rather than quietly passing through it, so a change that
+    made the over-long component unreachable fails loudly here instead of
+    leaving an oracle with nothing left to observe.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    shipped_limit = naming._MAX_COMPONENT_BYTES
+
+    with pytest.raises(OutputEscapesDirError):
+        render_name("{stem}.{ext}", out_dir=out_dir, stem="a" * 300, ext="pdf")
+
+    monkeypatch.setattr(naming, "_MAX_COMPONENT_BYTES", 10_000)
+    candidate = render_name("{stem}.{ext}", out_dir=out_dir, stem="a" * 300, ext="pdf")
+    encoded = len(candidate.name.encode("utf-8", "surrogateescape"))
+    assert encoded > shipped_limit, (
+        f"the raised limit returned a {encoded}-byte component, inside the shipped "
+        f"{shipped_limit}-byte limit — this arm did not construct its own case, and an "
+        "oracle asked a question the filesystem was always going to answer yes to"
+    )
+
+    with pytest.raises(AssertionError) as caught:
+        _the_filesystem_accepts(candidate, out_dir=out_dir)
+
+    message = str(caught.value)
+    assert "ENAMETOOLONG" in message, (
+        f"the refusal reddened without naming ENAMETOOLONG, so the next reader has to "
+        f"look a number up to know which branch fired: {message}"
+    )
+    assert f"{encoded} bytes" in message, (
+        f"the message lost the component's byte count, which is the one figure that says "
+        f"WHY this is the renderer's defect: {message}"
+    )
+
+
+#: The verdict roster: every ``errno`` this design has an opinion about, and
+#: three it deliberately does not. SYMBOLIC constants only — an integer here
+#: would be correct on at most one half of this product's CI matrix, for the
+#: reason ``_ENCODING_REFUSAL_ERRNOS`` states above.
+_VERDICT_ROSTER: Final[tuple[tuple[int, str], ...]] = (
+    (errno.ENAMETOOLONG, _DEFECT),
+    (errno.EILSEQ, _RECORDED),
+    (errno.EACCES, _UNCLASSIFIED),
+    (errno.ENOENT, _UNCLASSIFIED),
+    (errno.ENOSPC, _UNCLASSIFIED),
+)
+
+
+@pytest.mark.parametrize(
+    ("errno_value", "expected"),
+    _VERDICT_ROSTER,
+    ids=[errno.errorcode[value] for value, _ in _VERDICT_ROSTER],
+)
+def test_the_classifier_answers_every_roster_errno_with_one_of_three_verdicts(
+    tmp_path: Path, errno_value: int, expected: str
+) -> None:
+    """AC4/AC6/AC8. The whole contract of the re-scope, pinned in one arm.
+
+    **This is where the monotonicity claim is discharged in mechanism rather
+    than in prose.** Before PDF-85 every member of this roster reached an
+    `AssertionError`; after it, every member except `errno.EILSEQ` still does.
+    Exactly one verdict moved, in exactly one direction, and the allowlist's
+    width is that claim's own measure — which is why the width is asserted here
+    and not merely described above.
+
+    **It runs against the EIGHT-BYTE counterexample rather than a long name**,
+    which is what makes the `ENAMETOOLONG` cell load-bearing: the length
+    verdict follows the errno NAME, never a transcribed number and never the
+    component's own size. A design that had hard-coded this host's own
+    `ENAMETOOLONG` integer would mis-read a genuine length refusal from the one
+    host that has ever produced a second data point — retiring, there, the very
+    branch this item exists to keep alive.
+    """
+    assert len(_ENCODING_REFUSAL_ERRNOS) == 1, (
+        "the recorded-verdict allowlist is no longer exactly one member wide. The narrowing "
+        "PDF-85 landed is exactly one verdict wide: a second member is a new measurement and "
+        "arrives with its own evidence beside it, never as an entry added to reach green, and "
+        "an empty allowlist retires the one observation this arm exists to carry"
+    )
+    name = f"{_MACOS_COUNTEREXAMPLE}.pdf"
+    encoded = len(name.encode("utf-8", "surrogateescape"))
+    assert encoded < naming._MAX_COMPONENT_BYTES, (
+        f"the roster's component is {encoded} bytes, no longer inside the product's own "
+        "limit — the ENAMETOOLONG cell would then prove nothing about the verdict "
+        "following the NAME rather than the size"
+    )
+
+    verdict = _classify_filesystem_refusal(
+        OSError(errno_value, os.strerror(errno_value), name), name=name, out_dir=tmp_path
+    )
+
+    assert verdict.kind == expected, (
+        f"{errno.errorcode[errno_value]} was classified {verdict.kind!r}, not {expected!r}"
+    )
+    carries = "both a message and an event" if verdict.message else "neither"
+    assert bool(verdict.message) != bool(verdict.event_name), (
+        f"the verdict for {errno.errorcode[errno_value]} carries {carries} — a branch the "
+        "oracle returns from having neither reddened nor recorded is a SWALLOW, which is "
+        "the one shape this re-scope must never become"
+    )
+    if expected == _DEFECT:
+        assert "ENAMETOOLONG" in verdict.message
+        assert f"{encoded} bytes" in verdict.message
+    elif expected == _RECORDED:
+        assert verdict.event_name == _ENCODING_REFUSED
+    else:
+        assert f"UNCLASSIFIED errno {errno_value}" in verdict.message, (
+            f"the unclassified verdict did not name the errno it could not classify, which "
+            f"is the entire value it has: {verdict.message}"
+        )
+        assert errno.errorcode[errno_value] in verdict.message, (
+            f"the unclassified verdict named a number and not its symbolic name, so the "
+            f"reader on the other host has to look it up: {verdict.message}"
+        )
+
+
+def test_the_measured_counterexample_passes_here_and_is_recorded_where_it_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC3/AC10. The macos-14 observation, made executable on a host that accepts it.
+
+    Three halves, in the order that makes each mean something:
+
+    1. this host's filesystem ACCEPTS the pinned counterexample, so the oracle
+       passes and leaves nothing behind — which is why the property's own
+       twelfth seed is green here and was red there;
+    2. a filesystem that refuses it with the measured ENCODING errno is
+       RECORDED and not reddened, and the emission is OBSERVED rather than
+       assumed. `event()` raises outside a hypothesis build context, so
+       capturing the module's own name is the only way a deterministic arm can
+       watch the recorded verdict happen at all;
+    3. the SAME eight-byte component refused for LENGTH is still the renderer's
+       defect. Nothing about the component changed between halves 2 and 3 — only
+       the errno — which is the property that keeps a real length refusal red on
+       a host this loop cannot run.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    candidate = render_name("{stem}.{ext}", out_dir=out_dir, stem=_MACOS_COUNTEREXAMPLE, ext="pdf")
+
+    _the_filesystem_accepts(candidate, out_dir=out_dir)
+    assert not candidate.exists(), "the oracle left its own probe file behind"
+
+    recorded: list[str] = []
+    monkeypatch.setattr(sys.modules[__name__], "event", recorded.append)
+    monkeypatch.setattr(Path, "touch", _refusing_touch(errno.EILSEQ))
+
+    _the_filesystem_accepts(candidate, out_dir=out_dir)
+
+    assert recorded == [_ENCODING_REFUSED], (
+        f"the encoding refusal recorded {recorded!r}; an observation nobody emits is an "
+        "observation the operator never sees in --hypothesis-show-statistics"
+    )
+
+    monkeypatch.setattr(Path, "touch", _refusing_touch(errno.ENAMETOOLONG))
+    with pytest.raises(AssertionError) as caught:
+        _the_filesystem_accepts(candidate, out_dir=out_dir)
+
+    assert "ENAMETOOLONG" in str(caught.value)
+    assert recorded == [_ENCODING_REFUSED], (
+        "the length refusal emitted the encoding event as well, so the meter can no longer "
+        "tell the two refusal classes apart"
     )
 
 
