@@ -450,8 +450,12 @@ DEFAULT_DIRECTORY_MESSAGE: Final[str] = "expected a PDF file, not a directory"
 #: Note for whoever implements `PDF-90`: `D7` call group 13 forbids `os.chmod`
 #: outside `safety/` and its planted mutant is GREEN, because the mutation
 #: this comment describes arrives with no `chmod` call anywhere to catch. The
-#: control is not wrong, it is blind, and the remedy may need to add the very
-#: call that group forbids -- inside `safety/`, where it is permitted.
+#: control is not wrong, it is blind. The remedy may need the very call that
+#: group forbids, and the permission is NARROWER than it looks: `CHOKEPOINT`
+#: is `pdf_tooling.safety.atomic`, one FILE, and `tier_violations()` skips it
+#: before any allowlist is consulted. A `chmod` anywhere else under `safety/`
+#: -- including this module -- is a tier-2 violation needing the first entry
+#: `SAFETY_INNER_ALLOW` has ever carried; it is currently `frozenset({})`.
 #:
 #: **It deliberately avoids the framework's own phrase, "is not readable".**
 #: That string is the signature of the parse-time veto this spec removed, and
