@@ -26,6 +26,7 @@ from __future__ import annotations
 import errno
 import os
 import shutil
+import stat
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -235,6 +236,69 @@ def test_the_degraded_path_still_writes_the_sidecar(tmp_path: Path, xdev_dir: Pa
     assert result.returncode == 0, result.stderr
     assert target.read_text() == "rewritten"
     assert (tmp_path / "doc.pdf.bak").read_text() == "original"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-90 AC8/AC9(b) — the degraded path lands the SAME mode as the normal
+# path, and a preserved destination lacking the owner-read bit still
+# completes at exit 0, because the mode is applied only after
+# `_replace_across_devices`'s own verification (`§D3`, `§E11`).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("umask_value", "expected"),
+    [(0o002, 0o664), (0o022, 0o644), (0o077, 0o600)],
+    ids=["umask-002", "umask-022", "umask-077"],
+)
+def test_ac8_a_fresh_exdev_create_lands_the_same_mode_as_the_normal_path(
+    tmp_path: Path, xdev_dir: Path, umask_value: int, expected: int
+) -> None:
+    """AC8. The ``umask 077`` cell is the same NEGATIVE control AC2 names:
+    ``0o600`` is also the pre-fix defect's own answer, so it proves only that
+    nothing loosened, never that this path preserves. The 002/022 cells are
+    what discriminate the fix from the defect."""
+    target = tmp_path / "doc.pdf"
+    previous = os.umask(umask_value)
+    try:
+        result = run_harness(["write", "--target", str(target), "--temp-dir", str(xdev_dir)])
+    finally:
+        os.umask(previous)
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(target.stat().st_mode) == expected
+
+
+def test_ac8_a_forced_exdev_overwrite_preserves_a_0400_destination(
+    tmp_path: Path, xdev_dir: Path
+) -> None:
+    """AC8. ``-f`` over a ``0400`` destination through ``EXDEV``: ``0400``,
+    identical to the normal path's own AC4 arm."""
+    target = tmp_path / "doc.pdf"
+    target.write_text("original")
+    target.chmod(0o400)
+    result = run_harness(["-f", "write", "--target", str(target), "--temp-dir", str(xdev_dir)])
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(target.stat().st_mode) == 0o400, (
+        "the degraded path added back the owner-write bit a 0400 destination never "
+        "had -- the normal path (AC4) refuses to do this"
+    )
+
+
+@pytest.mark.parametrize("preserved_mode", [0o200, 0o000], ids=["0200", "0000"])
+def test_ac9b_a_preserved_destination_lacking_owner_read_completes_through_exdev(
+    tmp_path: Path, xdev_dir: Path, preserved_mode: int
+) -> None:
+    """AC9(b). The mode is applied AFTER ``_replace_across_devices``'s own
+    size-and-SHA-256 verification. Moved earlier, this exact arm raises an
+    unhandled ``PermissionError`` out of ``_digest``'s ``open(path, "rb")``
+    (`§E11`, `§D3`), because the verification re-reads the destination by
+    path while it would already be unreadable."""
+    target = tmp_path / "doc.pdf"
+    target.write_text("original")
+    target.chmod(preserved_mode)
+    result = run_harness(["-f", "write", "--target", str(target), "--temp-dir", str(xdev_dir)])
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(target.stat().st_mode) == preserved_mode
 
 
 # --------------------------------------------------------------------------- #

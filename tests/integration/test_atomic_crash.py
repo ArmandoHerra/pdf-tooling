@@ -30,6 +30,7 @@ import hashlib
 import os
 import select
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -356,4 +357,43 @@ def test_every_fault_point_precedes_the_replace() -> None:
         f"a checkpoint at line {max(checkpoints)} sits at or after the commit at "
         f"line {min(replaces)}: the crash arms would be parking after the destination "
         "has already changed"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-90 AC9(a) — the in-flight temp never carries the destination's mode.
+#
+# This reuses `park_at` rather than a second rendezvous mechanism: the
+# question is "what mode does the not-yet-committed temp hold while a real
+# process has it open", which is exactly what the `after_fsync` fault point
+# already proves a real child is parked at (§E12). A monkeypatched `st_dev`
+# or an in-process `AtomicWriter` could not show this — the file has to
+# genuinely be held open by another process for "while parked" to mean
+# anything.
+# --------------------------------------------------------------------------- #
+
+
+def test_ac9a_the_parked_temp_never_carries_the_destinations_mode(tmp_path: Path) -> None:
+    """§D3, §E12. Destination pre-set to `0664`; the temp must stay `0600`
+    (`tempfile`'s own default) the whole time it could be observed mid-write,
+    and the destination must land at the PRESERVED `0664`, never the temp's."""
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(ORIGINAL)
+    target.chmod(0o664)
+
+    args = ["-f", "write", "--target", str(target), "--content", "rewritten"]
+    with park_at("after_fsync", args) as parked:
+        temp = Path(parked.detail)
+        temp_mode = stat.S_IMODE(temp.stat().st_mode)
+        assert temp_mode == 0o600, (
+            f"the in-flight temp is {oct(temp_mode)}, not tempfile's own 0o600 -- the "
+            "destination's permissions were published onto the not-yet-committed bytes "
+            "before the write completed"
+        )
+        assert parked.release() == 0
+
+    final_mode = stat.S_IMODE(target.stat().st_mode)
+    assert final_mode == 0o664, (
+        f"the destination is {oct(final_mode)} after the write completed, not the "
+        "preserved 0o664 the pre-existing file already carried"
     )

@@ -53,8 +53,12 @@ and broken ``--dry-run`` purity while passing a four-name walk.
     creation is a gated write like any other)
 12. ``os.rmdir`` / ``shutil.rmtree`` (extension — symmetry with 9 and 11)
 13. ``os.truncate`` / ``Path.touch`` / ``os.utime`` / ``os.chmod`` / ``os.chown``
-    (extension — metadata mutation is still mutation, and the purity snapshot
-    compares ``st_mode`` and ``st_mtime_ns``)
+    (extension — no module OUTSIDE the write chokepoint may call a
+    metadata-mutating function; PDF-90 measured that this walk watches CALL
+    SITES and is blind to a mutation with none, which is why the mode a real
+    write leaves behind is observed separately, by
+    ``tests/integration/test_pdf90_output_mode.py`` and its neighbours,
+    rather than by this census)
 14. ``os.open`` / ``os.symlink`` / ``os.link`` (extension — ``os.open``'s flags
     are not reliably statically analysable, and no module outside ``safety/``
     has a legitimate use for any of the three)
@@ -5470,4 +5474,151 @@ def test_ac13b_a_fourth_sources_bearing_construction_fails_the_walk(tmp_path: Pa
     carrying = sorted(site for site, has in sites.items() if has)
     assert len(carrying) == 4, (
         f"the walk did not notice the planted fourth sources=-bearing construction: {carrying}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Section 7 -- PDF-90 `§D4`/AC18 (X-918 REPLACES the criterion as first
+# written): the umask is read AT MOST ONCE, at MODULE SCOPE, and no other
+# `os.umask(` call site exists anywhere under `src/`.
+#
+# TWO independent, isolating assertions -- never the single "exactly one
+# os.umask( call site" count the spec first proposed. `§D4`'s own
+# read-and-restore idiom needs TWO `os.umask(` calls BY DESIGN
+# (`current = os.umask(0o022); os.umask(current)`), so a bare call-site count
+# is red at rest on the very code this item ships, and collapsing the idiom
+# to reach green is the wrong fix (`§D4` refuses a probe value of `0`: a
+# process that died between the two calls must leave a sane umask, not a
+# permissive one). What actually has to hold is (a) the READ-ONCE HELPER,
+# `_read_umask_once`, is invoked exactly once, at module scope, and (b)
+# EVERY `os.umask(` call site anywhere in `src/` lives inside that helper's
+# own body -- never scattered, never per-write, never reachable from a
+# thread this product does not have today.
+# --------------------------------------------------------------------------- #
+
+_READ_UMASK_ONCE: Final = "_read_umask_once"
+_OS_UMASK: Final = "os.umask"
+
+
+class _UmaskCallVisitor(ast.NodeVisitor):
+    """Collects every ``os.umask(`` call and every ``_read_umask_once(`` call,
+    each with its enclosing scope -- ``"<module>"`` for a top-level statement,
+    else the name of the nearest enclosing function or class."""
+
+    def __init__(self, module: str, bindings: dict[str, str]) -> None:
+        self.module = module
+        self.bindings = bindings
+        self.scope: list[str] = ["<module>"]
+        self.umask_calls: list[tuple[str, str, int]] = []
+        self.helper_calls: list[tuple[str, str, int]] = []
+
+    def _scoped(self, node: ast.AST, name: str) -> None:
+        self.scope.append(name)
+        self.generic_visit(node)
+        self.scope.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        self._scoped(node, node.name)
+
+    def _is_umask_call(self, node: ast.Call, target: str) -> bool:
+        if target == _OS_UMASK:
+            return True
+        if isinstance(node.func, ast.Name):
+            return self.bindings.get(target) == _OS_UMASK
+        if isinstance(node.func, ast.Attribute):
+            head = target.rsplit(".", 1)[0]
+            resolved = self.bindings.get(head.split(".", 1)[0])
+            return bool(resolved) and f"{resolved}.umask" == _OS_UMASK
+        return False
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        target = dotted(node.func)
+        tail = target.rsplit(".", 1)[-1] if target else ""
+        if self._is_umask_call(node, target):
+            self.umask_calls.append((self.module, self.scope[-1], node.lineno))
+        if tail == _READ_UMASK_ONCE:
+            self.helper_calls.append((self.module, self.scope[-1], node.lineno))
+        self.generic_visit(node)
+
+
+def _umask_census(root: Path) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]]]:
+    """``(os.umask( call sites, _read_umask_once( call sites)`` under *root*."""
+    umask_sites: list[tuple[str, str, int]] = []
+    helper_sites: list[tuple[str, str, int]] = []
+    for path in iter_python_files(root):
+        module = module_name(path, root)
+        tree = ast.parse(path.read_text(), filename=module)
+        visitor = _UmaskCallVisitor(module, from_import_bindings(tree))
+        visitor.visit(tree)
+        umask_sites.extend(visitor.umask_calls)
+        helper_sites.extend(visitor.helper_calls)
+    return umask_sites, helper_sites
+
+
+def test_ac18_the_umask_read_once_helper_is_invoked_exactly_once_at_module_scope() -> None:
+    _, helper_sites = _umask_census(SRC)
+    assert len(helper_sites) == 1, (
+        f"expected exactly one `_read_umask_once()` invocation under src/, found "
+        f"{len(helper_sites)}: {helper_sites}"
+    )
+    module, scope, line = helper_sites[0]
+    assert scope == "<module>", (
+        f"{module}:{line}: _read_umask_once() must be invoked at MODULE scope "
+        f"(e.g. `_UMASK = _read_umask_once()`), found inside {scope!r} instead"
+    )
+
+
+def test_ac18_every_os_umask_call_site_lies_inside_the_helpers_own_body() -> None:
+    umask_sites, _ = _umask_census(SRC)
+    assert umask_sites, "no `os.umask(` call site found under src/ -- the helper is missing"
+    offenders = [
+        f"{module}:{line} (inside {scope!r})"
+        for module, scope, line in umask_sites
+        if scope != _READ_UMASK_ONCE
+    ]
+    assert offenders == [], f"os.umask( called outside _read_umask_once(): {offenders}"
+
+
+def test_ac18_a_second_helper_invocation_reds_only_the_invocation_count(tmp_path: Path) -> None:
+    """Isolation, driven: a SECOND `_read_umask_once()` call at module scope
+    must red the invocation-count arm above without touching the scope arm --
+    the plant introduces no new `os.umask(` call site of its own."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / "pdf_tooling" / "ops" / "_pdf90_planted_second_read.py"
+    planted.write_text(
+        "from pdf_tooling.safety.atomic import _read_umask_once\n\n\n_SECOND = _read_umask_once()\n"
+    )
+    umask_sites, helper_sites = _umask_census(scratch)
+    assert len(helper_sites) == 2, (
+        f"the walk did not notice the planted second invocation: {helper_sites}"
+    )
+    offenders = [site for site in umask_sites if site[1] != _READ_UMASK_ONCE]
+    assert offenders == [], (
+        f"planting a second _read_umask_once() invocation must not itself introduce "
+        f"a stray os.umask( call site: {offenders}"
+    )
+
+
+def test_ac18_a_stray_os_umask_call_reds_only_the_scope_arm(tmp_path: Path) -> None:
+    """Isolation, driven: a bare `os.umask(` call OUTSIDE the helper must red
+    the scope arm above without changing the invocation count -- the plant
+    calls `os.umask` directly and never calls `_read_umask_once`."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    planted = scratch / "pdf_tooling" / "ops" / "_pdf90_planted_stray_umask.py"
+    planted.write_text("import os\n\n\ndef relax() -> None:\n    os.umask(0o022)\n")
+    umask_sites, helper_sites = _umask_census(scratch)
+    assert len(helper_sites) == 1, (
+        f"planting a stray os.umask( call must not change the invocation count: {helper_sites}"
+    )
+    offenders = [site for site in umask_sites if site[1] != _READ_UMASK_ONCE]
+    assert len(offenders) == 1 and offenders[0][0].endswith("_pdf90_planted_stray_umask"), (
+        f"the walk did not notice the planted stray os.umask( call site: {offenders}"
     )

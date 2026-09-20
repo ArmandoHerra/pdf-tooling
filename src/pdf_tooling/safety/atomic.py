@@ -41,7 +41,14 @@ The seven steps, exactly (``PLAN.md`` §5.3)
    *correct* precisely because step 6 replaces the directory entry rather than
    truncating the file, so the sidecar keeps the original inode. ``shutil.copy2``
    is the fallback where linking is refused.
-6. **Replace** — ``os.replace``, atomic within a filesystem.
+6. **Replace** — ``os.replace``, atomic within a filesystem, followed by the
+   one place this product decides a mode: PDF-90's posture is PRESERVE. An
+   overwrite's destination keeps the nine permission bits it already had; a
+   destination that did not exist is created at ``0666 & ~umask``, what a
+   shell redirect would have produced. Applied here, after the replace (and,
+   on the degraded path, after :meth:`_replace_across_devices`'s own
+   verification) — never on the temp, which stays ``tempfile``'s ``0600``
+   while the bytes are in flight.
 7. **Crash residue** — a hard kill between 3 and 6 can leave a toolkit temp
    file. That is expected, it is reported by ``doctor --strict`` and never swept
    (``PLAN.md`` §12 R-07), and the destination is untouched either way.
@@ -152,6 +159,7 @@ import errno
 import hashlib
 import os
 import shutil
+import stat
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
@@ -186,6 +194,7 @@ from pdf_tooling.safety.tempnames import TEMP_PREFIX
 
 __all__ = [
     "AtomicWriter",
+    "CREATE_MODE",
     "DEGRADED_PREFIX",
     "PlannedOutputs",
     "ScratchDir",
@@ -200,6 +209,46 @@ DEGRADED_PREFIX: Final[str] = "atomicity degraded"
 #: Copy chunk for the ``EXDEV`` fallback. Large enough not to syscall per line,
 #: small enough that a multi-gigabyte document is never held in memory.
 _CHUNK: Final[int] = 1 << 20
+
+#: PDF-90 (`05172a7b3c`) — the ruling is PRESERVE (``X-911``): an overwrite
+#: keeps the destination's own nine permission bits, and a destination that
+#: did not exist is created at ``CREATE_MODE & ~umask`` — what a shell
+#: redirect would have produced. ``0o666`` is the base a redirect starts
+#: from, before the umask narrows it; the umask is applied at the one call
+#: site that consumes this constant (:meth:`AtomicWriter._apply_destination_mode`,
+#: ``§D4``). Exported alongside :data:`DEGRADED_PREFIX` so ``README.md``'s own
+#: claim derives from this constant rather than restating it (``§D7``).
+CREATE_MODE: Final[int] = 0o666
+
+
+def _read_umask_once() -> int:
+    """The process umask, read exactly once (``§D4``, ``X-916`` constraint 6).
+
+    ``os.umask`` is a read-modify-write of process-global state — there is no
+    read-only accessor — so the read happens here, once, and is cached below
+    rather than re-read per write. The probe value is deliberately ``0o022``,
+    never ``0``: a process that died between these two calls would leave a
+    sane umask behind, not a permissive one.
+
+    **Safe because nothing races it, measured rather than assumed.**
+    ``grep -rn "ThreadPool\\|concurrent.futures\\|threading\\|Thread("
+    src/`` finds no in-process threading anywhere in this product. The only
+    concurrency is ``ops/procpool.py``'s ``ProcessPoolExecutor`` with the
+    ``spawn`` start method, and the :class:`AtomicWriter` a worker constructs
+    lives in a separate OS process that inherited its own umask at spawn. A
+    future that introduces in-process threading must revisit this
+    deliberately — an AST arm pins both this function's own invocation count
+    and scope, and every ``os.umask(`` call site in ``src/``, so that future
+    cannot inherit today's assumption silently.
+    """
+    current = os.umask(0o022)
+    os.umask(current)
+    return current
+
+
+#: Read once, at import — never per-write, never from a thread. See
+#: :func:`_read_umask_once`'s own docstring for why that is safe today.
+_UMASK: Final[int] = _read_umask_once()
 
 #: ``os.link`` refusals that mean "this filesystem will not hard-link", as
 #: opposed to a real error worth propagating.
@@ -762,6 +811,12 @@ class AtomicWriter:
         #: replace. ``None`` until then, and ``None`` forever for a dry
         #: writer, which committed nothing.
         self._bytes_written: int | None = None
+        #: PDF-90 (``§D1``). The destination's own permission bits, captured
+        #: in :meth:`_plan` before anything has moved — ``None`` means the
+        #: destination did not exist, and is the ONLY thing that selects the
+        #: create-case mode in :meth:`_apply_destination_mode` (never a flag,
+        #: never ``policy.in_place``, never the verb).
+        self._destination_mode: int | None = None
 
     # -- the surface a verb touches ---------------------------------------- #
 
@@ -913,7 +968,19 @@ class AtomicWriter:
         refusal into :attr:`planned_refusal` and returns, stopping exactly where
         the real run would have stopped — which is why the warning below sits
         after the ``except`` and not inside a ``finally``.
+
+        **PDF-90 (``§D1``).** The FIRST statement, unconditionally, in both
+        modes: a ``stat`` is read-only, so this costs nothing under
+        ``--dry-run`` and keeps that purity intact. Capturing here, before the
+        no-clobber and writability checks below have run, is what makes
+        ``--in-place`` correct for free — the destination is the input, it
+        exists, and its mode is read before anything has moved.
         """
+        self._destination_mode = (
+            stat.S_IMODE(os.stat(self.destination).st_mode) & 0o777
+            if self.destination.exists()
+            else None
+        )
         try:
             ensure_no_clobber(
                 self.target,
@@ -1040,6 +1107,50 @@ class AtomicWriter:
             if error.errno != errno.EXDEV:
                 raise
             self._replace_across_devices(temp)
+        # PDF-90 (`§D3`). AFTER the whole try/except — including, on the
+        # degraded path, `_replace_across_devices`'s own size-and-SHA-256
+        # verification (`§E11`). Moved earlier, a `0200` or `0000` preserved
+        # destination raises an unhandled `PermissionError` out of `_digest`'s
+        # `open(path, "rb")` before the write is even confirmed to have
+        # landed. One call site covers both the normal and the degraded path.
+        self._apply_destination_mode()
+
+    def _apply_destination_mode(self) -> None:
+        """PDF-90 (`§D3`, `§D4`, `§D5`) — the one place this product decides a
+        mode. The temp never carries it: this runs only after the destination
+        already holds the committed bytes, so the in-flight temp stays
+        ``tempfile``'s own `0600` the whole time it could be observed
+        mid-write (`§E12`).
+
+        ``self._destination_mode`` is ``None`` only when :meth:`_plan` found
+        no existing destination — the create case, `CREATE_MODE & ~umask`,
+        what an anonymous shell redirect would have produced. Otherwise it is
+        the nine bits (`§D2`: `& 0o777`, never the raw `stat.S_IMODE()`, which
+        would carry `setuid`/`setgid`/`sticky` onto a new inode this process
+        does not own the way the original one's owner did) the destination
+        already had before this write began.
+        """
+        mode = (
+            self._destination_mode
+            if self._destination_mode is not None
+            else (CREATE_MODE & ~_UMASK)
+        )
+        try:
+            os.chmod(self.destination, mode)
+        except OSError as error:
+            # Very nearly unreachable — this process just created the inode
+            # `os.replace` handed it, so it owns it and `EPERM` does not
+            # arise. Wrapped anyway because this module's own standing rule
+            # (`_make_backup`'s own comment, PDF-50 D2) is that no bare
+            # `OSError` escapes to `cli/main.py`'s bug path. The bytes
+            # already landed; only the mode failed to apply, so the
+            # destination is left at the temp's own `0600` — tighter, never
+            # looser, and the message says so (`§D5`).
+            raise FailureError(
+                f"the write to {self.target} landed but its permissions could not "
+                f"be set: {error.strerror}",
+                path=str(self.target),
+            ) from error
 
     def _replace_across_devices(self, temp: Path) -> None:
         """Condition 2: a real ``EXDEV``, completed and then verified."""

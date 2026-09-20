@@ -29,6 +29,13 @@ What an entry records, and why each field is there
   with byte-identical content, which is exactly what an atomic writer that
   ignored the gate would produce.
 * **``st_mode`` is included**, because metadata mutation is still mutation.
+  This comparator runs against dry-run purity and against a REFUSED real run
+  (nothing lands either way) — never against a real run that finished writing,
+  where a mode is expected to land. PDF-90 measured every call site that
+  compares a before/after pair here and found none over a completed write; do
+  not mistake this field for an instrument that observes the mode a real
+  write leaves behind. ``tests/integration/test_pdf90_output_mode.py`` and its
+  neighbours are that instrument.
 
 The environment rule that makes it deterministic
 ------------------------------------------------

@@ -186,6 +186,7 @@ Uniform across every verb.
 - `--dry-run` plans and reports; it writes nothing, anywhere.
 - Outputs never clobber. An existing target needs `-f/--force`. On a non-interactive run, overwriting in a multi-input invocation (`merge`, `delete`, `convert`, etc.) additionally requires `-y`: bulk (more than a single input) plus destructive (in-place or clobbering) on a non-terminal stdin is refused with exit 5 rather than prompted.
 - Every write is write-to-temp-on-the-target-filesystem, `fsync`, then an atomic rename.
+- An output keeps the permission bits of the file it replaces, and a destination that did not exist is created at `0666 & ~umask` — what a shell redirect would have produced. The `.bak` sidecar keeps the original's bits too, so a backup is never more permissive than the file it backs up.
 - Inputs are never mutated unless you pass `--in-place`, which writes a `.bak` sidecar first. `--no-backup` suppresses the sidecar and requires `--in-place` — on its own it is a usage error.
 - A password is never accepted as a command-line value. `--password-file` takes a path or `-`, because `argv` is world-readable in `/proc` and lands in shell history.
 

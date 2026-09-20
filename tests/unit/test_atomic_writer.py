@@ -32,8 +32,10 @@ than a parallel one that happens to agree.
 from __future__ import annotations
 
 import ast
+import errno
 import hashlib
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -1748,4 +1750,44 @@ def test_pdf74_output_absolutizes_the_key_and_echoes_the_spelling(
         f"[{spelling.id}] the dry plan {'refused' if dry_plan.refused else 'did not refuse'} "
         f"while the real plan {'refused' if real_refused else 'did not'} over the same value "
         f"{value!r}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-90 D5/AC12 -- a `chmod` failure at the end of `_replace()` is a
+# `FailureError` (exit 1), covered without a new pragma. `PRAGMA_CEILING` is
+# 46 of 46 -- zero headroom -- so the covering mechanism is the
+# `monkeypatch.setattr(os, ...)` idiom already used above (`:289`), never a
+# `# pragma: no cover`. The bytes already landed; only the mode failed to
+# apply, and the destination is left at the temp's own `0600` -- tighter,
+# never looser (`§D5`, `§E13`).
+# --------------------------------------------------------------------------- #
+
+
+def test_ac12_a_chmod_failure_is_a_failure_error_naming_the_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "doc.pdf"
+    calls: list[tuple[object, object]] = []
+
+    def failing_chmod(path: object, mode: object) -> None:
+        calls.append((path, mode))
+        raise OSError(errno.EPERM, "operation not permitted")
+
+    monkeypatch.setattr(os, "chmod", failing_chmod)
+
+    with pytest.raises(errors.FailureError) as excinfo:
+        with AtomicWriter(target, policy=make_policy()) as writer:
+            writer.path.write_bytes(b"payload")
+
+    assert calls, "the patched os.chmod was never reached -- the branch was not exercised"
+    message = str(excinfo.value)
+    assert str(target) in message, message
+    assert "landed" in message, message
+    assert target.exists(), "the bytes must be there even though the mode application failed"
+    committed = target.read_bytes()
+    assert committed == b"payload"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600, (
+        "a chmod failure must leave the destination at the temp's own 0o600 -- "
+        "tighter than intended, never looser"
     )

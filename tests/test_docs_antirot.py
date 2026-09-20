@@ -464,6 +464,20 @@ def engine_disclosure_key() -> str:
     return f"`{ENGINE_VERIFIED_KEY}`"
 
 
+def create_mode_octal() -> str:
+    """`CREATE_MODE`, rendered the way `README.md`'s Safety contract bullet
+    renders it -- FROM the product constant, never a restated literal.
+
+    PDF-90 (`X-911`). `CREATE_MODE` is exported alongside `DEGRADED_PREFIX`
+    through `pdf_tooling.safety` for exactly this: renaming or changing the
+    constant reds this arm rather than leaving a stale octal literal sitting
+    in the document next to a source that moved on.
+    """
+    from pdf_tooling.safety import CREATE_MODE
+
+    return f"{CREATE_MODE:o}"
+
+
 def password_disclosure_key() -> str:
     """The disclosure key as `README.md` renders it, FROM the CONSTRUCTOR.
 
@@ -870,6 +884,22 @@ DERIVED_FIGURES: tuple[DerivedFigure, ...] = (
             "honoured verb the two keys never co-occur. Unlike its sibling the derivation "
             "reads the key off password_detail() itself rather than off a constant, so "
             "renaming the PUBLISHED key reds here even if a constant were added later."
+        ),
+    ),
+    DerivedFigure(
+        document="README.md",
+        anchor="a destination that did not exist is",
+        derive=lambda: f"created at `0{create_mode_octal()} & ~umask`",
+        note=(
+            "PDF-90 (`X-911`). The FIRST anchor tried CONTAINED the derived string and "
+            "reddened both arms at once when either half changed -- replaced, because a "
+            "mutation reddening two criteria at once has proved neither. `CREATE_MODE` is "
+            "the base an anonymous shell redirect starts from before the umask narrows it; "
+            "renaming it, or changing its value, reds `test_every_registered_figure_"
+            "equals_its_derivation` alone, and making this anchor occur a second time reds "
+            "`test_every_registry_anchor_occurs_exactly_once` alone -- both driven "
+            "independently rather than assumed from the shape of the other README entries "
+            "above."
         ),
     ),
     DerivedFigure(

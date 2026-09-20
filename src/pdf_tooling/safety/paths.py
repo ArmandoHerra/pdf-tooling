@@ -434,28 +434,18 @@ DEFAULT_DIRECTORY_MESSAGE: Final[str] = "expected a PDF file, not a directory"
 #: never suggests a `chmod` -- telling an operator to loosen a mode is advice,
 #: and this message is a diagnosis.
 #:
-#: **That clause previously read "this product does not change a mode bit",
-#: which was false when it was written and is false now.** Every file this
-#: product writes lands at `0600`, whether or not a file was there before:
-#: `tempfile.NamedTemporaryFile` creates the temp at `0600` and `os.replace`
-#: carries the temp's mode onto the destination. So an overwrite rewrites the
-#: destination's mode, a read-only target gains back the owner write bit, and
-#: under `--in-place` the `.bak` keeps the original mode -- `os.link`, same
-#: inode -- while the file it backs up does not. Nobody chose this; it is
-#: `tempfile`'s default arriving through a rename. Filed as `05172a7b3c`, and
-#: the BEHAVIOUR is `PDF-90`'s subject: this correction is deliberately
-#: descriptive so a false sentence is not left standing while the fix is
-#: specced, and so the two land as separate, separately reviewable acts.
-#:
-#: Note for whoever implements `PDF-90`: `D7` call group 13 forbids `os.chmod`
-#: outside `safety/` and its planted mutant is GREEN, because the mutation
-#: this comment describes arrives with no `chmod` call anywhere to catch. The
-#: control is not wrong, it is blind. The remedy may need the very call that
-#: group forbids, and the permission is NARROWER than it looks: `CHOKEPOINT`
-#: is `pdf_tooling.safety.atomic`, one FILE, and `tier_violations()` skips it
-#: before any allowlist is consulted. A `chmod` anywhere else under `safety/`
-#: -- including this module -- is a tier-2 violation needing the first entry
-#: `SAFETY_INNER_ALLOW` has ever carried; it is currently `frozenset({})`.
+#: **That clause used to claim this product never touches a permission bit --
+#: false when it was written. It is now a decided posture, not an
+#: accident.** `PDF-90` (`X-911`) rules PRESERVE: an overwrite keeps the
+#: destination's own nine permission bits, and a destination that did not
+#: exist is created at `0666 & ~umask` -- what a shell redirect would have
+#: produced. `setuid`, `setgid` and `sticky` are never carried, and the
+#: `.bak` sidecar this rung's own diagnosis sits beside was already right and
+#: is untouched: the ruling makes the destination come to agree with it,
+#: never the reverse. Applied at the one call site the write chokepoint
+#: consults, `AtomicWriter._apply_destination_mode` (`safety/atomic.py`), so
+#: this module states the posture and that one owns enforcing it. Filed as
+#: `05172a7b3c`, closed by `PDF-90`.
 #:
 #: **It deliberately avoids the framework's own phrase, "is not readable".**
 #: That string is the signature of the parse-time veto this spec removed, and

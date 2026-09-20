@@ -33,7 +33,7 @@ somewhere unexpected" impossible to express, and the ``--dry-run`` purity
 snapshot is the empirical backstop for the rest.
 """
 
-from pdf_tooling.safety.atomic import DEGRADED_PREFIX, AtomicWriter
+from pdf_tooling.safety.atomic import CREATE_MODE, DEGRADED_PREFIX, AtomicWriter
 from pdf_tooling.safety.confirm import require_confirmation
 from pdf_tooling.safety.paths import (
     canonical,
@@ -49,6 +49,7 @@ from pdf_tooling.safety.policy import SafetyPolicy
 from pdf_tooling.safety.tempnames import TEMP_PREFIX, find_stray_temps, is_toolkit_temp
 
 __all__ = [
+    "CREATE_MODE",
     "DEGRADED_PREFIX",
     "TEMP_PREFIX",
     "AtomicWriter",
