@@ -208,6 +208,11 @@ MAKEFILE_TARGETS = {
     # this target's arms cannot run in CI's shallow, planning-tree-less checkout
     # at all, so joining `ci` would trade a real local gate for a skipped one.
     "docs-gate",
+    # PDF-91: the website contract gate. Deliberately NOT in `ci`'s
+    # prerequisite list -- `make ci` is uv-only by design and a Node toolchain
+    # must not become a prerequisite of the Python gate. It IS a CI job
+    # (`.github/gate-parity.toml`'s `website` entry, `in_make_ci = false`).
+    "website",
     # PDF-46: the standing-residue reaper. Lists by default, removes only under
     # CONFIRM=1, and is a prerequisite of NOTHING -- asserted by parsing the
     # Makefile in tests/test_engine_hiding_shim.py, not by reading it here.

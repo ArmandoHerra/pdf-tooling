@@ -481,3 +481,30 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
+
+  website:
+    name: website
+    # PDF-91. "green runs" below counts deploy-website.yml's `Build` JOB's own
+    # runs, NOT this job's own -- this job does not exist yet, so a p95 over
+    # its own green runs cannot. That population covers `npm ci` + `astro
+    # build` only; `astro check` has no CI population at all, so its summand
+    # below is a SINGLE OBSERVATION on a loaded developer host, not a p95, and
+    # the re-derivation over this job's own first five green runs is OWED once
+    # it exists -- until then the second summand is provisional.
+    # PDF-91 bound: p95 342.0s over 13 green runs (deploy-website.yml `Build`, 33276605892..35539031026, 2026-08-29..2026-09-20);
+    # + 46.0s for `astro check` (no CI population); 3x(342.0+46.0) = 19.4 min, rounded up. Derivation rule above `jobs:`.
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'   # Astro 7 requires Node >=22.12
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --locked
+      - run: make website

@@ -96,6 +96,7 @@ secret-scan
 docs-gate
 license-gate
 build
+website
 dco
 ```
 

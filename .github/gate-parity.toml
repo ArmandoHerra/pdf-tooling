@@ -42,7 +42,7 @@
 # file and the workflow ever disagree -- and this file now also sits inside
 # tests/test_gate_parity.py's stale-count guard.
 #
-# Applying this rule to ci.yml yields 20 gating steps across the 11 jobs --
+# Applying this rule to ci.yml yields 21 gating steps across the 12 jobs --
 # reproduced, today and at every commit, by
 # `uv run python scripts/gate_parity.py check`.
 #
@@ -215,6 +215,15 @@ step = "uv run --no-project python scripts/assert_artifacts.py"
 local = "artifacts-check"
 in_make_ci = false
 reason = "needs-built-artifact"
+
+# --- website -------------------------------------------------------------- #
+
+[[check]]
+job = "website"
+step = "make website"
+local = "website"
+in_make_ci = false
+note = "PDF-91: deliberately NOT a prerequisite of `make ci` -- `make ci` is uv-only by design, and making Node a prerequisite of the Python gate would tax every contributor who only ever touches src/. The local target runs the IDENTICAL command; this job's only difference is a cold node_modules."
 
 # --- rejected proposals ----------------------------------------------------- #
 
