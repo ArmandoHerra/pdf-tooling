@@ -71,6 +71,8 @@ A `0.3.1` invocation, script or import that relied on any of the following stops
 | `info` on a nonexistent input nested the failure inside `documents[0].error` | the same input returns a top-level `error` key and no `documents` key | read `error` at the top level; the exit code stays `4` |
 | `convert --dry-run` over a batch containing an item the real run fails on predicted a clean batch | the preview now predicts the real run's own exit code and per-item `ok` | do not trust a `--dry-run` result captured before the upgrade |
 | `--no-color`, and the `NO_COLOR` environment variable it honoured | removed — the flag is not declared, so passing it is an unknown-flag usage error that exits `2` carrying the usual envelope, and `NO_COLOR` is read nowhere | drop both from any script, alias or CI job. Neither ever changed a byte of output: this tool emits no ANSI styling at all, deliberately |
+| `-O` or `--out-dir` naming a destination that was also an input of the same run overwrote that input under `-f`, at exit `0` with `"ok": true` and no `.bak` sidecar | the run is refused at exit `5`, naming the destination and the input it collides with; no flag reaches it | point the destination somewhere that is not an input. A script that relied on the old behaviour was destroying its input irreversibly |
+| every file written landed at mode `0600`, whatever the destination's prior mode and whatever the umask | an overwrite preserves the destination's existing permission bits, and a newly created file gets `0666 & ~umask` | set `umask` where a specific mode matters. Files this tool writes are no longer forced private |
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
