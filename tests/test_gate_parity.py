@@ -752,6 +752,25 @@ _FORBIDDEN_ALPHA: Final[str] = "Development Status :: 3 - Alpha"
 _REQUIRED_STABLE: Final[str] = "Development Status :: 5 - Production/Stable"
 _DEV_STATUS_RANK: Final[re.Pattern[str]] = re.compile(r"^Development Status :: (\d+) - ")
 
+#: B-371/X-946 P1. Two SCENARIO INPUTS for the seven-cell table below, one
+#: major-0 and one major-1 spelling -- each chosen because it is the major
+#: bucket the cell's own LABEL claims to exercise, never because it happens
+#: to match `pyproject.toml`'s `version` key. These are NOT the tree's
+#: version and must NEVER be "updated to match" it: that update is the exact
+#: defect this fix repairs. Before this fix, four of the table's seven cells
+#: read `data["project"]["version"]` directly, so a table authored to probe
+#: seven distinct (classifier, version) points quietly collapsed onto three
+#: once the tree's own version caught up with the literals already sitting
+#: in the other three cells -- reddening the one cell whose label named a
+#: major-0 scenario it no longer received, and silently retiring
+#: `pre-spec-tree`'s ability to isolate clause 1 (D2) from clause 2 along the
+#: way (see `test_pdf59_ac2_ac3_the_seven_cell_relation_table`'s docstring
+#: and `changelog.md`'s `[B-371]` entry for the full account). The next
+#: maintainer who is tempted to bump either constant to "keep it current" at
+#: the next major release is the next person to reproduce this defect.
+_SCENARIO_VERSION_MAJOR_0: Final[str] = "0.3.1"
+_SCENARIO_VERSION_MAJOR_1: Final[str] = "1.0.0"
+
 
 def load_pyproject() -> dict[str, Any]:
     with PYPROJECT_PATH.open("rb") as fh:
@@ -920,6 +939,77 @@ def test_pdf59_ac1_the_maturity_classifier_is_5_production_stable() -> None:
     assert alpha.stdout == ""
 
 
+def _dev_status_marker(classifiers: list[str]) -> str:
+    """B-371/X-946 P3. Reduces *classifiers* to a single hashable key for the
+    seven-cell table's distinctness check below: the one
+    `"Development Status :: "` entry present, or a marker naming how many
+    were found when that count is not exactly one (0, for the vacuity cell;
+    2+ would be the ambiguity clause 3 also forbids, though no cell plants
+    that today). The marker is deliberately not `None` for the zero-entry
+    case -- a bare `str | None` would make "zero entries" collide with a
+    hypothetical future classifier literally spelled `"None"`, which is a
+    needless way for a distinctness check to lie."""
+    entries = [c for c in classifiers if c.startswith(_DEV_STATUS_PREFIX)]
+    if len(entries) == 1:
+        return entries[0]
+    return f"<{len(entries)} dev-status entries>"
+
+
+def scenario_points(
+    cases: tuple[tuple[str, list[str], str, bool], ...],
+) -> dict[str, tuple[str, str]]:
+    """B-371/X-946 P3. Every cell reduced to its `(dev-status entry, version)`
+    point, keyed by label. Pure and label-keyed on purpose: both the standing
+    table below and `test_b371_proof_the_distinctness_assertion_reddens_a_
+    collapsed_table` call it, and a label key is what lets the proof name
+    exactly which two cells it collapsed."""
+    return {
+        label: (_dev_status_marker(classifiers), version)
+        for label, classifiers, version, _ in cases
+    }
+
+
+def assert_scenario_points_are_distinct(
+    cases: tuple[tuple[str, list[str], str, bool], ...],
+) -> None:
+    """B-371/X-946 P3 -- the mechanical control this fix exists to add. A
+    collapsed table (three collision pairs, 7 points down to 4) PASSED
+    silently before this fix; this is what makes a future collapse red
+    instead.
+
+    `as-shipped` is the ONE cell permitted to read the tree (P2), so it is
+    the one cell permitted to coincide with a fixed-literal cell's point --
+    and, AT THIS COMMIT, it does: `pyproject.toml` ships
+    `_SCENARIO_VERSION_MAJOR_1` with `_REQUIRED_STABLE`, which is exactly the
+    state `post-tag-state` was authored to predict. That coincidence is
+    real, expected, temporary (the next patch release moves the tree's
+    version off `_SCENARIO_VERSION_MAJOR_1` and it resolves on its own), and
+    it is NOT what this control exists to catch.
+
+    What it exists to catch is any of the other six cells -- every one of
+    them built from literals entirely under this test's own control --
+    landing on the same point as ANY other cell. Two such collisions existed
+    at HEAD before this fix (`pre-spec-tree` == `major-1-alpha`,
+    `major-1-beta` == `discriminator-major-0-beta`); either reappearing, or a
+    new one appearing anywhere (including the live cell colliding with a
+    cell OTHER than `post-tag-state`, which would mean the tree has drifted
+    onto some other cell's frozen scenario), reds here.
+    """
+    points = scenario_points(cases)
+    live_point = points.pop("as-shipped")
+    assert len(set(points.values())) == 6, (
+        "the six always-literal cells must occupy six distinct "
+        f"(dev-status entry, version) points; got {points} -- a repeat here "
+        "is the silent 7-point-to-4-point collapse (B-371) recurring"
+    )
+    if live_point in points.values():
+        assert live_point == points["post-tag-state"], (
+            "as-shipped's live point collided with a fixed cell that is NOT "
+            f"post-tag-state: live={live_point}, fixed cells={points} -- the "
+            "only coincidence P2 sanctions is with post-tag-state specifically"
+        )
+
+
 def test_pdf59_ac2_ac3_the_seven_cell_relation_table() -> None:
     """PDF-59 D2/AC2/AC3 -- all seven cells, driven against the SAME function
     with no edit between calls (AC2's whole point: the assertion must survive
@@ -927,7 +1017,40 @@ def test_pdf59_ac2_ac3_the_seven_cell_relation_table() -> None:
     `major-0/4-Beta` cell is the DISCRIMINATOR: GREEN under the ruled
     monotone relation, RED under the forbidden equality form
     (`major == 1` <=> `5 - Production/Stable`) -- this single cell is what
-    proves the shape actually written."""
+    proves the shape actually written.
+
+    B-371/X-946 -- repaired here after AC2 was reported satisfied and was
+    not (`changelog.md`'s `[B-371]` entry has the full account; the short
+    version: this table's seven cells are byte-identical at the `PDF-59`
+    landing commit and at HEAD, and that same file, run in a scratch
+    worktree whose ONLY difference from the landing commit is
+    `pyproject.toml`'s `version = "1.0.0"`, fails on
+    `discriminator-major-0-beta`). Two rules restore AC2 for real:
+
+      - P1 (no cell reads the tree for its version operand except the one
+        below that is SUPPOSED to) -- `_SCENARIO_VERSION_MAJOR_0` /
+        `_SCENARIO_VERSION_MAJOR_1` replace every `real_version` read except
+        one.
+      - P2 (exactly one cell may read the tree, and it is the live-
+        compliance cell) -- renamed from `landing-state` to `as-shipped`:
+        `landing-state` named a frozen historical moment that has since
+        passed (the pre-1.0 tree); this cell's actual job, unchanged since
+        it was written, is asserting the tree AS IT STANDS RIGHT NOW
+        satisfies the relation, which only a tree-reading cell can do. It
+        currently computes the same point as `post-tag-state`
+        (`_REQUIRED_STABLE` at `_SCENARIO_VERSION_MAJOR_1`) because the tree
+        currently ships exactly the state `post-tag-state` predicts -- see
+        `assert_scenario_points_are_distinct`'s docstring for why that one
+        coincidence is sound and everything else is not.
+
+    P3's mechanical distinctness proof is `assert_scenario_points_are_
+    distinct`, called below; P4's failure proofs (the three things this fix
+    must be shown to actually catch or actually pass, having been run) are
+    `test_b371_proof_p4a_fixed_operand_catches_what_the_tree_read_missed`,
+    `test_b371_proof_the_distinctness_assertion_reddens_a_collapsed_table`,
+    and `test_b371_proof_the_repaired_discriminator_is_green_for_the_ruled_
+    reason`, all below.
+    """
     data = load_pyproject()
     real_classifiers = data["project"]["classifiers"]
     real_version = data["project"]["version"]
@@ -938,13 +1061,25 @@ def test_pdf59_ac2_ac3_the_seven_cell_relation_table() -> None:
 
     beta = "Development Status :: 4 - Beta"
     cases: tuple[tuple[str, list[str], str, bool], ...] = (
-        ("landing-state", real_classifiers, real_version, True),
-        ("post-tag-state", with_entry(_REQUIRED_STABLE), "1.0.0", True),
-        ("pre-spec-tree", with_entry(_FORBIDDEN_ALPHA), real_version, False),
-        ("major-1-alpha", with_entry(_FORBIDDEN_ALPHA), "1.0.0", False),
-        ("major-1-beta", with_entry(beta), "1.0.0", False),
-        ("discriminator-major-0-beta", with_entry(beta), real_version, True),
-        ("vacuity-no-classifier", with_entry(None), real_version, False),
+        # The ONE tree-reading cell (P2) -- asserts the tree AS SHIPPED, right
+        # now, satisfies the relation. Everything else below is a literal.
+        ("as-shipped", real_classifiers, real_version, True),
+        ("post-tag-state", with_entry(_REQUIRED_STABLE), _SCENARIO_VERSION_MAJOR_1, True),
+        # Isolates clause 1 (forbidden UNCONDITIONALLY, at ANY version) from
+        # clause 2 (forbidden only once major >= 1) by staying at major 0 --
+        # if this cell read `real_version` instead, it would isolate nothing
+        # the moment the tree's major reached 1, because clause 2 would
+        # redden it anyway for an unrelated reason. See
+        # `test_b371_proof_p4a_fixed_operand_catches_what_the_tree_read_
+        # missed` for this driven both ways.
+        ("pre-spec-tree", with_entry(_FORBIDDEN_ALPHA), _SCENARIO_VERSION_MAJOR_0, False),
+        ("major-1-alpha", with_entry(_FORBIDDEN_ALPHA), _SCENARIO_VERSION_MAJOR_1, False),
+        ("major-1-beta", with_entry(beta), _SCENARIO_VERSION_MAJOR_1, False),
+        # The discriminator: GREEN under the ruled relation, RED under the
+        # forbidden equality shape -- MUST stay at major 0, or it stops
+        # being the discriminator and starts being a second `major-1-alpha`.
+        ("discriminator-major-0-beta", with_entry(beta), _SCENARIO_VERSION_MAJOR_0, True),
+        ("vacuity-no-classifier", with_entry(None), _SCENARIO_VERSION_MAJOR_0, False),
     )
     for label, classifiers, version, expect_green in cases:
         problems = maturity_relation_problems(classifiers, version)
@@ -952,6 +1087,128 @@ def test_pdf59_ac2_ac3_the_seven_cell_relation_table() -> None:
             assert problems == [], f"{label}: expected GREEN, got {problems}"
         else:
             assert problems != [], f"{label}: expected RED, got none"
+
+    assert_scenario_points_are_distinct(cases)
+
+
+def test_b371_proof_p4a_fixed_operand_catches_what_the_tree_read_missed() -> None:
+    """B-371/X-946 P4(a), driven both ways. `clause1_conditional` below is
+    `maturity_relation_problems` with clause 1 weakened from "forbidden
+    unconditionally" to "forbidden once major >= 1" -- exactly the mutation
+    `pre-spec-tree` exists to catch.
+
+    BEFORE (the defect, reproduced here rather than left standing): if
+    `pre-spec-tree` read `real_version` -- as it did before this fix -- the
+    weakened clause is caught at a major-0 tree (the weakened clause never
+    fires there, so `problems == []` and pre-spec-tree's own `assert
+    problems != []` would FAIL) and MISSED at a major->=1 tree, where clause
+    2 independently reddens Alpha-at-major->=1 for an unrelated reason --
+    `problems != []` stays TRUE whether clause 1 is unconditional (correct)
+    or conditional on major >= 1 (the mutation), so the two are
+    indistinguishable there and the cell stops isolating anything. Confirmed
+    live at the tree's OWN real version too, if its major is already >= 1
+    (true at this commit).
+
+    AFTER (this fix): pinned to `_SCENARIO_VERSION_MAJOR_0`, the weakened
+    clause is caught BY ITS OWN PROBLEM STRING no matter what the tree's
+    version is -- proven at three tree-version states: the tree's real
+    version at the time this test runs, and two planted spellings never used
+    as either scenario constant, one major 0 and one major 2.
+    """
+
+    def clause1_conditional(classifiers: list[str], version: str) -> list[str]:
+        """The weakened relation this proof plants: clause 1 forbids
+        `3 - Alpha` only once major >= 1, instead of unconditionally."""
+        problems: list[str] = []
+        entries = [c for c in classifiers if c.startswith(_DEV_STATUS_PREFIX)]
+        if len(entries) != 1:
+            problems.append("vacuity")
+            return problems
+        entry = entries[0]
+        major = int(version.split(".", 1)[0])
+        if entry == _FORBIDDEN_ALPHA and major >= 1:  # <- the weakening
+            problems.append("weakened clause 1")
+        if major >= 1:
+            rank_match = _DEV_STATUS_RANK.match(entry)
+            if rank_match is not None and int(rank_match.group(1)) < 5:
+                problems.append("clause 2")
+        return problems
+
+    alpha_classifiers = [_FORBIDDEN_ALPHA]
+
+    def would_be_caught(version_operand: str) -> bool:
+        """pre-spec-tree expects RED (`assert problems != []`). `True` here
+        means the weakened relation returns `[]` for this operand, so that
+        assertion would FAIL -- the mutation is CAUGHT. `False` means the
+        weakened relation still returns something non-empty (clause 2 firing
+        on its own, unrelated to clause 1), so the table's assertion would
+        still PASS -- the mutation is MISSED."""
+        return clause1_conditional(alpha_classifiers, version_operand) == []
+
+    # BEFORE (the defect, reproduced): pre-spec-tree read `real_version`
+    # directly, so whether the mutation is caught depended entirely on what
+    # the tree's version happened to be -- caught at major 0 (clause 2 cannot
+    # cover for the weakened clause 1 there), MISSED at major >= 1 (clause 2
+    # covers for it, so the cell still "looks red" for the wrong reason).
+    assert would_be_caught("0.3.1") is True, "expected CAUGHT at a major-0 tree"
+    assert would_be_caught("1.0.0") is False, "expected MISSED at a major-1 tree"
+    assert would_be_caught("2.7.4") is False, "expected MISSED at a major-2 tree"
+
+    # Confirmed live at the tree's own real version too, whatever it is
+    # today: if it is already major >= 1, the mutation is MISSED there --
+    # reproducing X-946's live evidence.
+    real_version = load_pyproject()["project"]["version"]
+    if int(real_version.split(".", 1)[0]) >= 1:
+        assert would_be_caught(real_version) is False, real_version
+
+    # AFTER (this fix): pre-spec-tree is pinned to `_SCENARIO_VERSION_MAJOR_0`
+    # and no longer reads the tree at all, so it is CAUGHT no matter what the
+    # tree's real version is -- unlike the BEFORE block above, this operand
+    # never changes, which is exactly the point: the outcome stops depending
+    # on whichever of these three states the tree happens to be in.
+    for _simulated_tree_version in ("0.3.1", "1.0.0", "2.7.4"):
+        assert would_be_caught(_SCENARIO_VERSION_MAJOR_0) is True
+
+
+def test_b371_proof_the_distinctness_assertion_reddens_a_collapsed_table() -> None:
+    """B-371/X-946 P4(b). Plants exactly one of the three collisions that
+    existed at HEAD before this fix -- `pre-spec-tree` collapsed onto
+    `major-1-alpha`'s point -- and confirms `assert_scenario_points_are_
+    distinct` reds it. Not a tautology (X-153/B-080): the real, unmutated
+    `cases` tuple in the table above already passes this same assertion on
+    every run; this is the mutation that makes it fail, run and observed."""
+    beta = "Development Status :: 4 - Beta"
+    collapsed_cases: tuple[tuple[str, list[str], str, bool], ...] = (
+        ("as-shipped", [_REQUIRED_STABLE], _SCENARIO_VERSION_MAJOR_1, True),
+        ("post-tag-state", [_REQUIRED_STABLE], _SCENARIO_VERSION_MAJOR_1, True),
+        # collapsed: pinned to MAJOR_1 instead of MAJOR_0, landing on the
+        # exact same point as major-1-alpha directly below it.
+        ("pre-spec-tree", [_FORBIDDEN_ALPHA], _SCENARIO_VERSION_MAJOR_1, False),
+        ("major-1-alpha", [_FORBIDDEN_ALPHA], _SCENARIO_VERSION_MAJOR_1, False),
+        ("major-1-beta", [beta], _SCENARIO_VERSION_MAJOR_1, False),
+        ("discriminator-major-0-beta", [beta], _SCENARIO_VERSION_MAJOR_0, True),
+        ("vacuity-no-classifier", [], _SCENARIO_VERSION_MAJOR_0, False),
+    )
+    with pytest.raises(AssertionError):
+        assert_scenario_points_are_distinct(collapsed_cases)
+
+
+def test_b371_proof_the_repaired_discriminator_is_green_for_the_ruled_reason() -> None:
+    """B-371/X-946 P4(c). `discriminator-major-0-beta` is pinned to
+    `_SCENARIO_VERSION_MAJOR_0` now, not `real_version` (the defect) --
+    confirms the GREEN is the relation's clause 2 genuinely permitting a
+    below-5 classifier while major is 0, not the cell having quietly stopped
+    being checked. Sensitivity, not vacuity (mirrors `test_the_base_fixture_
+    itself_agrees`'s reasoning): the identical classifier at major 1 reds
+    (clause 2), and an unparseable version reds too -- if either of these
+    were ALSO green, the discriminator's own green above would be trivially
+    satisfied and would prove nothing about the relation."""
+    beta = "Development Status :: 4 - Beta"
+    green = maturity_relation_problems([beta], _SCENARIO_VERSION_MAJOR_0)
+    assert green == [], green
+
+    assert maturity_relation_problems([beta], _SCENARIO_VERSION_MAJOR_1) != []
+    assert maturity_relation_problems([beta], "not-a-version") != []
 
 
 def test_pdf59_ac3_proof_the_equality_shape_would_miss_the_discriminator() -> None:
