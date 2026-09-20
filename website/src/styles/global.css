@@ -9,13 +9,21 @@
  *
  * Palette: rose primary over the shared surface scale. Deliberately not
  * kubewright's blue or mediakit's amber -- the three sibling sites must be
- * distinguishable. See PDF-16 spec section D3 for the measured contrast
- * ratios and the dark-on-rose ruling. The primary-500 shade at 4.16:1
- * against the primary-500/10 verb-chip tint fails WCAG 1.4.3 as accent
- * text, so accent TEXT uses the primary-400 shade (6.63:1) throughout;
- * primary-500 survives only as a fill under the surface-900 text colour
- * or as a <=10% decorative tint. (Deliberately not spelled as Tailwind
- * class names here so this comment does not itself trip the AC10 grep.)
+ * distinguishable. See PDF-16 spec section D3 for the original dark-on-rose
+ * ruling and PDF-91 ruling `R7` for the correction below: a single ratio
+ * recorded there for the accent shade did not reproduce, because the
+ * quantity it named is not single-valued.
+ *
+ * Accent TEXT is the primary-400 shade on every ground. The primary-500
+ * shade is a FILL and never a text colour, because its contrast as text is
+ * surface-dependent -- a function of whichever container it lands in -- and
+ * fails the 4.5:1 body threshold on most of the surfaces this palette puts
+ * it over. No single ratio is recorded for it here, because the quantity is
+ * not single-valued; the figure this comment used to carry was one ground's
+ * reading written as though it were all of them. primary-500 survives as a
+ * fill under the surface-900 text colour, or as a <=10% decorative tint.
+ * (Deliberately not spelled as Tailwind class names here so this comment
+ * does not itself trip the AC10 grep.)
  */
 @theme {
   --color-primary-50: #fff1f2;

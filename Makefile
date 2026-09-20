@@ -41,7 +41,7 @@ endif
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
         samples-gate engines-gate engines-hidden licenses-check artifacts-check \
-        gate-timing docs-gate shim-reap ci clean
+        gate-timing docs-gate website shim-reap ci clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -425,6 +425,10 @@ docs-gate: ## Re-run the documented figures and compare them (PDF-30). NOT a pre
 	@$(UV_RUN) pytest tests/test_docs_antirot.py tests/test_changelog_history.py \
 	  tests/test_docstring_pointers.py -rs -q -p no:randomly \
 	  | $(UV_RUN) python -c "$$DOCS_GATE_EPILOGUE"
+
+website: ## Build the project website and run its contract arms (PDF-91). NOT a prereq of `ci`: `make ci` is uv-only by design and a Node toolchain must not become a prerequisite of the Python gate
+	cd website && npm ci && npm run check && npm run build
+	PDF_TOOLING_WEBSITE_BUILT=1 $(UV_RUN) pytest tests/test_website_contract.py -rs -q
 
 ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate; ends by printing what CI additionally gates
 	@uv run python scripts/gate_parity.py epilogue

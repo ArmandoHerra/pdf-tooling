@@ -202,19 +202,20 @@ def load_manifest() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_independent_scan_finds_eleven_jobs_eighteen_legs_twenty_gating_steps() -> None:
-    """PDF-34 D4: `docs-gate` is a new single-leg job with one gating step
-    (`make docs-gate`), re-derived at implementation HEAD -- 10/17/19 -> 11/18/20."""
+def test_the_independent_scan_finds_twelve_jobs_nineteen_legs_twenty_one_gating_steps() -> None:
+    """PDF-91: `website` is a new single-leg job with one gating step
+    (`make website`), re-derived at implementation HEAD -- 11/18/20 -> 12/19/21.
+    PDF-34 D4 made the previous move, `docs-gate`'s: 10/17/19 -> 11/18/20."""
     names, leg_count, gating_counts = independent_derive_from_ci()
-    assert len(names) == 11, names
-    assert leg_count == 18, leg_count
-    assert sum(gating_counts.values()) == 20, gating_counts
+    assert len(names) == 12, names
+    assert leg_count == 19, leg_count
+    assert sum(gating_counts.values()) == 21, gating_counts
 
 
 def test_manifest_parses_with_tomllib_and_declares_schema_version_1() -> None:
     manifest = load_manifest()
     assert manifest["schema_version"] == 1
-    assert len(manifest["check"]) == 20
+    assert len(manifest["check"]) == 21
 
 
 def test_gate_parity_check_subcommand_agrees_with_the_independent_scan() -> None:
@@ -555,6 +556,7 @@ _PDF02_EXPECTED_JOBS: Final[tuple[str, ...]] = (
     "docs-gate",
     "license-gate",
     "build",
+    "website",
 )
 
 
@@ -574,6 +576,13 @@ def test_pdf02_ac1_ci_yml_defines_exactly_the_ten_named_jobs() -> None:
     the assertion below passes against eleven names; both the covering
     pointer's name and the claim prose are a PDF-02 re-verification's or the
     PM's to correct, not this spec's.
+
+    PDF-91 D7/AC5: `_PDF02_EXPECTED_JOBS` gains `website` LAST (`ci.yml`'s file
+    order, one wave later), a second CONTRACT CHANGE stacked on the first. The
+    function name is left exactly as PDF-34 left it -- it now reads "ten" over
+    a twelve-member tuple, and it is the same out-of-scope pointer's to correct,
+    not this spec's; renaming it here without moving `audit_pdf_02.py:63` in
+    the same commit would only trade one staleness for another.
     """
     names, _legs, _counts = independent_derive_from_ci()
     assert names == _PDF02_EXPECTED_JOBS, names
@@ -1244,11 +1253,25 @@ def test_pdf59_ac3_proof_the_equality_shape_would_miss_the_discriminator() -> No
 
 
 def test_pdf59_ac5_pdf02_expected_jobs_is_unmoved_by_this_spec() -> None:
-    """PDF-59 AC5 -- a non-vacuity pin on the boundary itself: this spec adds
-    no hunk inside `_PDF02_EXPECTED_JOBS`'s span, and the eleven-member tuple
-    (re-derived, not the brief's stale "ten") is exactly what it was before
-    this section was appended."""
-    assert len(_PDF02_EXPECTED_JOBS) == 11, _PDF02_EXPECTED_JOBS
+    """PDF-59 AC5 -- ORIGINALLY a non-vacuity pin asserting that PDF-59's own
+    diff added no hunk inside `_PDF02_EXPECTED_JOBS`'s span. PDF-91 D6 names
+    this tuple as one of exactly three frozen structural inventories
+    authorised to move when the CI job set itself moves (the other two are
+    `EXPECTED_JOB_COUNT` in `tests/test_gate_budget.py` and the from-scratch
+    scan triple above) -- so the pin now reads the POST-`website` twelve-
+    member state, the same way it would have read eleven had this test
+    existed when PDF-34 D4 added `docs-gate`. Found running this spec's own
+    targeted suite: it is a fourteenth coordinate the spec's own Scope In
+    table did not enumerate, because it is a residual pin from a DIFFERENT
+    spec's acceptance criterion rather than a reader this spec's authors
+    could have found by reading `ci.yml` or the manifest. The function NAME
+    is left as PDF-59's own, for the identical D7 reason
+    `test_pdf02_ac1_ci_yml_defines_exactly_the_ten_named_jobs` gives: nothing
+    outside this file cites this node id, and renaming a stale-but-accurate
+    name is a correction belonging to whichever spec next authorises a move
+    here, not a silent side effect of this one.
+    """
+    assert len(_PDF02_EXPECTED_JOBS) == 12, _PDF02_EXPECTED_JOBS
     assert _PDF02_EXPECTED_JOBS == (
         "lint",
         "typecheck",
@@ -1261,6 +1284,7 @@ def test_pdf59_ac5_pdf02_expected_jobs_is_unmoved_by_this_spec() -> None:
         "docs-gate",
         "license-gate",
         "build",
+        "website",
     )
 
 

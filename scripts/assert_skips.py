@@ -93,6 +93,26 @@ SKIP_CLASSES = {
     "provenance-endpoint-disabled": re.compile(
         r"provenance endpoint check disabled", re.IGNORECASE
     ),
+    # PDF-91. `tests/test_website_contract.py`'s dist tier cannot run without a
+    # built `website/dist/` (gitignored, not produced by `make ci` or `test`),
+    # so outside `make website` those arms skip visibly by this named class
+    # rather than vanishing into the unclassified remainder -- the identical
+    # reasoning `PDF-30` and `PDF-47` recorded for their own classes above.
+    #
+    # APPENDED LAST, deliberately: first-match-wins, so this class can only
+    # claim a skip no earlier class claimed. The reason string carries none of
+    # `engine`/`tesseract`/`soffice`/`libreoffice`, `planning directory
+    # absent`, `shallow clone`, `PDF_TOOLING_SAMPLES_DIR`, `parallel session`
+    # or `provenance endpoint check disabled` -- verified against the live
+    # registry above, not assumed -- so no earlier class can swallow it and it
+    # can swallow none of theirs.
+    #
+    # VISIBILITY, NOT FAILURE, for this class specifically. Inside
+    # `make website` the arms never reach this skip at all: `PDF_TOOLING_
+    # WEBSITE_BUILT=1` turns the unbuilt-dist branch into a `pytest.fail`
+    # instead (Design D4) -- a skip is not a pass, and the one job that exists
+    # to run these arms must not be able to pass by skipping them.
+    "website-not-built": re.compile(r"website not built", re.IGNORECASE),
 }
 
 

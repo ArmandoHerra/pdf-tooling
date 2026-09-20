@@ -200,11 +200,24 @@ def test_no_committed_fixture_contains_an_xfail() -> None:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_pypi_provenance import SKIP_REASON as PROVENANCE_SKIP_REASON  # noqa: E402
+from test_website_contract import WEBSITE_NOT_BUILT_REASON  # noqa: E402
 
 _PROVENANCE_SKIP = (
     '  <testcase classname="tests.test_pypi_provenance" '
     'name="test_the_live_endpoint_still_agrees_with_the_recorded_matrix" time="0.001">\n'
     f'    <skipped type="pytest.skip" message="{PROVENANCE_SKIP_REASON}"/>\n'
+    "  </testcase>\n"
+)
+
+# PDF-91. The dist-tier arm's own unbuilt-site skip -- the `website-not-built`
+# class, appended last in scripts/assert_skips.py's SKIP_CLASSES. Same
+# import-not-transcribe discipline as the provenance skip above: the reason
+# string is imported from tests/test_website_contract.py, so the two files
+# cannot come to disagree while both look green.
+_WEBSITE_SKIP = (
+    '  <testcase classname="tests.test_website_contract" '
+    'name="test_a8_base_path_integrity" time="0.001">\n'
+    f'    <skipped type="pytest.skip" message="{WEBSITE_NOT_BUILT_REASON}"/>\n'
     "  </testcase>\n"
 )
 
@@ -269,6 +282,74 @@ def test_the_registered_pattern_matches_the_reason_the_suite_actually_emits() ->
     ]
     assert claimants == ["provenance-endpoint-disabled"], (
         f"the provenance skip reason is claimed by {claimants}; first-match-wins makes the "
+        "earliest claimant the one that counts, so this reason would be filed under the wrong "
+        "class with a green exit code"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-91 D5 -- the `website-not-built` class, mirroring the two arms above
+# exactly (`PDF-47`'s own shape, transplanted for a second named class).
+# --------------------------------------------------------------------------- #
+
+
+def test_the_website_skip_class_counts_its_own_reason(tmp_path: Path) -> None:
+    """AC13. The unbuilt-site skip is visible BY NAME in the census, not
+    swallowed into the unclassified remainder."""
+    report = tmp_path / "junit-website.xml"
+    report.write_text(_junit(_WEBSITE_SKIP, _REAL_ENGINE_SKIP, total=2, skipped=2))
+
+    result = _run(report)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _census_line(result.stdout, "website-not-built") == 1, result.stdout
+    assert _census_line(result.stdout, "unclassified") == 0, result.stdout
+
+
+def test_the_website_class_neither_swallows_nor_is_swallowed(tmp_path: Path) -> None:
+    """AC13's real content. First-match-wins means the two failure modes are
+    (a) an earlier class claiming this reason and (b) this class claiming an
+    earlier one's. Both driven, in one report that carries both kinds --
+    including the provenance skip, so THREE named classes are proven not to
+    collide in one pass."""
+    report = tmp_path / "junit-website-partition.xml"
+    report.write_text(
+        _junit(_WEBSITE_SKIP, _PROVENANCE_SKIP, _REAL_ENGINE_SKIP, total=3, skipped=3)
+    )
+
+    stdout = _run(report).stdout
+
+    # (a) neither earlier class took the website skip ...
+    assert _census_line(stdout, "engine-gated") == 1, stdout
+    assert _census_line(stdout, "provenance-endpoint-disabled") == 1, stdout
+    # ... and (b) the website class did not take either of theirs.
+    assert _census_line(stdout, "website-not-built") == 1, stdout
+    assert _census_line(stdout, "unclassified") == 0, stdout
+
+
+def test_the_registered_website_pattern_matches_the_reason_the_suite_actually_emits() -> None:
+    """AC13's RED: reword the skip reason without updating the pattern and
+    this fails. The pattern is read from the script itself, so the two files
+    cannot come to disagree while both look green -- and the partition is
+    asserted against the LIVE registry, so no other class may claim this
+    reason first, and this class may claim none of theirs."""
+    spec = importlib.util.spec_from_file_location("assert_skips_under_test", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    classes = module.SKIP_CLASSES
+    assert "website-not-built" in classes, sorted(classes)
+    assert classes["website-not-built"].search(WEBSITE_NOT_BUILT_REASON), (
+        f"the registered pattern does not match the reason the suite emits: "
+        f"{WEBSITE_NOT_BUILT_REASON!r}"
+    )
+
+    claimants = [
+        name for name, pattern in classes.items() if pattern.search(WEBSITE_NOT_BUILT_REASON)
+    ]
+    assert claimants == ["website-not-built"], (
+        f"the website skip reason is claimed by {claimants}; first-match-wins makes the "
         "earliest claimant the one that counts, so this reason would be filed under the wrong "
         "class with a green exit code"
     )
