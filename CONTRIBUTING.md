@@ -53,6 +53,33 @@ make test-e2e     # only the subprocess-level CLI tests
 
 `make help` lists every target.
 
+## Branch, pull request, merge
+
+`main` takes no direct pushes. A merge requires every required check to report success against the head of your branch, and admin enforcement is on, so there is no path that puts an unvalidated commit on `main` — not for a contributor, not for a maintainer.
+
+Work lands as **a pull request per specification**, merged in sequence.
+
+```bash
+git switch -c pdf-NN-short-slug
+# implement; drive each acceptance criterion red before you drive it green
+git commit -s -m "[PDF-NN] fix: <why>"
+git push -u origin pdf-NN-short-slug
+gh pr create --fill
+```
+
+Rebase onto `main` rather than merging `main` into your branch: linear history is required, so a merge commit is refused. Run `make ci` again after the rebase. The rebase is where a collision with a landing that arrived while you were working shows up, and it is much cheaper to see it there than in CI.
+
+### Why a specification at a time, rather than several in flight
+
+Serialised landings are not ceremony here. The repository has places where concurrent branches collide by construction:
+
+- **`changelog.md` has a single anchor.** Every entry inserts directly below the same comment, so concurrent branches conflict there every time — and resolving that conflict by overwriting at the anchor, rather than inserting above it, is exactly how a landed entry gets destroyed.
+- **The guarded documents sit at their residue ceilings with no headroom.** Branches that each add an unregistered cardinal are green apart and red together: the check is honest on each branch and wrong about the combination. This is the worst shape available, because nothing reports a problem until `main` has it.
+- **The ratification ledgers derive each entry from its predecessor.** Concurrent raises derive from the same parent, and merging silently drops the loser.
+- **The specification roster carries a status cell per item**, rewritten as the item lands.
+
+A branch that rebases cleanly onto a `main` already carrying the previous landing has been told about each of them before CI runs.
+
 ## What must be green before a merge
 
 Every check below must pass, derived from `ci.yml`'s own job names plus `dco` from `dco.yml` — never transcribed by hand, and reconciled by a test so this list cannot silently drift from what actually runs:
