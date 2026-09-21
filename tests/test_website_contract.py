@@ -54,6 +54,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from html import unescape as html_unescape
 from pathlib import Path
 from typing import Final
 
@@ -949,3 +950,290 @@ def test_the_vacuity_guard_skips_with_the_named_reason_when_unbuilt_and_unset(
     with pytest.raises(pytest.skip.Exception) as excinfo:
         _require_dist()
     assert str(excinfo.value) == WEBSITE_NOT_BUILT_REASON
+
+
+# --------------------------------------------------------------------------- #
+# PDF-95 -- the fold, rebuilt around a real transcript. AC1 drives the actual
+# `pdftooling` CLI (this module's one arm that is neither source- nor
+# dist-tier in the sense above: it needs no `website/dist`, only the product
+# itself, so it always runs); AC6/AC8/AC9/AC20 are source/dist-tier regex
+# arms in the same style as the rest of this module. AC2-AC5, AC7 and AC16
+# are the browser-measured criteria the spec's own validation ladder keeps
+# off this module (`B-376`: no accessibility/browser instrument in this
+# repo) -- driven by hand and reported in the implementation log instead.
+# --------------------------------------------------------------------------- #
+
+HERO_TRANSCRIPT_TS: Final[Path] = WEBSITE_SRC / "lib" / "hero-transcript.ts"
+TERMINAL_ASTRO: Final[Path] = WEBSITE_SRC / "components" / "Terminal.astro"
+HERO_ASTRO: Final[Path] = WEBSITE_SRC / "components" / "Hero.astro"
+CLOSING_CTA_ASTRO: Final[Path] = WEBSITE_SRC / "components" / "ClosingCta.astro"
+
+#: The two captured command strings and the exact captured `ls` failure --
+#: transcribed here ONCE, from the shipped `hero-transcript.ts`, so a future
+#: edit to that file's session is what has to change this constant too,
+#: rather than two independent hand-typed copies silently drifting apart.
+_HERO_MERGE_COMMAND: Final[str] = "pdftooling merge jul.pdf aug.pdf sep.pdf -O q3.pdf --dry-run"
+_HERO_LS_COMMAND: Final[str] = "ls q3.pdf"
+_HERO_LS_FAILURE: Final[str] = "ls: cannot access 'q3.pdf': No such file or directory"
+
+_SESSION_ENTRY_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\{\s*kind:\s*'([a-z]+)',\s*text:\s*(\"[^\"]*\"|'[^']*')\s*\}"
+)
+
+
+def _hero_session_entries() -> list[tuple[str, str]]:
+    """`(kind, text)` pairs, in DOM order, read from `hero-transcript.ts`'s
+    own source TEXT -- never imported/executed (this test tree has no Node
+    runtime, the same constraint `declared_section_ids()` documents)."""
+    text = HERO_TRANSCRIPT_TS.read_text()
+    m = re.search(r"HERO_TRANSCRIPT_SESSION.*?\] as const;", text, re.DOTALL)
+    assert m is not None, "HERO_TRANSCRIPT_SESSION array not found in hero-transcript.ts"
+    return [(kind, quoted[1:-1]) for kind, quoted in _SESSION_ENTRY_PATTERN.findall(m.group(0))]
+
+
+def _hero_merge_table_lines() -> list[str]:
+    """The captured `merge --dry-run -o table` stdout ONLY -- the 'output'
+    entries between the session's first 'command' and its first 'blank'.
+    The session also carries a SECOND 'output' entry after that (the `ls`
+    failure line, following the second 'command'), which is a different
+    process's stderr and is asserted separately (`_HERO_LS_FAILURE`) --
+    conflating the two would make this function's name a lie about what it
+    returns."""
+    entries = _hero_session_entries()
+    lines: list[str] = []
+    for kind, text in entries[1:]:  # entries[0] is the merge command itself
+        if kind == "blank":
+            break
+        assert kind == "output", f"unexpected kind before the first blank: {kind}"
+        lines.append(text)
+    return lines
+
+
+def _build_merge_dry_run_fixtures(tmp_path: Path, run_cli) -> None:
+    """The exact construction method `hero-transcript.ts`'s own provenance
+    header records: one one-page PDF via `create`, then `merge` of repeated
+    `path:range` operands on that single page to reach the target page
+    counts -- never hand-built, never inside a repository (`tmp_path` is
+    pytest's own scratch tree)."""
+    (tmp_path / "one.txt").write_text("one\n")
+    created = run_cli("create", "one.txt", "-O", "one.pdf", "--page-size", "letter", cwd=tmp_path)
+    assert created.returncode == 0, created.stderr
+
+    def _merge_n(name: str, n: int) -> None:
+        operands = ["one.pdf:1"] * n
+        merged = run_cli("merge", *operands, "-O", name, "-f", cwd=tmp_path)
+        assert merged.returncode == 0, merged.stderr
+
+    _merge_n("jul.pdf", 12)
+    _merge_n("aug.pdf", 9)
+    _merge_n("sep.pdf", 11)
+
+
+def test_pdf95_ac1_the_hero_transcript_table_is_reproducible_from_the_product(
+    tmp_path: Path,
+) -> None:
+    """AC1. Re-run the invocation the panel shows, in a scratch directory
+    outside every repository with fixtures built there (`tmp_path`), and
+    diff its stdout against the table lines `hero-transcript.ts` ships:
+    exit 0, zero differences. This is the one arm in this module that drives
+    the real `pdftooling` CLI -- deliberately, because AC1's whole claim is
+    that the shipped bytes are reproducible FROM THE PRODUCT, TODAY, by
+    whoever is shipping them, not merely transcribed from an earlier drive.
+
+    Reproduced independently at implementation time in a `mktemp -d`
+    (outside `tmp_path` too): jul.pdf 9,983 bytes, aug.pdf 7,578 bytes,
+    sep.pdf 9,182 bytes -- byte-identical across two independent scratch
+    builds, which is what makes shipping these exact numbers (rather than
+    the design dossier's `design/2026-09-20_hero-transcript-capture.txt`,
+    captured against DIFFERENT fixtures with different byte sizes) the
+    correct call: the dossier's own `bytes before` values are fixture-
+    dependent and were never going to survive this arm's own re-run diff.
+
+    Control: change one character in one shipped table line (e.g. `12
+    pages selected` -> `12 pages`) in a scratch copy of `hero-transcript.ts`
+    and re-run this test -- it reds naming the mismatched line. Driven and
+    observed red before this note was written.
+    """
+    tests_dir = str(Path(__file__).resolve().parent)
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
+    from registry import run_cli  # noqa: E402  (path must be set up first)
+
+    _build_merge_dry_run_fixtures(tmp_path, run_cli)
+    result = run_cli(
+        "merge",
+        "jul.pdf",
+        "aug.pdf",
+        "sep.pdf",
+        "-O",
+        "q3.pdf",
+        "--dry-run",
+        "-o",
+        "table",
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    actual_lines = result.stdout.splitlines()
+    expected_lines = _hero_merge_table_lines()
+    assert actual_lines == expected_lines, (
+        f"re-run stdout differs from the shipped transcript:\n"
+        f"  actual:   {actual_lines}\n"
+        f"  expected: {expected_lines}"
+    )
+
+    # `ls` is a coreutils binary, not a pdftooling verb -- drive it directly.
+    ls_result = subprocess.run(
+        ["ls", "q3.pdf"], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+    assert ls_result.returncode != 0
+    assert ls_result.stderr.strip() == _HERO_LS_FAILURE, (
+        f"ls verdict differs: {ls_result.stderr.strip()!r} != {_HERO_LS_FAILURE!r}"
+    )
+
+
+def test_pdf95_ac6a_the_built_page_carries_both_commands_and_the_exact_ls_failure() -> None:
+    """AC6(a). Astro HTML-escapes JSX-interpolated text (the `ls` failure's
+    apostrophes become `&#39;` in the raw bytes) -- unescaped once here, the
+    same normalisation a browser's own text content would apply, so this
+    arm asserts what a visitor actually reads rather than the raw markup."""
+    _require_dist()
+    html = html_unescape((DIST_ROOT / "index.html").read_text())
+    for needle in (_HERO_MERGE_COMMAND, _HERO_LS_COMMAND, _HERO_LS_FAILURE):
+        assert needle in html, f"missing from dist/index.html: {needle!r}"
+
+
+def test_pdf95_ac6b_the_two_commands_share_one_panel_with_no_section_boundary_between() -> None:
+    """AC6(b), a regex-scoped proxy for "one common ancestor": between the
+    merge invocation and the `ls` invocation in the built page there is no
+    `<section` boundary -- both sit inside the one `Terminal` panel rather
+    than being split across two page-level sections. Full DOM ancestry
+    (`id="quickstart"` is an ancestor of the scroll container at every
+    measured viewport) was verified directly with a driven Playwright
+    measurement; see this item's report."""
+    _require_dist()
+    html = html_unescape((DIST_ROOT / "index.html").read_text())
+    i1 = html.find(_HERO_MERGE_COMMAND)
+    i2 = html.find(_HERO_LS_COMMAND, i1 if i1 != -1 else 0)
+    assert i1 != -1 and i2 != -1 and i2 > i1, "both commands must appear, merge before ls"
+    between = html[i1:i2]
+    assert "<section" not in between, "a <section> boundary sits between the two commands"
+
+
+def test_pdf95_ac6c_the_caption_carries_its_own_declared_two_fragment_signature() -> None:
+    """AC6(c). The caption's text asserts against the signature
+    `hero-transcript.ts` DECLARES (`CAPTION_FRAGMENTS`), never against a
+    substring chosen at this test site."""
+    _require_dist()
+    ts_text = HERO_TRANSCRIPT_TS.read_text()
+    dry_run_m = re.search(r"dryRun:\s*'([^']*)'", ts_text)
+    nothing_m = re.search(r"nothingWritten:\s*'([^']*)'", ts_text)
+    assert dry_run_m is not None and nothing_m is not None, (
+        "CAPTION_FRAGMENTS not found in hero-transcript.ts"
+    )
+    html = html_unescape((DIST_ROOT / "index.html").read_text())
+    assert dry_run_m.group(1) in html, f"caption fragment missing from dist: {dry_run_m.group(1)!r}"
+    assert nothing_m.group(1) in html, f"caption fragment missing from dist: {nothing_m.group(1)!r}"
+
+
+def test_pdf95_ac6d_the_dry_run_never_claims_what_the_output_does_not_say() -> None:
+    """AC6(d). `merge --dry-run` announces nothing about being a dry run in
+    its own `-o table` output (ruling R8) -- neither may the page. `would
+    create` and `bytes written` occur zero times under `website/src` and in
+    every file under `dist`."""
+    offenders = []
+    for path in _source_files():
+        text = path.read_text()
+        for needle in ("would create", "bytes written"):
+            if needle in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: {needle!r}")
+    _require_dist()
+    for path in sorted(DIST_ROOT.rglob("*")):
+        if not path.is_file():
+            continue
+        text = path.read_text(errors="ignore")
+        for needle in ("would create", "bytes written"):
+            if needle in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: {needle!r}")
+    assert offenders == [], "\n".join(offenders)
+
+
+#: AC8. Anchor text must never state another section's position.
+_DIRECTIONAL_WORDS: Final[tuple[str, ...]] = ("below", "above", "further down", "earlier", "later")
+_HASH_ANCHOR_WITH_TEXT_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r'<a\s+href="#([a-zA-Z0-9_-]+)"[^>]*>(.*?)</a>', re.DOTALL
+)
+
+
+def test_pdf95_ac8_no_anchor_text_states_another_sections_position() -> None:
+    """AC8. For every `<a href="#...">` under `website/src`, the link text
+    contains none of the directional words, and every such href resolves to
+    an id present somewhere under `website/src` (the latter restates AR3;
+    kept local so this arm's failure message names the directional word by
+    itself). Measured before this item: `QuickStart.astro:55` linked
+    `#verbs` with the text "listed below" -- that file is deleted by this
+    item, and the directionless replacement lives in `Hero.astro`."""
+    all_ids = {i for _, i in _component_id_attrs()}
+    offenders = []
+    for path in _source_files():
+        if path.suffix != ".astro":
+            continue
+        text = path.read_text()
+        for href_id, inner in _HASH_ANCHOR_WITH_TEXT_PATTERN.findall(text):
+            plain = re.sub(r"<[^>]+>", "", inner).lower()
+            hit = next((w for w in _DIRECTIONAL_WORDS if w in plain), None)
+            if hit is not None:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: href=#{href_id} contains {hit!r}")
+            if href_id not in all_ids:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: href=#{href_id} has no id target")
+    assert offenders == [], "\n".join(offenders)
+
+
+def test_pdf95_ac9_quickstart_resolves_exactly_once_in_dist() -> None:
+    """AC9, the occurrence-count half (the ancestor half is a driven
+    Playwright measurement, reported in this item's log -- see AC6(b)'s
+    docstring). `grep -o` idiom: occurrences, never lines -- `dist/index.html`
+    is minified to a handful of very long lines."""
+    _require_dist()
+    html = (DIST_ROOT / "index.html").read_text()
+    occurrences = len(re.findall(r'id="quickstart"', html))
+    assert occurrences == 1, f'id="quickstart" occurs {occurrences} time(s) in dist/index.html'
+
+
+#: AC20. `v?\d+\.\d+\.\d+` outside the one sanctioned provenance-header
+#: comment in `hero-transcript.ts`.
+_VERSION_SHAPE_PATTERN: Final[re.Pattern[str]] = re.compile(r"v?\d+\.\d+\.\d+")
+
+
+def _leading_comment_block_end(text: str) -> int:
+    """The character offset where the file's leading run of `//`-comment (and
+    blank) lines ends -- the provenance header's own boundary. Everything
+    from here on is code, and AC20 must see zero version-shaped matches in
+    it."""
+    lines = text.splitlines(keepends=True)
+    offset = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith("//"):
+            offset += len(line)
+            continue
+        break
+    return offset
+
+
+def test_pdf95_ac20_no_version_number_is_typed_in_the_fold_or_the_closing_band() -> None:
+    """AC20. Zero matches for `v?\\d+\\.\\d+\\.\\d+` in `Hero.astro`,
+    `ClosingCta.astro`, `Terminal.astro` and `hero-transcript.ts` OUTSIDE the
+    provenance header comment (the one sanctioned place a version may be
+    written -- it records a drive, never a claim)."""
+    offenders = []
+    for path in (HERO_ASTRO, CLOSING_CTA_ASTRO, TERMINAL_ASTRO):
+        text = path.read_text()
+        for m in _VERSION_SHAPE_PATTERN.finditer(text):
+            offenders.append(f"{path.relative_to(REPO_ROOT)}: {m.group(0)!r}")
+    ts_text = HERO_TRANSCRIPT_TS.read_text()
+    header_end = _leading_comment_block_end(ts_text)
+    for m in _VERSION_SHAPE_PATTERN.finditer(ts_text[header_end:]):
+        offenders.append(
+            f"{HERO_TRANSCRIPT_TS.relative_to(REPO_ROOT)}: {m.group(0)!r} (outside header)"
+        )
+    assert offenders == [], "typed version number found:\n" + "\n".join(offenders)

@@ -1,0 +1,113 @@
+---
+// PDF-95 D8. The shared, non-clipping terminal. `PDF-96` consumes this
+// component one wave later (the shell snippet the wave plan describes), so
+// the props are a PUBLISHED interface, declared and typed here rather than
+// discovered there. Names are the consuming engineer's; the SHAPE is not.
+//
+// Ruling `R4`, refined by `R8`: the document must never scroll sideways at
+// any width, and THIS component's own box may scroll within itself provided
+// the scroll affordance is visible on arrival. D2 names *content hidden with
+// no indication*, not *content behind a visible, obvious scroll* -- a fade
+// edge plus a persistent scrollbar discharges it.
+//
+// Design D4: ONE scroll context, not the two `QuickStart.astro` used to nest
+// (`:36` around `:43`) -- `tabindex="0"`, `role="group"`, a real, non-empty
+// `aria-label` (the region's name was missing before this item: measured
+// `role` null, `aria-label` null). A `comment`, when a session line carries
+// one, renders OUTSIDE the scroll container, so it can never be dragged into
+// a scroll it does not need. No fake traffic-light chrome (PDF-93 D4 already
+// removed the three coloured dots; they do not come back here).
+export interface TerminalSessionLine {
+  readonly kind: 'command' | 'output' | 'blank';
+  readonly text: string;
+  readonly comment?: string;
+}
+
+export interface Props {
+  session: ReadonlyArray<TerminalSessionLine>;
+  /** The scroll region's `aria-label`. Required -- a focusable scrollable
+   *  region with no name is the defect this component exists to close. */
+  label: string;
+  /** The hero passes `"quickstart"` (D7): `#quickstart` is a published
+   *  anchor and moves onto this block. Rendered on the outer card, which is
+   *  an ANCESTOR of the scroll container, never on the scroller itself. */
+  id?: string;
+}
+
+const { session, label, id } = Astro.props;
+const commented = session.filter((line) => line.comment);
+---
+
+<div class="card terminal-panel overflow-hidden" id={id}>
+  <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
+    <span class="micro text-surface-400">bash &mdash; pdftooling</span>
+    <span class="ml-auto micro inline-flex items-center gap-1.5 text-surface-400">
+      exit 0
+      <span class="text-primary-400" aria-hidden="true">&check;</span>
+    </span>
+  </div>
+
+  <div class="terminal-scroll-wrap relative">
+    <div
+      class="terminal-scroll overflow-x-auto px-5 py-4 font-mono text-sm leading-6 text-surface-100"
+      tabindex="0"
+      role="group"
+      aria-label={label}
+    >
+      {session.map((line) => {
+        if (line.kind === 'blank') {
+          return <div class="terminal-blank" aria-hidden="true">&nbsp;</div>;
+        }
+        if (line.kind === 'command') {
+          return (
+            <div class="terminal-line whitespace-pre text-surface-50">
+              <span class="select-none text-primary-400" aria-hidden="true">$ </span>{line.text}
+            </div>
+          );
+        }
+        return <div class="terminal-line whitespace-pre text-surface-300">{line.text}</div>;
+      })}
+    </div>
+  </div>
+
+  {commented.length > 0 && (
+    <div class="terminal-comments border-t border-line px-4 py-2">
+      {commented.map((line) => (
+        <p class="micro text-surface-400">{line.comment}</p>
+      ))}
+    </div>
+  )}
+</div>
+
+<style>
+  /* Every ancestor of the scroller needs `min-width: 0` -- a flex/grid item's
+     default `min-width: auto` lets an intrinsically wide `<pre>`-shaped
+     child force its own TRACK to grow instead of scrolling internally,
+     which is the mechanical form of D2 recurring. */
+  .terminal-panel,
+  .terminal-scroll-wrap {
+    min-width: 0;
+  }
+
+  .terminal-scroll {
+    min-width: 0;
+    /* AC4(a): non-`none` at every width, unconditionally -- zero JS means
+       there is no "if scrollWidth > clientWidth" selector in CSS. The mask
+       is always active, but it only ever fades REAL ink when a line's
+       glyphs reach into the trailing band; when nothing overflows, that
+       26px band sits inside this container's own right padding (empty
+       space), so the fade is present-and-inert exactly where AC4(a) reads
+       it and visibly does something only where AC4(b)'s driven control
+       needs it to. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%);
+  }
+
+  .terminal-line {
+    tab-size: 2;
+  }
+
+  .terminal-blank {
+    height: 1.5rem;
+  }
+</style>

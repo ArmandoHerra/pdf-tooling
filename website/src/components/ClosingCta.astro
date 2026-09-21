@@ -1,0 +1,70 @@
+---
+// PDF-95 D9. The closing call to action, on the one inverted paper band --
+// the last child of `<main>` before `<Footer />`. `PDF-94` removed the
+// page's old ending (a second copy of the 31-row licence table) two waves
+// earlier and left the page ending on whatever was last; this item gives it
+// one on purpose.
+//
+// Three ranked destinations: the install command itself (primary -- it is
+// copyable TEXT, not a link; the action is *type this*), the licence
+// inventory (secondary, `/licensing/`, the route `PDF-94` created), source
+// on GitHub (tertiary, an already-closed host). PyPI is NAMED and never
+// LINKED (E9's dossier contradiction, ruled in `§F`'s favour: linking
+// `pypi.org` opens a third host and reds AC12/AC13).
+//
+// The `.on-paper` class (global.css, `PDF-93`) overrides the focus ring to
+// `primary-600` on this band -- `primary-400` measures 2.45:1 here and
+// fails 3:1. This item is that token's first consumer, not its definer
+// (Non-goals: no palette/token/focus-rule definition lives in this diff).
+//
+// AC20: no version number anywhere in this file, including the closing
+// line -- the frontend proposal's own illustrative closing copy (naming the
+// public API as of a specific typed release number) is NOT reproduced here
+// for exactly that reason; see this item's report for the contradiction
+// between that sentence and AC20's own file list, which names this
+// component explicitly.
+import { withBase } from '../lib/site';
+
+const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
+const inventoryUrl = withBase('licensing/');
+---
+
+<section class="u-crop on-paper border-t border-line-paper bg-paper-50 py-24 text-surface-900">
+  <div class="mx-auto max-w-2xl px-6 text-center">
+    <p class="micro text-primary-700">Get it</p>
+    <h2 class="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+      One command, and nothing hidden underneath it
+    </h2>
+    <p class="mt-4 text-lg text-surface-700">
+      The same install this page opened with &mdash; copy it, run it, and see the rest for yourself.
+    </p>
+
+    <div
+      tabindex="0"
+      class="u-selectall mx-auto mt-8 inline-block max-w-full overflow-x-auto rounded-md border border-line-soft bg-surface-950 px-5 py-3.5 text-left font-mono text-sm text-surface-100 shadow-well"
+    >
+      <code>uv tool install pdf-tooling</code>
+    </div>
+
+    <div class="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-semibold">
+      <!-- `primary-600` (this band's focus-ring override) measures 4.27:1 on
+           paper-50 -- FAILS the 4.5:1 body threshold (R7), so it is never
+           used as a resting or hover TEXT colour here, only as the focus
+           ring. `primary-700` (5.71:1, passes) is the one accent-text shade
+           this band uses, at rest and on hover alike. -->
+      <a href={inventoryUrl} class="text-primary-700 underline hover:underline-offset-4">
+        All packages, with licenses &rarr;
+      </a>
+      <a href={githubUrl} class="text-primary-700 underline hover:underline-offset-4">
+        Source on GitHub &rarr;
+      </a>
+      <span class="font-normal text-surface-600">Also on PyPI</span>
+    </div>
+
+    <p class="mt-10 max-w-xl text-sm leading-relaxed text-surface-600">
+      Apache-2.0. The structured output shapes and the exit-code table are public API. Open
+      defects are tracked in the maintainer's own planning tree, not the distribution.
+      Contributions are welcome, under the DCO.
+    </p>
+  </div>
+</section>
