@@ -325,46 +325,84 @@ _PDF_84_RATIFICATION: Final[_GatingRatification] = _GatingRatification(
     ),
 )
 
+_PDF_89_RATIFICATION: Final[_GatingRatification] = _GatingRatification(
+    date="2026-09-18",
+    spec="PDF-89",
+    direction="up",
+    ruling="X-891",
+    ceilings=MappingProxyType(
+        {**_PDF_84_RATIFICATION.ceilings, "tests/integration/test_or7_bulk_destructive.py": 14}
+    ),
+    reason=(
+        "PDF-89 refuses a destination that resolves onto one of the run's own "
+        "inputs, and `convert`/`ocr` are 2 of the 19 `-O` cells and 2 of the 11 "
+        "`--out-dir` cells the defect reaches (E2) -- an acceptance bar that "
+        "silently dropped the two verbs hardest to drive is `PDF-84`'s own lesson "
+        "recurring one item later (X-772). The new arm lands in "
+        "tests/integration/test_or7_bulk_destructive.py, which already carries "
+        "this idiom; the key tests/integration/test_or7_bulk_destructive.py moves "
+        "13 -> 14 and no other key moves, total 135 -> 136 across the same 16 "
+        "modules. "
+        "THE DRIVE IS ENGINE-INDEPENDENT, MEASURED HERE RATHER THAN INHERITED FROM "
+        "X-781: PDF-89's refusal fires at PLAN TIME, strictly before X-781's own "
+        "bulk-destructive gate is ever consulted, which makes engine-independence "
+        "MORE plausible and therefore exactly the thing not to assume. With `PATH` "
+        "pointed at a directory neither soffice nor tesseract resolves from, the "
+        "refusal is BYTE-IDENTICAL to the engine-present one on both flag shapes: "
+        "288 bytes, `cmp` clean, for `convert` on both `-O` and `--out-dir`; 279 "
+        "bytes, `cmp` clean, for `ocr` on both `-O` and `--out-dir`. The same "
+        "command over a DISTINCT target (not one of the run's inputs), with the "
+        "engine hidden, reaches code 3 / kind engine_missing for both verbs, so the "
+        "engine's absence is genuinely reachable on this exact command and the new "
+        "refusal is the gate outranking the engine tier rather than the engine "
+        "being irrelevant. A `@pytest.mark.requires(...)` would therefore be a "
+        "FALSE declaration and would DELETE the arm under `engines-hidden`, in the "
+        "without-engines job release.yml:44 gates the tag on. "
+        "+1 AND NO MORE, carried forward verbatim from X-781: `population()` "
+        "appends one Member per ARM, so both verbs and both flag shapes live in "
+        "ONE non-parametrized function. Parametrizing over the two verbs would "
+        "cost 2 and is not authorized by this ruling any more than by X-781."
+    ),
+)
+
+
 ENGINE_GATING_LEDGER: Final[tuple[_GatingRatification, ...]] = (
     _PDF_82_GENESIS,
     _PDF_84_RATIFICATION,
+    _PDF_89_RATIFICATION,
     _GatingRatification(
-        date="2026-09-18",
-        spec="PDF-89",
+        date="2026-09-21",
+        spec="PDF-96",
         direction="up",
-        ruling="X-891",
+        ruling="X-977",
         ceilings=MappingProxyType(
-            {**_PDF_84_RATIFICATION.ceilings, "tests/integration/test_or7_bulk_destructive.py": 14}
+            {**_PDF_89_RATIFICATION.ceilings, "tests/test_website_diagrams.py": 1}
         ),
         reason=(
-            "PDF-89 refuses a destination that resolves onto one of the run's own "
-            "inputs, and `convert`/`ocr` are 2 of the 19 `-O` cells and 2 of the 11 "
-            "`--out-dir` cells the defect reaches (E2) -- an acceptance bar that "
-            "silently dropped the two verbs hardest to drive is `PDF-84`'s own lesson "
-            "recurring one item later (X-772). The new arm lands in "
-            "tests/integration/test_or7_bulk_destructive.py, which already carries "
-            "this idiom; the key tests/integration/test_or7_bulk_destructive.py moves "
-            "13 -> 14 and no other key moves, total 135 -> 136 across the same 16 "
-            "modules. "
-            "THE DRIVE IS ENGINE-INDEPENDENT, MEASURED HERE RATHER THAN INHERITED FROM "
-            "X-781: PDF-89's refusal fires at PLAN TIME, strictly before X-781's own "
-            "bulk-destructive gate is ever consulted, which makes engine-independence "
-            "MORE plausible and therefore exactly the thing not to assume. With `PATH` "
-            "pointed at a directory neither soffice nor tesseract resolves from, the "
-            "refusal is BYTE-IDENTICAL to the engine-present one on both flag shapes: "
-            "288 bytes, `cmp` clean, for `convert` on both `-O` and `--out-dir`; 279 "
-            "bytes, `cmp` clean, for `ocr` on both `-O` and `--out-dir`. The same "
-            "command over a DISTINCT target (not one of the run's inputs), with the "
-            "engine hidden, reaches code 3 / kind engine_missing for both verbs, so the "
-            "engine's absence is genuinely reachable on this exact command and the new "
-            "refusal is the gate outranking the engine tier rather than the engine "
-            "being irrelevant. A `@pytest.mark.requires(...)` would therefore be a "
-            "FALSE declaration and would DELETE the arm under `engines-hidden`, in the "
-            "without-engines job release.yml:44 gates the tag on. "
-            "+1 AND NO MORE, carried forward verbatim from X-781: `population()` "
-            "appends one Member per ARM, so both verbs and both flag shapes live in "
-            "ONE non-parametrized function. Parametrizing over the two verbs would "
-            "cost 2 and is not authorized by this ruling any more than by X-781."
+            "PDF-96 corrects the website's six-layer diagram, whose published port "
+            "count must be DERIVED rather than typed. The deriving arm, "
+            "test_ac4_the_published_six_is_ast_derived_and_both_derivations_agree, "
+            "asserts the six port module names, two of which -- `ocr` and `office` -- "
+            "are also the spellings of engine-blind verbs, and that is the ONLY reason "
+            "the detector reaches it. The key tests/test_website_diagrams.py enters at "
+            "1 and no other key moves. "
+            "THE DRIVE IS ENGINE-INDEPENDENT, MEASURED RATHER THAN ASSERTED, and the "
+            "measurement is the cheap one precisely because the claim is the strong "
+            "one: the arm invokes NO verb and spawns NO process. It reads "
+            "src/pdf_tooling/ports/*.py with `ast` and compares two derivations of the "
+            "same figure -- the module set carrying a Protocol subclass, and the PORTS "
+            "tuple literal -- against the rendered spine data. Driven both ways on this "
+            "host: engines present, `1 passed`; engines hidden via "
+            "PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice, `1 passed`, with no skip "
+            "and no change in outcome. Its helper makes zero process-invoking calls. "
+            "A `@pytest.mark.requires(...)` here would be a FALSE declaration -- it "
+            "would claim an engine this arm never consults, and would DELETE the arm "
+            "under engines-hidden, in the without-engines job release.yml:44 gates the "
+            "tag on, which is the failure mode X-891 records one item earlier. "
+            "+1 AND NO MORE: the sibling arms in the same module that plant a seventh "
+            "port module or a second spawn site operate on a tmp_path COPY of the "
+            "package and never name a verb, so they are outside the detector by "
+            "construction rather than by exemption."
         ),
     ),
 )
