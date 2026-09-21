@@ -28,23 +28,23 @@ const codes = [
 ];
 ---
 
-<section id="contract" class="mx-auto max-w-6xl px-6 py-24">
-  <div class="mx-auto max-w-2xl text-center">
-    <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">
-      A stable exit-code contract
-    </h2>
-    <p class="mt-4 text-lg text-surface-100">
-      Seven codes, uniform across every verb — the same contract <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftooling --version</code> and
-      the source both agree on.
-    </p>
-  </div>
+<section id="contract" class="u-crop mx-auto max-w-6xl px-6 py-24">
+  <p class="micro text-surface-400"><span class="text-primary-400">&sect;05</span> / Exit Codes</p>
+  <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
+  <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
+    A stable exit-code contract
+  </h2>
+  <p class="mt-4 max-w-2xl text-lg text-surface-300">
+    Seven codes, uniform across every verb — the same contract <code class="code-inline text-sm">pdftooling --version</code> and
+    the source both agree on.
+  </p>
 
   <div class="mt-12 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
     {codes.map((c) => (
-      <div class="rounded-xl border border-surface-800 bg-surface-800/40 p-5 text-center">
-        <p class="font-mono text-2xl text-primary-400">{c.code}</p>
+      <div class="card p-5 text-center">
+        <p class={`u-datum font-mono text-2xl ${c.code === '0' ? 'text-surface-400' : 'text-primary-400'}`}>{c.code}</p>
         <p class="mt-1 font-mono text-[11px] font-semibold uppercase tracking-wide text-surface-50">{c.name}</p>
-        <p class="mt-2 text-xs leading-snug text-surface-100">{c.label}</p>
+        <p class="mt-2 text-xs leading-snug text-surface-300">{c.label}</p>
       </div>
     ))}
   </div>

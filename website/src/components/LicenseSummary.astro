@@ -48,35 +48,35 @@ const thirdPartyUrl = 'https://github.com/ArmandoHerra/pdf-tooling/blob/main/THI
 const inventoryUrl = withBase('licensing/');
 ---
 
-<section id="licensing" class="border-t border-surface-800 bg-surface-800/20 py-24">
+<section id="licensing" class="u-crop border-t border-line bg-surface-850 py-24">
   <div class="mx-auto max-w-3xl px-6">
-    <div class="mx-auto max-w-2xl text-center">
-      <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">Licensing</h2>
-      <p class="mt-4 text-lg text-surface-100">
-        Apache-2.0, and every engine underneath it is BSD, MIT, Apache or MPL — nothing AGPL
-        or GPL on the call graph.
-      </p>
-    </div>
+    <p class="micro text-surface-400"><span class="text-primary-400">&sect;06</span> / Licensing</p>
+    <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
+    <h2 class="mt-6 text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">Licensing</h2>
+    <p class="mt-4 max-w-2xl text-lg text-surface-300">
+      Apache-2.0, and every engine underneath it is BSD, MIT, Apache or MPL — nothing AGPL
+      or GPL on the call graph.
+    </p>
 
-    <div class="mx-auto mt-10 max-w-2xl space-y-4 text-sm leading-relaxed text-surface-100">
+    <div class="mt-10 max-w-2xl space-y-4 text-sm leading-relaxed text-surface-200">
       <p>
         The guarantee is a CI job and a unit test, not a promise in a README: the license gate
         fails the build on any AGPL, GPL or LGPL package in the distributed closure, and a
-        source-level test walks every file under <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">src/</code> for
-        forbidden imports and <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">subprocess</code> shell-outs — the
+        source-level test walks every file under <code class="code-inline text-xs">src/</code> for
+        forbidden imports and <code class="code-inline text-xs">subprocess</code> shell-outs — the
         realistic leak a package-level license scan cannot see on its own.
       </p>
       <p>
         Computed straight from the same generated inventory the full inventory publishes: the
         default install closure is <strong>{defaultCount} packages</strong>, the optional
-        <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">[html]</code> extra
+        <code class="code-inline text-xs">[html]</code> extra
         adds <strong>{htmlExtraCount} more</strong>, <strong>{totalCount} packages</strong> in total.
       </p>
       {pikepdf && (
         <p>
-          <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pikepdf</code> bundles
+          <code class="code-inline text-xs">pikepdf</code> bundles
           libqpdf under <strong>{pikepdf.License}</strong> — file-level copyleft, used unmodified as a
-          dependency, and Apache-compatible on that basis. It is documented in <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">NOTICE</code> and
+          dependency, and Apache-compatible on that basis. It is documented in <code class="code-inline text-xs">NOTICE</code> and
           the full <a href={thirdPartyUrl} class="text-primary-400 underline hover:text-primary-300">THIRD_PARTY_LICENSES</a> inventory.
         </p>
       )}
@@ -85,8 +85,8 @@ const inventoryUrl = withBase('licensing/');
         in the whole inventory that names one is optional and offers MPL 1.1 as an alternative:
         {pyphen && (
           <>
-            {' '}<code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">{pyphen.Name} {pyphen.Version}</code> enters
-            only through the optional <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">[html]</code> extra,
+            {' '}<code class="code-inline text-xs">{pyphen.Name} {pyphen.Version}</code> enters
+            only through the optional <code class="code-inline text-xs">[html]</code> extra,
             tri-licensed
           </>
         )}
@@ -94,13 +94,13 @@ const inventoryUrl = withBase('licensing/');
       </p>
     </div>
 
-    <p class="mx-auto mt-10 max-w-2xl text-center">
+    <p class="mt-10 max-w-2xl">
       <a href={inventoryUrl} class="font-semibold text-primary-400 underline hover:text-primary-300">
         All {totalCount} packages, with licenses, tiers and roles →
       </a>
     </p>
 
-    <p class="mt-6 text-center text-sm text-surface-100">
+    <p class="mt-6 text-sm text-surface-300">
       Full inventory: <a href={thirdPartyUrl} class="text-primary-400 underline hover:text-primary-300">THIRD_PARTY_LICENSES</a>.
     </p>
   </div>

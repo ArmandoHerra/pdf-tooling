@@ -9,24 +9,24 @@ const steps = [
 ];
 ---
 
-<section id="architecture" class="border-t border-surface-800 bg-surface-800/20 py-24">
+<section id="architecture" class="u-crop border-t border-line bg-surface-850 py-24">
   <div class="mx-auto max-w-5xl px-6">
-    <div class="mx-auto max-w-2xl text-center">
-      <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">
-        A six-layer spine, one licence guarantee
-      </h2>
-      <p class="mt-4 text-lg text-surface-100">
-        Adapters are the only modules that import an engine library or spawn a process —
-        that is what makes the licence guarantee auditable by reading eight files.
-      </p>
-    </div>
+    <p class="micro text-surface-400"><span class="text-primary-400">&sect;02</span> / Architecture</p>
+    <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
+    <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
+      A six-layer spine, one licence guarantee
+    </h2>
+    <p class="mt-4 max-w-2xl text-lg text-surface-300">
+      Adapters are the only modules that import an engine library or spawn a process —
+      that is what makes the licence guarantee auditable by reading eight files.
+    </p>
 
     <div class="mt-14 flex flex-col items-stretch gap-2 lg:flex-row lg:items-center lg:gap-3">
       {steps.map((step, i) => (
         <>
-          <div class="min-w-0 flex-1 rounded-lg border border-surface-800 bg-surface-900 p-4 text-center">
+          <div class="min-w-0 flex-1 rounded-md border border-line-soft bg-surface-950 p-4 text-center shadow-well">
             <p class="font-mono text-sm font-semibold text-primary-400">{step.label}</p>
-            <p class="mt-1 text-xs leading-snug text-surface-100 break-words">{step.detail}</p>
+            <p class="mt-1 text-xs leading-snug text-surface-300 break-words">{step.detail}</p>
           </div>
           {i < steps.length - 1 && (
             <div class="flex items-center justify-center text-primary-400" aria-hidden="true">

@@ -2,19 +2,20 @@
 
 /*
  * Tailwind v4 CSS-first theme. Mirrors website/tailwind.config.mjs -- keep
- * both in sync if you touch color/font tokens. No web fonts are fetched (no
- * external network calls at build or runtime); the stacks below fall back to
- * the OS default sans/mono fonts when Inter / JetBrains Mono aren't installed
- * locally.
+ * both in sync if you touch color/font/radius/shadow tokens.
  *
- * Palette: rose primary over the shared surface scale. Deliberately not
- * kubewright's blue or mediakit's amber -- the three sibling sites must be
- * distinguishable. See PDF-16 spec section D3 for the original dark-on-rose
- * ruling and PDF-91 ruling `R7` for the correction below: a single ratio
- * recorded there for the accent shade did not reproduce, because the
- * quantity it named is not single-valued.
+ * PDF-93 -- the two-plate prepress system. Near-black warm-neutral ink
+ * (plate K, the surface-* ramp) and the rose accent (plate M, the primary-*
+ * ramp, which is literally a process ink). Deliberately not kubewright's
+ * blue or mediakit's amber, and deliberately not `#0f172a` -- Tailwind's
+ * stock slate-900 is the single most common dark canvas on the web, and the
+ * old ramp used it. See PDF-16 spec section D3 for the original dark-on-rose
+ * ruling, PDF-91 ruling `R7` for the accent-text correction below, and
+ * PDF-93 ruling `D5` for the tint-budget correction the two blooms below
+ * carry.
  *
- * Accent TEXT is the primary-400 shade on every ground. The primary-500
+ * Accent TEXT is the primary-400 shade on every ground -- it measures
+ * 5.40:1 or better on every surface this ramp defines. The primary-500
  * shade is a FILL and never a text colour, because its contrast as text is
  * surface-dependent -- a function of whichever container it lands in -- and
  * fails the 4.5:1 body threshold on most of the surfaces this palette puts
@@ -24,27 +25,189 @@
  * fill under the surface-900 text colour, or as a <=10% decorative tint.
  * (Deliberately not spelled as Tailwind class names here so this comment
  * does not itself trip the AC10 grep.)
+ *
+ * No web fonts are fetched -- no external network calls at build or
+ * runtime, and that claim is now STRICTER than it was: the stacks below
+ * name only faces the operating system already ships (a generic that maps
+ * to the platform UI face, then the platform-specific names, then two
+ * open-source families Linux distributions actually carry, then a
+ * fifteen-year-old last resort, then the CSS generic). There is no third
+ * clause promising a fetch-free fallback for a named face that is never
+ * fetched in the first place, because no such face is named. Self-hosting
+ * (IBM Plex Sans + Mono, OFL-1.1, subsetted) was considered and rejected on
+ * a licence-surface argument, not a taste one: `THIRD_PARTY_LICENSES` is
+ * generated and CI-diffed, so an OFL row for a website asset would be the
+ * one licence claim nothing checks. Identity comes instead from giving
+ * monospace roughly a third of the visible type and a real job -- the
+ * wordmark, eyebrows, section numbers, verb names, exit codes, versions,
+ * every table numeral -- against sans prose.
  */
 @theme {
+  /* ── Plate M -- the ink. 400/500 are byte-identical to the shipped
+         values (frozen; see PDF-93 D1/AC2) -- 200/300 are new tints for the
+         cases 400 reads too dark against a deep well. ──────────────────── */
   --color-primary-50: #fff1f2;
   --color-primary-100: #ffe4e6;
+  --color-primary-200: #fecdd3;
+  --color-primary-300: #fda4af;
   --color-primary-400: #fb7185;
   --color-primary-500: #f43f5e;
   --color-primary-600: #e11d48;
   --color-primary-700: #be123c;
   --color-primary-900: #881337;
 
-  --color-surface-50: #f8fafc;
-  --color-surface-100: #f1f5f9;
-  --color-surface-800: #1e293b;
-  --color-surface-900: #0f172a;
+  /* ── Plate K -- warm near-neutral ink-black. Replaces the slate ramp
+         (`#0f172a`, `#1e293b`, `#f8fafc`, `#f1f5f9`) entirely. Thirteen
+         steps; every pairing below is measured in the table under
+         "Measured contrast" further down this file. ────────────────────── */
+  --color-surface-950: #0b0709;
+  --color-surface-900: #120c10;
+  --color-surface-850: #181116;
+  --color-surface-800: #1f171d;
+  --color-surface-750: #271e25;
+  --color-surface-700: #33282f;
+  --color-surface-600: #4e434b;
+  --color-surface-500: #756a71;
+  --color-surface-400: #a1979d;
+  --color-surface-300: #c6bfc4;
+  --color-surface-200: #e0dbde;
+  --color-surface-100: #efecee;
+  --color-surface-50: #fbf9fa;
 
-  --font-sans: Inter, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  /* ── Paper stock -- the single inverted band the closing CTA uses.
+         Token and focus-ring override only in this item; the band itself
+         is PDF-95's (see the `.on-paper` rule below). ───────────────────── */
+  --color-paper-50: #f7f3f5;
+  --color-paper-100: #eae3e7;
+
+  /* ── Rules. Translucent so one token works over every band. `line-mark`
+         and `line-ink` are primary-400, not primary-500, and are outside
+         the <=10% tint-budget rule (D5) -- they are the whole drafting
+         vocabulary (crop ticks, registration marks, hover borders). ────── */
+  --color-line-hair: rgb(255 255 255 / 0.045);
+  --color-line-soft: rgb(255 255 255 / 0.08);
+  --color-line: rgb(255 255 255 / 0.14);
+  --color-line-strong: rgb(255 255 255 / 0.24);
+  --color-line-mark: rgb(251 113 133 / 0.55);
+  --color-line-ink: rgb(251 113 133 / 0.6);
+  --color-line-paper: rgb(0 0 0 / 0.12);
+
+  /* ── Type. Pure system stacks -- no font file ships, no phantom name is
+         named (see the header comment above and PDF-93 D6). ─────────────── */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text",
+    "Segoe UI", Roboto, "Noto Sans", "Liberation Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono",
+    "Segoe UI Mono", "Roboto Mono", "DejaVu Sans Mono", "Liberation Mono",
+    Consolas, monospace;
+
+  /* ── Radii -- tight. Nothing on this page is a pill. ──────────────────── */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+
+  /* ── Elevation. The two colour-bearing blooms below are held at or under
+         the 10% primary-500 tint budget (D5) -- the frontend proposal wrote
+         them at 16%/28%, which the widened tint arm in
+         tests/test_website_contract.py now catches in every notation. ──── */
+  --shadow-card: inset 0 1px 0 0 rgb(255 255 255 / 0.05), 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-lift: inset 0 1px 0 0 rgb(255 255 255 / 0.09), 0 10px 30px -12px rgb(244 63 94 / 0.1),
+    0 0 0 1px rgb(251 113 133 / 0.35);
+  --shadow-well: inset 0 1px 2px 0 rgb(0 0 0 / 0.6), inset 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-float: 0 24px 60px -24px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(255 255 255 / 0.06);
+
+  /* ── Motion. Zero JavaScript (PDF-16 AC11/AC12) -- every keyframe below is
+         driven by `animation-timeline: view()` behind a `@supports` guard,
+         never a script. `prefers-reduced-motion: reduce` is honoured at
+         every call site, not here (see the utilities section below). ───── */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-snap: cubic-bezier(0.2, 0, 0, 1);
+
+  --animate-caret: caret 1.1s steps(1, end) infinite;
+  @keyframes caret {
+    0%,
+    55% {
+      opacity: 1;
+    }
+    56%,
+    100% {
+      opacity: 0;
+    }
+  }
+
+  --animate-rise: rise 520ms var(--ease-out-quint) both;
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  --animate-rule: rule 640ms var(--ease-out-quint) both;
+  @keyframes rule {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
 }
+
+/*
+ * Measured contrast, every pair this ramp actually ships (WCAG 2.1 §1.4.3,
+ * `(L_lighter + 0.05) / (L_darker + 0.05)` over sRGB relative luminance).
+ * Threshold column: 4.5 = body text / 3.0 = large text & non-text UI
+ * indicators / "--" = decorative, no threshold. Independently recomputed at
+ * PDF-93 implementation time (not copied) and reproduces the frontend
+ * proposal's table to within rounding.
+ *
+ *   surface-50  / surface-900  18.45:1  4.5  pass -- headings
+ *   surface-50  / surface-850  17.72:1  4.5  pass
+ *   surface-50  / surface-800  16.71:1  4.5  pass
+ *   surface-100 / surface-950  17.07:1  4.5  pass -- terminal commands
+ *   surface-100 / surface-800  14.94:1  4.5  pass -- inline code
+ *   surface-200 / surface-900  14.14:1  4.5  pass -- body text
+ *   surface-300 / surface-900  10.73:1  4.5  pass -- secondary body
+ *   surface-400 / surface-900   6.84:1  4.5  pass -- meta, captions
+ *   surface-500 / surface-900   3.74:1  3.0  pass -- large-text/UI only, FAILS 4.5 as body
+ *   primary-200 / surface-950  14.20:1  4.5  pass
+ *   primary-300 / surface-950  10.59:1  4.5  pass -- transcript flags
+ *   primary-400 / surface-900   7.19:1  4.5  pass -- the accent-text default (was 6.63:1 on the old canvas -- raised)
+ *   primary-400 / surface-950   7.44:1  4.5  pass
+ *   primary-500 / surface-950   5.45:1  4.5  pass -- FILL only, the primary button
+ *   primary-600 / surface-950   4.26:1  4.5  FAIL as body -- large-text fills only
+ *   surface-900 / paper-50     17.58:1  4.5  pass -- the one inverted band
+ *   primary-700 / paper-50      5.71:1  4.5  pass -- accent text + CTA fill on paper
+ *   primary-600 / paper-50      4.27:1  4.5  FAIL as body -- large text/fills only; this is the on-paper focus-ring override
+ *   primary-500 / paper-50      3.34:1  4.5  FAIL -- forbidden on paper entirely
+ *   focus primary-400 / paper-50 2.45:1 3.0  FAIL -- must not be the ring there
+ *   focus primary-600 / paper-50 4.27:1 3.0  pass -- the mandated override
+ *
+ * Chip tint, flattened (`primary-500` at the shipped 10%, not the frontend
+ * proposal's unbuilt 12% -- the ≤10% budget in the header comment above
+ * governs regardless of what a design document assumed before the ruling):
+ * over surface-800 -> #341b24; primary-400 on it = 5.87:1 (pass, the chip's
+ * actual text colour); primary-500 on it = 4.31:1 (FAIL -- confirms
+ * primary-500 is never text there, independent of the exact alpha chosen).
+ *
+ * No single ratio is recorded here for `primary-500` as text generally
+ * (ruling `R7`): the quantity is surface-dependent, and an accent whose
+ * compliance depends on its container is the defect, not the ratio.
+ */
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  /* Refuse smeared fake-bold on faces with no real 700 -- the shipped
+     weight ceiling is 700 (below), so this only ever catches a genuine
+     fallback gap, and makes it visible instead of quietly ugly. */
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
 }
 
 /* Anchor-heavy single page: honour the OS-level motion preference. */
@@ -57,13 +220,43 @@ html {
 body {
   background-color: var(--color-surface-900);
   color: var(--color-surface-50);
+  font-feature-settings:
+    "kern" 1,
+    "liga" 1;
 }
 
-/* Deliberate, measured focus ring (WCAG 2.4.7) over custom-coloured controls.
-   primary-400 on surface-900 = 6.63:1 (>= 3:1, WCAG 1.4.11). */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+p,
+li {
+  text-wrap: pretty;
+}
+table,
+.u-num,
+.u-datum {
+  font-variant-numeric: tabular-nums;
+}
+pre,
+code {
+  font-variant-ligatures: none;
+}
+
+/* Deliberate, measured, CONTEXT-AWARE focus ring (WCAG 2.4.7/2.4.11).
+   primary-400 on surface-900 = 7.19:1 (>= 3:1) everywhere on the canvas,
+   band, card and well surfaces. The one exception is the inverted paper
+   band PDF-95 introduces: primary-400 there measures 2.45:1 and FAILS the
+   3:1 UI threshold, so `.on-paper` locally redefines the ring to
+   primary-600, which measures 4.27:1. Shipped here, ahead of the band
+   itself, so the band cannot land without a compliant ring (AC12). */
 :focus-visible {
-  outline: 2px solid var(--color-primary-400);
+  outline: 2px solid var(--focus-ring, var(--color-primary-400));
   outline-offset: 2px;
+}
+.on-paper {
+  --focus-ring: var(--color-primary-600);
 }
 
 /* PDF-92 D5. `--nav-h` is the sticky header's own height, and it is NOT a
@@ -97,4 +290,149 @@ body {
    anchors. */
 :where([id]) {
   scroll-margin-top: calc(var(--nav-h) + 0.5rem);
+}
+
+/* ── PDF-93 utilities ────────────────────────────────────────────────────
+   The drafting vocabulary: a masked grid field, crop ticks at container
+   corners, scroll-driven reveals behind a double guard, a one-click select
+   affordance, inline-code chip and the reusable card contract. */
+
+/* §D.1 -- a 1px inset top highlight turns "a rectangle filled with a dark
+   colour" into "a milled surface catching light". */
+.card {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-line-soft);
+  background-image: linear-gradient(180deg, var(--color-surface-800) 0%, var(--color-surface-850) 100%);
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color 160ms var(--ease-snap),
+    box-shadow 160ms var(--ease-snap),
+    transform 160ms var(--ease-snap);
+}
+.card:hover,
+.card:focus-within {
+  border-color: var(--color-line-ink);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition:
+      border-color 160ms var(--ease-snap),
+      box-shadow 160ms var(--ease-snap);
+  }
+  .card:hover,
+  .card:focus-within {
+    transform: none;
+  }
+}
+
+/* Inline code: surface-100 on a surface-800 chip with a line-soft hairline
+   (14.94:1) -- quiet and legible, so the ink stays free to mean something
+   (the ≤8% ink-coverage rule). Never used for a verb-chip name, which
+   keeps its own primary-400-on-tint treatment. */
+.code-inline {
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-line-soft);
+  background-color: var(--color-surface-800);
+  color: var(--color-surface-100);
+  padding-inline: 0.375rem;
+  padding-block: 0.125rem;
+  font-family: var(--font-mono);
+}
+
+/* Mono micro label: eyebrows, section numbers, chrome-bar meta, table
+   headers. Colour is left to the call site (surface-400 by default,
+   primary-400 when it is a section index). */
+.micro {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* §D.3 -- the drafting grid. Hero background only, radially masked so it
+   fades before the fold. */
+.u-grid-field {
+  background-image: linear-gradient(to right, var(--color-line-hair) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-line-hair) 1px, transparent 1px);
+  background-size: 64px 64px;
+  -webkit-mask-image: radial-gradient(ellipse 85% 65% at 50% 0%, #000 10%, transparent 72%);
+  mask-image: radial-gradient(ellipse 85% 65% at 50% 0%, #000 10%, transparent 72%);
+}
+
+/* §D.5 -- crop marks as the section divider. Four ticks at the container's
+   corners, two pseudo-elements, no extra DOM. */
+.u-crop {
+  position: relative;
+}
+.u-crop::before,
+.u-crop::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--color-line-mark), var(--color-line-mark)) left / 1px 10px no-repeat,
+    linear-gradient(var(--color-line-mark), var(--color-line-mark)) right / 1px 10px no-repeat;
+}
+.u-crop::before {
+  top: -10px;
+}
+.u-crop::after {
+  bottom: -10px;
+}
+
+/* §E.1 -- scroll reveals via `animation-timeline`, never IntersectionObserver.
+   The hidden initial state lives ONLY inside both guards: a browser without
+   scroll-driven animations never matches `@supports`, so the element is
+   simply visible (no flash of invisible content); `prefers-reduced-motion:
+   reduce` never matches the outer `@media`, so it is fully visible there
+   too, unconditionally. Zero JavaScript either way (AC10). */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .u-reveal {
+      animation: rise 520ms var(--ease-out-quint) both;
+      animation-timeline: view();
+      animation-range: entry 8% cover 30%;
+    }
+    .u-reveal-rule {
+      animation: rule 640ms var(--ease-out-quint) both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 24%;
+      transform-origin: left center;
+    }
+  }
+}
+
+/* §E.3 -- a zero-JS copy affordance: one click selects the whole command. */
+.u-selectall {
+  -webkit-user-select: all;
+  user-select: all;
+  cursor: text;
+}
+
+/* §D.4 -- grain. ~400 bytes inline, zero requests. Worst-case contrast cost
+   is 0.21 of a ratio point (measured, header table above), and it is
+   suppressed entirely under `prefers-contrast: more`. `pointer-events: none`
+   keeps it non-interactive; the visible-focus-ring criterion (AC11) is
+   checked directly rather than inferred from that fact alone. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.03;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@media (prefers-contrast: more) {
+  body::after {
+    display: none;
+  }
 }

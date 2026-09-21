@@ -24,12 +24,21 @@ from PIL import Image, ImageDraw, ImageFont
 DEFAULT_OUT = pathlib.Path(__file__).resolve().parent.parent / "public" / "og-image.png"
 
 WIDTH, HEIGHT = 1200, 630
-BG_TOP = (15, 23, 42)  # surface-900  #0f172a
-BG_BOTTOM = (136, 19, 55)  # primary-900  #881337
-ACCENT = (251, 113, 133)  # primary-400  #fb7185
-RIM = (190, 18, 60)  # primary-700  #be123c
-TEXT = (248, 250, 252)  # surface-50
-SUBTEXT = (251, 113, 133)  # primary-400  #fb7185
+#: PDF-93 D3 -- the two-plate ramp. All eight operands below are asserted BY
+#: NAME in tests/test_website_contract.py, never by hex grep: a hex census
+#: is blind to any operand whose comment omits its hex (PDF-93 Objection 1),
+#: which is why every constant below spells its hex, including TEXT.
+BG_TOP = (18, 12, 16)  # surface-900  #120c10
+BG_BOTTOM = (136, 19, 55)  # primary-900  #881337 -- unmoved
+ACCENT = (251, 113, 133)  # primary-400  #fb7185 -- frozen byte-for-byte
+RIM = (190, 18, 60)  # primary-700  #be123c -- unmoved
+TEXT = (251, 249, 250)  # surface-50  #fbf9fa
+SUBTEXT = (251, 113, 133)  # primary-400  #fb7185 -- frozen byte-for-byte
+#: The two inline literals PDF-16/PDF-91 left unpromoted -- an inline
+#: literal cannot be asserted by name, which is what made TEXT's stale copy
+#: invisible until this item's operand-level census.
+RULE = (146, 68, 80)  # line-mark (primary-400 @ 55%) flattened over surface-900
+FOOTER = (198, 191, 196)  # surface-300  #c6bfc4
 
 FONT_CANDIDATES_BOLD = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -105,7 +114,7 @@ def render(out_path: pathlib.Path) -> pathlib.Path:
     img = _vertical_gradient(WIDTH, HEIGHT, BG_TOP, BG_BOTTOM)
     draw = ImageDraw.Draw(img)
 
-    draw.rectangle([24, 24, WIDTH - 24, HEIGHT - 24], outline=(120, 30, 60), width=2)
+    draw.rectangle([24, 24, WIDTH - 24, HEIGHT - 24], outline=RULE, width=2)
     _draw_document(draw, cx=178, cy=HEIGHT // 2, r=88)
 
     title_font = _load_font(FONT_CANDIDATES_BOLD, 92)
@@ -122,7 +131,7 @@ def render(out_path: pathlib.Path) -> pathlib.Path:
         (text_x, 440),
         "pypdf · pdfium · pikepdf · reportlab — github.com/ArmandoHerra/pdf-tooling",
         font=footer_font,
-        fill=(203, 213, 225),
+        fill=FOOTER,
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

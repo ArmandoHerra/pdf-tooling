@@ -11,6 +11,14 @@
 // `watermark --pages N` appears in any example below, because both also
 // modify pages sharing a /Contents object — see PLAN.md §11.1.6. Other
 // verbs' page selection (as used by `rotate` here) is unaffected.
+//
+// PDF-93 D4: the three fake macOS traffic lights are deleted here — they
+// were the page's only off-palette colours (E7) — and the chrome bar is
+// left in plate-K/M terms: a mono micro label left, quiet meta right. The
+// bar's FINAL content (`bash — pdftooling`, `exit 0` with an ink tick) and
+// the `{ command, comment }` data-driven grid this transcript becomes are
+// PDF-95's, which extracts the shared `Terminal` component this item does
+// not build.
 const install = `# Install (published on PyPI)
 uv tool install pdf-tooling
 # or: pip install pdf-tooling`;
@@ -21,33 +29,31 @@ pdftooling rotate report.pdf --pages 2-4 --angle 90 -O rotated.pdf   # rotate pa
 pdftooling compress report.pdf -O small.pdf                          # lossless structural shrink`;
 ---
 
-<section id="quickstart" class="border-t border-surface-800 bg-surface-800/20 py-24">
+<section id="quickstart" class="u-crop border-t border-line bg-surface-850 py-24">
   <div class="mx-auto max-w-4xl px-6">
-    <div class="mx-auto max-w-2xl text-center">
-      <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">Quick Start</h2>
-      <p class="mt-4 text-lg text-surface-100">
-        Install <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdf-tooling</code>;
-        the command is <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftooling</code>.
-      </p>
-    </div>
+    <p class="micro text-surface-400"><span class="text-primary-400">&sect;04</span> / Quick Start</p>
+    <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
+    <h2 class="mt-6 text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">Quick Start</h2>
+    <p class="mt-4 max-w-2xl text-lg text-surface-300">
+      Install <code class="code-inline text-sm">pdf-tooling</code>;
+      the command is <code class="code-inline text-sm">pdftooling</code>.
+    </p>
 
-    <pre tabindex="0" class="mt-8 overflow-x-auto rounded-lg border border-surface-800 bg-surface-900 p-4 font-mono text-xs leading-relaxed text-surface-100"><code>{install}</code></pre>
+    <div tabindex="0" class="u-selectall mt-8 overflow-x-auto rounded-md border border-line-soft bg-surface-950 p-4 font-mono text-xs leading-relaxed text-surface-100 shadow-well"><pre><code>{install}</code></pre></div>
 
-    <div tabindex="0" class="mt-6 overflow-x-auto rounded-xl border border-surface-800 bg-surface-900">
-      <div class="flex items-center gap-2 border-b border-surface-800 px-4 py-3">
-        <span class="h-3 w-3 rounded-full bg-red-500/70"></span>
-        <span class="h-3 w-3 rounded-full bg-yellow-500/70"></span>
-        <span class="h-3 w-3 rounded-full bg-green-500/70"></span>
-        <span class="ml-3 text-xs text-surface-100">terminal</span>
+    <div tabindex="0" class="mt-6 overflow-x-auto rounded-lg border border-line-soft bg-surface-950 shadow-well">
+      <div class="flex items-center gap-2 border-b border-line px-4 py-3">
+        <span class="micro text-surface-400">quickstart</span>
+        <span class="ml-auto micro text-surface-400">terminal</span>
       </div>
-      <pre tabindex="0" class="overflow-x-auto p-6 font-mono text-sm leading-relaxed text-surface-50"><code>{commands}</code></pre>
+      <pre tabindex="0" class="overflow-x-auto p-6 font-mono text-sm leading-relaxed text-surface-100"><code>{commands}</code></pre>
     </div>
 
-    <p class="mt-6 text-sm text-surface-100">
-      Published on PyPI as <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdf-tooling</code> —
+    <p class="mt-6 max-w-2xl text-sm text-surface-300">
+      Published on PyPI as <code class="code-inline text-xs">pdf-tooling</code> —
       no Homebrew formula, no system package, no container image yet.
       Every verb <a href="#verbs" class="text-primary-400 underline hover:text-primary-300">listed below</a> is shipped —
-      <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdftooling --help</code> is the authoritative
+      <code class="code-inline text-xs">pdftooling --help</code> is the authoritative
       list of what actually exists.
     </p>
   </div>

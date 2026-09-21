@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-93] The visual system — 2026-09-20
+
+- **The site is set in two plates on a warm ink-black stock, not on `#0f172a` — Tailwind's stock `slate-900` and the single most common dark canvas on the web.** A thirteen-step warm-neutral ramp (`surface-950…50`) replaces the old four-stop slate ramp; the rose accent (`primary-400`/`primary-500`) is frozen byte-for-byte, and every inherited contrast pair moves up, never down (the accent rises from 6.63:1 to 7.19:1 on the new canvas).
+- **Drafting apparatus is the page's only decoration**: crop ticks at section corners, a masked drafting grid and a `612 × 792 pt` page-box motif in the hero, numbered `micro` eyebrows with a hairline rule replacing eight identical centred blocks, and monospace carrying roughly a third of the type with a real job (the wordmark, eyebrows, section numbers, verb chips, exit codes, tabular version numbers). The three fake macOS traffic lights — the page's only off-palette colours — are gone.
+- **The social card is regenerated from its generator in this commit**: all eight colour operands move or stay by name (`D3`), including the one a hex grep could never have seen (`TEXT`'s comment spelled no hex) — asserted by a new by-name census (`AC4`) rather than a hex count, with the byte gate passing (not skipping) as evidence.
+- **No accent byte moved.** `primary-400 #fb7185` and `primary-500 #f43f5e` are unchanged in all five files that copy them; the four hard-coded copies of the dark plate now agree with the `@theme` block that defines them, asserted by a new occurrence-census arm rather than left to a reviewer's eye. The tint budget holds in every CSS colour notation the new tokens are written in, including the one the inherited sweep could not see.
+- **No new font file and no phantom font name.** `Inter` / `JetBrains Mono` / `Fira Code` are gone from both `global.css` and `tailwind.config.mjs`; the stacks are pure system fonts, and the comment claiming a fallback for a never-fetched face is rewritten to say what is actually true.
+
 ## [PDF-94] Move the evidence to its own route — 2026-09-20
 
 - **The full 31-package inventory now exists exactly once, at `/licensing/`, instead of twice on the home page.** `Licensing.astro` and `TechStack.astro` both rendered the same generated `licenses.json`, three of four columns identical, in two different row orders; both are deleted, and `DependencyTable.astro` renders one `Package · Version · License · Tier · Role` table in the file's own declared order.
