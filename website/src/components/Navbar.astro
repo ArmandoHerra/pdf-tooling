@@ -15,7 +15,6 @@ interface Props {
 const { home = true } = Astro.props;
 const sectionHref = (id: string) => (home ? `#${id}` : `${base}#${id}`);
 
-const docsUrl = 'https://github.com/ArmandoHerra/pdf-tooling#readme';
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
 // PDF-94 D4: the annex route did not exist before this item, so this is the
 // only item that can add it to the link set.
@@ -40,13 +39,20 @@ const inventoryUrl = withBase('licensing/');
          all six register entries plus Docs measured 725-854px of required
          width against a 640px viewport across four label/spacing variants
          (E9) -- a document-level horizontal-scroll regression at a width
-         AC17 does not sample and the inherited preflight sweep cannot see. -->
+         AC17 does not sample and the inherited preflight sweep cannot see.
+         PDF-97 D10: `SECTIONS` gained a seventh entry (`status`) when
+         `features` retired to `safety` without dropping an entry -- the
+         725-854px figure is this row's PRIOR count and is not re-derived
+         here; the wrap escape hatch this comment describes is exactly what
+         makes that stale figure harmless rather than a silent regression,
+         and AC15's own reflow measurement (320/375/768/1280, this item's
+         report) is what actually re-verifies "no document-level horizontal
+         scroll" for the real, current entry count. -->
     <div class="hidden min-w-0 flex-1 flex-wrap items-center justify-end gap-x-5 gap-y-2 text-sm font-medium text-surface-300 sm:flex">
       {SECTIONS.map((section) => (
         <a href={sectionHref(section.id)} class="hover:text-primary-400">{section.label}</a>
       ))}
       <a href={inventoryUrl} class="hover:text-primary-400">All packages</a>
-      <a href={docsUrl} class="hover:text-primary-400">Docs</a>
     </div>
 
     <a

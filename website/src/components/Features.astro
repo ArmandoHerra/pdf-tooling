@@ -1,67 +1,88 @@
 ---
+// PDF-97 D6/D10. Retitled from "Features" (six mixed cards) to the safety
+// contract (four cards plus one closing admission). Two of the six old
+// cards duplicated sections that already exist elsewhere on the page --
+// "License-clean stack" duplicates `#licensing` (`LicenseSummary.astro`)
+// and "Stable exit codes" duplicates `#contract` (`ExitCodes.astro`'s exit-
+// code datasheet) -- and are absorbed there rather than kept here twice.
+// "Honest engine reporting" is absorbed into the `doctor` roster row
+// (`Verbs.astro`, this item's own section) and the ENGINE_MISSING (exit 3)
+// row at `#contract`. "One page-range grammar" relocates into the Verbs
+// lede, a fact about the verb surface rather than about safety. No fact
+// leaves this section without a living destination (D6's own table); every
+// destination was located in the built HTML before this file was written.
+//
+// Every sentence below carries a verbatim anchor into `README.md`, checked
+// by `tests/test_website_contract.py`'s `SOURCE_ANCHORS` table (D8) -- the
+// site restates in its own register, the anchor is the proof the restated
+// thing is still in the source. Two of the four cards are facts this site
+// has never shown before: a password is never accepted as a command-line
+// value, and permission bits are advisory rather than enforced.
+//
+// D10 -- this file is NOT renamed (a path rename in the last wave of a
+// seven-wave chain moves a coordinate several other diffs key on, for zero
+// user-visible gain). `#features` is a published anchor in the live nav
+// (`Navbar.astro`, first in-page link) and keeps resolving via the empty,
+// `aria-hidden` anchor immediately inside the section, above the heading --
+// both `#features` and `#safety` land the reader in the same place.
 const features = [
   {
     icon: 'shield',
-    title: 'Safe by default',
-    description: '--dry-run shows exactly what would be written and touches nothing. Outputs never clobber without --force. Every write goes to a temp file on the target filesystem, is fsync\'d, and is moved into place with os.replace. Inputs are never modified unless you ask for --in-place, which writes a .bak sidecar first.',
+    title: '--dry-run is pure',
+    description: "It plans and reports; it writes nothing, anywhere. Run it first on anything you are not sure about -- there is no partial-write state to clean up afterward, because nothing was written.",
   },
   {
-    icon: 'scale',
-    title: 'License-clean stack',
-    description: 'Apache-2.0 top to bottom. pypdf, pdfium, pikepdf, reportlab and pdfplumber are BSD / MIT / Apache / MPL. CI fails the build on any AGPL, GPL or LGPL package, and a unit test walks the source for forbidden imports and shell-outs — because the realistic leak in a PDF tool is a convenience subprocess call, not a dependency.',
+    icon: 'lock',
+    title: 'Nothing is clobbered',
+    description: 'Outputs never clobber. A bulk destructive run without --force is refused with exit 5 rather than prompted, so a script and a human get the identical guarantee -- there is no interactive confirmation path for an automated caller to accidentally satisfy.',
   },
   {
-    icon: 'terminal',
-    title: 'Machine-first output',
-    description: 'Every read path emits table, json or ndjson with a declared schema_version. json is automatic when stdout is not a terminal. Designed to be a link in a shell pipeline.',
+    icon: 'swap',
+    title: 'Every write is atomic, inputs untouched',
+    description: 'Every write goes to a temp file on the target filesystem, is fsync\'d, then moved into place with an atomic rename. Inputs are never mutated unless you ask for --in-place, which writes a .bak sidecar first.',
   },
   {
-    icon: 'stethoscope',
-    title: 'Honest engine reporting',
-    description: 'pdftooling doctor states, per port, which adapter resolved, its version, and what is missing — with an OS-aware install hint. A verb whose engine is absent exits 3 with that hint; never a stack trace, never a silently degraded result.',
-  },
-  {
-    icon: 'ruler',
-    title: 'One page-range grammar',
-    description: '1-3,5,9-, even, odd, first, last, -1, !5 — parsed by one module and shared by every page-addressing verb. Learn it once.',
-  },
-  {
-    icon: 'signal',
-    title: 'Stable exit codes',
-    description: 'Seven codes, uniform across every verb, asserted by a contract test. A script\'s recovery for "wrong password" differs from "engine missing" and from "refused", so they are different codes.',
+    icon: 'key',
+    title: 'A password is never a command-line value',
+    description: "argv is world-readable in /proc and lands in shell history, so a password is never accepted as a command-line value -- there is no --password, no --user-password and no --owner-password. Read it from a file or from stdin instead.",
   },
 ];
 
 const icons: Record<string, string> = {
-  shield:     'M12 2 20 5.5V11c0 5-3.4 8.7-8 9.9C7.4 19.7 4 16 4 11V5.5L12 2ZM9 11.5l2 2 4-4',
-  scale:      'M12 3v18M7 7 5 12h4L7 7Zm10 0-2 5h4l-2-5ZM5 12a2 2 0 0 0 4 0M15 12a2 2 0 0 0 4 0M5 21h14',
-  terminal:   'M4 5h16v14H4V5Zm3 4 3 3-3 3M12 15h5',
-  stethoscope:'M6 3v6a4 4 0 0 0 8 0V3M10 21a4 4 0 0 0 4-4v-3M18 9v2a4 4 0 0 1-4 4M18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z',
-  ruler:      'M3 8h18v8H3V8Zm4 0v3m4-3v5m4-5v3m4-5v8',
-  signal:     'M3 12h4l3-8 4 16 3-8h4',
+  shield: 'M12 2 20 5.5V11c0 5-3.4 8.7-8 9.9C7.4 19.7 4 16 4 11V5.5L12 2ZM9 11.5l2 2 4-4',
+  lock:   'M7 10V7a5 5 0 0 1 10 0v3M5 10h14v10H5V10Zm7 3.5v3',
+  swap:   'M4 7h13l-3-3M20 17H7l3 3',
+  key:    'M14 4a4 4 0 1 0-3.4 6.3L4 16.8V20h3.2l6.5-6.5A4 4 0 0 0 14 4Z',
 };
 ---
 
-<section id="features" class="u-crop mx-auto max-w-6xl px-6 py-24">
-  <p class="micro text-surface-400"><span class="text-primary-400">&sect;01</span> / Features</p>
+<section id="safety" class="u-crop mx-auto max-w-6xl px-6 py-24">
+  <span id="features" aria-hidden="true"></span>
+  <p class="micro text-surface-400"><span class="text-primary-400">&sect;01</span> / Safety</p>
   <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
   <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
-    Every common PDF chore, without the footguns
+    What happens to your files
   </h2>
   <p class="mt-4 max-w-2xl text-lg text-surface-300">
-    Six principles, machine-checked rather than promised.
+    Four guarantees, checked by the product's own test suite rather than promised.
   </p>
 
-  <div class="mt-16 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+  <div class="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
     {features.map((f) => (
-      <div class="card p-6">
+      <div class="card p-5">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="text-primary-400" aria-hidden="true">
           <path d={icons[f.icon]} />
         </svg>
         <div class="mt-3 h-px w-full bg-line-soft" aria-hidden="true"></div>
-        <h3 class="mt-4 text-lg font-semibold text-surface-50">{f.title}</h3>
-        <p class="mt-2 max-w-[48ch] text-sm leading-relaxed text-surface-200">{f.description}</p>
+        <h3 class="mt-3 text-lg font-semibold text-surface-50">{f.title}</h3>
+        <p class="mt-2 max-w-[32ch] text-sm leading-snug text-surface-200">{f.description}</p>
       </div>
     ))}
   </div>
+
+  <p class="mt-8 max-w-2xl text-sm leading-snug text-surface-300">
+    <strong class="text-surface-100">Permission bits are advisory, not enforcement.</strong> They are a
+    request to the reader, not a lock. Encryption protects the content; the bits on their own protect
+    nothing.
+  </p>
 </section>

@@ -1,62 +1,45 @@
 ---
-// Data-driven verb roster. `status` is derived from `pdftooling --help` AND
-// each verb's own `--help` (re-derived at implementation time, PDF-16
-// Phase B, 2026-08-31), NOT from PLAN.md §4.1 or this spec's text — that is
-// the whole point of honesty rule 7. All sixteen pdf-tooling specs have now
-// landed: every one of the 25 top-level commands `pdftooling --help` prints
-// resolves with a working `--help` of its own, so every entry below is
-// `available` and `planned.length` is 0.
+// PDF-97 D1/D3/D4/D5. Rewritten: the 26-row roster now lives in
+// `../lib/verbs.ts` (a typed module, not local data) and this component
+// only consumes it -- imports `verbs` and `familyOrder`, derives
+// `available` / `planned` / `groups` exactly as the previous version did,
+// and declares no roster of its own.
 //
-// `meta` is a grouping parent — `pdftooling meta --help` prints `get` and
-// `set` as its own two subcommands, both independently verified — so the
-// roster keeps `meta get` and `meta set` as two separate rows rather than
-// collapsing them into one `meta` row: both are real, distinct invocations,
-// and collapsing them would be a data-model change beyond this pass's
-// remit that loses purpose granularity. 25 top-level commands, minus the
-// `meta` parent, plus its two children, is 26 — the array's row count.
+// D3 -- density. The old layout was 26 near-identical cards in a grid,
+// 2,993px at 1440px and 27% of the page. This version is a chip map (every
+// verb as a small monospace anchor, clustered by family, the whole block
+// readable at a glance) OVER a set of detail rows (one line per verb: name,
+// then purpose) -- not a second copy of the same information, the same 26
+// rows read at two densities. Zero JavaScript: no filter, no search, no
+// script -- 26 items sit in the DOM and `Ctrl-F` already searches their
+// purposes too (`PDF-16` AC11/AC12).
 //
-// PDF-93 D5/PDF-96: the grouping field is still named `port` -- renaming it
-// to `family` (ruling R3) is PDF-96's, since a true port-per-verb
-// derivation, not a visual one, is what the rename exists to unblock. This
-// item restyles the group headings only.
-type Verb = { name: string; port: string; purpose: string; status: 'available' | 'planned' };
-
-const verbs: Verb[] = [
-  { name: 'doctor', port: 'diagnostics', purpose: "Report each port's resolved adapter, version, and OS-aware install hint for what is missing.", status: 'available' },
-  { name: 'info', port: 'diagnostics', purpose: 'Page count/sizes, encryption + permission bits, metadata, producer, font list, signature presence, per-page rotation.', status: 'available' },
-  { name: 'version', port: 'diagnostics', purpose: 'Report the tool, runtime and engine versions.', status: 'available' },
-  { name: 'merge', port: 'structure', purpose: 'Concatenate PDFs; per-input page selection via path:range; outline entry per source file.', status: 'available' },
-  { name: 'split', port: 'structure', purpose: 'One PDF → many, by fixed chunk size, explicit ranges, per page, or at top-level bookmarks.', status: 'available' },
-  { name: 'extract', port: 'structure', purpose: 'Write the selected pages to a new PDF, in the order given.', status: 'available' },
-  { name: 'delete', port: 'structure', purpose: 'Write everything except the selected pages.', status: 'available' },
-  { name: 'rotate', port: 'structure', purpose: 'Rotate the selected pages by a multiple of 90°, absolute or relative.', status: 'available' },
-  { name: 'reorder', port: 'structure', purpose: 'Rewrite page order from an explicit sequence; duplicates allowed, order preserved.', status: 'available' },
-  { name: 'repair', port: 'structure', purpose: "Structural recovery of a damaged/malformed PDF via libqpdf's recovery parser.", status: 'available' },
-  { name: 'linearize', port: 'structure', purpose: 'Rewrite for byte-serving ("fast web view").', status: 'available' },
-  { name: 'permissions', port: 'structure', purpose: 'Report the permission bits and encryption algorithm of an encrypted PDF.', status: 'available' },
-  { name: 'meta get', port: 'structure', purpose: 'Read the document information dictionary + XMP.', status: 'available' },
-  { name: 'meta set', port: 'structure', purpose: 'Write/clear document information fields and XMP.', status: 'available' },
-  { name: 'rasterize', port: 'raster', purpose: 'PDF → PNG/JPEG/TIFF/WEBP at a chosen DPI or pixel width.', status: 'available' },
-  { name: 'compose', port: 'compose', purpose: 'Images → PDF. JPEG inputs embed as DCTDecode streams (byte-preserving, no re-encode).', status: 'available' },
-  { name: 'create', port: 'compose', purpose: 'Text (v1) → PDF. Markdown/HTML behind the [html] extra (Phase 2).', status: 'available' },
-  { name: 'text', port: 'text', purpose: 'Extract text: fast path (pdfium) or layout-aware (pdfplumber) with per-block geometry.', status: 'available' },
-  { name: 'tables', port: 'text', purpose: 'Detect and extract tables to CSV/JSON.', status: 'available' },
-  { name: 'compress', port: 'optimize', purpose: 'Shrink: libqpdf object streams plus stream recompression (lossless), optional Pillow image downsample/recompress (lossy).', status: 'available' },
-  { name: 'encrypt', port: 'crypto', purpose: 'Apply AES-256 (or RC4-128 with --legacy) with user/owner passwords and a permission set.', status: 'available' },
-  { name: 'decrypt', port: 'crypto', purpose: 'Remove encryption given the correct password.', status: 'available' },
-  { name: 'watermark', port: 'overlay', purpose: 'Overlay/underlay generated text across the selected pages.', status: 'available' },
-  { name: 'stamp', port: 'overlay', purpose: 'Overlay/underlay an existing PDF page onto the selected pages.', status: 'available' },
-  { name: 'ocr', port: 'overlay', purpose: 'Add a Tesseract text layer over untouched pixels — a text-only PDF generated per page and merged.', status: 'available' },
-  { name: 'convert', port: 'external', purpose: 'Office → PDF via headless LibreOffice.', status: 'available' },
-];
+// D4 -- the drift sentence is now TRUE and names its instrument:
+// `tests/test_website_contract.py::test_the_website_verb_roster_is_the_live_
+// command_tree` asserts this module's 26 names are set-equal to
+// `discover_verbs()` (the product's own CLI, walked recursively, no skip
+// list) on every pull request and every deploy, replacing the previous
+// unchecked "checked against pdftooling --help at every deploy" claim.
+//
+// D5 -- two false/unsourced claims the previous footer carried are gone,
+// not restyled: `config` and `completion` do not exist on the live CLI
+// (both answer "No such command" at exit code 2 -- measured), and the
+// Phase 2 parked list (`redaction`, `outline editing`, `attachments`,
+// `run recipes`) has no source in `README.md` or `CONTRIBUTING.md` and this
+// site was its only carrier tree-wide. The one true, sourced statement in
+// that neighbourhood -- Phase 1 (v1) complete -- now lives in the
+// production-posture section instead (`Posture.astro`, D7).
+import { verbs, familyOrder, type Verb } from '../lib/verbs';
 
 const available = verbs.filter((v) => v.status === 'available');
 const planned = verbs.filter((v) => v.status === 'planned');
 
-const portOrder = ['diagnostics', 'structure', 'raster', 'compose', 'text', 'optimize', 'crypto', 'overlay', 'external'];
-const groups = portOrder
-  .map((port) => ({ port, items: verbs.filter((v) => v.port === port) }))
+const groups = familyOrder
+  .map((family) => ({ family, items: verbs.filter((v: Verb) => v.family === family) }))
   .filter((g) => g.items.length > 0);
+
+/** `meta get` -> `meta-get`, for the `#verb-<slug>` row anchor. */
+const slug = (name: string) => name.replace(/\s+/g, '-');
 ---
 
 <section id="verbs" class="u-crop mx-auto max-w-6xl px-6 py-24">
@@ -65,35 +48,65 @@ const groups = portOrder
   <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl u-num">
     {available.length} shipped &middot; {planned.length} planned
   </h2>
-  <p class="mt-4 max-w-2xl text-lg text-surface-300">
+  <p class="mt-3 max-w-3xl text-lg text-surface-300">
     {planned.length > 0 && (
       <>Verbs marked <strong>planned</strong> are specified and not yet shipped. </>
     )}
-    This list is
-    checked against <code class="code-inline text-sm">pdftooling --help</code> at every deploy.
+    Every page-addressing verb shares one page-range grammar --
+    <code class="code-inline text-sm">1-3,5,9-</code>, <code class="code-inline text-sm">even</code>,
+    <code class="code-inline text-sm">odd</code>, <code class="code-inline text-sm">first</code>,
+    <code class="code-inline text-sm">last</code>, <code class="code-inline text-sm">-1</code>,
+    <code class="code-inline text-sm">!5</code> -- parsed once. Set-equal to
+    <code class="code-inline text-sm">pdftooling --help</code>, checked by
+    <code class="code-inline text-sm">tests/test_website_contract.py</code> on every pull request and
+    every deploy.
   </p>
 
-  <div class="mt-16 space-y-12">
+  <ul class="verb-chip-map mt-8 space-y-3" aria-label="All verbs, clustered by family">
+    {groups.map((g) => (
+      <li>
+        <h4 id={`chip-${g.family}`} class="visually-hidden">{g.family} family, {g.items.length} verbs</h4>
+        <p aria-hidden="true" class="micro mb-1.5 text-surface-400">
+          {g.family} <span class="text-surface-500">{g.items.length}</span>
+        </p>
+        <ul aria-labelledby={`chip-${g.family}`} class="flex flex-wrap gap-1.5">
+          {g.items.map((v) => (
+            <li>
+              <a
+                href={`#verb-${slug(v.name)}`}
+                class="chip inline-flex min-h-6 min-w-6 items-center justify-center rounded-sm border border-primary-500/10 bg-primary-500/10 px-2 py-0.5 font-mono text-xs font-semibold text-primary-400 hover:underline"
+              >
+                {v.name}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </li>
+    ))}
+  </ul>
+
+  <div class="verb-detail mt-10 space-y-6">
     {groups.map((g) => (
       <div>
-        <div class="mb-4 flex items-center gap-4">
-          <h3 class="micro shrink-0 text-surface-400">{g.port}</h3>
+        <div class="mb-2 flex items-center gap-4">
+          <h3 class="micro shrink-0 text-surface-400">{g.family} &middot; {g.items.length}</h3>
           <div class="h-px flex-1 bg-line" aria-hidden="true"></div>
         </div>
-        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="grid grid-cols-1 gap-x-8 lg:grid-cols-2">
           {g.items.map((v) => (
-            <div class="card p-6">
-              <div class="mb-4 flex flex-wrap items-center gap-2">
-                <span class="inline-flex items-center justify-center rounded-sm border border-primary-500/10 bg-primary-500/10 px-3 py-1.5 text-sm font-bold tracking-wide text-primary-400 font-mono">
-                  {v.name}
-                </span>
+            <div
+              id={`verb-${slug(v.name)}`}
+              class="verb-row flex flex-col gap-x-4 border-b border-line-soft py-1.5 sm:grid sm:grid-cols-[7.5rem_1fr] sm:items-baseline"
+            >
+              <span class="flex items-center gap-2 font-mono text-sm font-semibold text-primary-400">
+                {v.name}
                 {v.status === 'planned' && (
                   <span class="micro rounded-xs bg-surface-750 px-2 py-1 text-surface-300">
                     planned
                   </span>
                 )}
-              </div>
-              <p class="text-sm leading-relaxed text-surface-200">{v.purpose}</p>
+              </span>
+              <p class="text-sm leading-snug text-surface-200">{v.purpose}</p>
             </div>
           ))}
         </div>
@@ -101,9 +114,7 @@ const groups = portOrder
     ))}
   </div>
 
-  <p class="mt-8 max-w-2xl text-sm text-surface-300">
-    config and completion round out the surface — run <code class="code-inline text-xs">pdftooling --help</code> for the whole tree.
-    Phase 2 (HTML/Markdown create, redaction, forms, outline editing, attachments/annotations,
-    run recipes) is parked, additive on the same spine.
+  <p class="mt-6 max-w-2xl text-sm text-surface-300">
+    Run <code class="code-inline text-xs">pdftooling --help</code> for the whole tree.
   </p>
 </section>

@@ -79,14 +79,19 @@ OG_GENERATOR_SCRIPT: Final[Path] = WEBSITE_ROOT / "scripts" / "generate-og-image
 
 #: PDF-92 D7 / AR1. The frozen `id` sequence, declared INDEPENDENTLY of
 #: `sections.ts` (D7's own instruction) so drift between the two is a
-#: deliberate edit and never a silent one -- `PDF-97` retiring `features` to
-#: `safety` reds this tuple by design unless it is edited in the same commit.
+#: deliberate edit and never a silent one. PDF-97 D10 retires `features` in
+#: favour of `safety` and assigns the previously-reserved `status` -- both
+#: edited here in the SAME commit as `sections.ts` itself, per this
+#: comment's own standing instruction; `#features` keeps resolving via its
+#: own empty anchor (`Features.astro`), so the published link contract is
+#: unbroken even though the register no longer names it.
 FROZEN_SECTION_IDS: Final[tuple[str, ...]] = (
-    "features",
+    "safety",
     "architecture",
     "verbs",
     "quickstart",
     "contract",
+    "status",
     "licensing",
 )
 
@@ -600,17 +605,17 @@ def test_a4_the_over_budget_census_counts_occurrences_never_lines() -> None:
     (`border-primary-500/10` and `bg-primary-500/10`) -- a line-based
     instrument would report 1 where the true count is 2.
 
-    PDF-93 re-pin: the chip moved from `Verbs.astro:79` to `:87` when the
-    section gained its chrome (eyebrow, hairline, `.card` treatment) -- the
-    two-occurrence CLAIM is what this test protects, not the specific line,
-    so the line is re-measured here rather than left stale."""
+    PDF-97 re-pin: the chip moved from `Verbs.astro:87` to `:77` when D3's
+    chip map replaced the old card grid's name badge with a compact anchor
+    chip -- the two-occurrence CLAIM is what this test protects, not the
+    specific line, so the line is re-measured here rather than left stale."""
     verbs = WEBSITE_SRC / "components" / "Verbs.astro"
     occs_by_line: dict[int, int] = {}
     for occ in locate_accent_occurrences(verbs, verbs.read_text()):
         occs_by_line[occ.line] = occs_by_line.get(occ.line, 0) + 1
     two_hit_lines = [line for line, count in occs_by_line.items() if count == 2]
-    assert two_hit_lines == [87], (
-        f"expected exactly one two-occurrence line at :87, found {two_hit_lines} "
+    assert two_hit_lines == [77], (
+        f"expected exactly one two-occurrence line at :77, found {two_hit_lines} "
         f"(full census: {occs_by_line})"
     )
 
@@ -1258,3 +1263,435 @@ def test_pdf95_ac20_no_version_number_is_typed_in_the_fold_or_the_closing_band()
             f"{HERO_TRANSCRIPT_TS.relative_to(REPO_ROOT)}: {m.group(0)!r} (outside header)"
         )
     assert offenders == [], "typed version number found:\n" + "\n".join(offenders)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-97 -- density: verbs, features and posture. Source-tier throughout
+# (no `dist/` needed) except the anchor-resolution and rendered-count arms,
+# which are dist-tier in the same style as the rest of this module.
+#
+# AC1 and AC3(a) -- the TYPE-level halves of the roster/rename guard --
+# need `astro check` (a Node runtime this test tree does not have) and are
+# driven by hand and recorded in this item's report instead, exactly as
+# AC2-AC5/AC7/AC16 of the PDF-95 section above are. AC17 (the page-height
+# ceiling) is Binding 3: no pixel-height CI gate, ever -- measured by hand
+# and recorded in the report.
+# --------------------------------------------------------------------------- #
+
+VERBS_TS: Final[Path] = WEBSITE_SRC / "lib" / "verbs.ts"
+POSTURE_ASTRO: Final[Path] = WEBSITE_SRC / "components" / "Posture.astro"
+README_MD: Final[Path] = REPO_ROOT / "README.md"
+CONTRIBUTING_MD: Final[Path] = REPO_ROOT / "CONTRIBUTING.md"
+
+#: D2/AC2/AC3(b). One roster row, as authored today (`family:`) OR as it
+#: was authored at `5265850` (`port:`) -- ONE pattern for both texts, so
+#: AC2's identity comparison can never silently drift into two hand-
+#: maintained parsers that stop agreeing with each other.
+_VERB_ROW_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\{\s*name:\s*'([^']*)',\s*(?:family|port):\s*'([^']*)',"
+    r"\s*purpose:\s*(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'),"
+    r"\s*status:\s*'(available|planned)'\s*\}"
+)
+#: D4's non-vacuity clause, read independently of `_VERB_ROW_PATTERN` so a
+#: roster whose SHAPE changed entirely (zero paired-row matches) cannot
+#: pass AC4 by comparing two empty sets -- `scripts/assert_skips.py`'s own
+#: idiom, applied to a roster instead of a build artifact.
+_NAME_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bname\b\s*:")
+_FAMILY_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bfamily\b\s*:")
+_PORT_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bport\b\s*:")
+
+#: D5/AC6. The two false/unsourced claims the previous footer carried,
+#: measured false (`config`/`completion` answer "No such command" at exit
+#: code 2, live) or unsourced (the Phase 2 parked list has zero occurrences
+#: in `README.md`/`CONTRIBUTING.md` and this site was its only carrier
+#: tree-wide) -- E3/E4 in this item's spec.
+_FALSE_FOOTER_NEEDLES: Final[tuple[str, ...]] = (
+    "config and completion",
+    "additive on the same spine",
+)
+
+#: D8/AC8. One row per claim in the safety and posture sections; each
+#: anchor is a verbatim sentence fragment that must still appear in its
+#: named source document -- the site restates in its own register, the
+#: anchor is the proof the restated thing is still in the source (the site
+#: text is deliberately NOT required to equal the anchor). Eighteen rows,
+#: matching this item's spec E7 one-for-one; re-verified against the
+#: shipped files, not transcribed from the spec.
+SOURCE_ANCHORS: Final[tuple[tuple[str, Path, str], ...]] = (
+    ("dry-run purity", README_MD, "plans and reports; it writes nothing, anywhere"),
+    ("no clobber", README_MD, "Outputs never clobber."),
+    ("bulk refusal", README_MD, "is refused with exit 5 rather than prompted"),
+    (
+        "atomic write",
+        README_MD,
+        "write-to-temp-on-the-target-filesystem, `fsync`, then an atomic rename",
+    ),
+    (
+        "inputs immutable",
+        README_MD,
+        "Inputs are never mutated unless you pass `--in-place`, which writes a "
+        "`.bak` sidecar first",
+    ),
+    ("password/argv", README_MD, "A password is never accepted as a command-line value"),
+    (
+        "argv is readable",
+        README_MD,
+        "`argv` is world-readable in `/proc` and lands in shell history",
+    ),
+    (
+        "no such flags",
+        README_MD,
+        "There is no `--password`, no `--user-password` and no `--owner-password`",
+    ),
+    ("bits advisory", README_MD, "They are a request to the reader, not a lock"),
+    (
+        "bits protect none",
+        README_MD,
+        "Encryption protects the content; the bits on their own protect nothing.",
+    ),
+    ("public API", README_MD, "public API from v1.0.0"),
+    (
+        "major bump",
+        README_MD,
+        "Breaking either requires a major version bump and a `schema_version` increment",
+    ),
+    (
+        "where defects live",
+        README_MD,
+        "Open defects and planned work are recorded, per finding, in the maintainer's "
+        "planning tree",
+    ),
+    ("not distributed", README_MD, "are not part of this distribution"),
+    (
+        "not in sdist",
+        README_MD,
+        "They are not shipped in the sdist or the wheel and are not present in a clone",
+    ),
+    ("phase", README_MD, "Phase 1 (v1) complete"),
+    ("dco", CONTRIBUTING_MD, "git commit -s"),
+    ("changelog rule", CONTRIBUTING_MD, "in the same commit as the code"),
+)
+
+#: D7/AC9. The four things the posture section must never carry.
+_SWEEP_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"\d{4}-\d{2}-\d{2}_\d{6}")
+_COMMIT_SHA_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
+_OPEN_FINDING_TALLY_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b\d+\s+open\b|\bopen\s+\d+\b", re.IGNORECASE
+)
+_VERSION_LITERAL_PATTERN: Final[re.Pattern[str]] = re.compile(r"v?\d+\.\d+\.\d+")
+#: The one sanctioned, frozen occurrence -- a historical fact ("public API
+#: SINCE v1.0.0"), never a claim about the currently-shipping version.
+_SANCTIONED_VERSION_PHRASE: Final[str] = "public API from v1.0.0"
+
+#: D10/AC10. The full published anchor set after this item -- the six
+#: `FROZEN_SECTION_IDS` above the register still declares, plus `features`
+#: (kept alive by its own empty anchor, no longer in the register).
+ALL_PUBLISHED_ANCHORS: Final[tuple[str, ...]] = FROZEN_SECTION_IDS + ("features",)
+
+
+def _unquote_purpose(raw: str) -> str:
+    """Strip the one matched pair of quotes `_VERB_ROW_PATTERN` captured --
+    single OR double (`doctor`'s purpose is double-quoted because it
+    contains an apostrophe)."""
+    return raw[1:-1]
+
+
+def _parse_roster(text: str) -> list[tuple[str, str, str, str]]:
+    """`(name, family_or_port_value, purpose, status)` tuples, in file
+    order, from either the current (`family:`) or the pre-rename
+    (`port:`) shape -- `_VERB_ROW_PATTERN` reads both."""
+    return [
+        (name, group_value, _unquote_purpose(purpose), status)
+        for name, group_value, purpose, status in _VERB_ROW_PATTERN.findall(text)
+    ]
+
+
+def test_pdf97_ac4_the_verb_roster_is_the_live_command_tree() -> None:
+    """AC4/D4. `{v.name for v in discover_verbs()}` (the product's own CLI,
+    walked recursively, no skip list -- `tests/registry.py:651`'s own
+    contract) is set-equal to the 26 `name`s `verbs.ts` declares, with the
+    non-vacuity clause: the parsed `name:` count equals the parsed
+    `family:` count and is greater than zero.
+
+    Failing controls, both driven and reverted from a byte-compared backup
+    (E2's isolating pair, re-derived against this tree): delete the
+    `rotate` row -> RED naming `rotate` in `live - site`; add a bogus
+    `flatten` row -> RED naming `flatten` in `site - live`.
+    """
+    tests_dir = str(Path(__file__).resolve().parent)
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
+    from registry import discover_verbs  # noqa: E402  (path must be set up first)
+
+    live = {v.name for v in discover_verbs()}
+
+    text = VERBS_TS.read_text()
+    name_count = len(_NAME_KEY_PATTERN.findall(text))
+    family_count = len(_FAMILY_KEY_PATTERN.findall(text))
+    assert name_count == family_count and name_count > 0, (
+        f"non-vacuity: {VERBS_TS.relative_to(REPO_ROOT)} parsed {name_count} "
+        f"name: key(s) and {family_count} family: key(s) -- the parse must "
+        "not silently match nothing"
+    )
+
+    site = {name for name, _family, _purpose, _status in _parse_roster(text)}
+    assert site == live, (
+        f"verb roster != live command tree -- "
+        f"live - site: {sorted(live - site)}  site - live: {sorted(site - live)}"
+    )
+
+
+def test_pdf97_ac2_the_rename_is_a_rename_and_the_data_is_unchanged() -> None:
+    """AC2/D2. `(name, family, purpose, status)` parsed from `verbs.ts`
+    equals `(name, port, purpose, status)` parsed from `Verbs.astro` AT
+    `5265850` (the commit this item's spec measured against; `Verbs.astro`'s
+    own diff since then -- `PDF-91`/`PDF-93` -- is styling only, never the
+    roster array, confirmed by `git diff 5265850 -- .../Verbs.astro`), after
+    substituting the key name: 26 rows, in order, nine family values,
+    unchanged membership, unchanged purposes and statuses.
+
+    Failing control (driven, reverted from a byte-compared backup): change
+    one purpose by one character in a scratch copy of `verbs.ts` -- the
+    comparison reds naming that verb (`merge`, in the drive).
+    """
+    old_text = _git("show", "5265850:website/src/components/Verbs.astro").stdout
+    old_rows = _parse_roster(old_text)
+    new_rows = _parse_roster(VERBS_TS.read_text())
+
+    assert len(old_rows) == 26, f"5265850 roster parsed {len(old_rows)} row(s), expected 26"
+    assert len(new_rows) == 26, f"verbs.ts roster parsed {len(new_rows)} row(s), expected 26"
+    assert old_rows == new_rows, (
+        "roster changed beyond the field rename -- diff the two parses to find the row:\n"
+        f"  old: {old_rows}\n  new: {new_rows}"
+    )
+
+    families = sorted({family for _name, family, _purpose, _status in new_rows})
+    expected_families = [
+        "compose",
+        "crypto",
+        "diagnostics",
+        "external",
+        "optimize",
+        "overlay",
+        "raster",
+        "structure",
+        "text",
+    ]
+    assert families == expected_families, f"family values changed: {families}"
+
+
+def test_pdf97_ac3b_no_port_named_field_survives_textually() -> None:
+    """AC3(b)/D2. The TEXTUAL half of the rename guard (the type-level
+    half, AC3(a), is `astro check` -- driven by hand and recorded in the
+    report, this test tree has no Node runtime). Zero `port:` matches and
+    exactly 27 `family:` matches (26 rows plus the type declaration) across
+    `verbs.ts` + `Verbs.astro` combined; `portOrder` absent from both.
+
+    Failing control (driven): the same `port:` count against `Verbs.astro`
+    AT `5265850` is 27 (26 rows plus the type) -- confirms this arm can
+    see the pre-rename shape rather than passing vacuously.
+    """
+    verbs_astro = WEBSITE_SRC / "components" / "Verbs.astro"
+    for path in (VERBS_TS, verbs_astro):
+        text = path.read_text()
+        port_hits = _PORT_KEY_PATTERN.findall(text)
+        assert port_hits == [], (
+            f"{path.relative_to(REPO_ROOT)}: {len(port_hits)} port: occurrence(s) survive"
+        )
+        assert "portOrder" not in text, (
+            f"{path.relative_to(REPO_ROOT)}: portOrder identifier survives"
+        )
+
+    family_total = sum(
+        len(_FAMILY_KEY_PATTERN.findall(path.read_text())) for path in (VERBS_TS, verbs_astro)
+    )
+    assert family_total == 27, (
+        f"family: occurs {family_total} time(s) across verbs.ts + Verbs.astro, expected 27"
+    )
+
+    old_text = _git("show", "5265850:website/src/components/Verbs.astro").stdout
+    old_port_hits = _PORT_KEY_PATTERN.findall(old_text)
+    assert len(old_port_hits) == 27, (
+        f"control: 5265850's Verbs.astro should carry 27 port: occurrences, "
+        f"found {len(old_port_hits)}"
+    )
+
+
+def test_pdf97_ac6_the_two_false_unsourced_footer_claims_are_gone() -> None:
+    """AC6/D5. Both needles absent from `website/src`, each carrying the
+    measurement that made it a needle: `config`/`completion` do not exist
+    on the live CLI (both answer "No such command", exit code 2 -- E3), and
+    the Phase 2 parked list has zero occurrences in `README.md` or
+    `CONTRIBUTING.md` and this site was its only carrier tree-wide (E4).
+
+    Failing control (driven): restore either string in a scratch copy and
+    confirm the arm reds naming it; reverted from a byte-compared backup.
+    """
+    offenders = []
+    for path in _source_files():
+        text = path.read_text()
+        for needle in _FALSE_FOOTER_NEEDLES:
+            if needle in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: {needle!r}")
+    assert offenders == [], "false/unsourced footer needle survives:\n" + "\n".join(offenders)
+
+
+def test_pdf97_ac8_every_new_sentence_is_mechanically_traceable() -> None:
+    """AC8/D8. Every anchor in `SOURCE_ANCHORS` appears verbatim in its
+    named document. The site's own wording is never required to equal the
+    anchor (D8's own selection rule) -- this arm proves the SOURCE still
+    carries the claim, not that the site quotes it byte-for-byte.
+
+    Failing control (driven, reverted from a byte-compared backup): change
+    one anchor by one character (`'Outputs never clobber.'` ->
+    `'Outputs never clobbers.'`) -- the arm reds naming exactly that claim
+    key (`no clobber`) and no other.
+    """
+    missing = []
+    for key, doc_path, anchor in SOURCE_ANCHORS:
+        text = doc_path.read_text()
+        if anchor not in text:
+            missing.append(f"{key!r}: {anchor!r} not found in {doc_path.relative_to(REPO_ROOT)}")
+    assert missing == [], "source anchor(s) not found verbatim:\n" + "\n".join(missing)
+    assert len(SOURCE_ANCHORS) == 18, f"expected 18 source anchors, found {len(SOURCE_ANCHORS)}"
+
+
+def test_pdf97_ac9_the_posture_section_carries_none_of_the_four_forbidden_tokens() -> None:
+    """AC9/D7. The BUILT `#status` section carries no sweep id, no 7-40
+    character hex sha, no open-finding tally, and no version literal other
+    than the one sanctioned, frozen occurrence inside
+    `"public API from v1.0.0"`. Dist-tier and scoped to the rendered
+    section (never the `.astro` source's own developer comments, which are
+    free to discuss "v1.0.0" as a fact about this arm without tripping it)
+    -- the spec's own AC9 wording is "arms over the BUILT section".
+
+    Failing control (driven, reverted from a byte-compared backup): plant
+    each of the four in turn in a scratch copy and confirm the arm reds
+    naming which token class fired.
+    """
+    _require_dist()
+    html = (DIST_ROOT / "index.html").read_text()
+    section_match = re.search(r'<section id="status".*?</section>', html, re.DOTALL)
+    assert section_match is not None, "#status section not found in dist/index.html"
+    text = html_unescape(section_match.group(0))
+
+    sweep_hits = _SWEEP_ID_PATTERN.findall(text)
+    assert sweep_hits == [], f"sweep id(s) found in the built #status section: {sweep_hits}"
+
+    sha_hits = _COMMIT_SHA_PATTERN.findall(text)
+    assert sha_hits == [], (
+        f"commit sha-shaped token(s) found in the built #status section: {sha_hits}"
+    )
+
+    tally_hits = _OPEN_FINDING_TALLY_PATTERN.findall(text)
+    assert tally_hits == [], f"open-finding tally found in the built #status section: {tally_hits}"
+
+    version_hits = list(_VERSION_LITERAL_PATTERN.finditer(text))
+    assert _SANCTIONED_VERSION_PHRASE in text, (
+        "the one sanctioned phrase, 'public API from v1.0.0', is missing from "
+        "the built #status section"
+    )
+    offenders = [m.group(0) for m in version_hits if m.group(0) != "v1.0.0"]
+    assert offenders == [], f"version literal(s) outside the sanctioned phrase: {offenders}"
+    assert len(version_hits) == 1, (
+        f"expected exactly one version-shaped match (inside the sanctioned phrase) in the "
+        f"built #status section, found {len(version_hits)}: {[m.group(0) for m in version_hits]}"
+    )
+
+
+def test_pdf97_ac10_all_published_anchors_resolve_in_dist() -> None:
+    """AC10/D10. `#quickstart`, `#licensing`, `#architecture`, `#verbs`,
+    `#contract`, `#status`, `#safety` and `#features` all resolve exactly
+    once each in the built `dist/index.html` -- the last pair is the point:
+    `Features.astro` is retitled to the safety contract and carries
+    `id="safety"`, while the empty, `aria-hidden` anchor it also carries
+    keeps the PUBLISHED `#features` link (`Navbar.astro`'s historical first
+    in-page link) resolving to the same place.
+    """
+    _require_dist()
+    html = (DIST_ROOT / "index.html").read_text()
+    missing = []
+    wrong_count = []
+    for anchor in ALL_PUBLISHED_ANCHORS:
+        occurrences = len(re.findall(f'id="{anchor}"', html))
+        if occurrences == 0:
+            missing.append(anchor)
+        elif occurrences != 1:
+            wrong_count.append((anchor, occurrences))
+    assert missing == [], f"published anchor(s) missing from dist/index.html: {missing}"
+    assert wrong_count == [], (
+        f"published anchor(s) with an unexpected occurrence count: {wrong_count}"
+    )
+
+
+def test_pdf97_ac11_verb_counts_stay_computed_and_no_literal_appears() -> None:
+    """AC11/D-standard. `{available.length}` / `{planned.length}` survive
+    in `Verbs.astro` (sourced from `verbs.ts`, never a local roster); `26`
+    and `0` appear nowhere as bare literals in the component; the rendered
+    heading in `dist/index.html` reads "26 shipped" (the planned count of 0
+    renders no digit at all -- `&middot; {planned.length} planned` renders
+    literally as "0 planned" via the template, and neither figure is typed
+    by the author).
+    """
+    verbs_astro_text = (WEBSITE_SRC / "components" / "Verbs.astro").read_text()
+    assert "available.length" in verbs_astro_text and "planned.length" in verbs_astro_text, (
+        "Verbs.astro no longer derives its counts from computed .length expressions"
+    )
+    assert re.search(r"\bconst\s+verbs\s*:", verbs_astro_text) is None, (
+        "Verbs.astro declares its own roster again -- it must import from verbs.ts only"
+    )
+    # AC11's own scope: "26 and 0 appear nowhere as literals IN THE
+    # SECTION" describes the rendered heading, not a blanket ban on the
+    # digit 0 anywhere in the file -- `.length > 0` and similar ordinary
+    # code would otherwise false-positive. Scoped to the `<h2...>` heading
+    # block itself, the one place a hand-typed "26 shipped" could silently
+    # replace the computed expression with an identical render (AC11's own
+    # worked control).
+    heading_match = re.search(r"<h2\b.*?</h2>", verbs_astro_text, re.DOTALL)
+    assert heading_match is not None, "no <h2> heading found in Verbs.astro"
+    heading_text = heading_match.group(0)
+    for literal in ("26", "0"):
+        bare = re.findall(rf"[^\w.](?:{literal})[^\w%]", heading_text)
+        assert bare == [], f"bare literal {literal!r} found in Verbs.astro's heading: {bare}"
+
+    _require_dist()
+    html = (DIST_ROOT / "index.html").read_text()
+    section_match = re.search(r'<section id="verbs".*?</section>', html, re.DOTALL)
+    assert section_match is not None, "verbs section not found in dist/index.html"
+    assert "26 shipped" in section_match.group(0), (
+        "rendered heading does not read '26 shipped' in dist/index.html"
+    )
+
+
+def test_pdf97_ac7_features_renders_four_cards_and_every_destination_exists() -> None:
+    """AC7/D6. The built `index.html` `#safety` section carries exactly
+    four `.card` blocks plus the closing admission, the stale cardinal
+    ("Six principles") is gone, and every fact the old six-card grid
+    carried has a living destination elsewhere in the same build (D6's own
+    table) -- located by grep, not assumed.
+    """
+    _require_dist()
+    html = (DIST_ROOT / "index.html").read_text()
+
+    assert "Six principles" not in html, "the stale six-card cardinal survives in dist/index.html"
+
+    safety_match = re.search(r'<section id="safety".*?</section>', html, re.DOTALL)
+    assert safety_match is not None, "#safety section not found in dist/index.html"
+    safety_html = safety_match.group(0)
+    # The padding utility on `.card` is a styling detail, not this arm's
+    # subject -- match the `card` class token itself (word-bounded, so a
+    # future unrelated class containing "card" as a substring cannot
+    # silently inflate the count).
+    card_count = len(re.findall(r'class="card\b', safety_html))
+    assert card_count == 4, f"#safety section carries {card_count} card(s), expected 4"
+
+    # D6's disposition table: every fact leaving Features has a living
+    # destination, verified in the SAME build.
+    destinations = {
+        "License-clean stack -> #licensing": "BSD, MIT, Apache or MPL",
+        "Machine-first output -> #contract": "schema_version",
+        "Honest engine reporting -> doctor row / exit 3": "install hint",
+        "Stable exit codes -> #contract": "uniform across every verb",
+    }
+    missing_destinations = [label for label, needle in destinations.items() if needle not in html]
+    assert missing_destinations == [], f"missing destination(s): {missing_destinations}"
