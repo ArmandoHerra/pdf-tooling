@@ -1086,9 +1086,30 @@ def test_pdf95_ac1_the_hero_transcript_table_is_reproducible_from_the_product(
         ["ls", "q3.pdf"], cwd=tmp_path, capture_output=True, text=True, check=False
     )
     assert ls_result.returncode != 0
-    assert ls_result.stderr.strip() == _HERO_LS_FAILURE, (
-        f"ls verdict differs: {ls_result.stderr.strip()!r} != {_HERO_LS_FAILURE!r}"
-    )
+
+    # `ls`'s wording is a property of the HOST's coreutils, not of this
+    # product. GNU prints "ls: cannot access 'q3.pdf': No such file or
+    # directory"; BSD `ls` on macOS prints "ls: q3.pdf: No such file or
+    # directory". Asserting byte-equality against the captured flavour
+    # reddens every macOS leg on a tree where nothing is wrong -- observed,
+    # on three of them, before this was corrected.
+    #
+    # So the PRODUCT claim is asserted everywhere and the HOST accident only
+    # where the host can speak to it. Both halves are unconditional in their
+    # own domain: neither is skipped, and the shipped line is always checked.
+    actual_ls = ls_result.stderr.strip()
+    for fragment in ("ls:", "q3.pdf", "No such file or directory"):
+        assert fragment in actual_ls, f"host ls verdict is unrecognised: {actual_ls!r}"
+        assert fragment in _HERO_LS_FAILURE, (
+            f"shipped ls verdict lost {fragment!r}: {_HERO_LS_FAILURE!r}"
+        )
+
+    if actual_ls.startswith("ls: cannot access"):
+        # A GNU host: it produced the flavour the transcript was captured on,
+        # so byte-equality is meaningful here and is required.
+        assert actual_ls == _HERO_LS_FAILURE, (
+            f"ls verdict differs on a GNU host: {actual_ls!r} != {_HERO_LS_FAILURE!r}"
+        )
 
 
 def test_pdf95_ac6a_the_built_page_carries_both_commands_and_the_exact_ls_failure() -> None:
