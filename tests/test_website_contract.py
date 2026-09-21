@@ -632,6 +632,13 @@ def declared_section_ids() -> tuple[str, ...]:
     return tuple(_SECTION_ID_DECL_PATTERN.findall(SECTIONS_TS.read_text()))
 
 
+#: AR4's one exemption. An id that is a landmark of a SINGLE document --
+#: `main`, the skip link's target -- is legitimately declared once per page,
+#: and became a cross-file duplicate the moment `PDF-94` added a second
+#: route. Held to at-most-once per FILE instead of not-at-all.
+PER_DOCUMENT_IDS: Final[frozenset[str]] = frozenset({"main"})
+
+
 def _component_id_attrs() -> list[tuple[Path, str]]:
     """Every literal `id="..."` attribute under `website/src`, in file
     order -- AR2's and AR4's shared subject. Page-blind by construction: it
@@ -688,16 +695,35 @@ def test_ar4_no_id_is_declared_twice_under_website_src() -> None:
     """AR4 (D7). No literal `id="..."` is declared twice under `website/src`
     -- guards `PDF-95` moving `#quickstart` onto the hero block: adding the
     new id without removing the old one reds here (isolating control C8,
-    E13: a second `id="licensing"` on another section, nothing removed)."""
+    E13: a second `id="licensing"` on another section, nothing removed).
+
+    PER_DOCUMENT_IDS is the one exemption, and it is narrow. `main` is a
+    landmark of ONE document: the skip link must resolve within the page it
+    is on, so every page carries its own. It became a false positive the
+    moment `PDF-94` added a second route, and the arm's original wording
+    ("page-blind by construction") was a statement about a one-page site.
+    The exempt ids are still held to at-most-once PER FILE, so the guard the
+    arm exists for is unweakened -- a second `id="licensing"` anywhere, or a
+    second `id="main"` in one document, still reds."""
     seen: dict[str, list[Path]] = {}
+    per_file: dict[tuple[Path, str], int] = {}
     for path, i in _component_id_attrs():
         seen.setdefault(i, []).append(path)
+        per_file[(path, i)] = per_file.get((path, i), 0) + 1
+
     dupes = {
         i: [str(p.relative_to(REPO_ROOT)) for p in paths]
         for i, paths in seen.items()
-        if len(paths) > 1
+        if len(paths) > 1 and i not in PER_DOCUMENT_IDS
     }
     assert dupes == {}, f"id declared more than once under website/src: {dupes}"
+
+    twice_in_one_file = {
+        f"{p.relative_to(REPO_ROOT)}:{i}": n for (p, i), n in per_file.items() if n > 1
+    }
+    assert twice_in_one_file == {}, (
+        f"id declared twice within a single document: {twice_in_one_file}"
+    )
 
 
 # --------------------------------------------------------------------------- #

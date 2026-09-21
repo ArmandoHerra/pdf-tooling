@@ -1,10 +1,25 @@
 ---
 import PdfToolingLogo from '../assets/pdf-tooling-logo.svg?url';
-import { base } from '../lib/site';
+import { base, withBase } from '../lib/site';
 import { SECTIONS } from '../lib/sections';
+
+interface Props {
+  /** PDF-94 D4. Default = today's behaviour (relative in-page anchors),
+   *  so `index.astro`'s own `<Navbar />` call needs no change. `false` on
+   *  `licensing.astro`, where none of `SECTIONS`' ids exist on this page --
+   *  those links become absolute round-trips back to `/` instead. `#main`
+   *  is unaffected: both pages carry their own main landmark with that id. */
+  home?: boolean;
+}
+
+const { home = true } = Astro.props;
+const sectionHref = (id: string) => (home ? `#${id}` : `${base}#${id}`);
 
 const docsUrl = 'https://github.com/ArmandoHerra/pdf-tooling#readme';
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
+// PDF-94 D4: the annex route did not exist before this item, so this is the
+// only item that can add it to the link set.
+const inventoryUrl = withBase('licensing/');
 ---
 
 <header class="sticky top-0 z-50 border-b border-surface-800 bg-surface-900/90 backdrop-blur">
@@ -25,8 +40,9 @@ const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
          AC17 does not sample and the inherited preflight sweep cannot see. -->
     <div class="hidden min-w-0 flex-1 flex-wrap items-center justify-end gap-x-8 gap-y-2 text-sm font-medium text-surface-100 sm:flex">
       {SECTIONS.map((section) => (
-        <a href={`#${section.id}`} class="hover:text-primary-400">{section.label}</a>
+        <a href={sectionHref(section.id)} class="hover:text-primary-400">{section.label}</a>
       ))}
+      <a href={inventoryUrl} class="hover:text-primary-400">All packages</a>
       <a href={docsUrl} class="hover:text-primary-400">Docs</a>
     </div>
 
@@ -52,13 +68,21 @@ const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
       {SECTIONS.map((section) => (
         <li class="shrink-0 snap-start">
           <a
-            href={`#${section.id}`}
+            href={sectionHref(section.id)}
             class="flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-surface-100 hover:text-primary-400"
           >
             {section.short}
           </a>
         </li>
       ))}
+      <li class="shrink-0 snap-start">
+        <a
+          href={inventoryUrl}
+          class="flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-surface-100 hover:text-primary-400"
+        >
+          All packages
+        </a>
+      </li>
     </ul>
   </nav>
 </header>
