@@ -27,6 +27,7 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 - **The page ends on a call to action**, on the site's one inverted paper band: the install command again, copyable, plus links to the full licence inventory and the source repository.
 - **Two defects close along the way**: the inline-code spacing before punctuation (`Install pdf-tooling; the command is pdftooling.`) is now a measured ≤1px gap instead of the chip's own 6px padding; the verb-roster pointer no longer claims a position ("listed below") that a later item is free to falsify.
 - **`QuickStart.astro` is deleted**, dissolved into the hero and the closing band; `#quickstart` — a published anchor — moves onto the hero's terminal block and keeps resolving exactly once.
+- **The re-run arm's `ls` comparison was over-specified and CI proved it.** It compared `ls`'s stderr byte-for-byte against the captured verdict, but the wording belongs to the host's coreutils, not to this product: GNU prints `ls: cannot access 'q3.pdf': No such file or directory` and BSD `ls` on macOS prints `ls: q3.pdf: No such file or directory`, so three macOS legs reddened on a tree where nothing was wrong — a failure no local run on this Linux host could reach. The product claim is now asserted on every host and byte-equality only where the host produced the captured flavour; neither half is skipped, and both controls were driven.
 
 ## [PDF-93] The visual system — 2026-09-20
 
