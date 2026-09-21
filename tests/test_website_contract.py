@@ -64,6 +64,36 @@ WEBSITE_SRC: Final[Path] = WEBSITE_ROOT / "src"
 DIST_ROOT: Final[Path] = WEBSITE_ROOT / "dist"
 GLOBAL_CSS: Final[Path] = WEBSITE_SRC / "styles" / "global.css"
 TAILWIND_CONFIG: Final[Path] = WEBSITE_ROOT / "tailwind.config.mjs"
+SECTIONS_TS: Final[Path] = WEBSITE_SRC / "lib" / "sections.ts"
+
+#: PDF-92 D7 / AR1. The frozen `id` sequence, declared INDEPENDENTLY of
+#: `sections.ts` (D7's own instruction) so drift between the two is a
+#: deliberate edit and never a silent one -- `PDF-97` retiring `features` to
+#: `safety` reds this tuple by design unless it is edited in the same commit.
+FROZEN_SECTION_IDS: Final[tuple[str, ...]] = (
+    "features",
+    "architecture",
+    "verbs",
+    "quickstart",
+    "contract",
+    "licensing",
+)
+
+#: `sections.ts`'s own declaration shape (`{ id: 'x', label: 'Y', short: 'Z' }`)
+#: -- read as TEXT, never imported/executed: this test tree has no Node
+#: runtime (D7 / AR1).
+_SECTION_ID_DECL_PATTERN: Final[re.Pattern[str]] = re.compile(r"id:\s*['\"]([a-z0-9-]+)['\"]")
+#: A literal `id="..."` attribute anywhere under `website/src` -- AR2's and
+#: AR4's subject. Deliberately distinct from `_SECTION_ID_DECL_PATTERN`'s
+#: `id: 'x'` shape, so `sections.ts`'s own declarations are never
+#: double-counted as targets.
+_COMPONENT_ID_ATTR_PATTERN: Final[re.Pattern[str]] = re.compile(r'id="([a-zA-Z0-9_-]+)"')
+#: A literal `href="#..."` anywhere under any `.astro` file -- AR3's subject.
+#: Deliberately blind to a template-built href (e.g. `href={`#${id}`}`, what
+#: the rail and the `sm`+ row both render) -- E12 is the reason: a regex over
+#: rendered markup cannot see a data-driven nav, and inferring one is exactly
+#: the failure this item's arms replace with a declaration-reading test.
+_LITERAL_HASH_HREF_PATTERN: Final[re.Pattern[str]] = re.compile(r'href="#([a-zA-Z0-9_-]+)"')
 
 #: AC10, `P1`. `global.css`'s own rewritten comment (PDF-91 `R7`): accent
 #: TEXT is `primary-400` on every ground; `primary-500` is a fill and never
@@ -585,6 +615,89 @@ def test_a9_no_hyphenated_or_underscored_legacy_needle_under_website() -> None:
     assert proc.returncode in (0, 1), f"git grep failed rc={proc.returncode}: {proc.stderr}"
     hits = [line for line in proc.stdout.splitlines() if line]
     assert hits == [], f"legacy needle under website/: {hits}"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-92 D7 -- the section register arms. Source-level only, like the rest of
+# this tier: no Node, no `dist/`, no build step and therefore no skip path
+# (AC7b). Named `AR1`-`AR4` because this module's own `A1`..`A9` series
+# already exists and a second `A1` would mean two different things in one
+# file (D7b).
+# --------------------------------------------------------------------------- #
+
+
+def declared_section_ids() -> tuple[str, ...]:
+    """The `id` sequence `sections.ts` declares, in DOM order, read from its
+    source TEXT -- never imported/executed (D7 / AR1)."""
+    return tuple(_SECTION_ID_DECL_PATTERN.findall(SECTIONS_TS.read_text()))
+
+
+def _component_id_attrs() -> list[tuple[Path, str]]:
+    """Every literal `id="..."` attribute under `website/src`, in file
+    order -- AR2's and AR4's shared subject. Page-blind by construction: it
+    scans `website/src` as one namespace (D7's `PDF-94` hand-off)."""
+    hits: list[tuple[Path, str]] = []
+    for path in _source_files():
+        for m in _COMPONENT_ID_ATTR_PATTERN.finditer(path.read_text()):
+            hits.append((path, m.group(1)))
+    return hits
+
+
+def test_ar1_the_section_register_declares_the_frozen_id_sequence() -> None:
+    """AR1 (D7). `sections.ts`'s declared id sequence equals the tuple frozen
+    above, independently of the shipping code. `PDF-97` retires `features` to
+    `safety` by editing BOTH the tuple and the module in the same commit --
+    this arm reds on that change by design (D7's third hand-off; isolating
+    control C1, E13: remove one entry from `sections.ts`)."""
+    declared = declared_section_ids()
+    assert declared == FROZEN_SECTION_IDS, (
+        f"sections.ts declares {declared}, frozen {FROZEN_SECTION_IDS} -- "
+        "an intentional change to the register must edit this tuple in the "
+        "same commit"
+    )
+
+
+def test_ar2_every_declared_section_id_has_a_target_under_website_src() -> None:
+    """AR2 (D7). Every id `sections.ts` declares exists as a literal
+    `id="..."` somewhere under `website/src` (isolating control C2, E13:
+    remove `id="contract"` from `ExitCodes.astro`)."""
+    all_ids = {i for _, i in _component_id_attrs()}
+    missing = [i for i in declared_section_ids() if i not in all_ids]
+    assert missing == [], f'declared section id(s) with no id="..." target: {missing}'
+
+
+def test_ar3_every_literal_hash_href_resolves_to_an_id_in_source() -> None:
+    """AR3 (D7). Every literal `href="#..."` under any `.astro` resolves to
+    an `id="..."` somewhere under `website/src` -- catches a hand-typed dead
+    anchor (isolating control C7, E13: a literal `href="#nope"` in
+    `Footer.astro`). Deliberately page-blind and deliberately blind to a
+    template-built href (E12) -- the register's own links are covered by
+    AR1/AR2/AR4 reading the declaration instead."""
+    all_ids = {i for _, i in _component_id_attrs()}
+    offenders = []
+    for path in _source_files():
+        if path.suffix != ".astro":
+            continue
+        for m in _LITERAL_HASH_HREF_PATTERN.finditer(path.read_text()):
+            if m.group(1) not in all_ids:
+                offenders.append(f'{path.relative_to(REPO_ROOT)}: href="#{m.group(1)}"')
+    assert offenders == [], 'literal anchor href with no id="..." target:\n' + "\n".join(offenders)
+
+
+def test_ar4_no_id_is_declared_twice_under_website_src() -> None:
+    """AR4 (D7). No literal `id="..."` is declared twice under `website/src`
+    -- guards `PDF-95` moving `#quickstart` onto the hero block: adding the
+    new id without removing the old one reds here (isolating control C8,
+    E13: a second `id="licensing"` on another section, nothing removed)."""
+    seen: dict[str, list[Path]] = {}
+    for path, i in _component_id_attrs():
+        seen.setdefault(i, []).append(path)
+    dupes = {
+        i: [str(p.relative_to(REPO_ROOT)) for p in paths]
+        for i, paths in seen.items()
+        if len(paths) > 1
+    }
+    assert dupes == {}, f"id declared more than once under website/src: {dupes}"
 
 
 # --------------------------------------------------------------------------- #
