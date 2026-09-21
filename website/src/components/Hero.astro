@@ -1,44 +1,95 @@
 ---
+// PDF-93. Restyled onto the two-plate system: mono wordmark with the ink
+// hyphen, a left-aligned single column (the two-column grid + terminal
+// panel from the frontend proposal §G is PDF-95's -- it needs the captured
+// `--dry-run` transcript this item explicitly does not build), the
+// drafting grid and a simplified page-box motif as the section's only
+// decoration, and the ink bloom re-anchored over the left column instead of
+// dead centre. Structure (copy, CTAs, section order) is unchanged.
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
 ---
 
-<section class="relative overflow-hidden">
+<section class="u-crop relative overflow-hidden">
+  <div class="u-grid-field pointer-events-none absolute inset-0" aria-hidden="true"></div>
+
+  <!-- The ink bloom, used once per viewport (§D.6) -- re-anchored over the
+       left column so the wordmark sits inside it. Held at the shipped 10%
+       (D5): the frontend proposal's 16% is over the primary-500 tint
+       budget in `global.css:17` and is not reproduced here. -->
   <div
-    class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(244,63,94,0.10),transparent_60%)]"
+    class="pointer-events-none absolute inset-0 hero-bloom"
     aria-hidden="true"
   >
   </div>
 
-  <div class="relative mx-auto max-w-5xl px-6 py-28 text-center sm:py-36">
-    <p class="mb-5 inline-flex items-center gap-2 rounded-full border border-surface-800 bg-surface-800/60 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary-400">
-      pypdf · pdfium · pikepdf · reportlab · pdfplumber — nothing AGPL or GPL
+  <!-- The page-box motif: a `612 : 792` outline with crop ticks and
+       dimension rules, in `line-hair`/`line-mark` only -- drafting
+       apparatus, not illustration. Bleeds off the top-right; hidden below
+       768px, where there is no room for it to read as a page. -->
+  <svg
+    class="pointer-events-none absolute -right-16 top-8 hidden h-[420px] w-[324px] md:block"
+    style="overflow: visible;"
+    viewBox="0 0 324 420"
+    fill="none"
+    aria-hidden="true"
+  >
+    <rect x="0.5" y="0.5" width="323" height="419" stroke="var(--color-line-hair)" />
+    <circle cx="0.5" cy="0.5" r="5" stroke="var(--color-line-mark)" />
+    <circle cx="323.5" cy="419.5" r="5" stroke="var(--color-line-mark)" />
+    <path d="M0.5 -8v8M0.5 428v-8M-8 0.5h8M332 0.5h-8" stroke="var(--color-line-mark)" />
+    <text x="8" y="-14" class="micro" fill="var(--color-line-mark)">612 pt</text>
+    <text x="-14" y="16" class="micro" fill="var(--color-line-mark)" text-anchor="end" transform="rotate(-90 -14 16)">792 pt</text>
+  </svg>
+
+  <div class="relative mx-auto max-w-3xl px-6 py-24 sm:py-32">
+    <p class="micro flex flex-wrap items-center gap-x-3 gap-y-1 text-surface-400">
+      <span class="text-primary-400">v1.0.0</span>
+      <span aria-hidden="true">&middot;</span>
+      <span>PyPI</span>
+      <span aria-hidden="true">&middot;</span>
+      <span>Apache-2.0</span>
+      <span aria-hidden="true">&middot;</span>
+      <span>pypdf &middot; pdfium &middot; pikepdf &middot; reportlab &middot; pdfplumber</span>
+      <span aria-hidden="true">&middot;</span>
+      <span>nothing AGPL or GPL</span>
     </p>
 
-    <h1 class="text-5xl font-extrabold tracking-tight text-surface-50 sm:text-6xl">
-      pdf-tooling
+    <h1 class="mt-5 font-mono text-5xl font-semibold tracking-tight text-surface-50 sm:text-6xl">
+      pdf<span class="text-primary-400">-</span>tooling
     </h1>
-    <p class="mt-4 text-2xl font-semibold text-primary-400 sm:text-3xl">
+    <p class="mt-4 max-w-xl text-xl font-medium leading-snug text-surface-100 sm:text-2xl">
       Every common PDF chore. One safe CLI. No copyleft underneath.
     </p>
-    <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-surface-100">
-      One command-line tool for merge, split, extract, rotate, PDF↔images, text, tables,
-      compress, encrypt, metadata, watermark, OCR and Office→PDF — orchestrating a
+    <p class="mt-6 max-w-2xl text-base leading-relaxed text-surface-300">
+      One command-line tool for merge, split, extract, rotate, PDF&harr;images, text, tables,
+      compress, encrypt, metadata, watermark, OCR and Office&rarr;PDF &mdash; orchestrating a
       permissively licensed engine stack behind one safe, scriptable interface.
     </p>
 
-    <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+    <div class="mt-10 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
       <a
         href="#quickstart"
-        class="w-full rounded-lg bg-primary-500 px-7 py-3.5 text-base font-semibold text-surface-900 shadow-lg shadow-primary-900/50 transition hover:bg-primary-400 sm:w-auto"
+        class="w-full rounded-md bg-primary-500 px-7 py-3.5 text-center text-base font-semibold text-surface-950 transition hover:bg-primary-400 sm:w-auto"
       >
         Get Started &rarr;
       </a>
       <a
         href={githubUrl}
-        class="w-full rounded-lg border border-surface-800 px-7 py-3.5 text-base font-semibold text-surface-50 transition hover:border-primary-400 hover:text-primary-400 sm:w-auto"
+        class="w-full rounded-md border border-line-strong px-7 py-3.5 text-center text-base font-semibold text-surface-50 transition hover:border-line-ink hover:text-primary-400 sm:w-auto"
       >
         View on GitHub &rarr;
       </a>
     </div>
   </div>
 </section>
+
+<style>
+  /* Two stacked radial washes: the accent bloom is `primary-500` at the
+     shipped 10% (D5, the ≤10% decorative-tint budget in global.css:17) --
+     the frontend proposal's 16% is not reproduced; the second wash is a
+     plain white highlight and carries no accent budget at all. */
+  .hero-bloom {
+    background-image: radial-gradient(62% 52% at 22% 6%, rgb(244 63 94 / 0.1), transparent 70%),
+      radial-gradient(80% 60% at 82% 0%, rgb(255 255 255 / 0.03), transparent 70%);
+  }
+</style>

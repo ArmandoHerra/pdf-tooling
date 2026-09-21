@@ -14,6 +14,11 @@
 // and collapsing them would be a data-model change beyond this pass's
 // remit that loses purpose granularity. 25 top-level commands, minus the
 // `meta` parent, plus its two children, is 26 — the array's row count.
+//
+// PDF-93 D5/PDF-96: the grouping field is still named `port` -- renaming it
+// to `family` (ruling R3) is PDF-96's, since a true port-per-verb
+// derivation, not a visual one, is what the rename exists to unblock. This
+// item restyles the group headings only.
 type Verb = { name: string; port: string; purpose: string; status: 'available' | 'planned' };
 
 const verbs: Verb[] = [
@@ -54,38 +59,41 @@ const groups = portOrder
   .filter((g) => g.items.length > 0);
 ---
 
-<section id="verbs" class="mx-auto max-w-6xl px-6 py-24">
-  <div class="mx-auto max-w-2xl text-center">
-    <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">
-      {available.length} shipped &middot; {planned.length} planned
-    </h2>
-    <p class="mt-4 text-lg text-surface-100">
-      {planned.length > 0 && (
-        <>Verbs marked <strong>planned</strong> are specified and not yet shipped. </>
-      )}
-      This list is
-      checked against <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-sm text-primary-400">pdftooling --help</code> at every deploy.
-    </p>
-  </div>
+<section id="verbs" class="u-crop mx-auto max-w-6xl px-6 py-24">
+  <p class="micro text-surface-400"><span class="text-primary-400">&sect;03</span> / Verbs</p>
+  <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
+  <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl u-num">
+    {available.length} shipped &middot; {planned.length} planned
+  </h2>
+  <p class="mt-4 max-w-2xl text-lg text-surface-300">
+    {planned.length > 0 && (
+      <>Verbs marked <strong>planned</strong> are specified and not yet shipped. </>
+    )}
+    This list is
+    checked against <code class="code-inline text-sm">pdftooling --help</code> at every deploy.
+  </p>
 
   <div class="mt-16 space-y-12">
     {groups.map((g) => (
       <div>
-        <h3 class="mb-4 text-xs font-semibold uppercase tracking-widest text-surface-100/70">{g.port}</h3>
+        <div class="mb-4 flex items-center gap-4">
+          <h3 class="micro shrink-0 text-surface-400">{g.port}</h3>
+          <div class="h-px flex-1 bg-line" aria-hidden="true"></div>
+        </div>
         <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {g.items.map((v) => (
-            <div class="rounded-xl border border-surface-800 bg-surface-800/40 p-6">
+            <div class="card p-6">
               <div class="mb-4 flex flex-wrap items-center gap-2">
-                <span class="inline-flex items-center justify-center rounded-lg border border-primary-500/10 bg-primary-500/10 px-3 py-1.5 text-sm font-bold tracking-wide text-primary-400 font-mono">
+                <span class="inline-flex items-center justify-center rounded-sm border border-primary-500/10 bg-primary-500/10 px-3 py-1.5 text-sm font-bold tracking-wide text-primary-400 font-mono">
                   {v.name}
                 </span>
                 {v.status === 'planned' && (
-                  <span class="rounded bg-surface-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-surface-100">
+                  <span class="micro rounded-xs bg-surface-750 px-2 py-1 text-surface-300">
                     planned
                   </span>
                 )}
               </div>
-              <p class="text-sm leading-relaxed text-surface-100">{v.purpose}</p>
+              <p class="text-sm leading-relaxed text-surface-200">{v.purpose}</p>
             </div>
           ))}
         </div>
@@ -93,8 +101,8 @@ const groups = portOrder
     ))}
   </div>
 
-  <p class="mt-8 text-center text-sm text-surface-100">
-    config and completion round out the surface — run <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pdftooling --help</code> for the whole tree.
+  <p class="mt-8 max-w-2xl text-sm text-surface-300">
+    config and completion round out the surface — run <code class="code-inline text-xs">pdftooling --help</code> for the whole tree.
     Phase 2 (HTML/Markdown create, redaction, forms, outline editing, attachments/annotations,
     run recipes) is parked, additive on the same spine.
   </p>

@@ -42,9 +42,9 @@ const HTML_EXTRA = new Set([
 // failure the Role column is being fixed for.
 function tierBadge(name: string): { label: string; classes: string } {
   const n = normalize(name);
-  if (DEFAULT_CLOSURE.has(n)) return { label: 'default install', classes: 'bg-surface-900 text-surface-100/70' };
-  if (HTML_EXTRA.has(n)) return { label: 'optional · [html] extra', classes: 'bg-surface-800 text-surface-100' };
-  return { label: 'build tooling', classes: 'bg-surface-800 text-surface-100' };
+  if (DEFAULT_CLOSURE.has(n)) return { label: 'default install', classes: 'bg-surface-950 text-surface-300' };
+  if (HTML_EXTRA.has(n)) return { label: 'optional · [html] extra', classes: 'bg-surface-750 text-surface-200' };
+  return { label: 'build tooling', classes: 'bg-surface-750 text-surface-200' };
 }
 
 // D3: the Role column's contract. A DIRECT dependency (11 entries, carried
@@ -105,13 +105,13 @@ const ROLES: Record<string, string> = {
 <!-- D5: desktop table, `sm` and above. `overflow-x-auto` + `tabindex="0"`
      keep it keyboard-reachable where it is shown -- unchanged from the
      idiom `Licensing.astro`/`TechStack.astro` already used. -->
-<div tabindex="0" class="mt-10 hidden overflow-x-auto rounded-xl border border-surface-800 sm:block">
+<div tabindex="0" class="card mt-10 hidden overflow-x-auto sm:block">
   <table class="w-full border-collapse text-left text-sm">
     <caption class="sr-only">
       Full third-party dependency inventory: package, version, license, tier and role, for all {rows.length} packages.
     </caption>
     <thead>
-      <tr class="border-b border-surface-800 bg-surface-800/40 text-surface-100">
+      <tr class="micro border-b border-line bg-surface-850 text-surface-400">
         <th class="px-4 py-3 font-semibold">Package</th>
         <th class="px-4 py-3 font-semibold">Version</th>
         <th class="px-4 py-3 font-semibold">License</th>
@@ -120,20 +120,20 @@ const ROLES: Record<string, string> = {
       </tr>
     </thead>
     <tbody>
-      {rows.map((r, i) => {
+      {rows.map((r) => {
         const badge = tierBadge(r.Name);
         const role = ROLES[normalize(r.Name)] ?? '';
         return (
-          <tr class={i % 2 === 0 ? 'bg-surface-900' : 'bg-surface-800/20'}>
+          <tr class="border-b border-line-soft last:border-b-0">
             <td class="px-4 py-3 font-medium text-surface-50">{r.Name}</td>
-            <td class="px-4 py-3 font-mono text-xs text-primary-400">{r.Version}</td>
-            <td class="px-4 py-3 text-surface-100">{r.License}</td>
+            <td class="u-num px-4 py-3 font-mono text-xs text-primary-400">{r.Version}</td>
+            <td class="px-4 py-3 text-surface-200">{r.License}</td>
             <td class="px-4 py-3">
-              <span class={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${badge.classes}`}>
+              <span class={`micro rounded-xs px-2 py-1 ${badge.classes}`}>
                 {badge.label}
               </span>
             </td>
-            <td class="px-4 py-3 text-surface-100">{role}</td>
+            <td class="px-4 py-3 text-surface-200">{role}</td>
           </tr>
         );
       })}
@@ -152,30 +152,30 @@ const ROLES: Record<string, string> = {
     const badge = tierBadge(r.Name);
     const role = ROLES[normalize(r.Name)] ?? '';
     return (
-      <div class="rounded-xl border border-surface-800 bg-surface-900 p-4 text-sm">
+      <div class="card p-4 text-sm">
         <p class="font-semibold text-surface-50">{r.Name}</p>
-        <p class="mt-2 text-surface-100">
-          <span class="text-surface-100/60">Version </span>
-          <span class="font-mono text-xs text-primary-400">{r.Version}</span>
+        <p class="mt-2 text-surface-200">
+          <span class="text-surface-400">Version </span>
+          <span class="u-num font-mono text-xs text-primary-400">{r.Version}</span>
         </p>
-        <p class="mt-1 text-surface-100">
-          <span class="text-surface-100/60">License </span>{r.License}
+        <p class="mt-1 text-surface-200">
+          <span class="text-surface-400">License </span>{r.License}
         </p>
         <p class="mt-1">
-          <span class="text-surface-100/60">Tier </span>
-          <span class={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${badge.classes}`}>
+          <span class="text-surface-400">Tier </span>
+          <span class={`micro rounded-xs px-2 py-1 ${badge.classes}`}>
             {badge.label}
           </span>
         </p>
-        <p class="mt-1 text-surface-100">
-          <span class="text-surface-100/60">Role </span>{role}
+        <p class="mt-1 text-surface-200">
+          <span class="text-surface-400">Role </span>{role}
         </p>
       </div>
     );
   })}
 </div>
 
-<p class="mt-6 max-w-3xl text-sm leading-relaxed text-surface-100">
+<p class="mt-6 max-w-3xl text-sm leading-relaxed text-surface-300">
   <strong>Tier</strong> is which install pulls a package in. <strong>Role</strong> answers
   "why is this package here": a direct dependency names what it does for pdf-tooling; a
   transitive one names what pulls it in.

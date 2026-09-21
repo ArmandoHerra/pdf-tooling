@@ -48,6 +48,7 @@ the inherited `design/2026-09-20_website-preflight.sh:33` regex embodies
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import subprocess
@@ -65,6 +66,15 @@ DIST_ROOT: Final[Path] = WEBSITE_ROOT / "dist"
 GLOBAL_CSS: Final[Path] = WEBSITE_SRC / "styles" / "global.css"
 TAILWIND_CONFIG: Final[Path] = WEBSITE_ROOT / "tailwind.config.mjs"
 SECTIONS_TS: Final[Path] = WEBSITE_SRC / "lib" / "sections.ts"
+#: PDF-93 AC3. The four independent hard-coded copies of the brand colour
+#: (`R6.5`) -- none of which reads the `@theme` block that defines it.
+LOGO_SVG: Final[Path] = WEBSITE_SRC / "assets" / "pdf-tooling-logo.svg"
+FAVICON_SVG: Final[Path] = WEBSITE_ROOT / "public" / "favicon.svg"
+#: PDF-93 AC4. The OG generator's Python module, loaded through the shipped
+#: import idiom (`tests/test_brand_surfaces.py`'s `_load_og_generator()`),
+#: never by hex grep -- a grep is blind to any operand whose comment omits
+#: its hex (Objection 1, `TEXT`'s own trap).
+OG_GENERATOR_SCRIPT: Final[Path] = WEBSITE_ROOT / "scripts" / "generate-og-image.py"
 
 #: PDF-92 D7 / AR1. The frozen `id` sequence, declared INDEPENDENTLY of
 #: `sections.ts` (D7's own instruction) so drift between the two is a
@@ -224,8 +234,16 @@ SHAPE_UTILITY_BARE: Final[str] = "utility-bare"  # fill-only, e.g. `bg-primary-5
 #: from the spec's own illustrative drive (which was measured against a
 #: different tree state; see this item's report). A shape outside this set
 #: is a NINTH notation arriving, and it reds naming the file and the line.
+#:
+#: PDF-93 re-derivation: `SHAPE_RGBA_LEGACY` (`Hero.astro:7`'s old
+#: `rgba(244,63,94,0.10)`) is GONE -- the hero bloom now writes the modern
+#: space-separated form the frontend proposal uses throughout `@theme`, and
+#: `--shadow-lift`'s colour-bearing blur does too, both held at the shipped
+#: 10% (D5) rather than the proposal's unbuilt 16%/28%. `SHAPE_RGB_MODERN`
+#: replaces it in the frozen set -- this is the arm PDF-91 built and PDF-93
+#: is the first item to actually exercise on a real, non-synthetic value.
 LIVE_NOTATION_SHAPES: Final[frozenset[str]] = frozenset(
-    {SHAPE_HEX6, SHAPE_RGBA_LEGACY, SHAPE_UTILITY_MODIFIER, SHAPE_UTILITY_BARE}
+    {SHAPE_HEX6, SHAPE_RGB_MODERN, SHAPE_UTILITY_MODIFIER, SHAPE_UTILITY_BARE}
 )
 
 #: R1 (E13, driven). Other CSS Level-4/5 colour-space functions this arm has
@@ -576,15 +594,24 @@ def test_a3_the_accent_hex_values_are_byte_identical_in_both_copies() -> None:
 
 
 def test_a4_the_over_budget_census_counts_occurrences_never_lines() -> None:
-    """E10 trap 1, pinned against REAL content: `Verbs.astro:79` carries TWO
+    """E10 trap 1, pinned against REAL content: the verb-chip line carries TWO
     accent occurrences on one physical line
     (`border-primary-500/10` and `bg-primary-500/10`) -- a line-based
-    instrument would report 1 where the true count is 2."""
+    instrument would report 1 where the true count is 2.
+
+    PDF-93 re-pin: the chip moved from `Verbs.astro:79` to `:87` when the
+    section gained its chrome (eyebrow, hairline, `.card` treatment) -- the
+    two-occurrence CLAIM is what this test protects, not the specific line,
+    so the line is re-measured here rather than left stale."""
     verbs = WEBSITE_SRC / "components" / "Verbs.astro"
-    on_line_79 = [
-        occ for occ in locate_accent_occurrences(verbs, verbs.read_text()) if occ.line == 79
-    ]
-    assert len(on_line_79) == 2, on_line_79
+    occs_by_line: dict[int, int] = {}
+    for occ in locate_accent_occurrences(verbs, verbs.read_text()):
+        occs_by_line[occ.line] = occs_by_line.get(occ.line, 0) + 1
+    two_hit_lines = [line for line, count in occs_by_line.items() if count == 2]
+    assert two_hit_lines == [87], (
+        f"expected exactly one two-occurrence line at :87, found {two_hit_lines} "
+        f"(full census: {occs_by_line})"
+    )
 
 
 def test_a4_synthetic_two_hits_one_line_count_as_two() -> None:
@@ -615,6 +642,124 @@ def test_a9_no_hyphenated_or_underscored_legacy_needle_under_website() -> None:
     assert proc.returncode in (0, 1), f"git grep failed rc={proc.returncode}: {proc.stderr}"
     hits = [line for line in proc.stdout.splitlines() if line]
     assert hits == [], f"legacy needle under website/: {hits}"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-93 AC3 -- the four hard-coded brand-colour copies agree, as an ARM.
+# --------------------------------------------------------------------------- #
+
+#: Per-file occurrence census (occurrences, never lines -- `E2`'s own idiom).
+#: `pdf-tooling-logo.svg` carries ZERO copies of the dark plate after `D7`:
+#: its plate went to `fill="none"`, permanently removing that copy rather
+#: than moving it. `favicon.svg` keeps one copy, MOVED to the new value --
+#: a favicon is composited against browser tab chrome this site does not
+#: control, so the transparent-plate argument that pays for the logo does
+#: not pay for it (D7).
+ACCENT_HEX: Final[str] = "#fb7185"
+DARK_PLATE_HEX: Final[str] = "#120c10"
+EXPECTED_ACCENT_CENSUS: Final[dict[str, int]] = {
+    "global.css": 1,
+    "tailwind.config.mjs": 1,
+    "pdf-tooling-logo.svg": 5,
+    "favicon.svg": 2,
+}
+EXPECTED_DARK_PLATE_CENSUS: Final[dict[str, int]] = {
+    "global.css": 1,
+    "tailwind.config.mjs": 1,
+    "favicon.svg": 1,
+    "pdf-tooling-logo.svg": 0,
+}
+
+
+def test_a10_the_four_hardcoded_brand_colour_copies_agree() -> None:
+    """AC3. The agreement is an ARM, not an intention (`R6.5`). Per-file
+    occurrence census, same shape as `test_brand_surfaces.py`'s display-name
+    census -- `.count()`, never a line count, so a minified or single-line
+    copy still reports its true occurrence total.
+
+    Control (run manually, never committed): revert exactly one file's copy
+    to the old `#0f172a` -- this arm reds naming that one file and nothing
+    else moves. Running it once per copy proves four independent reds, not
+    one accidental one."""
+    css_text = GLOBAL_CSS.read_text()
+    tw_text = TAILWIND_CONFIG.read_text()
+    logo_text = LOGO_SVG.read_text()
+    favicon_text = FAVICON_SVG.read_text()
+
+    accent_census = {
+        "global.css": css_text.count(ACCENT_HEX),
+        "tailwind.config.mjs": tw_text.count(ACCENT_HEX),
+        "pdf-tooling-logo.svg": logo_text.count(ACCENT_HEX),
+        "favicon.svg": favicon_text.count(ACCENT_HEX),
+    }
+    assert accent_census == EXPECTED_ACCENT_CENSUS, (
+        f"accent hex census: {accent_census}, expected {EXPECTED_ACCENT_CENSUS}"
+    )
+
+    dark_plate_census = {
+        "global.css": css_text.count(DARK_PLATE_HEX),
+        "tailwind.config.mjs": tw_text.count(DARK_PLATE_HEX),
+        "favicon.svg": favicon_text.count(DARK_PLATE_HEX),
+        "pdf-tooling-logo.svg": logo_text.count(DARK_PLATE_HEX),
+    }
+    assert dark_plate_census == EXPECTED_DARK_PLATE_CENSUS, (
+        f"dark-plate census: {dark_plate_census}, expected {EXPECTED_DARK_PLATE_CENSUS}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-93 AC4 -- THE ONE F9 WOULD HAVE MISSED. The OG generator's eight
+# operands, asserted BY NAME through the shipped import idiom, never by hex
+# grep -- a hex census cannot see an operand whose own comment omits its hex
+# (Objection 1: `TEXT`'s trap, reproduced here as the control).
+# --------------------------------------------------------------------------- #
+
+#: `PDF-93 D3`'s eight-row table, post-slice. Loaded from the module itself
+#: (never re-typed as a second copy of the generator's own literals) would
+#: defeat the point of this arm existing -- but the EXPECTED values below
+#: are what the design document specifies, so a change to either side is a
+#: deliberate edit to this test, never a silent pass.
+EXPECTED_OG_OPERANDS: Final[dict[str, tuple[int, int, int]]] = {
+    "BG_TOP": (18, 12, 16),  # surface-900  #120c10 -- MOVED
+    "BG_BOTTOM": (136, 19, 55),  # primary-900  #881337 -- unmoved
+    "ACCENT": (251, 113, 133),  # primary-400  #fb7185 -- frozen byte-for-byte
+    "RIM": (190, 18, 60),  # primary-700  #be123c -- unmoved
+    "TEXT": (251, 249, 250),  # surface-50  #fbf9fa -- MOVED (F9's own blind spot)
+    "SUBTEXT": (251, 113, 133),  # primary-400  #fb7185 -- frozen byte-for-byte
+    "RULE": (146, 68, 80),  # promoted from an inline literal -- MOVED
+    "FOOTER": (198, 191, 196),  # surface-300  #c6bfc4 -- promoted -- MOVED
+}
+
+
+def _load_og_generator_module():
+    """Loaded through the same idiom `tests/test_brand_surfaces.py`'s
+    `_load_og_generator()` uses -- a fresh module object, never imported as a
+    package, so re-running this in the same interpreter session as that
+    module's own tests cannot cross-contaminate either one."""
+    spec = importlib.util.spec_from_file_location("_og_generator_ac4", OG_GENERATOR_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a11_the_og_generators_eight_operands_are_asserted_by_name() -> None:
+    """AC4. If `PDF-91`'s `P4` already asserted the operands by name this
+    would be redundant -- it does not (grepped: no such arm exists anywhere
+    under `tests/` before this commit), so this is the one instrument in the
+    tree that reads the loaded module's actual tuples rather than grepping
+    hex strings.
+
+    Control: revert `TEXT` alone to `(248, 250, 252)` in a scratch copy.
+    A hex-grep census stays GREEN (`#f8fafc` never appears in this file as a
+    literal -- the operand is a tuple). A contrast check stays green too
+    (18.49:1 vs 18.45:1, functionally identical). Only THIS arm reds, naming
+    `TEXT`."""
+    module = _load_og_generator_module()
+    actual = {name: tuple(getattr(module, name)) for name in EXPECTED_OG_OPERANDS}
+    assert actual == EXPECTED_OG_OPERANDS, (
+        f"OG generator operand census: {actual}, expected {EXPECTED_OG_OPERANDS}"
+    )
 
 
 # --------------------------------------------------------------------------- #
