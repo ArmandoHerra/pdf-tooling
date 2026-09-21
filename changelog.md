@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-94] Move the evidence to its own route — 2026-09-20
+
+- **The full 31-package inventory now exists exactly once, at `/licensing/`, instead of twice on the home page.** `Licensing.astro` and `TechStack.astro` both rendered the same generated `licenses.json`, three of four columns identical, in two different row orders; both are deleted, and `DependencyTable.astro` renders one `Package · Version · License · Tier · Role` table in the file's own declared order.
+- **Every row now carries a Role**, the column's entire justification: 11 direct dependencies keep their existing description, and the 20 that were blank are filled by derivation from `uv.lock` rather than by invented prose — every one of them resolves to a parent already inside the inventory.
+- **The home page's licensing section is now a computed summary, not a table**, and it names its own worst row rather than rounding it away: nothing in the default install carries a GPL-family license at all, and the single row that does — `pyphen 0.18.1` — is optional and tri-licensed, offering MPL 1.1 as an alternative.
+- **`B-105` closes by ruling, not by a file vanishing.** The `(renders via pypdfium2, not poppler)` parenthetical is dropped from `pdfplumber`'s role per `X-949`; `poppler` under `website/` goes from 1 occurrence to 0, measured.
+- **Atomicity is enforced, not assumed.** Astro silently drops a page whose filename starts with `_` (build exit 0, no warning); the route is `licensing.astro`, and a local acceptance arm asserts the annex ships in the same build that produces the summary. The inherited preflight sweep resolves anchors against the home page only, so `Navbar.astro` gained a `home` prop: the annex renders the home page's section anchors as absolute links back to `/` instead of the dead relative anchors that variant replaces.
+
 ## [PDF-92] Navigation and anchor hygiene — 2026-09-20
 
 - **Every section is reachable from the header at every width, not just at `sm` and above.** The mobile header offered zero in-page anchors (only the `sr-only` skip link); it now carries an always-visible rail of six anchors below `sm`, with zero JavaScript — nothing opens, so nothing can be stuck open, and there is no focus trap to get wrong.

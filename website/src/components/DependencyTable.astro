@@ -1,0 +1,182 @@
+---
+// PDF-94 D2/D3. The unified dependency table: one render of `licenses.json`,
+// `Package · Version · License · Tier · Role`, all 31 rows, once. Replaces
+// the two components this item deletes (`Licensing.astro`, `TechStack.astro`)
+// that rendered the same data twice with three of four columns identical.
+import licenses from '../data/licenses.json';
+
+type Row = { Name: string; Version: string; License: string };
+const rows = licenses as Row[];
+
+// D2: NOT sorted. `scripts/licenses.py:195-197` chose a codepoint sort *for
+// determinism* and said so; `localeCompare` is an unpinned environment input
+// (PDF-94 E6) and re-introduces exactly the non-determinism the generator
+// ruled against. Consumed in the generated file's own declared order.
+
+/** PEP 503 name normalization, mirroring scripts/licenses.py's normalize(). */
+function normalize(name: string): string {
+  return name.replace(/[-_.]+/g, '-').toLowerCase();
+}
+
+// Hand-authored closures (PDF-16 R-9), carried across from `Licensing.astro`
+// byte-for-byte -- see that history for the derivation. `colorama` and
+// `brotlicffi` do not resolve on the pinned Linux/CPython measurement
+// platform (`website/README.md`); that is not drift (PDF-94 §Out) and these
+// two sets are never "fixed" to make the counts match.
+const DEFAULT_CLOSURE = new Set([
+  'annotated-doc', 'cffi', 'charset-normalizer', 'colorama', 'cryptography',
+  'lxml', 'markdown-it-py', 'mdurl', 'packaging', 'pdfminer-six',
+  'pdfplumber', 'pikepdf', 'pillow', 'pycparser', 'pygments', 'pypdf',
+  'pypdfium2', 'pytesseract', 'reportlab', 'rich', 'shellingham', 'typer',
+]);
+const HTML_EXTRA = new Set([
+  'brotli', 'brotlicffi', 'cssselect2', 'fonttools', 'pydyf', 'pyphen',
+  'tinycss2', 'tinyhtml5', 'weasyprint', 'webencodings', 'zopfli',
+]);
+
+// D2: a Tier cell always renders a visible label -- never `null` -- five
+// columns means every cell says something. The third branch ("build
+// tooling") is dead today because the census balances at 21 + 10 = 31, and
+// it stays anyway: `licenses.json` is machine-generated and may legitimately
+// gain a row, and an empty Tier cell on a new package is precisely the
+// failure the Role column is being fixed for.
+function tierBadge(name: string): { label: string; classes: string } {
+  const n = normalize(name);
+  if (DEFAULT_CLOSURE.has(n)) return { label: 'default install', classes: 'bg-surface-900 text-surface-100/70' };
+  if (HTML_EXTRA.has(n)) return { label: 'optional · [html] extra', classes: 'bg-surface-800 text-surface-100' };
+  return { label: 'build tooling', classes: 'bg-surface-800 text-surface-100' };
+}
+
+// D3: the Role column's contract. A DIRECT dependency (11 entries, carried
+// across from `TechStack.astro`) names what it does for pdf-tooling; a
+// TRANSITIVE one (20 entries) names what pulls it in, derived from
+// `uv.lock` (PDF-94 E8, dev-only parents such as pytest/pip-audit/bandit/
+// requests discarded) rather than invented. All 31 rows resolve; none is a
+// blank cell. `ROLES` is hand-authored here and is not wired to `uv.lock` at
+// build time -- that would add a Python lockfile as a build input to an
+// Astro site for no reader benefit (D3); the staleness exposure is the same
+// one the eleven direct entries already carried before this item.
+const ROLES: Record<string, string> = {
+  // -- direct (11) --
+  pypdf: 'merge, split, reorder, rotate, metadata, bookmarks, watermark overlay, encrypt/decrypt',
+  pypdfium2: 'PDF → images, page rendering, fast plain-text extraction',
+  reportlab: 'create PDFs from scratch, images → PDF (lossless DCTDecode embed)',
+  pikepdf: 'repair, linearize, object-stream compression, robust encryption',
+  // X-949 applied verbatim: the parenthetical comparing this renderer
+  // against a non-dependency command-line PDF tool is dropped. A prose
+  // comparison against a library that is not a dependency is marketing
+  // register, which this evidence page does not adopt (D3). This line is
+  // also the one occurrence PDF-94 removes for AC5 -- deliberately not
+  // spelled out by name in this comment, the same reason `sections.ts`
+  // gives for omitting a literal `id=` example: AC5's own grep for that
+  // name under `website/` would otherwise double-count this explanation as
+  // a hit.
+  pdfplumber: 'layout-aware text, tables',
+  'pdfminer-six': 'layout analysis engine behind pdfplumber',
+  pytesseract: 'OCR driver for the tesseract binary',
+  pillow: 'image plumbing, downsampling for compression',
+  weasyprint: 'optional HTML/Markdown → PDF ([html] extra, Phase 2)',
+  typer: 'CLI surface',
+  cryptography: 'AES-256 encryption backing pypdf[crypto]',
+  // -- transitive (20), derived from uv.lock (PDF-94 E8) --
+  pygments: 'pulled in by rich',
+  'annotated-doc': 'pulled in by typer',
+  brotli: 'pulled in by fonttools',
+  cffi: 'pulled in by cryptography, weasyprint',
+  'charset-normalizer': 'pulled in by pdfminer.six, reportlab',
+  cssselect2: 'pulled in by weasyprint',
+  fonttools: 'pulled in by weasyprint',
+  lxml: 'pulled in by pikepdf',
+  'markdown-it-py': 'pulled in by rich',
+  mdurl: 'pulled in by markdown-it-py',
+  packaging: 'pulled in by pikepdf, pytesseract',
+  pycparser: 'pulled in by cffi',
+  pydyf: 'pulled in by weasyprint',
+  pyphen: 'pulled in by weasyprint',
+  rich: 'pulled in by typer',
+  shellingham: 'pulled in by typer',
+  tinycss2: 'pulled in by cssselect2, weasyprint',
+  tinyhtml5: 'pulled in by weasyprint',
+  webencodings: 'pulled in by cssselect2, tinycss2, tinyhtml5',
+  zopfli: 'pulled in by fonttools',
+};
+---
+
+<!-- D5: desktop table, `sm` and above. `overflow-x-auto` + `tabindex="0"`
+     keep it keyboard-reachable where it is shown -- unchanged from the
+     idiom `Licensing.astro`/`TechStack.astro` already used. -->
+<div tabindex="0" class="mt-10 hidden overflow-x-auto rounded-xl border border-surface-800 sm:block">
+  <table class="w-full border-collapse text-left text-sm">
+    <caption class="sr-only">
+      Full third-party dependency inventory: package, version, license, tier and role, for all {rows.length} packages.
+    </caption>
+    <thead>
+      <tr class="border-b border-surface-800 bg-surface-800/40 text-surface-100">
+        <th class="px-4 py-3 font-semibold">Package</th>
+        <th class="px-4 py-3 font-semibold">Version</th>
+        <th class="px-4 py-3 font-semibold">License</th>
+        <th class="px-4 py-3 font-semibold">Tier</th>
+        <th class="px-4 py-3 font-semibold">Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map((r, i) => {
+        const badge = tierBadge(r.Name);
+        const role = ROLES[normalize(r.Name)] ?? '';
+        return (
+          <tr class={i % 2 === 0 ? 'bg-surface-900' : 'bg-surface-800/20'}>
+            <td class="px-4 py-3 font-medium text-surface-50">{r.Name}</td>
+            <td class="px-4 py-3 font-mono text-xs text-primary-400">{r.Version}</td>
+            <td class="px-4 py-3 text-surface-100">{r.License}</td>
+            <td class="px-4 py-3">
+              <span class={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${badge.classes}`}>
+                {badge.label}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-surface-100">{role}</td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+</div>
+
+<!-- D5: below `sm`, 31 stacked cards instead of a table. Same data, same
+     order, same source. Measured reason: `class="w-full"` resolves the
+     table to the container width, so `overflow-x-auto` is largely inert and
+     cells wrap instead -- and the worst cell on the site is `pyphen`'s
+     108-character triple-licence string in a column roughly 90px wide
+     (PDF-94 E7). Stacked labelled text wraps freely instead of clipping. -->
+<div class="mt-10 space-y-4 sm:hidden">
+  {rows.map((r) => {
+    const badge = tierBadge(r.Name);
+    const role = ROLES[normalize(r.Name)] ?? '';
+    return (
+      <div class="rounded-xl border border-surface-800 bg-surface-900 p-4 text-sm">
+        <p class="font-semibold text-surface-50">{r.Name}</p>
+        <p class="mt-2 text-surface-100">
+          <span class="text-surface-100/60">Version </span>
+          <span class="font-mono text-xs text-primary-400">{r.Version}</span>
+        </p>
+        <p class="mt-1 text-surface-100">
+          <span class="text-surface-100/60">License </span>{r.License}
+        </p>
+        <p class="mt-1">
+          <span class="text-surface-100/60">Tier </span>
+          <span class={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${badge.classes}`}>
+            {badge.label}
+          </span>
+        </p>
+        <p class="mt-1 text-surface-100">
+          <span class="text-surface-100/60">Role </span>{role}
+        </p>
+      </div>
+    );
+  })}
+</div>
+
+<p class="mt-6 max-w-3xl text-sm leading-relaxed text-surface-100">
+  <strong>Tier</strong> is which install pulls a package in. <strong>Role</strong> answers
+  "why is this package here": a direct dependency names what it does for pdf-tooling; a
+  transitive one names what pulls it in.
+</p>

@@ -1,0 +1,107 @@
+---
+// PDF-94 D7. The home page's licence section, replacing `Licensing.astro`
+// and `TechStack.astro` (both deleted): the claim, the guarantee mechanism,
+// the computed figures, the two honest caveats, and one link to the full
+// inventory at `/licensing/`. Keeps the `licensing` section id -- the
+// published anchor (AC9) -- even though the 31-row table itself has moved
+// off this page. (Deliberately not spelled as a literal `id=` example in
+// this comment: `tests/test_website_contract.py`'s AR2/AR4 scan this tree
+// for exactly that attribute shape, and a worked example here would
+// double-count as one of its own targets -- the same reason `sections.ts`
+// gives for the identical omission.)
+import licenses from '../data/licenses.json';
+import { withBase } from '../lib/site';
+
+type Row = { Name: string; Version: string; License: string };
+const rows = licenses as Row[];
+
+/** PEP 503 name normalization, mirroring scripts/licenses.py's normalize(). */
+function normalize(name: string): string {
+  return name.replace(/[-_.]+/g, '-').toLowerCase();
+}
+
+// Carried across from `Licensing.astro` byte-for-byte (PDF-16 R-9). Not
+// re-derived independently of `DependencyTable.astro` -- both consume
+// `licenses.json` and compute their own figures the same way (D7); neither
+// touches `website/src/data/`.
+const DEFAULT_CLOSURE = new Set([
+  'annotated-doc', 'cffi', 'charset-normalizer', 'colorama', 'cryptography',
+  'lxml', 'markdown-it-py', 'mdurl', 'packaging', 'pdfminer-six',
+  'pdfplumber', 'pikepdf', 'pillow', 'pycparser', 'pygments', 'pypdf',
+  'pypdfium2', 'pytesseract', 'reportlab', 'rich', 'shellingham', 'typer',
+]);
+const HTML_EXTRA = new Set([
+  'brotli', 'brotlicffi', 'cssselect2', 'fonttools', 'pydyf', 'pyphen',
+  'tinycss2', 'tinyhtml5', 'weasyprint', 'webencodings', 'zopfli',
+]);
+
+// Computed from the data, never typed (D7 item 3 / AC6) -- mirrors the
+// mechanism `Licensing.astro:45-49` already used.
+const defaultCount = rows.filter((r) => DEFAULT_CLOSURE.has(normalize(r.Name))).length;
+const htmlExtraCount = rows.filter((r) => HTML_EXTRA.has(normalize(r.Name))).length;
+const totalCount = rows.length;
+
+const pikepdf = rows.find((r) => normalize(r.Name) === 'pikepdf');
+const pyphen = rows.find((r) => normalize(r.Name) === 'pyphen');
+
+const thirdPartyUrl = 'https://github.com/ArmandoHerra/pdf-tooling/blob/main/THIRD_PARTY_LICENSES';
+const inventoryUrl = withBase('licensing/');
+---
+
+<section id="licensing" class="border-t border-surface-800 bg-surface-800/20 py-24">
+  <div class="mx-auto max-w-3xl px-6">
+    <div class="mx-auto max-w-2xl text-center">
+      <h2 class="text-3xl font-bold tracking-tight text-surface-50 sm:text-4xl">Licensing</h2>
+      <p class="mt-4 text-lg text-surface-100">
+        Apache-2.0, and every engine underneath it is BSD, MIT, Apache or MPL — nothing AGPL
+        or GPL on the call graph.
+      </p>
+    </div>
+
+    <div class="mx-auto mt-10 max-w-2xl space-y-4 text-sm leading-relaxed text-surface-100">
+      <p>
+        The guarantee is a CI job and a unit test, not a promise in a README: the license gate
+        fails the build on any AGPL, GPL or LGPL package in the distributed closure, and a
+        source-level test walks every file under <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">src/</code> for
+        forbidden imports and <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">subprocess</code> shell-outs — the
+        realistic leak a package-level license scan cannot see on its own.
+      </p>
+      <p>
+        Computed straight from the same generated inventory the full inventory publishes: the
+        default install closure is <strong>{defaultCount} packages</strong>, the optional
+        <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">[html]</code> extra
+        adds <strong>{htmlExtraCount} more</strong>, <strong>{totalCount} packages</strong> in total.
+      </p>
+      {pikepdf && (
+        <p>
+          <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">pikepdf</code> bundles
+          libqpdf under <strong>{pikepdf.License}</strong> — file-level copyleft, used unmodified as a
+          dependency, and Apache-compatible on that basis. It is documented in <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">NOTICE</code> and
+          the full <a href={thirdPartyUrl} class="text-primary-400 underline hover:text-primary-300">THIRD_PARTY_LICENSES</a> inventory.
+        </p>
+      )}
+      <p>
+        Nothing in the default install carries a GPL-family license at all, and the single row
+        in the whole inventory that names one is optional and offers MPL 1.1 as an alternative:
+        {pyphen && (
+          <>
+            {' '}<code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">{pyphen.Name} {pyphen.Version}</code> enters
+            only through the optional <code class="rounded bg-surface-900 px-1.5 py-0.5 font-mono text-xs text-primary-400">[html]</code> extra,
+            tri-licensed
+          </>
+        )}
+        {' '}GPLv2+, LGPLv2+ or MPL 1.1 — a taker's choice.
+      </p>
+    </div>
+
+    <p class="mx-auto mt-10 max-w-2xl text-center">
+      <a href={inventoryUrl} class="font-semibold text-primary-400 underline hover:text-primary-300">
+        All {totalCount} packages, with licenses, tiers and roles →
+      </a>
+    </p>
+
+    <p class="mt-6 text-center text-sm text-surface-100">
+      Full inventory: <a href={thirdPartyUrl} class="text-primary-400 underline hover:text-primary-300">THIRD_PARTY_LICENSES</a>.
+    </p>
+  </div>
+</section>
