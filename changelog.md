@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-95] The fold, rebuilt around a real transcript — 2026-09-20
+
+- **The fold now opens on a captured `merge --dry-run` session and the `ls` that proves it wrote nothing** — a shared `Terminal` component renders the real bytes of `pdftooling merge jul.pdf aug.pdf sep.pdf -O q3.pdf --dry-run` (re-run and diffed against the shipped transcript on every test run) followed by `ls q3.pdf` failing, because `--dry-run` announces nothing about itself in `merge`'s own output and the `ls` line is what carries the proof.
+- **The terminal no longer hides its own content without saying so.** The document never scrolls sideways at any width; the terminal's own box may, but only with a persistent fade affordance, a named (`aria-label`) scroll region, and `tabindex`/`role="group"` where before the region had no name at all.
+- **The page ends on a call to action**, on the site's one inverted paper band: the install command again, copyable, plus links to the full licence inventory and the source repository.
+- **Two defects close along the way**: the inline-code spacing before punctuation (`Install pdf-tooling; the command is pdftooling.`) is now a measured ≤1px gap instead of the chip's own 6px padding; the verb-roster pointer no longer claims a position ("listed below") that a later item is free to falsify.
+- **`QuickStart.astro` is deleted**, dissolved into the hero and the closing band; `#quickstart` — a published anchor — moves onto the hero's terminal block and keeps resolving exactly once.
+
 ## [PDF-93] The visual system — 2026-09-20
 
 - **The site is set in two plates on a warm ink-black stock, not on `#0f172a` — Tailwind's stock `slate-900` and the single most common dark canvas on the web.** A thirteen-step warm-neutral ramp (`surface-950…50`) replaces the old four-stop slate ramp; the rose accent (`primary-400`/`primary-500`) is frozen byte-for-byte, and every inherited contrast pair moves up, never down (the accent rises from 6.63:1 to 7.19:1 on the new canvas).

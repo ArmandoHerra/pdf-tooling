@@ -1,12 +1,27 @@
 ---
-// PDF-93. Restyled onto the two-plate system: mono wordmark with the ink
-// hyphen, a left-aligned single column (the two-column grid + terminal
-// panel from the frontend proposal §G is PDF-95's -- it needs the captured
-// `--dry-run` transcript this item explicitly does not build), the
-// drafting grid and a simplified page-box motif as the section's only
-// decoration, and the ink bloom re-anchored over the left column instead of
-// dead centre. Structure (copy, CTAs, section order) is unchanged.
+// PDF-95. The fold: identity, the thesis, the copyable install rail, and the
+// captured `--dry-run` / `ls` transcript inside the shared `Terminal`
+// (D2/D8) -- for a CLI the terminal IS the hero asset, and this one proves
+// the product's own thesis rather than decorating the page (`G.1`).
+//
+// AC20: no version number is typed anywhere in this file -- the old status
+// rail's typed-version span is REMOVED here, not carried forward. `E9`/`AC20`
+// measured a typed release number absent at a stale commit (`5265850`);
+// `PDF-93` (landed after that measurement, an ancestor of this one)
+// reintroduced one at line 46 of the pre-this-item file, so this item's own
+// re-derivation is the thing that actually makes the claim true again,
+// rather than inheriting it.
+//
+// Decoration (drafting grid, ink bloom, page-box motif) is `PDF-93`'s and is
+// carried forward unchanged -- this item only rewrites the content column.
+import Terminal from './Terminal.astro';
+import { HERO_TRANSCRIPT_SESSION, HERO_CAPTION } from '../lib/hero-transcript';
+
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
+
+const install = `# Install (published on PyPI)
+uv tool install pdf-tooling
+# or: pip install pdf-tooling`;
 ---
 
 <section class="u-crop relative overflow-hidden">
@@ -41,38 +56,45 @@ const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
     <text x="-14" y="16" class="micro" fill="var(--color-line-mark)" text-anchor="end" transform="rotate(-90 -14 16)">792 pt</text>
   </svg>
 
-  <div class="relative mx-auto max-w-3xl px-6 py-24 sm:py-32">
+  <div class="relative mx-auto max-w-3xl px-6 py-6 sm:py-24 lg:py-28">
     <p class="micro flex flex-wrap items-center gap-x-3 gap-y-1 text-surface-400">
-      <span class="text-primary-400">v1.0.0</span>
-      <span aria-hidden="true">&middot;</span>
       <span>PyPI</span>
       <span aria-hidden="true">&middot;</span>
       <span>Apache-2.0</span>
       <span aria-hidden="true">&middot;</span>
-      <span>pypdf &middot; pdfium &middot; pikepdf &middot; reportlab &middot; pdfplumber</span>
-      <span aria-hidden="true">&middot;</span>
       <span>nothing AGPL or GPL</span>
     </p>
 
-    <h1 class="mt-5 font-mono text-5xl font-semibold tracking-tight text-surface-50 sm:text-6xl">
+    <h1 class="mt-3 font-mono text-4xl font-semibold tracking-tight text-surface-50 sm:mt-5 sm:text-5xl lg:text-6xl">
       pdf<span class="text-primary-400">-</span>tooling
     </h1>
-    <p class="mt-4 max-w-xl text-xl font-medium leading-snug text-surface-100 sm:text-2xl">
+    <p class="mt-2 max-w-xl text-base font-medium leading-snug text-surface-100 sm:mt-4 sm:text-xl lg:text-2xl">
       Every common PDF chore. One safe CLI. No copyleft underneath.
     </p>
-    <p class="mt-6 max-w-2xl text-base leading-relaxed text-surface-300">
+    <p class="mt-6 hidden max-w-2xl text-base leading-relaxed text-surface-300 sm:block">
       One command-line tool for merge, split, extract, rotate, PDF&harr;images, text, tables,
       compress, encrypt, metadata, watermark, OCR and Office&rarr;PDF &mdash; orchestrating a
       permissively licensed engine stack behind one safe, scriptable interface.
     </p>
 
+    <p class="mt-4 max-w-xl text-sm leading-relaxed text-surface-300 sm:mt-8 sm:text-base">
+      Install <code class="code-inline-tight text-sm">pdf-tooling</code>;
+      the command is <code class="code-inline-tight text-sm">pdftooling</code>.
+    </p>
+    <div tabindex="0" class="u-selectall mt-2 overflow-x-auto rounded-md border border-line-soft bg-surface-950 p-3 font-mono text-xs leading-relaxed text-surface-100 shadow-well sm:p-4"><pre><code>{install}</code></pre></div>
+
+    <div class="mt-4 sm:mt-8">
+      <Terminal
+        id="quickstart"
+        label="A captured pdftooling merge --dry-run session, followed by the ls that shows nothing was written"
+        session={HERO_TRANSCRIPT_SESSION}
+      />
+      <p class="mt-3 max-w-xl text-sm leading-relaxed text-surface-400">
+        {HERO_CAPTION}
+      </p>
+    </div>
+
     <div class="mt-10 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-      <a
-        href="#quickstart"
-        class="w-full rounded-md bg-primary-500 px-7 py-3.5 text-center text-base font-semibold text-surface-950 transition hover:bg-primary-400 sm:w-auto"
-      >
-        Get Started &rarr;
-      </a>
       <a
         href={githubUrl}
         class="w-full rounded-md border border-line-strong px-7 py-3.5 text-center text-base font-semibold text-surface-50 transition hover:border-line-ink hover:text-primary-400 sm:w-auto"
@@ -80,6 +102,13 @@ const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
         View on GitHub &rarr;
       </a>
     </div>
+
+    <p class="mt-8 max-w-2xl text-sm text-surface-300">
+      Published on PyPI as <code class="code-inline text-xs">pdf-tooling</code> &mdash;
+      no Homebrew formula, no system package, no container image yet. Every verb
+      <code class="code-inline text-xs">pdftooling --help</code> prints is shipped &mdash;
+      see <a href="#verbs" class="text-primary-400 underline hover:text-primary-300">Verbs</a>.
+    </p>
   </div>
 </section>
 
@@ -91,5 +120,23 @@ const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
   .hero-bloom {
     background-image: radial-gradient(62% 52% at 22% 6%, rgb(244 63 94 / 0.1), transparent 70%),
       radial-gradient(80% 60% at 82% 0%, rgb(255 255 255 / 0.03), transparent 70%);
+  }
+
+  /* D5 (the "Alternative" remedy, deliberately -- not the "Recommended" one,
+     which would edit `.code-inline` in `global.css` for every inline-code
+     chip on the site, and this item does not touch `global.css` at all
+     (Non-goals: token/palette/focus-rule definitions are `PDF-93`'s). E8
+     measured the visible gap as exactly the chip's own 6px
+     `padding-inline` (0.375rem) filled with its own darker background --
+     dropping it only at this one prose sentence, where a code span abuts
+     punctuation, is the scoped fix AC7 asks for. */
+  .code-inline-tight {
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--color-line-soft);
+    background-color: var(--color-surface-800);
+    color: var(--color-surface-100);
+    padding-inline: 0;
+    padding-block: 0.125rem;
+    font-family: var(--font-mono);
   }
 </style>
