@@ -1,0 +1,77 @@
+{
+  "_comment": "PDF-96 D2/D3. The six-layer spine, hand-authored and test-pinned by tests/test_website_diagrams.py against tests/test_import_boundaries.py's own AST walk and src/pdf_tooling/ports/__init__.py's PORTS tuple. Every count below is a derived fact, not a guess -- re-derive rather than hand-edit a number here. Corrects Architecture.astro's pre-PDF-96 rendering, which drew a seventh, invented 'Engines' layer and omitted output/ entirely.",
+  "boundaryTest": "tests/test_import_boundaries.py",
+  "layers": [
+    {
+      "index": "L1",
+      "path": "src/pdf_tooling/cli/",
+      "name": "CLI",
+      "rule": "The only layer that may import the CLI framework.",
+      "desc": "Parses flags, builds one frozen OperationPlan, picks a renderer.",
+      "enforcedBy": ["test_no_typer_or_click_import_below_l1"]
+    },
+    {
+      "index": "L2",
+      "path": "src/pdf_tooling/ops/",
+      "name": "Ops",
+      "rule": "Framework-free verbs, pure functions over ports — never a filesystem-tier refusal built locally.",
+      "desc": "No I/O except through Safety and Ports.",
+      "forkNote": "Ops reaches Safety and Ports in parallel.",
+      "enforcedBy": ["test_no_ops_module_names_a_filesystem_tier_refusal_class"]
+    },
+    {
+      "index": "L3",
+      "path": "src/pdf_tooling/safety/",
+      "name": "Safety",
+      "chip": "1 FILE",
+      "rule": "The single write chokepoint — one file, not one package. Both write allowlists are the empty set.",
+      "desc": "Write-to-temp, fsync, atomic rename. The --dry-run gate.",
+      "enforcedBy": ["test_write_calls_inside_safety_are_confined_to_the_chokepoint", "test_both_allowlists_are_empty"]
+    },
+    {
+      "index": "L4",
+      "path": "src/pdf_tooling/ports/",
+      "name": "Ports",
+      "chip": "6 ports",
+      "rule": "typing.Protocol definitions only — importing every port module loads no engine.",
+      "desc": "The type contract nothing passes through.",
+      "portNames": ["StructureEngine", "RasterEngine", "ComposeEngine", "TextEngine", "OcrEngine", "OfficeConverter"],
+      "enforcedBy": ["test_importing_the_port_layer_loads_no_engine"]
+    },
+    {
+      "index": "L5",
+      "path": "src/pdf_tooling/adapters/",
+      "name": "Adapters",
+      "chip": "8 adapter modules",
+      "spawnChip": "+1 spawn file — subprocess_util.py",
+      "rule": "The only package that may import an engine library. subprocess_util.py is the only module in the tree that may spawn a process.",
+      "desc": "Eight modules back the six ports above; the ninth file is the spawn chokepoint, not a port backer.",
+      "enforcedBy": ["test_no_engine_library_is_imported_outside_adapters", "test_nothing_outside_the_chokepoint_can_spawn"]
+    },
+    {
+      "index": "L6",
+      "path": "src/pdf_tooling/output/",
+      "name": "Output",
+      "rule": "stdout is the payload; stderr is everything else.",
+      "desc": "What Ops returns, rendered as table, json or ndjson.",
+      "enforcedBy": ["README.md ## Output contract"]
+    }
+  ],
+  "engines": {
+    "name": "Engines",
+    "names": ["pypdf", "pypdfium2", "pikepdf", "reportlab", "pdfplumber", "Tesseract", "LibreOffice"],
+    "note": "Not this codebase. Permissive licences only, checked in CI."
+  },
+  "boundary": {
+    "label": "Enforced boundary",
+    "above": "no engine import, no spawn, no write outside the chokepoint",
+    "below": "every third-party engine"
+  },
+  "counts": {
+    "ports": 6,
+    "portBackingAdapters": 8,
+    "spawnFiles": 1,
+    "safetyChokepointFiles": 1,
+    "totalAdapterFiles": 9
+  }
+}
