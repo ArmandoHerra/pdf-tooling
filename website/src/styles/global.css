@@ -436,3 +436,57 @@ body::after {
     display: none;
   }
 }
+
+/* ── PDF-96 G.5 -- four primitives the spine, the two contracts and the
+   atomic-write sequence share. Kept minimal so as not to pre-empt a later
+   visual pass; all four are additive, nothing above this comment moves. ── */
+
+/* G.5.1 -- the standard clip-rect pattern. Used for the spine's per-layer
+   "Layer " screen-reader prefix (the visible chip stays "L1"..."L6") and
+   for the exit-code datasheet's column headers, which carry column
+   semantics for assistive tech without a visible header row (D5 -- the
+   statute reads as rows of clauses, not a labelled grid). Equivalent to
+   Tailwind's built-in `sr-only`; spelled out as a plain class because this
+   file otherwise names no dependency on the utility pipeline for it. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* G.5.2 -- the spine's rail: a single vertical line the six-layer diagram's
+   list runs alongside. Applied to the `<ol>` itself, not to each `<li>`, so
+   it continues unbroken through the boundary and engines rows for free --
+   one border on the container, not N borders that have to agree. The
+   fork/join geometry the design proposal sketched is NOT shipped (`D1`
+   escape taken): the one fact it would have carried ships as text on the
+   Ops band instead, so this primitive is the rail alone. */
+.spine-rail {
+  border-left: 2px solid var(--color-line-mark);
+}
+
+/* G.5.3 -- the POSITIVE reduced-motion gate, ready for use and currently
+   empty: neither the spine, the exit-code datasheet nor the atomic-write
+   sequence ships any motion (D8 -- "the spine ships static"), so there is
+   nothing to gate yet. Kept as its own rule, not folded into the `reduce`
+   block at `:214` above, because that block governs smooth scroll and is
+   the OPPOSITE polarity by necessity -- a future animated affordance on
+   one of these three sections belongs inside this block, never outside a
+   `prefers-reduced-motion` guard of either polarity. */
+@media (prefers-reduced-motion: no-preference) {
+}
+
+/* G.5.4 -- tabular numerals for the exit-code contract's code column,
+   where digits from different rows must align like clauses in a statute.
+   `table, .u-num, .u-datum` (`:238` above) already covers any real
+   `<table>`, so this is a narrower hook for the one cell that needs it
+   named explicitly rather than inherited from an ancestor selector. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

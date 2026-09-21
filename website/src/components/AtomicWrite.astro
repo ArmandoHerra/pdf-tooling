@@ -1,0 +1,64 @@
+---
+// PDF-96 D6/F. NEW. "What a write actually does" -- the atomic-write
+// sequence, re-derived 2026-09-20 from src/pdf_tooling/safety/atomic.py's
+// own seven-step docstring, compressed to six stations (step 7, crash
+// residue, belongs in the evidence below, not the drawing -- it is
+// reported by `doctor --strict`, never swept, PLAN.md §12 R-07).
+//
+// Two tracks, exactly one crossing: everything happens on the scratch
+// track; the upper track -- your file -- is untouched until the last
+// station, where the two touch once and the crossing is instantaneous.
+// That is what "atomic" means, drawn. Placed immediately after the spine:
+// it is the L3 detail, and the reader has just been told safety/atomic.py
+// is one file.
+//
+// Station 3 names no temp-file prefix (E7/AC15/AC16): the real prefix, a
+// TEMP_PREFIX literal declared once at safety/tempnames.py:30, is a
+// registered spelling under src/ and a FORBIDDEN needle under website/ --
+// tests/test_website_contract.py's legacy-needle arm and tests/test_
+// rename_completeness.py's remainder and residue-count checks both catch
+// it if it is ever typed here, and the failure they report reads as a
+// brand census, not a diagram defect. This comment deliberately never
+// spells the prefix out (it self-matched here once, during drafting, and
+// reddened the exact arm this note describes) -- describe it by pointer
+// only, in this file and in the rendered station text alike.
+import contracts from '../data/contracts.json';
+
+const { atomicWrite } = contracts;
+const crossingIndex = atomicWrite.stations.length - 1; // the only station on "your file"'s own track
+---
+
+<section id="atomic-write" aria-labelledby="atomic-h" class="u-crop mx-auto max-w-6xl px-6 py-24">
+  <p class="micro text-surface-400">What a write actually does</p>
+  <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
+  <h2 id="atomic-h" class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
+    Every write is atomic, and here is what that means
+  </h2>
+  <p class="mt-4 max-w-2xl text-lg text-surface-300">
+    <code class="code-inline text-sm">{atomicWrite.sourcePath}</code> is the single write chokepoint the
+    spine above names. Everything below happens on a scratch file; your file stays untouched until the
+    last station, where the two tracks touch exactly once.
+  </p>
+
+  <ol class="atomic-write mt-12 grid grid-cols-1 gap-4 md:grid-cols-6 md:gap-3" aria-describedby="atomic-legend">
+    {atomicWrite.stations.map((station: { glyph: string; name: string; detail: string }, i: number) => (
+      <li class={`station rounded-md border p-4 ${i === crossingIndex ? 'crossing border-primary-400/60 bg-primary-500/10' : 'border-line-soft bg-surface-950'}`}>
+        {i === crossingIndex && (
+          <p class="crossing-label micro mb-2 text-primary-400">— {atomicWrite.crossingLabel} —</p>
+        )}
+        <span class="glyph block font-mono text-lg text-primary-400" aria-hidden="true">{station.glyph}</span>
+        <h3 class="name mt-1 text-sm font-semibold text-surface-50">{station.name}</h3>
+        <p class="detail mt-1 text-xs leading-snug text-surface-300">{station.detail}</p>
+      </li>
+    ))}
+  </ol>
+
+  <p class="failure mt-6 max-w-2xl text-sm leading-relaxed text-surface-300">
+    <span class="text-primary-400" aria-hidden="true">&cross;</span> {atomicWrite.failure}
+  </p>
+
+  <p id="atomic-legend" class="legend mt-4 max-w-2xl text-xs text-surface-400">
+    Everything before the crossing runs on a scratch file, on the same filesystem as the target;
+    only the last station touches your file, and it does so atomically.
+  </p>
+</section>

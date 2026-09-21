@@ -1,0 +1,50 @@
+{
+  "_comment": "PDF-96 D5/D6. The two contracts as data: the exit-code contract and the output contract (both re-derived from src/pdf_tooling/cli/exit_codes.py, README.md's ## Output contract and ## Exit codes), plus the atomic-write sequence (re-derived from src/pdf_tooling/safety/atomic.py, compressed from PLAN.md §5.3's seven steps to six stations). tests/test_website_diagrams.py pins the exit-code half against ALL_EXIT_CODES; the atomic-write half is not independently re-derivable from source (it is prose about a sequence, not a walk), so it is authored here and reviewed, not asserted numerically beyond its station count and its ordering.",
+  "exitCodes": {
+    "sourcePath": "src/pdf_tooling/cli/exit_codes.py",
+    "codes": [
+      { "code": 0, "name": "OK", "meaning": "Success — including an empty-but-valid report. A --dry-run mirrors the code the real run would return, so it is not always 0." },
+      { "code": 1, "name": "FAILURE", "meaning": "The operation ran and failed — corrupt input, engine error, unwritable destination." },
+      { "code": 2, "name": "USAGE", "meaning": "Bad invocation — unknown flag, mutually exclusive flags, malformed page range, unknown subcommand." },
+      { "code": 3, "name": "ENGINE_MISSING", "meaning": "A required engine or binary is unavailable. The message always carries an install hint." },
+      { "code": 4, "name": "NO_INPUT", "meaning": "Valid invocation, nothing to act on." },
+      { "code": 5, "name": "REFUSED", "meaning": "A safety gate declined." },
+      { "code": 6, "name": "AUTH", "meaning": "Password required, incorrect, or of the wrong kind." }
+    ],
+    "carveOuts": [
+      {
+        "title": "The carve-out on code 0, an engine's verdict",
+        "text": "convert and ocr hand the operand to an out-of-process binary — soffice or tesseract — and a --dry-run may not start either. Every dry item of those verbs carries engine_verified: false in its detail, so the preview never reads as an unqualified success."
+      },
+      {
+        "title": "The carve-out on code 0, a password's correctness",
+        "text": "Whether a password can be resolved is decidable from existence alone and a preview predicts it; whether a resolved password is correct is decidable only by trying it, and a preview must not become an oracle. Every dry item that names a password source carries password_verified: false in its detail."
+      }
+    ],
+    "rules": [
+      "Add a code; never renumber one.",
+      "Breaking this table is a major version bump, not a patch."
+    ]
+  },
+  "outputContract": {
+    "shapes": [
+      { "flag": "-o table", "behaviour": "An aligned, plain-text table for a person reading a terminal." },
+      { "flag": "-o json", "behaviour": "One object, carrying schema_version." },
+      { "flag": "-o ndjson", "behaviour": "One object per item, one per line — each line carrying its own schema_version." }
+    ],
+    "asymmetry": "Errors are the one deliberate asymmetry: with -o table an error is a one-line message on stderr, but with -o json or -o ndjson it is an object on stdout, so a machine consumer reading stdout never has to also read stderr to learn a run failed."
+  },
+  "atomicWrite": {
+    "sourcePath": "src/pdf_tooling/safety/atomic.py",
+    "stations": [
+      { "glyph": "①", "name": "Plan / refuse", "detail": "Refuses an existing target without --force. Exit 5." },
+      { "glyph": "②", "name": "Dry-run gate", "detail": "Returns before any filesystem call, in both modes." },
+      { "glyph": "③", "name": "Temp file", "detail": "A temp file beside the target, on the same filesystem — which is what makes the rename atomic." },
+      { "glyph": "④", "name": "Write", "detail": "Write, flush, fsync." },
+      { "glyph": "⑤", "name": ".bak sidecar", "detail": "--in-place only." },
+      { "glyph": "⑥", "name": "os.replace()", "detail": "Atomic. The only place the two tracks touch." }
+    ],
+    "failure": "Anything fails at steps ① through ⑤: the temp is unlinked, your file is untouched, and the process exits with a non-zero code.",
+    "crossingLabel": "your file changes here"
+  }
+}

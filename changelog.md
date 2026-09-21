@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-96] The spine and the contracts — 2026-09-20
+
+- **The architecture section stated the product's own layering incorrectly since the site shipped, and now states it correctly.** The six real layers — `cli` → `ops` → `safety` → `ports` → `adapters` → `output` — replace the old five layers plus an invented sixth, `Engines`; the engines (`pypdf`, `pypdfium2`, `pikepdf`, `reportlab`, `pdfplumber`, `Tesseract`, `LibreOffice`) are drawn outside the licence boundary as third-party libraries, never as a layer of this codebase, and `output/` — the layer that decides what lands on stdout versus stderr — is drawn for the first time.
+- **Every count on the page is derived by a test from an AST walk, never typed by hand.** Six ports, eight port-backing adapter modules, one spawn chokepoint, nine adapter files total (8 + 1) — each is re-derived from `src/pdf_tooling/` by `tests/test_website_diagrams.py` and pinned against a planted mutation in a scratch copy of the source tree. The count of adapters that literally import an engine library (seven — `soffice_office.py` drives a binary instead) is measured and reported by the test suite but deliberately not published on the page, so a future edit cannot quietly "fix" seven into eight.
+- **A new section, "What a write actually does",** draws the atomic-write sequence — plan, dry-run gate, temp file, write, `.bak` sidecar, `os.replace()` — as two tracks with exactly one crossing, with the failure path (anything fails before the last step: the temp is unlinked, your file is untouched) as real text, not a caption.
+- **The exit-code contract and the output contract now read as one instrument** — a statute-style table for the seven exit codes plus the `-o table`/`-o json`/`-o ndjson` output shapes — replacing the seven-card grid, with `PDF-92`'s section anchor and the OR-7 guard on the code-`0` prose both carried forward unchanged.
+
 ## [PDF-95] The fold, rebuilt around a real transcript — 2026-09-20
 
 - **The fold now opens on a captured `merge --dry-run` session and the `ls` that proves it wrote nothing** — a shared `Terminal` component renders the real bytes of `pdftooling merge jul.pdf aug.pdf sep.pdf -O q3.pdf --dry-run` (re-run and diffed against the shipped transcript on every test run) followed by `ls q3.pdf` failing, because `--dry-run` announces nothing about itself in `merge`'s own output and the `ls` line is what carries the proof.

@@ -1,51 +1,137 @@
 ---
-// Re-derived from src/pdf_tooling/cli/exit_codes.py at PDF-16 Phase B
-// (2026-08-31) — codes, names and count are unchanged from Phase A: seven
-// codes, matching PLAN.md §5.6 and ALL_EXIT_CODES exactly. The donor sites
-// show six; this product adds AUTH.
+// Re-derived from src/pdf_tooling/cli/exit_codes.py at PDF-96 (2026-09-20)
+// -- rewritten as ONE bordered instrument carrying both contracts:
+// the exit-code contract and the output contract, replacing the seven-card
+// grid PDF-16 Phase B shipped. Codes, names and count are UNCHANGED from
+// Phase A: seven codes, matching PLAN.md §5.6 and ALL_EXIT_CODES exactly.
 //
 // Cell 0's meaning prose deliberately omits the struck "a dry run is also
-// 0" clause — do not "correct" it back in. Operator ruling OR-7 struck that
+// 0" clause -- do not "correct" it back in. Operator ruling OR-7 struck that
 // clause (PLAN.md:325, "superseded by OR-7, 2026-08-30"): under OR-7 a dry
 // run mirrors the exit code the real run would produce, so a completed
 // --dry-run is emphatically not always 0 (e.g. `convert --dry-run` with no
 // soffice present completes and exits 3). Per ruling X-142, the CODE and
 // NAME still come from exit_codes.py, but the meaning prose must not
-// restate a clause a ruling has struck — so this cell states OK truthfully
-// instead. When this note was written the source docstring still carried the
-// struck clause and this cell knowingly diverged from it; B-101 (2026-08-31)
-// has since corrected exit_codes.py, so the two now AGREE. The note stays as
-// the guard that keeps an honest re-derivation from any older copy of the
-// docstring from walking the clause back in.
-const codes = [
-  { code: '0', name: 'OK', label: 'Success — including an empty-but-valid report. A --dry-run mirrors the code the real run would return, so it is not always 0.' },
-  { code: '1', name: 'FAILURE', label: 'The operation ran and failed — corrupt input, engine error, unwritable destination.' },
-  { code: '2', name: 'USAGE', label: 'Bad invocation — unknown flag, mutually exclusive flags, malformed page range, unknown subcommand.' },
-  { code: '3', name: 'ENGINE_MISSING', label: 'A required engine or binary is unavailable. The message always carries an install hint.' },
-  { code: '4', name: 'NO_INPUT', label: 'Valid invocation, nothing to act on.' },
-  { code: '5', name: 'REFUSED', label: 'A safety gate declined.' },
-  { code: '6', name: 'AUTH', label: 'Password required, incorrect, or of the wrong kind.' },
-];
+// restate a clause a ruling has struck -- so this cell states OK truthfully
+// instead. B-101 (2026-08-31) corrected exit_codes.py's own docstring to
+// agree; this note stays as the guard that keeps an honest re-derivation
+// from any older copy of the docstring from walking the clause back in.
+//
+// PDF-96 D7 -- this item is SOLE WRITER on this file and PDF-97 rebases on
+// it: the `id` below is PDF-92's and survives byte-identical, and this
+// comment keeps the house header-comment convention (what was re-derived,
+// from what, on what date) that Verbs.astro and this file's own prior
+// version already carry.
+import contracts from '../data/contracts.json';
+
+const { exitCodes, outputContract } = contracts;
 ---
 
 <section id="contract" class="u-crop mx-auto max-w-6xl px-6 py-24">
   <p class="micro text-surface-400"><span class="text-primary-400">&sect;05</span> / Exit Codes</p>
   <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
   <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
-    A stable exit-code contract
+    Two contracts, one instrument
   </h2>
   <p class="mt-4 max-w-2xl text-lg text-surface-300">
-    Seven codes, uniform across every verb — the same contract <code class="code-inline text-sm">pdftooling --version</code> and
-    the source both agree on.
+    {exitCodes.codes.length} exit codes, uniform across every verb, and the shapes
+    <code class="code-inline text-sm">-o table</code> / <code class="code-inline text-sm">-o json</code> /
+    <code class="code-inline text-sm">-o ndjson</code> render into — both contracts are public API, both
+    asserted by a test, neither typed by hand on this page.
   </p>
 
-  <div class="mt-12 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
-    {codes.map((c) => (
-      <div class="card p-5 text-center">
-        <p class={`u-datum font-mono text-2xl ${c.code === '0' ? 'text-surface-400' : 'text-primary-400'}`}>{c.code}</p>
-        <p class="mt-1 font-mono text-[11px] font-semibold uppercase tracking-wide text-surface-50">{c.name}</p>
-        <p class="mt-2 text-xs leading-snug text-surface-300">{c.label}</p>
-      </div>
-    ))}
+  <div tabindex="0" class="card mt-12 overflow-x-auto">
+    <table class="exitcode-table w-full min-w-[28rem] border-collapse text-left text-sm">
+      <caption class="sr-only">
+        The exit-code contract: {exitCodes.codes.length} codes, uniform across every verb.
+      </caption>
+      <thead>
+        <tr class="border-b border-line bg-surface-950">
+          <th scope="col"><span class="visually-hidden">Code</span></th>
+          <th scope="col"><span class="visually-hidden">Name</span></th>
+          <th scope="col"><span class="visually-hidden">Meaning</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {exitCodes.codes.map((c: { code: number; name: string; meaning: string }) => (
+          <tr class="exitcode-row border-b border-line-soft last:border-b-0">
+            <th
+              scope="row"
+              class={`tabular w-16 px-4 py-3 align-top text-left font-mono text-lg font-semibold ${c.code === 0 ? 'text-surface-400' : 'text-primary-400'}`}
+            >
+              {c.code}
+            </th>
+            <td class="w-40 px-4 py-3 align-top font-mono text-xs font-semibold uppercase tracking-wide text-surface-50">{c.name}</td>
+            <td class="px-4 py-3 align-top text-xs leading-snug text-surface-300">{c.meaning}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3" class="px-4 py-3 text-xs leading-relaxed text-surface-400">
+            <strong class="text-surface-200">{exitCodes.rules[0]}</strong> {exitCodes.rules[1]}
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <details class="mt-4">
+    <summary class="micro cursor-pointer text-surface-300">The two carve-outs on code {exitCodes.codes[0].code}</summary>
+    <dl class="mt-3 max-w-3xl space-y-3 text-xs leading-relaxed text-surface-300">
+      {exitCodes.carveOuts.map((c: { title: string; text: string }) => (
+        <div>
+          <dt class="font-semibold text-surface-100">{c.title}</dt>
+          <dd class="mt-1">{c.text}</dd>
+        </div>
+      ))}
+    </dl>
+  </details>
+
+  <div class="mt-10 max-w-3xl">
+    <h3 class="text-lg font-semibold text-surface-50">The output contract</h3>
+    <p class="mt-2 text-sm leading-relaxed text-surface-300">{outputContract.asymmetry}</p>
+    <dl class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {outputContract.shapes.map((s: { flag: string; behaviour: string }) => (
+        <div class="card p-4">
+          <dt class="code-inline inline-block text-xs">{s.flag}</dt>
+          <dd class="mt-2 text-xs leading-snug text-surface-300">{s.behaviour}</dd>
+        </div>
+      ))}
+    </dl>
   </div>
 </section>
+
+<style>
+  /* D5 -- below 640px the meaning wraps under the code+name pair within the
+     same row rather than clipping or scrolling; the header cells stay
+     `.visually-hidden` at every width (they are redundant with the `<th
+     scope="row">` code cell's own semantics -- D-level design, not an AC). */
+  @media (max-width: 639px) {
+    /* The `min-w-[28rem]` utility exists for the >=640px real grid and
+       must NOT survive into the stacked layout below it, or the table
+       stays wider than a 320px viewport and the wrapping card's own
+       `overflow-x-auto` turns "wraps" into "scrolls" -- exactly the
+       horizontal-scroll defect this component exists to avoid (AC17 in
+       the parent spec's own terms). */
+    .exitcode-table {
+      min-width: 0;
+    }
+    .exitcode-table,
+    .exitcode-table tbody,
+    .exitcode-table tr,
+    .exitcode-table th,
+    .exitcode-table td {
+      display: block;
+      width: 100%;
+    }
+    .exitcode-table .exitcode-row {
+      padding-block: 0.75rem;
+    }
+    .exitcode-table th[scope='row'],
+    .exitcode-table td {
+      padding-inline: 0;
+      padding-block: 0.125rem;
+    }
+  }
+</style>

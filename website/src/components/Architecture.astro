@@ -1,42 +1,258 @@
 ---
-const steps = [
-  { label: 'CLI (Typer)', detail: 'Parses flags, builds one frozen OperationPlan, picks a renderer. The ONLY layer that may import Typer.' },
-  { label: 'Ops', detail: 'Framework-free verbs, pure functions over ports. No I/O except through Safety and Ports.' },
-  { label: 'Safety', detail: 'The single write chokepoint — atomic write-to-temp-then-rename, no-clobber, the --dry-run gate.' },
-  { label: 'Ports', detail: 'typing.Protocol definitions only: StructureEngine · RasterEngine · ComposeEngine · TextEngine · OcrEngine · OfficeConverter' },
-  { label: 'Adapters', detail: 'The ONLY modules that import an engine library or spawn a process — which is what makes the licence guarantee auditable.' },
-  { label: 'Engines', detail: 'pypdf · pypdfium2 · pikepdf · reportlab · pdfplumber · Tesseract · LibreOffice.' },
-];
+// PDF-96 R1/D1/D2/D3. Re-derived 2026-09-20 against tests/test_import_
+// boundaries.py's own AST walk and src/pdf_tooling/ports/__init__.py's
+// PORTS tuple, replacing the PDF-16-era rendering that drew a seventh,
+// invented "Engines" layer (engines are third-party libraries, not a layer
+// of this codebase) and omitted output/ entirely -- the only correctness
+// defect in cycle 6. The real six are cli -> ops -> safety -> ports ->
+// adapters -> output.
+//
+// Every count on this page comes from ../data/spine.json, which
+// tests/test_website_diagrams.py pins against a fresh AST walk over
+// src/pdf_tooling/ -- a planted change there moves the number this
+// component renders, not a number typed here (AC3-AC7). Eight is the
+// count of adapter MODULES that BACK a port; seven (the count that
+// literally imports a Python engine library) is measured and reported by
+// the test suite and deliberately not published here (R12/AC18) --
+// soffice_office.py backs a port by driving the `soffice` binary through
+// the spawn chokepoint, not by importing an engine library.
+//
+// Design (D1): a vertical descending stack, not the old horizontal chain
+// (which had to rotate 90 at narrow widths -- two layouts of one diagram).
+// The fork geometry the proposal weighed is NOT shipped: the sanctioned
+// escape is taken, and the one fact it would have carried ("Ops reaches
+// Safety and Ports in parallel") ships as real text on L2's own band at
+// every width instead. HTML is the content; the rail and the boundary
+// rule are CSS only, aria-hidden where decorative. No role="img" anywhere:
+// a stack of six ordered layers IS an <ol>, and collapsing it would
+// suppress the text that makes this diagram searchable.
+import spine from '../data/spine.json';
+
+const { layers, engines, boundary, counts } = spine;
+const [l1, l2, l3, l4, l5, l6] = layers;
 ---
 
-<section id="architecture" class="u-crop border-t border-line bg-surface-850 py-24">
+<section id="architecture" aria-labelledby="arch-h" class="u-crop border-t border-line bg-surface-850 py-24">
   <div class="mx-auto max-w-5xl px-6">
     <p class="micro text-surface-400"><span class="text-primary-400">&sect;02</span> / Architecture</p>
     <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
-    <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
+    <h2 id="arch-h" class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
       A six-layer spine, one licence guarantee
     </h2>
     <p class="mt-4 max-w-2xl text-lg text-surface-300">
-      Adapters are the only modules that import an engine library or spawn a process —
-      that is what makes the licence guarantee auditable by reading eight files.
+      <strong class="text-surface-50">{counts.ports} ports</strong> state the boundary.
+      <strong class="text-surface-50">{counts.portBackingAdapters} adapter modules</strong> back them, and
+      <strong class="text-surface-50">{counts.spawnFiles}</strong> more file —
+      <code class="code-inline text-sm">adapters/subprocess_util.py</code> — is the only place in the tree
+      that may spawn a process. That is <strong class="text-surface-50">{counts.totalAdapterFiles} files</strong>.
+      The allowlist of code permitted to write outside the chokepoint is the <strong class="text-surface-50">empty</strong> set,
+      and <code class="code-inline text-sm">{spine.boundaryTest}</code> asserts that it is empty.
     </p>
 
-    <div class="mt-14 flex flex-col items-stretch gap-2 lg:flex-row lg:items-center lg:gap-3">
-      {steps.map((step, i) => (
-        <>
-          <div class="min-w-0 flex-1 rounded-md border border-line-soft bg-surface-950 p-4 text-center shadow-well">
-            <p class="font-mono text-sm font-semibold text-primary-400">{step.label}</p>
-            <p class="mt-1 text-xs leading-snug text-surface-300 break-words">{step.detail}</p>
+    <ol class="spine spine-rail mt-14 flex flex-col gap-6" aria-describedby="arch-legend">
+      <li class="band" data-layer="1">
+        <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l1.index}</span>
+            <code class="path font-mono text-xs text-surface-400">{l1.path}</code>
+            <h3 class="name text-sm font-semibold text-surface-50">{l1.name}</h3>
           </div>
-          {i < steps.length - 1 && (
-            <div class="flex items-center justify-center text-primary-400" aria-hidden="true">
-              <svg class="h-5 w-5 rotate-90 lg:rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
-            </div>
-          )}
-        </>
-      ))}
-    </div>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l1.rule}</p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l1.desc}</p>
+        </div>
+      </li>
+
+      <li class="band" data-layer="2">
+        <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l2.index}</span>
+            <code class="path font-mono text-xs text-surface-400">{l2.path}</code>
+            <h3 class="name text-sm font-semibold text-surface-50">{l2.name}</h3>
+          </div>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l2.rule}</p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l2.desc}</p>
+          <p class="fork-note mt-2 text-xs italic text-surface-400">{l2.forkNote}</p>
+        </div>
+      </li>
+
+      <li class="band chokepoint" data-layer="3">
+        <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l3.index}</span>
+            <code class="path font-mono text-xs text-surface-400">{l3.path}</code>
+            <h3 class="name text-sm font-semibold text-surface-50">{l3.name}</h3>
+            <span class="seal ml-auto rounded-xs bg-primary-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary-400">▣ {l3.chip}</span>
+          </div>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l3.rule}</p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l3.desc}</p>
+        </div>
+      </li>
+
+      <li class="band" data-layer="4">
+        <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l4.index}</span>
+            <code class="path font-mono text-xs text-surface-400">{l4.path}</code>
+            <h3 class="name text-sm font-semibold text-surface-50">{l4.name}</h3>
+            <span class="chip ml-auto rounded-xs bg-surface-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-surface-100">{l4.chip}</span>
+          </div>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l4.rule}</p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300">{(l4.portNames as string[]).join(' · ')}</p>
+        </div>
+      </li>
+
+      <li class="band chokepoint" data-layer="5">
+        <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l5.index}</span>
+            <code class="path font-mono text-xs text-surface-400">{l5.path}</code>
+            <h3 class="name text-sm font-semibold text-surface-50">{l5.name}</h3>
+          </div>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l5.rule}</p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l5.desc}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <span class="seal rounded-xs bg-primary-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary-400">▣ {l5.chip}</span>
+            <span class="seal nested rounded-xs bg-primary-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary-400">▣ {l5.spawnChip}</span>
+          </div>
+        </div>
+      </li>
+
+      <li class="boundary -mx-4 border-y border-line-strong bg-surface-900/60 px-4 py-3 sm:-mx-6 sm:px-6">
+        <p class="boundary-label micro text-primary-400">{boundary.label}</p>
+        <code class="boundary-test mt-1 block font-mono text-xs text-surface-200">{spine.boundaryTest}</code>
+        <p class="boundary-sides mt-1 text-xs text-surface-400">above: {boundary.above} &middot; below: {boundary.below}</p>
+      </li>
+
+      <li class="band external" data-layer="ext">
+        <div class="rounded-md border border-dashed border-line p-4">
+          <h3 class="name text-sm font-semibold text-surface-200">{engines.name}</h3>
+          <p class="engine-names mt-1 font-mono text-xs leading-snug text-surface-300">{engines.names.join(' · ')}</p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-400">{engines.note}</p>
+        </div>
+      </li>
+
+      <li class="band return" data-layer="6">
+        <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l6.index}</span>
+            <code class="path font-mono text-xs text-surface-400">{l6.path}</code>
+            <h3 class="name text-sm font-semibold text-surface-50">{l6.name}</h3>
+          </div>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l6.rule}</p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l6.desc}</p>
+        </div>
+      </li>
+    </ol>
+
+    <p id="arch-legend" class="legend mt-4 max-w-2xl text-xs leading-relaxed text-surface-400">
+      ▣ a chokepoint — the only file that may do this &middot;
+      the boundary rule below is enforced by the test named on it &middot;
+      the rail runs one way: down.
+    </p>
+
+    <details class="mt-8">
+      <summary class="micro cursor-pointer text-surface-300">Show the enforcement evidence</summary>
+      <div class="card mt-4">
+        <table class="evidence w-full border-collapse text-left text-sm">
+          <caption class="sr-only">Every layer, its rule, and the test that enforces it.</caption>
+          <thead>
+            <tr class="border-b border-line bg-surface-950">
+              <th scope="col"><span class="visually-hidden">Layer</span></th>
+              <th scope="col"><span class="visually-hidden">Path</span></th>
+              <th scope="col"><span class="visually-hidden">The rule</span></th>
+              <th scope="col"><span class="visually-hidden">Enforced by</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {layers.map((layer) => (
+              <tr class="evidence-row border-b border-line-soft last:border-b-0">
+                <th scope="row" class="px-3 py-2 text-left align-top font-mono text-primary-400">{layer.index}</th>
+                <td class="px-3 py-2 align-top font-mono text-xs text-surface-300">{layer.path}</td>
+                <td class="px-3 py-2 align-top text-surface-200">{layer.rule}</td>
+                <td class="px-3 py-2 align-top text-xs text-surface-300">
+                  {layer.enforcedBy.map((fn: string, i: number) => (
+                    <>
+                      {i > 0 && ' · '}
+                      {fn.startsWith('README.md')
+                        ? (<><code>README.md</code> <code>## Output contract</code></>)
+                        : (<code>{fn}</code>)}
+                    </>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
   </div>
 </section>
+
+<style>
+  /* PDF-96 D1. The rail continues unbroken through the boundary and
+     engines rows because it is one border on the LIST, not one per row
+     (`.spine-rail`, global.css). Each row insets to clear it and carries
+     its own marker dot so the rail reads as a call path, not a rule. */
+  .spine {
+    padding-left: 1rem;
+  }
+  .spine > li.band,
+  .spine > li.boundary,
+  .spine > li.external {
+    position: relative;
+  }
+  .spine > li.band::before {
+    content: '';
+    position: absolute;
+    left: -1.3125rem;
+    top: 1.1rem;
+    width: 9px;
+    height: 9px;
+    border-radius: 9999px;
+    background: var(--color-primary-400);
+  }
+  .spine > li.boundary::before,
+  .spine > li.external::before {
+    display: none;
+  }
+
+  /* The evidence table reflows below 640px, the same pattern ExitCodes.astro
+     uses (D5): header cells stay `.visually-hidden` at every width (the
+     `<th scope="row">` layer-index cell already carries the row's own
+     semantics), and the remaining three cells stack under it. No `min-width`
+     anywhere on this table: a closed `<details>` in this browser generation
+     is hidden via `content-visibility: hidden`, not `display: none`, so an
+     un-stacked wide table INSIDE it still inflates the page's real
+     `scrollWidth` while collapsed -- a horizontal PAGE scroll a reader would
+     never see caused, but could still nudge, with the accordion never
+     opened. Observed and fixed during this item's own verification pass. */
+  @media (max-width: 639px) {
+    .evidence,
+    .evidence tbody,
+    .evidence tr,
+    .evidence th,
+    .evidence td {
+      display: block;
+      width: 100%;
+    }
+    .evidence .evidence-row {
+      padding-block: 0.5rem;
+    }
+    .evidence th[scope='row'],
+    .evidence td {
+      padding-inline: 0;
+      padding-block: 0.125rem;
+    }
+  }
+
+  /* The cited test-function names are long, space-free identifiers --
+     `test_no_engine_library_is_imported_outside_adapters` and its
+     siblings -- which CANNOT wrap at a word boundary because they have
+     none. At every width, not just below 640px: an unbroken identifier
+     wider than its cell is exactly the same content-visibility-driven
+     page-scrollWidth defect the min-width removal above fixes, now shaped
+     as one long word instead of a wide table. */
+  .evidence code {
+    overflow-wrap: anywhere;
+  }
+</style>
