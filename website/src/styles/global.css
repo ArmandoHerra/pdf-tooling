@@ -65,3 +65,36 @@ body {
   outline: 2px solid var(--color-primary-400);
   outline-offset: 2px;
 }
+
+/* PDF-92 D5. `--nav-h` is the sticky header's own height, and it is NOT a
+   single value: the below-`sm` anchor rail makes the header taller than at
+   `sm`+, and `sm`+ is itself not single-valued once its own link row is
+   allowed to wrap (D4) -- one line at 1024px and above, two lines from 640
+   to 1023. Each figure below is measured against THIS build (D5 rule 1,
+   never transcribed), and the `sm`+ value is the MAXIMUM header height over
+   its whole range, not a 1440px reading (D5 rule 2 -- taking the narrower
+   figure leaves every anchor short of clearance across a 384px-wide band). */
+:root {
+  --nav-h: 132px;
+}
+@media (min-width: 640px) {
+  :root {
+    --nav-h: 81px;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --nav-h: 71px;
+  }
+}
+
+/* `:where([id])` rather than `section[id]`: specificity 0, so any component
+   can override it, and the rule survives PDF-95 moving `#quickstart` onto a
+   non-`<section>` block inside the hero (D5 rule 3). `scroll-margin-top`
+   rather than `html { scroll-padding-top }`, because a margin travels WITH
+   its target element when a later item moves that target elsewhere (D5 rule
+   4) -- PDF-94 and PDF-95 are about to do exactly that to two published
+   anchors. */
+:where([id]) {
+  scroll-margin-top: calc(var(--nav-h) + 0.5rem);
+}

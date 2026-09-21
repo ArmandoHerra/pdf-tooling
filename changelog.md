@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-92] Navigation and anchor hygiene — 2026-09-20
+
+- **Every section is reachable from the header at every width, not just at `sm` and above.** The mobile header offered zero in-page anchors (only the `sr-only` skip link); it now carries an always-visible rail of six anchors below `sm`, with zero JavaScript — nothing opens, so nothing can be stuck open, and there is no focus trap to get wrong.
+- **A frozen register (`website/src/lib/sections.ts`) is now the single source both the `sm`+ row and the rail render from**, so the two can no longer drift apart, and `tests/test_website_contract.py` gained four arms (`AR1`-`AR4`) that read the register from source and catch a dropped anchor, a missing target, a dead literal `href="#..."`, or a duplicated `id` — including the one shape (`#features` dropped from both the nav and the page together) the inherited `design/2026-09-20_website-preflight.sh` sweep cannot see at all.
+- **Every anchor now lands clear of the sticky header, at every width**, via a breakpoint-aware `--nav-h` custom property and one `scroll-margin-top` rule; a single fixed value was driven and confirmed insufficient (still short of clearance below `lg`), which is why the property has three tiers, not one.
+- **`#licensing` joins the nav for the first time and `ExitCodes.astro` gains `id="contract"`** — the register now names every section that is a navigation destination and exists today; `safety` and `status` are reserved, not assigned, for the sections a later item creates.
+- **The `sm`+ link row is now allowed to wrap instead of forcing the document wider than the viewport.** A non-wrapping row carrying all six anchors plus `Docs` was driven and confirmed to push `document.documentElement.scrollWidth` past `clientWidth` at 640-768px — a regression band `AC17`'s own four widths do not sample — before the wrapping fix removed it.
+
 ## [PDF-91] Gate the website, and make the colour rules real — 2026-09-20
 
 - **A pull request that breaks the site now reports red before the merge, not after it.** `ci.yml` gains a twelfth job, `website`, running `npm ci`, `astro check` and `astro build` behind one `make website` step; `deploy-website.yml`'s publish path was gated all along, but by a CI that could not see the site build at all — a pull request could go nineteen-of-nineteen green, merge, and only then fail in the deploy workflow, downstream of the decision the gate exists to inform.
