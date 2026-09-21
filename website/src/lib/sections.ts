@@ -5,15 +5,16 @@
 // this file exists to remove (D1).
 //
 // `tests/test_website_contract.py`'s `AR1` freezes the `id` sequence below
-// in a tuple declared INDEPENDENTLY of this file, so a change here (e.g.
-// `PDF-97` retiring `features` in favour of `safety`) reds by design unless
-// the test's own tuple is edited in the same commit -- a deliberate edit,
-// never a silent drift (D7).
+// in a tuple declared INDEPENDENTLY of this file, so a change here reds by
+// design unless the test's own tuple is edited in the same commit -- a
+// deliberate edit, never a silent drift (D7).
 //
-// `safety` and `status` are RESERVED, not assigned: they are the
-// information architecture's final section set and `PDF-97` creates both
-// sections. Assigning either id now would put a safety contract's name on a
-// Features grid that has not yet become one (D2).
+// PDF-97 D10: `features` retires in favour of `safety` -- `Features.astro`
+// is retitled to the safety contract and keeps `#features` resolving via
+// an empty, `aria-hidden` anchor of its own, so the published link is not
+// broken by this rename. `status` is newly assigned to the production-
+// posture section (`Posture.astro`, NEW). Both were RESERVED, not assigned,
+// until this item created the sections they name.
 export interface SectionLink {
   /** The section's `id` -- e.g. `features` renders as a `<section>` whose
    *  id attribute is that same word. Deliberately not spelled here as a
@@ -29,10 +30,11 @@ export interface SectionLink {
 }
 
 export const SECTIONS: readonly SectionLink[] = [
-  { id: 'features', label: 'Features', short: 'Features' },
+  { id: 'safety', label: 'Safety', short: 'Safety' },
   { id: 'architecture', label: 'Architecture', short: 'Architecture' },
   { id: 'verbs', label: 'Verbs', short: 'Verbs' },
   { id: 'quickstart', label: 'Quick Start', short: 'Install' },
   { id: 'contract', label: 'Exit Codes', short: 'Exit codes' },
+  { id: 'status', label: 'Status', short: 'Status' },
   { id: 'licensing', label: 'Licensing', short: 'Licensing' },
 ] as const;

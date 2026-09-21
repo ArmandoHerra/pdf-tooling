@@ -8,6 +8,7 @@ import AtomicWrite from '../components/AtomicWrite.astro';
 import Verbs from '../components/Verbs.astro';
 import ExitCodes from '../components/ExitCodes.astro';
 import LicenseSummary from '../components/LicenseSummary.astro';
+import Posture from '../components/Posture.astro';
 import ClosingCta from '../components/ClosingCta.astro';
 import Footer from '../components/Footer.astro';
 ---
@@ -22,6 +23,14 @@ import Footer from '../components/Footer.astro';
     <Verbs />
     <ExitCodes />
     <LicenseSummary />
+    <!-- PDF-97: production posture is the last content section before the
+         closing call to action, mirroring the IA's own #status-before-CTA
+         order even though #licensing itself sits later on this built page
+         than the IA's guidance table places it (a PDF-94/95 decision, not
+         this item's to move -- D9 forbids reordering anything to make the
+         height ceiling, and this placement is a content decision, not a
+         height lever). -->
+    <Posture />
     <ClosingCta />
   </main>
   <Footer />

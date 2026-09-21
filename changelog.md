@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-97] Density: verbs, features and posture — 2026-09-21
+
+- **The 26-row verb roster moved into a typed module (`website/src/lib/verbs.ts`) and its grouping field was renamed `port` → `family`.** Ruling `R3`: the rename only — the nine family values, their membership, and all 26 purposes and statuses carry byte-for-byte from the previous roster (`Verbs.astro` at `5265850`), verified by a direct comparison. Deriving a real port per verb stays out of scope, filed as `B-374`.
+- **Verbs is now a chip map over compact detail rows instead of 26 near-identical cards** — every verb name as a small monospace anchor, clustered by family, readable at a glance, over one line per verb (name, then purpose). Zero JavaScript: no filter, no search, no script.
+- **The claim that the verb list is checked against the live CLI is now true and named**: `tests/test_website_contract.py::test_pdf97_ac4_the_verb_roster_is_the_live_command_tree` asserts the roster is set-equal to `discover_verbs()` on every pull request and every deploy, replacing an unchecked assertion. Two false/unsourced footer claims (`config`/`completion`, which do not exist on the live CLI; an unsourced Phase 2 parked list) are deleted rather than restyled.
+- **Features is retitled to the safety contract: six mixed cards become four plus one closing admission.** Two duplicated facts (license-clean stack, stable exit codes) are absorbed into their existing sections; every new sentence carries a verbatim anchor into `README.md`, checked by a new `SOURCE_ANCHORS` table. `#features`, a published nav anchor, keeps resolving via an empty anchor even though the section is now `id="safety"`.
+- **A new production-posture section (`Posture.astro`, `id="status"`) answers "is this ready, and where are the bugs"** — the output/exit-code contract's frozen public-API status, where open defects are recorded, and that Phase 1 is complete — naming where and what is frozen, never a live count, a sweep id, or a commit sha.
+
 ## [PDF-96] The spine and the contracts — 2026-09-20
 
 - **The architecture section stated the product's own layering incorrectly since the site shipped, and now states it correctly.** The six real layers — `cli` → `ops` → `safety` → `ports` → `adapters` → `output` — replace the old five layers plus an invented sixth, `Engines`; the engines (`pypdf`, `pypdfium2`, `pikepdf`, `reportlab`, `pdfplumber`, `Tesseract`, `LibreOffice`) are drawn outside the licence boundary as third-party libraries, never as a layer of this codebase, and `output/` — the layer that decides what lands on stdout versus stderr — is drawn for the first time.

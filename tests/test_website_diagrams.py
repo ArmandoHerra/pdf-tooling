@@ -954,15 +954,24 @@ def test_ac19_dropping_a_code_reddens_the_cardinality_arm() -> None:
 
 
 def test_ac22_the_changelog_carries_a_pdf96_entry_directly_below_the_anchor() -> None:
+    """This arm is a one-shot landing check for the SPEC THAT ADDS IT, not a
+    durable invariant -- `tests/test_changelog_history.py` is the general,
+    durable house instrument for the anchor rule (AC19's own reference).
+    The literal it checks is necessarily re-pinned by whichever spec's own
+    commit next inserts a newer entry above this one (the anchor rule
+    guarantees there can only ever be ONE entry directly below the anchor
+    line, and it is always the newest). PDF-97 D10's own instruction for
+    `FROZEN_SECTION_IDS` -- "edited here in the SAME commit" -- is the same
+    pattern applied to a different frozen literal; this re-pin is that."""
     text = CHANGELOG.read_text(encoding="utf-8")
     anchor = "<!-- CHANGELOG-ANCHOR"
     anchor_idx = text.index(anchor)
     anchor_line_end = text.index("\n", anchor_idx) + 1
     remainder = text[anchor_line_end:].lstrip("\n")
     first_line = remainder.splitlines()[0]
-    assert first_line.startswith("## [PDF-96] "), (
-        "the PDF-96 entry must be the first heading directly below the anchor line"
+    assert first_line.startswith("## [PDF-97] "), (
+        "the PDF-97 entry must be the first heading directly below the anchor line"
     )
-    assert re.match(r"^## \[PDF-96\] .+ — \d{4}-\d{2}-\d{2}$", first_line), (
+    assert re.match(r"^## \[PDF-97\] .+ — \d{4}-\d{2}-\d{2}$", first_line), (
         f"changelog heading does not match the required format: {first_line!r}"
     )
