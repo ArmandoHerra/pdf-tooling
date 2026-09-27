@@ -89,6 +89,9 @@ FROZEN_SECTION_IDS: Final[tuple[str, ...]] = (
     "safety",
     "architecture",
     "verbs",
+    # Worked examples. Added after `verbs` deliberately: a reader who has
+    # just seen WHAT the tool does is the one who wants to see it used.
+    "examples",
     "quickstart",
     "contract",
     "status",
@@ -137,7 +140,20 @@ LEGACY_NEEDLE: Final[str] = r"pdf[-_]toolkit|" + _LEGACY_BARE
 #: Astro inlines into a `data:` URI in `index.html` -- never a fetched
 #: resource -- and is exempt WHEREVER it appears, not only inside `.svg`
 #: files (E10 trap 2: the original wording predates that inlining).
-ALLOWED_HOSTS: Final[frozenset[str]] = frozenset({"armandoherra.github.io", "github.com"})
+#: AC12's closure. The property this criterion exists to protect is that the
+#: page FETCHES nothing from a third party -- no CDN, no analytics, no web
+#: font -- and that property is asserted independently by `test_a5`/`test_a6`
+#: (zero script, zero `.js`) and re-measured in a real browser at every
+#: viewport. A destination a reader may CLICK is not a request the page
+#: makes: `github.com` has always been in this set for exactly that reason.
+#: `pypi.org` joins it on the same footing and no other -- it is the
+#: canonical registry for this artifact, the page names it in the hero, the
+#: install rail, the posture section and the closing band, and a named
+#: install channel that cannot be clicked is the dead end this site spent a
+#: cycle removing everywhere else.
+ALLOWED_HOSTS: Final[frozenset[str]] = frozenset(
+    {"armandoherra.github.io", "github.com", "pypi.org"}
+)
 EXEMPT_HOST: Final[str] = "www.w3.org"
 HOST_PATTERN: Final[re.Pattern[str]] = re.compile(r"https?://([a-zA-Z0-9.-]+)")
 
@@ -608,16 +624,52 @@ def test_a4_the_over_budget_census_counts_occurrences_never_lines() -> None:
     PDF-97 re-pin: the chip moved from `Verbs.astro:87` to `:77` when D3's
     chip map replaced the old card grid's name badge with a compact anchor
     chip -- the two-occurrence CLAIM is what this test protects, not the
-    specific line, so the line is re-measured here rather than left stale."""
+    specific line, so the line is re-measured here rather than left stale.
+
+    THE COORDINATE IS GONE, and that is a repair, not a relaxation.
+
+    This arm was pinned to a line number: `:87` -> `:77` -> `:116` ->
+    `:122` -> `:123`. Every one of those moves was an edit to this
+    component's FRONTMATTER -- a Spanish copy table, two locale helpers, a
+    `RANGE_TOKENS` list, one import -- and not one of them touched the chip
+    markup or changed the fact under test. An assertion that reds four
+    times for reasons unrelated to its subject trains a reader to re-pin it
+    without looking, which is exactly how a real regression gets waved
+    through.
+
+    So the subject is now identified by CONTENT. The claim is unchanged and
+    still fully asserted: exactly one line in this component carries TWO
+    accent occurrences, which is what makes a line-counting instrument
+    report 1 where the truth is 2. It additionally asserts that the line in
+    question is the verb chip -- by its own two class names -- which a line
+    number never did. A coincidental future two-hit line elsewhere in the
+    file now fails here instead of silently satisfying `== [N]`.
+
+    DRIVEN RED (both directions): delete one of the two accent utilities
+    from the chip -> no line carries two, and this reds. Add a second
+    accent utility to any other line -> two lines carry two, and this reds
+    naming both."""
     verbs = WEBSITE_SRC / "components" / "Verbs.astro"
+    text = verbs.read_text()
+    lines = text.splitlines()
     occs_by_line: dict[int, int] = {}
-    for occ in locate_accent_occurrences(verbs, verbs.read_text()):
+    for occ in locate_accent_occurrences(verbs, text):
         occs_by_line[occ.line] = occs_by_line.get(occ.line, 0) + 1
+
     two_hit_lines = [line for line, count in occs_by_line.items() if count == 2]
-    assert two_hit_lines == [77], (
-        f"expected exactly one two-occurrence line at :77, found {two_hit_lines} "
-        f"(full census: {occs_by_line})"
+    assert len(two_hit_lines) == 1, (
+        f"expected exactly one line carrying two accent occurrences, found "
+        f"{two_hit_lines} (full census: {occs_by_line})"
     )
+
+    # The one two-hit line must be the verb chip itself, named by the two
+    # utilities that put two occurrences on it in the first place.
+    chip_line = lines[two_hit_lines[0] - 1]
+    for marker in ("border-primary-500/10", "bg-primary-500/10"):
+        assert marker in chip_line, (
+            f"the two-occurrence line (:{two_hit_lines[0]}) is not the verb chip -- "
+            f"{marker!r} is absent from it: {chip_line.strip()!r}"
+        )
 
 
 def test_a4_synthetic_two_hits_one_line_count_as_two() -> None:
@@ -1368,6 +1420,17 @@ SOURCE_ANCHORS: Final[tuple[tuple[str, Path, str], ...]] = (
         "They are not shipped in the sdist or the wheel and are not present in a clone",
     ),
     ("phase", README_MD, "Phase 1 (v1) complete"),
+    # The posture section's two new claims. It stopped restating the three
+    # rows above it -- the planning tree and the phase are disclosed in
+    # README.md for a source-tree reader and are not things a website
+    # visitor can act on -- but those anchors stay, because the rows assert
+    # the SOURCE still carries the claim and README.md still does.
+    ("ci-only publication", README_MD, "Publication uses PyPI Trusted\nPublishing over OIDC"),
+    (
+        "every fix in the changelog",
+        README_MD,
+        "Every fix that ships is\nrecorded in `changelog.md`",
+    ),
     ("dco", CONTRIBUTING_MD, "git commit -s"),
     ("changelog rule", CONTRIBUTING_MD, "in the same commit as the code"),
 )
@@ -1441,6 +1504,61 @@ def test_pdf97_ac4_the_verb_roster_is_the_live_command_tree() -> None:
     )
 
 
+#: Deliberate copy edits to a verb's `purpose` made AFTER `5265850`, keyed by
+#: verb name as `(before, after)`. A row here is a claim that the change was
+#: intended and that the MEANING is unchanged; it is not a licence to edit the
+#: roster, which `test_pdf97_ac2_...` still compares in full identity terms.
+#:
+#: `ocr`: the em-dash is gone at the operator's request (2026-09-27, site-wide:
+#: no em-dash renders anywhere on either locale's pages). Punctuation only --
+#: the clause it joined is unchanged and still says the same thing, and the
+#: colon is the separator the rest of the roster already uses for this shape.
+#:
+#: `split`, `rasterize`, `compose`, `create`, `convert`: the conversion ARROW
+#: is gone, same date, same request. The operator reported the arrows as hard
+#: to see, and they are: this site ships no web fonts (system stacks only,
+#: `tailwind.config.mjs`), so the one lever that would have made the glyph
+#: bolder -- shipping a face that draws it heavier -- is closed by a rule
+#: older than the complaint. A heavier codepoint (U+27F6, U+2794) is not a fix
+#: either, because whether it renders at all depends on the reader's system
+#: font rather than on anything this repository controls. Words do not have
+#: that failure mode, they say which direction the conversion runs without
+#: the reader inferring it from a glyph, and a screen reader pronounces them.
+#: `\u2192` survives ONLY after a link label, where it is a navigation
+#: affordance and not a claim about formats.
+RECORDED_PURPOSE_EDITS: Final[dict[str, tuple[str, str]]] = {
+    "ocr": (
+        "Add a Tesseract text layer over untouched pixels \u2014 a text-only PDF "
+        "generated per page and merged.",
+        "Add a Tesseract text layer over untouched pixels: a text-only PDF "
+        "generated per page and merged.",
+    ),
+    "split": (
+        "One PDF \u2192 many, by fixed chunk size, explicit ranges, per page, or at "
+        "top-level bookmarks.",
+        "One PDF into many, by fixed chunk size, explicit ranges, per page, or at "
+        "top-level bookmarks.",
+    ),
+    "rasterize": (
+        "PDF \u2192 PNG/JPEG/TIFF/WEBP at a chosen DPI or pixel width.",
+        "PDF to PNG/JPEG/TIFF/WEBP at a chosen DPI or pixel width.",
+    ),
+    "compose": (
+        "Images \u2192 PDF. JPEG inputs embed as DCTDecode streams (byte-preserving, "
+        "no re-encode).",
+        "Images to PDF. JPEG inputs embed as DCTDecode streams (byte-preserving, no re-encode).",
+    ),
+    "create": (
+        "Text (v1) \u2192 PDF. Markdown/HTML behind the [html] extra (Phase 2).",
+        "Text (v1) to PDF. Markdown/HTML behind the [html] extra (Phase 2).",
+    ),
+    "convert": (
+        "Office \u2192 PDF via headless LibreOffice.",
+        "Office to PDF via headless LibreOffice.",
+    ),
+}
+
+
 def test_pdf97_ac2_the_rename_is_a_rename_and_the_data_is_unchanged() -> None:
     """AC2/D2. `(name, family, purpose, status)` parsed from `verbs.ts`
     equals `(name, port, purpose, status)` parsed from `Verbs.astro` AT
@@ -1453,6 +1571,15 @@ def test_pdf97_ac2_the_rename_is_a_rename_and_the_data_is_unchanged() -> None:
     Failing control (driven, reverted from a byte-compared backup): change
     one purpose by one character in a scratch copy of `verbs.ts` -- the
     comparison reds naming that verb (`merge`, in the drive).
+
+    RECORDED EDITS. This arm compares against a commit, so a deliberate
+    copy change after that commit lands here as a red, which is correct:
+    it is the arm asking to be told. It is NOT answered by loosening the
+    comparison to ignore purposes -- that would retire the instrument to
+    pass one edit. Each intended change is written into
+    `RECORDED_PURPOSE_EDITS` below with its reason, applied to the
+    historical rows, and the equality is then asserted in full. Any purpose
+    that moves WITHOUT a row there still reds exactly as before.
     """
     old_text = _git("show", "5265850:website/src/components/Verbs.astro").stdout
     old_rows = _parse_roster(old_text)
@@ -1460,9 +1587,31 @@ def test_pdf97_ac2_the_rename_is_a_rename_and_the_data_is_unchanged() -> None:
 
     assert len(old_rows) == 26, f"5265850 roster parsed {len(old_rows)} row(s), expected 26"
     assert len(new_rows) == 26, f"verbs.ts roster parsed {len(new_rows)} row(s), expected 26"
-    assert old_rows == new_rows, (
-        "roster changed beyond the field rename -- diff the two parses to find the row:\n"
-        f"  old: {old_rows}\n  new: {new_rows}"
+
+    # The identity half of the roster is compared with no allowance at all:
+    # no recorded edit may add, drop, reorder or re-family a verb, or move a
+    # status. Only the prose column is editable, and only by enumeration.
+    assert [(n, f, s) for n, f, _p, s in old_rows] == [(n, f, s) for n, f, _p, s in new_rows], (
+        "roster identity changed (name, family or status) -- that is never a copy edit"
+    )
+
+    expected_rows = [
+        (name, family, RECORDED_PURPOSE_EDITS.get(name, (purpose, purpose))[1], status)
+        if name in RECORDED_PURPOSE_EDITS
+        else (name, family, purpose, status)
+        for name, family, purpose, status in old_rows
+    ]
+    for name, (before, _after) in RECORDED_PURPOSE_EDITS.items():
+        historical = next(p for n, _f, p, _s in old_rows if n == name)
+        assert historical == before, (
+            f"the recorded edit for {name!r} quotes a 'before' that is not what 5265850 "
+            f"actually carried -- re-derive it rather than adjusting it to fit:\n"
+            f"  recorded: {before!r}\n  at 5265850: {historical!r}"
+        )
+    assert expected_rows == new_rows, (
+        "roster changed beyond the field rename and the recorded copy edits -- diff the two "
+        "parses to find the row, then either revert it or record it with a reason:\n"
+        f"  expected: {expected_rows}\n  new: {new_rows}"
     )
 
     families = sorted({family for _name, family, _purpose, _status in new_rows})
@@ -1553,7 +1702,7 @@ def test_pdf97_ac8_every_new_sentence_is_mechanically_traceable() -> None:
         if anchor not in text:
             missing.append(f"{key!r}: {anchor!r} not found in {doc_path.relative_to(REPO_ROOT)}")
     assert missing == [], "source anchor(s) not found verbatim:\n" + "\n".join(missing)
-    assert len(SOURCE_ANCHORS) == 18, f"expected 18 source anchors, found {len(SOURCE_ANCHORS)}"
+    assert len(SOURCE_ANCHORS) == 20, f"expected 20 source anchors, found {len(SOURCE_ANCHORS)}"
 
 
 def test_pdf97_ac9_the_posture_section_carries_none_of_the_four_forbidden_tokens() -> None:
@@ -1628,10 +1777,12 @@ def test_pdf97_ac11_verb_counts_stay_computed_and_no_literal_appears() -> None:
     """AC11/D-standard. `{available.length}` / `{planned.length}` survive
     in `Verbs.astro` (sourced from `verbs.ts`, never a local roster); `26`
     and `0` appear nowhere as bare literals in the component; the rendered
-    heading in `dist/index.html` reads "26 shipped" (the planned count of 0
-    renders no digit at all -- `&middot; {planned.length} planned` renders
-    literally as "0 planned" via the template, and neither figure is typed
-    by the author).
+    heading in `dist/index.html` reads "26 commands" -- the figure is produced
+    by `{available.length}`, never typed by the author. The heading WORDING is
+    not the subject and has changed once already (it read "26 shipped / 0
+    planned" until that register was judged to read like a project tracker
+    rather than a released tool); what this arm protects is that the number is
+    COMPUTED, so it re-targets to whatever noun follows it.
     """
     verbs_astro_text = (WEBSITE_SRC / "components" / "Verbs.astro").read_text()
     assert "available.length" in verbs_astro_text and "planned.length" in verbs_astro_text, (
@@ -1644,7 +1795,7 @@ def test_pdf97_ac11_verb_counts_stay_computed_and_no_literal_appears() -> None:
     # SECTION" describes the rendered heading, not a blanket ban on the
     # digit 0 anywhere in the file -- `.length > 0` and similar ordinary
     # code would otherwise false-positive. Scoped to the `<h2...>` heading
-    # block itself, the one place a hand-typed "26 shipped" could silently
+    # block itself, the one place a hand-typed count could silently
     # replace the computed expression with an identical render (AC11's own
     # worked control).
     heading_match = re.search(r"<h2\b.*?</h2>", verbs_astro_text, re.DOTALL)
@@ -1658,8 +1809,9 @@ def test_pdf97_ac11_verb_counts_stay_computed_and_no_literal_appears() -> None:
     html = (DIST_ROOT / "index.html").read_text()
     section_match = re.search(r'<section id="verbs".*?</section>', html, re.DOTALL)
     assert section_match is not None, "verbs section not found in dist/index.html"
-    assert "26 shipped" in section_match.group(0), (
-        "rendered heading does not read '26 shipped' in dist/index.html"
+    assert "26 commands" in section_match.group(0), (
+        "rendered heading does not read '26 commands' in dist/index.html -- the "
+        "count must still render from `{available.length}` beside its noun"
     )
 
 

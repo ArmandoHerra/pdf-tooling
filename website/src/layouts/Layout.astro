@@ -1,33 +1,72 @@
 ---
+// The document shell, now bilingual. `lang` is DERIVED from the page's own
+// URL rather than passed in: a page that forgets the prop would otherwise
+// ship Spanish prose inside `<html lang="en">`, which is not a cosmetic
+// slip -- it is what a screen reader uses to choose a voice, and it is
+// invisible to every check that reads rendered text.
 import '../styles/global.css';
-import { withBase } from '../lib/site';
+import { withBase, base } from '../lib/site';
+import { langOf, alternatePath } from '../lib/i18n';
 
 interface Props {
   title?: string;
   description?: string;
 }
 
-const {
-  title = 'pdf-tooling — Every common PDF chore. One safe CLI. No copyleft underneath.',
-  description = "An Apache-2.0 PDF toolkit CLI in Python — merge, split, extract, rotate, PDF↔images, text, tables, compress, encrypt, metadata, watermark, OCR and Office→PDF — over pypdf, pdfium, pikepdf, reportlab and pdfplumber, with nothing AGPL or GPL on the call graph.",
-} = Astro.props;
+const lang = langOf(Astro.url);
+
+// Per-locale defaults. The tagline and the verb list are the page's own
+// first sentence in each language; `pdf-tooling`, the verb names and the
+// engine names are identifiers and stay as they are in both.
+const DEFAULTS = {
+  en: {
+    title: 'pdf-tooling: Every common PDF chore. One safe CLI. No copyleft underneath.',
+    description:
+      "An Apache-2.0 PDF toolkit CLI in Python for merge, split, extract, rotate, PDF to images and back, text, tables, compress, encrypt, metadata, watermark, OCR and Office to PDF, over pypdf, pdfium, pikepdf, reportlab and pdfplumber, with nothing AGPL or GPL on the call graph.",
+    ogDescription: 'Every common PDF chore. One safe CLI. No copyleft underneath.',
+  },
+  es: {
+    title: 'pdf-tooling: Todas las tareas comunes de PDF. Una sola CLI segura. Sin copyleft debajo.',
+    description:
+      'Una CLI de PDF en Python con licencia Apache-2.0: unir, dividir, extraer, rotar, de PDF a imágenes y de vuelta, texto, tablas, comprimir, cifrar, metadatos, marca de agua, OCR y de Office a PDF, sobre pypdf, pdfium, pikepdf, reportlab y pdfplumber, sin nada AGPL ni GPL en el grafo de llamadas.',
+    ogDescription: 'Todas las tareas comunes de PDF. Una sola CLI segura. Sin copyleft debajo.',
+  },
+} as const;
+
+const { title = DEFAULTS[lang].title, description = DEFAULTS[lang].description } = Astro.props;
 
 const ogImage = new URL(withBase('og-image.png'), Astro.site).toString();
 const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
+
+// `hreflang` on BOTH pages, plus `x-default` pointing at English. Declared
+// from one path transform so the pair can never disagree with the language
+// switch in the navbar, which reads the same function.
+const enHref = new URL(lang === 'en' ? Astro.url.pathname : alternatePath(Astro.url, base), Astro.site).toString();
+const esHref = new URL(lang === 'es' ? Astro.url.pathname : alternatePath(Astro.url, base), Astro.site).toString();
+const alternates = [
+  { hreflang: 'en', href: enHref },
+  { hreflang: 'es', href: esHref },
+  { hreflang: 'x-default', href: enHref },
+];
+const ogLocale = lang === 'es' ? 'es_MX' : 'en_US';
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang={lang}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonicalUrl} />
+    {alternates.map((alt) => (
+      <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />
+    ))}
 
     <!-- Open Graph -->
     <meta property="og:title" content="pdf-tooling" />
-    <meta property="og:description" content="Every common PDF chore. One safe CLI. No copyleft underneath." />
+    <meta property="og:description" content={DEFAULTS[lang].ogDescription} />
+    <meta property="og:locale" content={ogLocale} />
     <meta property="og:image" content={ogImage} />
     <meta property="og:url" content={canonicalUrl} />
     <meta property="og:type" content="website" />
@@ -35,7 +74,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="pdf-tooling" />
-    <meta name="twitter:description" content="Every common PDF chore. One safe CLI. No copyleft underneath." />
+    <meta name="twitter:description" content={DEFAULTS[lang].ogDescription} />
     <meta name="twitter:image" content={ogImage} />
 
     <link rel="icon" type="image/svg+xml" href={withBase('favicon.svg')} />

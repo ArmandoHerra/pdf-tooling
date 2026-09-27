@@ -263,7 +263,22 @@ make ci        # the full local gate: format, lint, types, tests, licenses, SAST
 
 Contributions are accepted under the Developer Certificate of Origin (`git commit -s`). See `CONTRIBUTING.md` for the commit conventions and `TESTING.md` for how to run each suite.
 
+## Releases
+
+Every release is built and published by CI from a tag. Publication uses PyPI Trusted
+Publishing over OIDC: the workflow holds no upload token at all, so nothing can be
+published from a developer's machine.
+
+The wheel and the sdist both carry attested provenance on PyPI, served from PyPI's
+integrity endpoint beside each file. You can verify that the artifact you installed was
+built from this repository, by this workflow, at the tag it claims.
+
 ## Known issues
+
+Found a bug? Open an issue: <https://github.com/ArmandoHerra/pdf-tooling/issues>. A report
+that names the verb, the flags, the input and what you expected is enough to act on, and
+`pdftooling doctor` output helps whenever an engine is involved. Every fix that ships is
+recorded in `changelog.md`, written by the commit that made it.
 
 Open defects and planned work are recorded, per finding, in the maintainer's planning tree:
 

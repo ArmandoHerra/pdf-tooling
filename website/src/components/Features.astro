@@ -25,28 +25,87 @@
 // (`Navbar.astro`, first in-page link) and keeps resolving via the empty,
 // `aria-hidden` anchor immediately inside the section, above the heading --
 // both `#features` and `#safety` land the reader in the same place.
+import Prose from './Prose.astro';
+import { langOf, pick } from '../lib/i18n';
+
 const features = [
   {
     icon: 'shield',
     title: '--dry-run is pure',
-    description: "It plans and reports; it writes nothing, anywhere. Run it first on anything you are not sure about -- there is no partial-write state to clean up afterward, because nothing was written.",
+    description:
+      "It plans and reports, and writes nothing, anywhere. Run it first on anything you are not sure about. There is no half-written file to clean up afterwards, because nothing was written.",
   },
   {
     icon: 'lock',
-    title: 'Nothing is clobbered',
-    description: 'Outputs never clobber. A bulk destructive run without --force is refused with exit 5 rather than prompted, so a script and a human get the identical guarantee -- there is no interactive confirmation path for an automated caller to accidentally satisfy.',
+    title: 'Nothing is overwritten',
+    description:
+      'Output files are never replaced unless you pass --force. A bulk run that would destroy files is refused with exit 5 instead of asking first, so a script and a person get the same answer. There is no prompt for an automated caller to satisfy by accident.',
   },
   {
     icon: 'swap',
     title: 'Every write is atomic, inputs untouched',
-    description: 'Every write goes to a temp file on the target filesystem, is fsync\'d, then moved into place with an atomic rename. Inputs are never mutated unless you ask for --in-place, which writes a .bak sidecar first.',
+    description:
+      'Every write goes to a temporary file next to the target, is flushed to disk, then moved into place in one step the system cannot leave half-done. Your input files are never changed unless you ask for --in-place, which saves a .bak copy first.',
   },
   {
     icon: 'key',
     title: 'A password is never a command-line value',
-    description: "argv is world-readable in /proc and lands in shell history, so a password is never accepted as a command-line value -- there is no --password, no --user-password and no --owner-password. Read it from a file or from stdin instead.",
+    description:
+      "Anything typed on the command line is visible to other users on the machine and is saved in your shell history, so a password is never accepted there. There is no --password, no --user-password and no --owner-password. Pass it in a file or on stdin instead.",
   },
 ];
+
+// The Spanish cards, positionally paired with the English four above. A
+// parallel array rather than a key on each card: the English objects are
+// what `SOURCE_ANCHORS` reads this file for, and they stay exactly as they
+// were rather than growing a second language inside the pinned literal.
+//
+// Register note: flag names (`--dry-run`, `--force`, `--in-place`), `argv`,
+// `/proc`, `fsync`, `stdin` and `.bak` are identifiers and are NOT
+// translated -- a reader who types `--fuerza` gets an exit 2, so a
+// translation that invents one would be actively wrong.
+const featuresEs = [
+  {
+    title: '--dry-run es puro',
+    description:
+      'Planea y reporta; no escribe nada, en ning\u00fan lado. \u00dasalo primero con cualquier cosa de la que no est\u00e9s seguro: no queda un estado a medio escribir que limpiar despu\u00e9s, porque no se escribi\u00f3 nada.',
+  },
+  {
+    title: 'Nada se sobrescribe',
+    description:
+      'Las salidas nunca sobrescriben. Una corrida destructiva en lote sin --force se rechaza con c\u00f3digo 5 en lugar de preguntar, as\u00ed que un script y una persona reciben la misma garant\u00eda: no hay una confirmaci\u00f3n interactiva que un llamador automatizado pueda satisfacer por accidente.',
+  },
+  {
+    title: 'Cada escritura es at\u00f3mica; tus entradas no se tocan',
+    description:
+      'Cada escritura va a un archivo temporal en el mismo sistema de archivos del destino, se sincroniza con fsync y luego se mueve a su lugar con un rename at\u00f3mico. Las entradas nunca se modifican a menos que pidas --in-place, que primero deja un respaldo .bak junto al archivo.',
+  },
+  {
+    title: 'Una contrase\u00f1a nunca es un valor de l\u00ednea de comandos',
+    description:
+      'argv se puede leer desde /proc y queda en el historial de la terminal, as\u00ed que nunca se acepta una contrase\u00f1a como valor de l\u00ednea de comandos: no existe --password, ni --user-password, ni --owner-password. L\u00e9ela de un archivo o de stdin.',
+  },
+];
+
+const cards = langOf(Astro.url) === 'es'
+  ? features.map((f, i) => ({ ...f, ...featuresEs[i] }))
+  : features;
+
+const t = pick(Astro.url, {
+  eyebrow: 'Safety',
+  heading: 'What happens to your files',
+  lede: 'Four guarantees. Each one is checked by the test suite, not just promised here.',
+  advisoryLead: 'Permission bits are a request, not a lock.',
+  advisoryRest:
+    ' Nothing enforces them. Encryption protects the content; the bits on their own protect nothing.',
+}, {
+  eyebrow: 'Seguridad',
+  heading: 'Qu\u00e9 le pasa a tus archivos',
+  lede: 'Cuatro garant\u00edas, verificadas por la propia suite de pruebas del producto en lugar de prometidas.',
+  advisoryLead: 'Los bits de permisos son informativos, no una restricci\u00f3n.',
+  advisoryRest:
+    ' Son una petici\u00f3n al lector, no un candado. El cifrado protege el contenido; los bits por s\u00ed solos no protegen nada.',
+});
 
 const icons: Record<string, string> = {
   shield: 'M12 2 20 5.5V11c0 5-3.4 8.7-8 9.9C7.4 19.7 4 16 4 11V5.5L12 2ZM9 11.5l2 2 4-4',
@@ -58,31 +117,29 @@ const icons: Record<string, string> = {
 
 <section id="safety" class="u-crop mx-auto max-w-6xl px-6 py-24">
   <span id="features" aria-hidden="true"></span>
-  <p class="micro text-surface-400"><span class="text-primary-400">&sect;01</span> / Safety</p>
+  <p class="micro text-surface-400"><span class="text-primary-400">&sect;01</span> / {t.eyebrow}</p>
   <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
   <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
-    What happens to your files
+    {t.heading}
   </h2>
   <p class="mt-4 max-w-2xl text-lg text-surface-300">
-    Four guarantees, checked by the product's own test suite rather than promised.
+    {t.lede}
   </p>
 
   <div class="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-    {features.map((f) => (
+    {cards.map((f) => (
       <div class="card p-5">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="text-primary-400" aria-hidden="true">
           <path d={icons[f.icon]} />
         </svg>
         <div class="mt-3 h-px w-full bg-line-soft" aria-hidden="true"></div>
-        <h3 class="mt-3 text-lg font-semibold text-surface-50">{f.title}</h3>
-        <p class="mt-2 max-w-[32ch] text-sm leading-snug text-surface-200">{f.description}</p>
+        <h3 class="mt-3 text-lg font-semibold text-surface-50"><Prose text={f.title} /></h3>
+        <p class="mt-2 max-w-[32ch] text-sm leading-snug text-surface-200"><Prose text={f.description} /></p>
       </div>
     ))}
   </div>
 
   <p class="mt-8 max-w-2xl text-sm leading-snug text-surface-300">
-    <strong class="text-surface-100">Permission bits are advisory, not enforcement.</strong> They are a
-    request to the reader, not a lock. Encryption protects the content; the bits on their own protect
-    nothing.
+    <strong class="text-surface-100">{t.advisoryLead}</strong>{t.advisoryRest}
   </p>
 </section>

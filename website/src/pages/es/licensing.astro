@@ -1,17 +1,20 @@
 ---
+// The Spanish annex route. Same near-copy rule as `pages/es/index.astro`:
+// nothing here selects Spanish, `langOf(Astro.url)` does, and every import
+// gains one `../` for the extra directory.
 // PDF-94 D1/D6/D7/D8. The product's evidence page: the full 31-row
 // dependency inventory, once, at a URL a legal reviewer can be handed
 // directly. `licensing.astro` -- no leading underscore, no leading dot
 // (PDF-94 E2): Astro excludes files whose name begins with `_` from
 // routing, and that mistake ships a green build with the second route
 // silently absent.
-import Layout from '../layouts/Layout.astro';
-import Navbar from '../components/Navbar.astro';
-import Footer from '../components/Footer.astro';
-import DependencyTable from '../components/DependencyTable.astro';
-import licenses from '../data/licenses.json';
-import { base } from '../lib/site';
-import { langOf, pick } from '../lib/i18n';
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar.astro';
+import Footer from '../../components/Footer.astro';
+import DependencyTable from '../../components/DependencyTable.astro';
+import licenses from '../../data/licenses.json';
+import { base } from '../../lib/site';
+import { langOf, pick } from '../../lib/i18n';
 
 type Row = { Name: string; Version: string; License: string };
 const rows = licenses as Row[];

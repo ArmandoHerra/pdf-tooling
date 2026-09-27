@@ -1,4 +1,6 @@
 ---
+import { pick } from '../lib/i18n';
+
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
 const docsUrl = 'https://github.com/ArmandoHerra/pdf-tooling#readme';
 const changelogUrl = 'https://github.com/ArmandoHerra/pdf-tooling/blob/main/changelog.md';
@@ -7,17 +9,44 @@ const licenseUrl = 'https://github.com/ArmandoHerra/pdf-tooling/blob/main/LICENS
 // the conditional link resolves to "include it" rather than "omit it".
 const thirdPartyUrl = 'https://github.com/ArmandoHerra/pdf-tooling/blob/main/THIRD_PARTY_LICENSES';
 const year = new Date().getFullYear();
+
+// `git commit -s` is a command, not a phrase, and `DCO`, `Apache-2.0` and
+// the four destination names below are identifiers -- only the sentence
+// around them forks. The measured width note above still holds: the
+// Spanish copyright line is four characters longer than the English one,
+// which is well inside the slack `xl:` already buys.
+const t = pick(Astro.url, {
+  copyrightA: '. Apache-2.0. Contributions under the DCO (',
+  copyrightB: ').',
+  readme: 'README',
+  changelog: 'Changelog',
+  thirdParty: 'Third-Party Licenses',
+  licence: 'License',
+}, {
+  copyrightA: '. Apache-2.0. Contribuciones bajo el DCO (',
+  copyrightB: ').',
+  readme: 'README',
+  changelog: 'Changelog',
+  thirdParty: 'Licencias de terceros',
+  licence: 'Licencia',
+});
 ---
 
 <footer class="u-crop border-t border-line">
-  <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 sm:flex-row">
-    <p class="text-center font-mono text-xs text-surface-400 sm:text-left">&copy; {year} pdf-tooling — Apache-2.0. Contributions accepted under the DCO (<code class="code-inline text-[10px]">git commit -s</code>).</p>
-    <div class="micro flex flex-wrap items-center justify-center gap-6 text-surface-400">
+  <!-- The two halves need about 1,124px side by side and the container gives
+     1,104px, so at `sm` -- where this used to become a row -- neither fits:
+     the copyright wrapped mid-sentence and `License` was orphaned onto a
+     second line under the other four. It becomes a row only at `xl`, the
+     first breakpoint with room for both on one line; below that it stacks
+     and centres, which is the rendering it already used on a phone. -->
+  <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 xl:flex-row">
+    <p class="text-center font-mono text-xs text-surface-400 xl:text-left">&copy; {year} pdf-tooling{t.copyrightA}<code class="code-inline text-[10px]">git commit -s</code>{t.copyrightB}</p>
+    <div class="micro flex flex-wrap items-center justify-center gap-6 text-surface-400 xl:gap-5 xl:flex-nowrap">
       <a href={githubUrl} class="hover:text-primary-400">GitHub</a>
-      <a href={docsUrl} class="hover:text-primary-400">README</a>
-      <a href={changelogUrl} class="hover:text-primary-400">Changelog</a>
-      <a href={thirdPartyUrl} class="hover:text-primary-400">Third-Party Licenses</a>
-      <a href={licenseUrl} class="hover:text-primary-400">License</a>
+      <a href={docsUrl} class="hover:text-primary-400">{t.readme}</a>
+      <a href={changelogUrl} class="hover:text-primary-400">{t.changelog}</a>
+      <a href={thirdPartyUrl} class="hover:text-primary-400">{t.thirdParty}</a>
+      <a href={licenseUrl} class="hover:text-primary-400">{t.licence}</a>
     </div>
   </div>
 </footer>

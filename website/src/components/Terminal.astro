@@ -32,18 +32,27 @@ export interface Props {
    *  anchor and moves onto this block. Rendered on the outer card, which is
    *  an ANCESTOR of the scroll container, never on the scroller itself. */
   id?: string;
+  /** The status the captured session actually ended on. Defaults to 0
+   *  because every consumer before the worked examples captured a
+   *  succeeding run -- but the chrome USED to hardcode `exit 0`, and the
+   *  first session that deliberately fails (the no-clobber refusal, which
+   *  exits 5 and whose whole point is that the code is the payload) was
+   *  therefore labelled with someone else's exit code. A page that argues
+   *  the exit code is public API cannot print the wrong one. */
+  exit?: number;
 }
 
-const { session, label, id } = Astro.props;
+const { session, label, id, exit = 0 } = Astro.props;
 const commented = session.filter((line) => line.comment);
+const ok = exit === 0;
 ---
 
 <div class="card terminal-panel overflow-hidden" id={id}>
   <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
-    <span class="micro text-surface-400">bash &mdash; pdftooling</span>
+    <span class="micro text-surface-400">bash &middot; pdftooling</span>
     <span class="ml-auto micro inline-flex items-center gap-1.5 text-surface-400">
-      exit 0
-      <span class="text-primary-400" aria-hidden="true">&check;</span>
+      exit {exit}
+      <span class="text-primary-400" aria-hidden="true">{ok ? '\u2713' : '\u2717'}</span>
     </span>
   </div>
 

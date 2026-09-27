@@ -98,5 +98,5 @@ export const CAPTION_FRAGMENTS = {
 } as const;
 
 export const HERO_CAPTION =
-  `A ${CAPTION_FRAGMENTS.dryRun} plans the whole merge across three files — ` +
-  `then ls is the check, and ${CAPTION_FRAGMENTS.nothingWritten}.`;
+  `A ${CAPTION_FRAGMENTS.dryRun} plans the whole merge across three files. ` +
+  `Then ls is the check, and ${CAPTION_FRAGMENTS.nothingWritten}.`;

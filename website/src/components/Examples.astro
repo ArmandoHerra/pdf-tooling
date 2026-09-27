@@ -1,0 +1,125 @@
+---
+// Worked examples. Four real sessions, captured never composed, each
+// carrying the point a reader should take from it rather than a
+// restatement of the command.
+//
+// This is also where the agent-native argument lives, and it lives here
+// rather than in a claim band because it is the one claim on this page
+// that is better shown than asserted: the determinism an agent needs is
+// visible in the transcripts themselves -- a declared `schema_version`, a
+// structured refusal carrying the same code the process exits with, and
+// output that turns to JSON on its own when nothing is watching.
+//
+// Reuses `Terminal.astro` (PDF-95) rather than restyling a second
+// terminal: one scroll-affordance implementation, one accessible name
+// contract, one set of overflow rules.
+import Terminal from './Terminal.astro';
+import { EXAMPLES } from '../lib/examples';
+import Prose from './Prose.astro';
+import { langOf, pick } from '../lib/i18n';
+import { EXAMPLES_ES } from '../lib/copy-es';
+
+// The SESSIONS are not translated, at all. Every line inside a terminal
+// here is stdout a real run produced, and stdout does not have a Spanish
+// edition -- a reader who runs `pdftooling doctor` in Mexico City sees the
+// same column headers. What forks is this page's words ABOUT the capture:
+// the title, the point, and the one authored comment line under the
+// refusal.
+const esLang = langOf(Astro.url) === 'es';
+const examples = esLang
+  ? EXAMPLES.map((ex) => {
+      const tr = EXAMPLES_ES[ex.id];
+      if (!tr) return ex;
+      return {
+        ...ex,
+        title: tr.title,
+        point: tr.point,
+        session: tr.comment
+          ? ex.session.map((line) => (line.comment ? { ...line, comment: tr.comment } : line))
+          : ex.session,
+      };
+    })
+  : EXAMPLES;
+
+const t = pick(Astro.url, {
+  eyebrow: 'Examples',
+  heading: 'What it looks like to use it',
+  lede: 'Four real sessions, captured from the tool rather than written for the page.',
+  agentEyebrow: 'Built for agents, not only for people',
+  agentA:
+    'An agent driving a command-line tool has to guess twice: whether the output it just read means what it thinks, and whether the thing it asked for actually happened. Both guesses are removed here. Every read path emits a declared ',
+  agentB:
+    ' and turns to JSON on its own when stdout is not a terminal. Every failure is a structured object whose ',
+  agentC:
+    ' is the same number the process exits with, taken from a table that is part of the public API, so a script can branch on a number instead of matching English text. And ',
+  agentD:
+    ' reports exactly what a real run would do while writing nothing, anywhere, so an agent can plan, check, then act, instead of hoping.',
+  sessionLabel: (title: string) => `Example session: ${title}`,
+}, {
+  eyebrow: 'Ejemplos',
+  heading: 'As\u00ed se ve usarla',
+  lede: 'Cuatro sesiones reales, capturadas de la herramienta en lugar de escritas para esta p\u00e1gina.',
+  agentEyebrow: 'Hecha para agentes, no solo para personas',
+  agentA:
+    'Un agente que maneja una herramienta de l\u00ednea de comandos tiene que adivinar dos veces: si la salida que acaba de leer significa lo que cree, y si lo que pidi\u00f3 de verdad ocurri\u00f3. Aqu\u00ed se quitan las dos adivinanzas. Toda ruta de lectura emite un ',
+  agentB:
+    ' declarado y se convierte en JSON por su cuenta cuando stdout no es una terminal. Toda falla es un objeto estructurado cuyo ',
+  agentC:
+    ' es el mismo n\u00famero con el que termina el proceso, tomado de una tabla congelada como API p\u00fablica, as\u00ed que un plan puede ramificar sobre un entero en lugar de reconocer texto en ingl\u00e9s. Y ',
+  agentD:
+    ' reporta exactamente lo que har\u00eda una corrida real sin escribir nada, en ning\u00fan lado, lo que convierte planear-verificar-actuar en una secuencia real y no en una esperanza.',
+  sessionLabel: (title: string) => `Sesi\u00f3n de ejemplo: ${title}`,
+});
+---
+
+<section id="examples" class="u-crop mx-auto max-w-6xl px-6 py-24">
+  <p class="micro text-surface-400"><span class="text-primary-400">&sect;04</span> / {t.eyebrow}</p>
+  <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
+  <h2 class="mt-6 max-w-3xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
+    {t.heading}
+  </h2>
+  <p class="mt-4 max-w-3xl text-lg text-surface-300">
+    {t.lede}
+  </p>
+
+  <div
+    class="mt-8 max-w-3xl rounded-md border border-line-soft bg-surface-850/60 p-5 shadow-card"
+  >
+    <p class="micro text-primary-400">{t.agentEyebrow}</p>
+    <p class="mt-3 text-base leading-relaxed text-surface-200">
+      {t.agentA}<code class="code-inline text-xs">schema_version</code>{t.agentB}<code
+        class="code-inline text-xs">code</code>{t.agentC}<code
+        class="code-inline text-xs">--dry-run</code>{t.agentD}
+    </p>
+  </div>
+
+  <!-- The terminals are NOT two-up. Measured: the widest captured line is 65
+       monospace characters, which needs about 586px of ink plus the scroller's
+       own 40px of padding; a half-width column of this 1,104px container gives
+       526px, so both table captures lost their last column to the fade at
+       every desktop width. R8 permits a terminal to scroll inside itself when
+       the affordance is visible -- it does not make hidden output an
+       acceptable way to SHOW output, which is the whole job of this section.
+       Each example is its own row instead, with the point beside the capture
+       rather than above it: the terminal gets 776px at `lg` and up (fits with
+       190px spare), and the prose occupies vertical space the terminal was
+       going to occupy anyway, so the section is barely taller than the
+       clipping version it replaces. Below `lg` it stacks and the terminal
+       takes the full container; a phone still scrolls it, visibly, which is
+       the rendering R8 was written for. -->
+  <div class="mt-12 flex flex-col gap-12">
+    {examples.map((example) => (
+      <article class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:gap-10">
+        <div>
+          <h3 class="font-mono text-sm font-semibold text-surface-50">{example.title}</h3>
+          <p class="mt-2 text-sm leading-snug text-surface-400"><Prose text={example.point} /></p>
+        </div>
+        <Terminal
+          session={example.session}
+          exit={example.exit}
+          label={t.sessionLabel(example.title)}
+        />
+      </article>
+    ))}
+  </div>
+</section>

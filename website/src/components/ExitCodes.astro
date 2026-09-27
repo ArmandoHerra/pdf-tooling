@@ -23,33 +23,87 @@
 // from what, on what date) that Verbs.astro and this file's own prior
 // version already carry.
 import contracts from '../data/contracts.json';
+import Prose from './Prose.astro';
+import { langOf, pick } from '../lib/i18n';
+import { EXIT_MEANINGS_ES, CONTRACTS_ES } from '../lib/copy-es';
 
-const { exitCodes, outputContract } = contracts;
+const { exitCodes: enExitCodes, outputContract: enOutputContract } = contracts;
+
+// Code NUMBERS and code NAMES are public API and identical in both
+// languages -- `REFUSED` is what the tool prints, so translating it here
+// would teach a Spanish reader a name that appears nowhere in the product.
+// Only the `meaning` column, the two rules, the carve-outs and the shape
+// behaviours fork, and each is merged onto the pinned table rather than
+// replacing it.
+const es = langOf(Astro.url) === 'es';
+const exitCodes = es
+  ? {
+      ...enExitCodes,
+      codes: enExitCodes.codes.map((c) => ({ ...c, meaning: EXIT_MEANINGS_ES[c.code] ?? c.meaning })),
+      rules: CONTRACTS_ES.rules,
+      carveOuts: CONTRACTS_ES.carveOuts,
+    }
+  : enExitCodes;
+const outputContract = es
+  ? {
+      ...enOutputContract,
+      shapes: enOutputContract.shapes.map((sh) => ({
+        ...sh,
+        behaviour: CONTRACTS_ES.shapes[sh.flag] ?? sh.behaviour,
+      })),
+      asymmetry: CONTRACTS_ES.asymmetry,
+    }
+  : enOutputContract;
+
+const t = pick(Astro.url, {
+  eyebrow: 'Exit Codes',
+  heading: 'Two contracts a script can rely on',
+  ledeA: ' exit codes that mean the same thing in every command, plus the shapes that ',
+  ledeB: ' render into. Both are public API, both are checked by a test, and neither is typed by hand on this page.',
+  captionA: 'The exit-code contract: ',
+  captionB: ' codes, uniform across every verb.',
+  colCode: 'Code',
+  colName: 'Name',
+  colMeaning: 'Meaning',
+  carveSummaryA: 'Two exceptions on code ',
+  outputHeading: 'The output contract',
+}, {
+  eyebrow: 'C\u00f3digos de salida',
+  heading: 'Dos contratos, un solo instrumento',
+  ledeA: ' c\u00f3digos de salida que significan lo mismo en todos los comandos, m\u00e1s las formas en las que se renderiza ',
+  ledeB: '. Los dos son API p\u00fablica, los dos est\u00e1n respaldados por una prueba, y ninguno se escribi\u00f3 a mano en esta p\u00e1gina.',
+  captionA: 'El contrato de c\u00f3digos de salida: ',
+  captionB: ' c\u00f3digos, iguales en todos los comandos.',
+  colCode: 'C\u00f3digo',
+  colName: 'Nombre',
+  colMeaning: 'Significado',
+  carveSummaryA: 'Las dos excepciones del c\u00f3digo ',
+  outputHeading: 'El contrato de salida',
+});
 ---
 
 <section id="contract" class="u-crop mx-auto max-w-6xl px-6 py-24">
-  <p class="micro text-surface-400"><span class="text-primary-400">&sect;05</span> / Exit Codes</p>
+  <p class="micro text-surface-400"><span class="text-primary-400">&sect;05</span> / {t.eyebrow}</p>
   <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
   <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
-    Two contracts, one instrument
+    {t.heading}
   </h2>
   <p class="mt-4 max-w-2xl text-lg text-surface-300">
-    {exitCodes.codes.length} exit codes, uniform across every verb, and the shapes
-    <code class="code-inline text-sm">-o table</code> / <code class="code-inline text-sm">-o json</code> /
-    <code class="code-inline text-sm">-o ndjson</code> render into — both contracts are public API, both
-    asserted by a test, neither typed by hand on this page.
+    {exitCodes.codes.length}{t.ledeA}<code class="code-inline text-sm">-o table</code> / <code
+      class="code-inline text-sm">-o json</code> / <code
+      class="code-inline text-sm">-o ndjson</code>{t.ledeB}
   </p>
 
   <div tabindex="0" class="card mt-12 overflow-x-auto">
     <table class="exitcode-table w-full min-w-[28rem] border-collapse text-left text-sm">
       <caption class="sr-only">
-        The exit-code contract: {exitCodes.codes.length} codes, uniform across every verb.
+        {t.captionA}{exitCodes.codes.length}{t.captionB}
       </caption>
       <thead>
         <tr class="border-b border-line bg-surface-950">
-          <th scope="col"><span class="visually-hidden">Code</span></th>
-          <th scope="col"><span class="visually-hidden">Name</span></th>
-          <th scope="col"><span class="visually-hidden">Meaning</span></th>
+          <th scope="col"><span class="visually-hidden">{t.colCode}</span></th>
+          <th scope="col"><span class="visually-hidden">{t.colName}</span></th>
+          <th scope="col"><span class="visually-hidden">{t.colMeaning}</span></th>
         </tr>
       </thead>
       <tbody>
@@ -62,7 +116,7 @@ const { exitCodes, outputContract } = contracts;
               {c.code}
             </th>
             <td class="w-40 px-4 py-3 align-top font-mono text-xs font-semibold uppercase tracking-wide text-surface-50">{c.name}</td>
-            <td class="px-4 py-3 align-top text-xs leading-snug text-surface-300">{c.meaning}</td>
+            <td class="px-4 py-3 align-top text-xs leading-snug text-surface-300"><Prose text={c.meaning} /></td>
           </tr>
         ))}
       </tbody>
@@ -77,25 +131,25 @@ const { exitCodes, outputContract } = contracts;
   </div>
 
   <details class="mt-4">
-    <summary class="micro cursor-pointer text-surface-300">The two carve-outs on code {exitCodes.codes[0].code}</summary>
+    <summary class="micro cursor-pointer text-surface-300">{t.carveSummaryA}{exitCodes.codes[0].code}</summary>
     <dl class="mt-3 max-w-3xl space-y-3 text-xs leading-relaxed text-surface-300">
       {exitCodes.carveOuts.map((c: { title: string; text: string }) => (
         <div>
           <dt class="font-semibold text-surface-100">{c.title}</dt>
-          <dd class="mt-1">{c.text}</dd>
+          <dd class="mt-1"><Prose text={c.text} /></dd>
         </div>
       ))}
     </dl>
   </details>
 
   <div class="mt-10 max-w-3xl">
-    <h3 class="text-lg font-semibold text-surface-50">The output contract</h3>
-    <p class="mt-2 text-sm leading-relaxed text-surface-300">{outputContract.asymmetry}</p>
+    <h3 class="text-lg font-semibold text-surface-50">{t.outputHeading}</h3>
+    <p class="mt-2 text-sm leading-relaxed text-surface-300"><Prose text={outputContract.asymmetry} /></p>
     <dl class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
       {outputContract.shapes.map((s: { flag: string; behaviour: string }) => (
         <div class="card p-4">
           <dt class="code-inline inline-block text-xs">{s.flag}</dt>
-          <dd class="mt-2 text-xs leading-snug text-surface-300">{s.behaviour}</dd>
+          <dd class="mt-2 text-xs leading-snug text-surface-300"><Prose text={s.behaviour} /></dd>
         </div>
       ))}
     </dl>

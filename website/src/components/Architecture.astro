@@ -27,76 +27,148 @@
 // a stack of six ordered layers IS an <ol>, and collapsing it would
 // suppress the text that makes this diagram searchable.
 import spine from '../data/spine.json';
+import Prose from './Prose.astro';
+import { langOf, pick } from '../lib/i18n';
+import { LAYERS_ES, SPINE_ES } from '../lib/copy-es';
 
-const { layers, engines, boundary, counts } = spine;
+const { layers: enLayers, engines: enEngines, boundary: enBoundary, counts } = spine;
+
+// The spine is MERGED, never replaced: `path`, `index`, `portNames` and
+// `enforcedBy` are identifiers and come from `spine.json` in both
+// languages, so the Spanish page cannot drift off the re-derived counts
+// and module names `tests/test_website_diagrams.py` pins. Only `rule`,
+// `desc`, `chip`, `spawnChip` and `forkNote` -- the sentences -- fork.
+const es = langOf(Astro.url) === 'es';
+const layers = es ? enLayers.map((l) => ({ ...l, ...(LAYERS_ES[l.index] ?? {}) })) : enLayers;
+const engines = es ? { ...enEngines, name: SPINE_ES.enginesName, note: SPINE_ES.enginesNote } : enEngines;
+const boundary = es
+  ? { label: SPINE_ES.boundaryLabel, above: SPINE_ES.boundaryAbove, below: SPINE_ES.boundaryBelow }
+  : enBoundary;
 const [l1, l2, l3, l4, l5, l6] = layers;
+
+const t = pick(Astro.url, {
+  eyebrow: 'Architecture',
+  heading: 'Small enough that you can check it yourself',
+  introA:
+    'Most tools ask you to trust a long dependency list. This one is built so you do not have to. Every PDF engine it uses sits behind ',
+  adapterModules: ' adapter modules',
+  introB: ', small files whose only job is to talk to one engine. Just ',
+  introD: ' more file, ',
+  introE:
+    ', may start another program, and nothing else in the codebase is allowed to. That is ',
+  files: ' files',
+  introF:
+    ' in total between you and every engine, so reading all of them takes an afternoon rather than a project. Writing to your disk is fenced off the same way, and ',
+  introH: ' fails the build the day either fence comes down.',
+  arranged:
+    'The diagram below shows how that is arranged. You do not need any of it to use the tool.',
+  layerWord: 'Layer ',
+  above: 'above: ',
+  below: 'below: ',
+  legend:
+    '\u25a3 marks a file that is the only one allowed to do its job. Each boundary rule is enforced by the test named beside it, and the rail runs one way: down.',
+  evidenceSummary: 'Show the tests that enforce this',
+  evidenceCaption: 'Every layer, its rule, and the test that enforces it.',
+  colLayer: 'Layer',
+  colPath: 'Path',
+  colRule: 'The rule',
+  colEnforced: 'Enforced by',
+}, {
+  eyebrow: 'Arquitectura',
+  heading: 'Lo bastante chico como para que lo revises t\u00fa mismo',
+  introA:
+    'Casi todas las herramientas te piden confiar en una lista larga de dependencias. Esta est\u00e1 hecha para que no tengas que hacerlo. Cada motor de PDF que usa queda detr\u00e1s de ',
+  adapterModules: ' m\u00f3dulos adaptadores',
+  introB: ', archivos chicos cuyo \u00fanico trabajo es hablar con un motor. Solo ',
+  introD: ' archivo m\u00e1s, ',
+  introE:
+    ', puede lanzar otro programa, y nada m\u00e1s en todo el c\u00f3digo tiene permiso de hacerlo. Son ',
+  files: ' archivos',
+  introF:
+    ' en total entre t\u00fa y cualquier motor, as\u00ed que leerlos todos toma una tarde y no un proyecto. Escribir en tu disco est\u00e1 igual de acotado, y ',
+  introH: ' hace fallar la compilaci\u00f3n el d\u00eda que cualquiera de los dos l\u00edmites deje de cumplirse.',
+  arranged:
+    'El diagrama de abajo muestra c\u00f3mo est\u00e1 acomodado. No necesitas nada de esto para usar la herramienta.',
+  layerWord: 'Capa ',
+  above: 'arriba: ',
+  below: 'abajo: ',
+  legend:
+    '\u25a3 marca un archivo que es el \u00fanico con permiso para hacer su trabajo. Cada regla de frontera la hace cumplir la prueba que aparece junto a ella, y el riel corre en un solo sentido: hacia abajo.',
+  evidenceSummary: 'Ver las pruebas que lo hacen cumplir',
+  evidenceCaption: 'Cada capa, su regla y la prueba que la hace cumplir.',
+  colLayer: 'Capa',
+  colPath: 'Ruta',
+  colRule: 'La regla',
+  colEnforced: 'La hace cumplir',
+});
 ---
 
 <section id="architecture" aria-labelledby="arch-h" class="u-crop border-t border-line bg-surface-850 py-24">
   <div class="mx-auto max-w-5xl px-6">
-    <p class="micro text-surface-400"><span class="text-primary-400">&sect;02</span> / Architecture</p>
+    <p class="micro text-surface-400"><span class="text-primary-400">&sect;02</span> / {t.eyebrow}</p>
     <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
-    <h2 id="arch-h" class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
-      A six-layer spine, one licence guarantee
+    <h2 id="arch-h" class="mt-6 max-w-3xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
+      {t.heading}
     </h2>
-    <p class="mt-4 max-w-2xl text-lg text-surface-300">
-      <strong class="text-surface-50">{counts.ports} ports</strong> state the boundary.
-      <strong class="text-surface-50">{counts.portBackingAdapters} adapter modules</strong> back them, and
-      <strong class="text-surface-50">{counts.spawnFiles}</strong> more file —
-      <code class="code-inline text-sm">adapters/subprocess_util.py</code> — is the only place in the tree
-      that may spawn a process. That is <strong class="text-surface-50">{counts.totalAdapterFiles} files</strong>.
-      The allowlist of code permitted to write outside the chokepoint is the <strong class="text-surface-50">empty</strong> set,
-      and <code class="code-inline text-sm">{spine.boundaryTest}</code> asserts that it is empty.
+    <p class="mt-4 max-w-3xl text-lg text-surface-300">
+      {t.introA}<strong class="text-surface-50">{counts.portBackingAdapters}{t.adapterModules}</strong>{t.introB}<strong
+        class="text-surface-50">{counts.spawnFiles}</strong>{t.introD}<code
+        class="code-inline code-path text-sm">adapters/subprocess_util.py</code>{t.introE}<strong
+        class="text-surface-50">{counts.totalAdapterFiles}{t.files}</strong>{t.introF}<code
+        class="code-inline code-path text-sm">{spine.boundaryTest}</code>{t.introH}
+    </p>
+    <p class="mt-4 max-w-3xl text-base text-surface-400">
+      {t.arranged}
     </p>
 
     <ol class="spine spine-rail mt-14 flex flex-col gap-6" aria-describedby="arch-legend">
       <li class="band" data-layer="1">
         <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
           <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l1.index}</span>
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">{t.layerWord}</span>{l1.index}</span>
             <code class="path font-mono text-xs text-surface-400">{l1.path}</code>
             <h3 class="name text-sm font-semibold text-surface-50">{l1.name}</h3>
           </div>
-          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l1.rule}</p>
-          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l1.desc}</p>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200"><Prose text={l1.rule} /></p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300"><Prose text={l1.desc} /></p>
         </div>
       </li>
 
       <li class="band" data-layer="2">
         <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
           <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l2.index}</span>
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">{t.layerWord}</span>{l2.index}</span>
             <code class="path font-mono text-xs text-surface-400">{l2.path}</code>
             <h3 class="name text-sm font-semibold text-surface-50">{l2.name}</h3>
           </div>
-          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l2.rule}</p>
-          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l2.desc}</p>
-          <p class="fork-note mt-2 text-xs italic text-surface-400">{l2.forkNote}</p>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200"><Prose text={l2.rule} /></p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300"><Prose text={l2.desc} /></p>
+          <p class="fork-note mt-2 text-xs italic text-surface-400"><Prose text={l2.forkNote} /></p>
         </div>
       </li>
 
       <li class="band chokepoint" data-layer="3">
         <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
           <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l3.index}</span>
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">{t.layerWord}</span>{l3.index}</span>
             <code class="path font-mono text-xs text-surface-400">{l3.path}</code>
             <h3 class="name text-sm font-semibold text-surface-50">{l3.name}</h3>
             <span class="seal ml-auto rounded-xs bg-primary-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary-400">▣ {l3.chip}</span>
           </div>
-          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l3.rule}</p>
-          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l3.desc}</p>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200"><Prose text={l3.rule} /></p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300"><Prose text={l3.desc} /></p>
         </div>
       </li>
 
       <li class="band" data-layer="4">
         <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
           <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l4.index}</span>
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">{t.layerWord}</span>{l4.index}</span>
             <code class="path font-mono text-xs text-surface-400">{l4.path}</code>
             <h3 class="name text-sm font-semibold text-surface-50">{l4.name}</h3>
             <span class="chip ml-auto rounded-xs bg-surface-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-surface-100">{l4.chip}</span>
           </div>
-          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l4.rule}</p>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200"><Prose text={l4.rule} /></p>
           <p class="desc mt-1 text-xs leading-snug text-surface-300">{(l4.portNames as string[]).join(' · ')}</p>
         </div>
       </li>
@@ -104,12 +176,12 @@ const [l1, l2, l3, l4, l5, l6] = layers;
       <li class="band chokepoint" data-layer="5">
         <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
           <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l5.index}</span>
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">{t.layerWord}</span>{l5.index}</span>
             <code class="path font-mono text-xs text-surface-400">{l5.path}</code>
             <h3 class="name text-sm font-semibold text-surface-50">{l5.name}</h3>
           </div>
-          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l5.rule}</p>
-          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l5.desc}</p>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200"><Prose text={l5.rule} /></p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300"><Prose text={l5.desc} /></p>
           <div class="mt-2 flex flex-wrap gap-2">
             <span class="seal rounded-xs bg-primary-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary-400">▣ {l5.chip}</span>
             <span class="seal nested rounded-xs bg-primary-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary-400">▣ {l5.spawnChip}</span>
@@ -120,7 +192,7 @@ const [l1, l2, l3, l4, l5, l6] = layers;
       <li class="boundary -mx-4 border-y border-line-strong bg-surface-900/60 px-4 py-3 sm:-mx-6 sm:px-6">
         <p class="boundary-label micro text-primary-400">{boundary.label}</p>
         <code class="boundary-test mt-1 block font-mono text-xs text-surface-200">{spine.boundaryTest}</code>
-        <p class="boundary-sides mt-1 text-xs text-surface-400">above: {boundary.above} &middot; below: {boundary.below}</p>
+        <p class="boundary-sides mt-1 text-xs text-surface-400">{t.above}{boundary.above} &middot; {t.below}{boundary.below}</p>
       </li>
 
       <li class="band external" data-layer="ext">
@@ -134,33 +206,31 @@ const [l1, l2, l3, l4, l5, l6] = layers;
       <li class="band return" data-layer="6">
         <div class="rounded-md border border-line-soft bg-surface-950 p-4 shadow-well">
           <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">Layer </span>{l6.index}</span>
+            <span class="idx font-mono text-xs font-semibold text-primary-400"><span class="visually-hidden">{t.layerWord}</span>{l6.index}</span>
             <code class="path font-mono text-xs text-surface-400">{l6.path}</code>
             <h3 class="name text-sm font-semibold text-surface-50">{l6.name}</h3>
           </div>
-          <p class="rule mt-1 text-xs font-semibold text-surface-200">{l6.rule}</p>
-          <p class="desc mt-1 text-xs leading-snug text-surface-300">{l6.desc}</p>
+          <p class="rule mt-1 text-xs font-semibold text-surface-200"><Prose text={l6.rule} /></p>
+          <p class="desc mt-1 text-xs leading-snug text-surface-300"><Prose text={l6.desc} /></p>
         </div>
       </li>
     </ol>
 
     <p id="arch-legend" class="legend mt-4 max-w-2xl text-xs leading-relaxed text-surface-400">
-      ▣ a chokepoint — the only file that may do this &middot;
-      the boundary rule below is enforced by the test named on it &middot;
-      the rail runs one way: down.
+      {t.legend}
     </p>
 
     <details class="mt-8">
-      <summary class="micro cursor-pointer text-surface-300">Show the enforcement evidence</summary>
+      <summary class="micro cursor-pointer text-surface-300">{t.evidenceSummary}</summary>
       <div class="card mt-4">
         <table class="evidence w-full border-collapse text-left text-sm">
-          <caption class="sr-only">Every layer, its rule, and the test that enforces it.</caption>
+          <caption class="sr-only">{t.evidenceCaption}</caption>
           <thead>
             <tr class="border-b border-line bg-surface-950">
-              <th scope="col"><span class="visually-hidden">Layer</span></th>
-              <th scope="col"><span class="visually-hidden">Path</span></th>
-              <th scope="col"><span class="visually-hidden">The rule</span></th>
-              <th scope="col"><span class="visually-hidden">Enforced by</span></th>
+              <th scope="col"><span class="visually-hidden">{t.colLayer}</span></th>
+              <th scope="col"><span class="visually-hidden">{t.colPath}</span></th>
+              <th scope="col"><span class="visually-hidden">{t.colRule}</span></th>
+              <th scope="col"><span class="visually-hidden">{t.colEnforced}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -168,7 +238,7 @@ const [l1, l2, l3, l4, l5, l6] = layers;
               <tr class="evidence-row border-b border-line-soft last:border-b-0">
                 <th scope="row" class="px-3 py-2 text-left align-top font-mono text-primary-400">{layer.index}</th>
                 <td class="px-3 py-2 align-top font-mono text-xs text-surface-300">{layer.path}</td>
-                <td class="px-3 py-2 align-top text-surface-200">{layer.rule}</td>
+                <td class="px-3 py-2 align-top text-surface-200"><Prose text={layer.rule} /></td>
                 <td class="px-3 py-2 align-top text-xs text-surface-300">
                   {layer.enforcedBy.map((fn: string, i: number) => (
                     <>
