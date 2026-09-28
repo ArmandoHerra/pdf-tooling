@@ -16,12 +16,65 @@
 // carried forward unchanged -- this item only rewrites the content column.
 import Terminal from './Terminal.astro';
 import { HERO_TRANSCRIPT_SESSION, HERO_CAPTION } from '../lib/hero-transcript';
+import { pick } from '../lib/i18n';
 
+const pypiUrl = 'https://pypi.org/project/pdf-tooling/';
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
 
-const install = `# Install (published on PyPI)
+// The transcript itself is never translated -- it is a CAPTURE, and the
+// bytes a real run printed are the same bytes in every language. Only the
+// caption and the scroll region's accessible name, which are this page's
+// words about the capture, fork.
+const t = pick(Astro.url, {
+  eyebrowLicence: 'nothing AGPL or GPL',
+  tagline: 'Every common PDF chore. One safe CLI. No copyleft underneath.',
+  intro:
+    'One command-line tool for merge, split, extract, rotate, PDF to images and back, text, tables, compress, encrypt, metadata, watermark, OCR and Office to PDF. It drives a set of permissively licensed engines behind one safe interface you can script.',
+  installLead: 'Install ',
+  installMid: '; the command is ',
+  installEnd: '.',
+  installComment: '# Install (published on PyPI)',
+  installOr: '# or: pip install pdf-tooling',
+  terminalLabel:
+    'A captured pdftooling merge --dry-run session, followed by the ls that shows nothing was written',
+  caption: HERO_CAPTION,
+  cta: 'View on GitHub \u2192',
+  pubA: 'Published on ',
+  pubB: ' as ',
+  pubC:
+    '. There is no Homebrew formula, no system package, no container image yet. Every command ',
+  pubD: ' prints is shipped. See ',
+  verbsLink: 'Commands',
+}, {
+  eyebrowLicence: 'sin nada AGPL ni GPL',
+  tagline: 'Todas las tareas comunes de PDF. Una sola CLI segura. Sin copyleft debajo.',
+  intro:
+    'Una sola herramienta de l\u00ednea de comandos para unir, dividir, extraer, rotar, de PDF a im\u00e1genes y de vuelta, texto, tablas, comprimir, cifrar, metadatos, marca de agua, OCR y de Office a PDF: orquesta un conjunto de motores con licencias permisivas detr\u00e1s de una sola interfaz segura y automatizable.',
+  installLead: 'Instala ',
+  installMid: '; el comando es ',
+  // Restated rather than inherited: the key-parity arm in
+  // `tests/test_website_i18n.py` compares the two tables key for key, and
+  // "a period is a period" is exactly the reasoning that lets a real
+  // missing sentence hide behind a default.
+  installEnd: '.',
+  installComment: '# Instalaci\u00f3n (publicado en PyPI)',
+  installOr: '# o bien: pip install pdf-tooling',
+  terminalLabel:
+    'Sesi\u00f3n capturada de pdftooling merge --dry-run, seguida del ls que muestra que no se escribi\u00f3 nada',
+  caption:
+    'Una corrida en seco planea la uni\u00f3n completa de tres archivos; despu\u00e9s ls es la comprobaci\u00f3n, y no se escribi\u00f3 nada.',
+  cta: 'Ver en GitHub \u2192',
+  pubA: 'Publicado en ',
+  pubB: ' como ',
+  pubC:
+    ': todav\u00eda no hay f\u00f3rmula de Homebrew, ni paquete del sistema, ni imagen de contenedor. Todo comando que imprime ',
+  pubD: ' ya viene incluido; consulta ',
+  verbsLink: 'Comandos',
+});
+
+const install = `${t.installComment}
 uv tool install pdf-tooling
-# or: pip install pdf-tooling`;
+${t.installOr}`;
 ---
 
 <section class="u-crop relative overflow-hidden">
@@ -62,35 +115,33 @@ uv tool install pdf-tooling
       <span aria-hidden="true">&middot;</span>
       <span>Apache-2.0</span>
       <span aria-hidden="true">&middot;</span>
-      <span>nothing AGPL or GPL</span>
+      <span>{t.eyebrowLicence}</span>
     </p>
 
     <h1 class="mt-3 font-mono text-4xl font-semibold tracking-tight text-surface-50 sm:mt-5 sm:text-5xl lg:text-6xl">
       pdf<span class="text-primary-400">-</span>tooling
     </h1>
     <p class="mt-2 max-w-xl text-base font-medium leading-snug text-surface-100 sm:mt-4 sm:text-xl lg:text-2xl">
-      Every common PDF chore. One safe CLI. No copyleft underneath.
+      {t.tagline}
     </p>
     <p class="mt-6 hidden max-w-2xl text-base leading-relaxed text-surface-300 sm:block">
-      One command-line tool for merge, split, extract, rotate, PDF&harr;images, text, tables,
-      compress, encrypt, metadata, watermark, OCR and Office&rarr;PDF &mdash; orchestrating a
-      permissively licensed engine stack behind one safe, scriptable interface.
+      {t.intro}
     </p>
 
     <p class="mt-4 max-w-xl text-sm leading-relaxed text-surface-300 sm:mt-8 sm:text-base">
-      Install <code class="code-inline-tight text-sm">pdf-tooling</code>;
-      the command is <code class="code-inline-tight text-sm">pdftooling</code>.
+      {t.installLead}<code class="code-inline-tight text-sm">pdf-tooling</code>{t.installMid}<code
+        class="code-inline-tight text-sm">pdftooling</code>{t.installEnd}
     </p>
     <div tabindex="0" class="u-selectall mt-2 overflow-x-auto rounded-md border border-line-soft bg-surface-950 p-3 font-mono text-xs leading-relaxed text-surface-100 shadow-well sm:p-4"><pre><code>{install}</code></pre></div>
 
     <div class="mt-4 sm:mt-8">
       <Terminal
         id="quickstart"
-        label="A captured pdftooling merge --dry-run session, followed by the ls that shows nothing was written"
+        label={t.terminalLabel}
         session={HERO_TRANSCRIPT_SESSION}
       />
       <p class="mt-3 max-w-xl text-sm leading-relaxed text-surface-400">
-        {HERO_CAPTION}
+        {t.caption}
       </p>
     </div>
 
@@ -99,15 +150,15 @@ uv tool install pdf-tooling
         href={githubUrl}
         class="w-full rounded-md border border-line-strong px-7 py-3.5 text-center text-base font-semibold text-surface-50 transition hover:border-line-ink hover:text-primary-400 sm:w-auto"
       >
-        View on GitHub &rarr;
+        {t.cta}
       </a>
     </div>
 
     <p class="mt-8 max-w-2xl text-sm text-surface-300">
-      Published on PyPI as <code class="code-inline text-xs">pdf-tooling</code> &mdash;
-      no Homebrew formula, no system package, no container image yet. Every verb
-      <code class="code-inline text-xs">pdftooling --help</code> prints is shipped &mdash;
-      see <a href="#verbs" class="text-primary-400 underline hover:text-primary-300">Verbs</a>.
+      {t.pubA}<a href={pypiUrl} class="text-primary-400 underline hover:text-primary-300"
+        >PyPI</a>{t.pubB}<code class="code-inline text-xs">pdf-tooling</code>{t.pubC}<code
+        class="code-inline text-xs">pdftooling --help</code>{t.pubD}<a
+        href="#verbs" class="text-primary-400 underline hover:text-primary-300">{t.verbsLink}</a>{t.installEnd}
     </p>
   </div>
 </section>

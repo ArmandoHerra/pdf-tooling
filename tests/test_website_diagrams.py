@@ -612,7 +612,22 @@ def test_ac7_the_census_balances_eight_plus_one_equals_nine() -> None:
     assert spine["counts"]["portBackingAdapters"] + spine["counts"]["spawnFiles"] == 9
 
     arch_src = ARCHITECTURE_ASTRO.read_text(encoding="utf-8")
-    assert "counts.totalAdapterFiles} files" in arch_src, "the balance must be STATED, from data"
+    # Bilingual re-target. The needle used to be the single literal
+    # `counts.totalAdapterFiles} files`: the count expression and its noun
+    # adjacent in the markup. The noun now comes from the component's own
+    # locale copy table (`t.files`), because the sentence around it has a
+    # Spanish edition and "files" is not the word on that page. What this
+    # arm protects is UNCHANGED and still asserted here in full -- the
+    # total is STATED, the number comes from `counts`, and the noun is
+    # adjacent to it, so neither half can quietly become a typed literal.
+    # The English wording is pinned too, so "9 files" is still what the
+    # English page renders rather than whatever a copy table drifts to.
+    assert "{counts.totalAdapterFiles}{t.files}" in arch_src, (
+        "the balance must be STATED, from data, with its noun adjacent to the count"
+    )
+    assert "files: ' files'," in arch_src, (
+        "the English noun for the adapter-file total is no longer ' files'"
+    )
 
 
 def test_ac7_a_tenth_adapter_that_spawns_makes_the_published_total_disagree_with_a_fresh_walk(
@@ -768,7 +783,12 @@ def test_ac8_a_literal_replacing_a_count_expression_reddens_the_grep() -> None:
     reds naming the digit, which is exactly the failure this criterion
     exists to catch separately from AC5's own count arm."""
     original = ARCHITECTURE_ASTRO.read_text(encoding="utf-8")
-    needle = "{counts.portBackingAdapters} adapter modules"
+    # Re-derived for the same reason as the balance arm above: the noun
+    # moved into the component's locale copy table, so the plant target is
+    # the count expression plus its adjacent noun SLOT. The mutation is
+    # unchanged -- both are replaced by a typed `8 adapter modules` -- and
+    # so is what it proves: the prose-only scan sees the digit.
+    needle = "{counts.portBackingAdapters}{t.adapterModules}"
     assert needle in original, (
         "the expression this control targets is no longer present -- re-derive the plant"
     )
@@ -894,7 +914,7 @@ def test_ac16_deleting_the_same_filesystem_clause_reddens_the_positive_half() ->
     the diagram would assert atomicity with nothing behind it."""
     contracts = _load_contracts()
     detail = contracts["atomicWrite"]["stations"][2]["detail"]
-    mutated = detail.replace(", on the same filesystem — which is what makes the rename atomic", "")
+    mutated = detail.replace(", on the same filesystem, which is what makes the rename atomic", "")
     assert mutated != detail
     assert "same filesystem" not in mutated
 

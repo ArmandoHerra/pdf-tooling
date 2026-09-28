@@ -1,7 +1,8 @@
 ---
 import PdfToolingLogo from '../assets/pdf-tooling-logo.svg?url';
 import { base, withBase } from '../lib/site';
-import { SECTIONS } from '../lib/sections';
+import { SECTIONS, type SectionLink } from '../lib/sections';
+import { langOf, langPath, alternatePath, pick } from '../lib/i18n';
 
 interface Props {
   /** PDF-94 D4. Default = today's behaviour (relative in-page anchors),
@@ -13,22 +14,58 @@ interface Props {
 }
 
 const { home = true } = Astro.props;
-const sectionHref = (id: string) => (home ? `#${id}` : `${base}#${id}`);
+const lang = langOf(Astro.url);
+
+// Off-page section links must land on the CURRENT locale's home, not on
+// English's. `${base}#verbs` from the Spanish annex used to be the only
+// route on this page that silently changed language under the reader.
+const localeHome = lang === 'es' ? `${base}es/` : base;
+const sectionHref = (id: string) => (home ? `#${id}` : `${localeHome}#${id}`);
+const sectionLabel = (s: SectionLink) => (lang === 'es' ? s.es.label : s.label);
+const sectionShort = (s: SectionLink) => (lang === 'es' ? s.es.short : s.short);
 
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
 // PDF-94 D4: the annex route did not exist before this item, so this is the
 // only item that can add it to the link set.
-const inventoryUrl = withBase('licensing/');
+const inventoryUrl = withBase(langPath(Astro.url, 'licensing/'));
+
+// The language switch. It is a LINK to this page's counterpart, not a
+// picker: there is no JavaScript on this site, so there is nothing to
+// remember a preference with and nothing that could get the two out of
+// sync. `alternatePath` is the same function `Layout.astro` builds its
+// `hreflang` pair from, so the switch and the machine-readable alternate
+// can never disagree.
+const switchHref = alternatePath(Astro.url, base);
+const t = pick(Astro.url, {
+  skip: 'Skip to content',
+  allPackages: 'All packages',
+  switchLabel: 'Ver esta página en español',
+  switchText: 'ES',
+}, {
+  skip: 'Saltar al contenido',
+  allPackages: 'Paquetes',
+  switchLabel: 'View this page in English',
+  switchText: 'EN',
+});
 ---
 
 <header class="sticky top-0 z-50 border-b border-line bg-surface-900/72 backdrop-blur-md backdrop-saturate-150">
   <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary-500 focus:px-4 focus:py-2 focus:font-semibold focus:text-surface-950">
-    Skip to content
+    {t.skip}
   </a>
   <!-- The bottom hairline carries a 36px `line-mark` segment under the
        wordmark -- the navbar's one drafting accent. -->
   <div class="pointer-events-none absolute bottom-[-1px] left-6 h-[2px] w-9 bg-line-mark" aria-hidden="true"></div>
-  <nav aria-label="primary" class="mx-auto flex max-w-6xl items-center justify-between gap-x-6 px-6 py-4">
+  <!-- Narrow-width budget, measured at 320px (inner content box 272px):
+       the wordmark is 158px and the right-hand cluster was 163px with a
+       24px gap between them -- 345px, a 73px document-level horizontal
+       scroll, which ruling R4 forbids at ANY width. The language switch
+       is what spent that budget (the row had 18px of slack before it),
+       so the switch pays for itself here rather than the page paying: the
+       gap, both control paddings and the GitHub wordmark all tighten
+       below `sm` and are restored at `sm` and up, where there is room.
+       Re-measured after the change, not reasoned about. -->
+  <nav aria-label="primary" class="mx-auto flex max-w-6xl items-center justify-between gap-x-3 px-6 py-4 sm:gap-x-6">
     <a href={base} class="flex shrink-0 items-center gap-3">
       <img src={PdfToolingLogo} alt="" width="32" height="32" />
       <span class="font-mono text-lg font-semibold tracking-tight text-surface-50">pdf<span class="text-primary-400">-</span>tooling</span>
@@ -48,22 +85,47 @@ const inventoryUrl = withBase('licensing/');
          and AC15's own reflow measurement (320/375/768/1280, this item's
          report) is what actually re-verifies "no document-level horizontal
          scroll" for the real, current entry count. -->
-    <div class="hidden min-w-0 flex-1 flex-wrap items-center justify-end gap-x-5 gap-y-2 text-sm font-medium text-surface-300 sm:flex">
+    <!-- `gap-x-[1.125rem]` rather than `gap-x-5`: with the three shortened
+         Spanish labels the row still needed 738px against 735px, and
+         trimming 2px from each of the eight gaps buys 16px -- enough for
+         both locales to stay on one line at 1,152px and up, with more
+         slack for English than it had before. Two pixels of letter
+         spacing is below the threshold anyone sees; a wrapped row is not. -->
+    <div class="hidden min-w-0 flex-1 flex-wrap items-center justify-end gap-x-[1.125rem] gap-y-2 text-sm font-medium text-surface-300 sm:flex">
       {SECTIONS.map((section) => (
-        <a href={sectionHref(section.id)} class="hover:text-primary-400">{section.label}</a>
+        <a href={sectionHref(section.id)} class="hover:text-primary-400">{sectionLabel(section)}</a>
       ))}
-      <a href={inventoryUrl} class="hover:text-primary-400">All packages</a>
+      <a href={inventoryUrl} class="hover:text-primary-400">{t.allPackages}</a>
     </div>
 
+    <div class="flex shrink-0 items-center gap-2 sm:gap-3">
+    <!-- `hreflang` + `lang` on the switch itself: the link TEXT is in the
+         language being switched TO, so without them a screen reader
+         announces "ES" in an English voice on the English page. -->
+    <a
+      href={switchHref}
+      hreflang={lang === 'es' ? 'en' : 'es'}
+      lang={lang === 'es' ? 'en' : 'es'}
+      aria-label={t.switchLabel}
+      class="flex min-h-11 shrink-0 items-center rounded-md border border-line-strong px-2.5 font-mono text-sm font-semibold text-surface-300 transition hover:border-line-ink hover:text-primary-400 sm:px-3"
+    >
+      {t.switchText}
+    </a>
+
+    <!-- Below `sm` the wordmark beside the mark is dropped, not the
+         control: the accessible name comes from `aria-label` at every
+         width, so the icon-only rendering is still announced "GitHub". -->
     <a
       href={githubUrl}
-      class="flex shrink-0 items-center gap-2 rounded-md border border-line-strong px-4 py-2 text-sm font-semibold text-surface-50 transition hover:border-line-ink hover:text-primary-400"
+      aria-label="GitHub"
+      class="flex min-h-11 shrink-0 items-center gap-2 rounded-md border border-line-strong px-3 text-sm font-semibold text-surface-50 transition hover:border-line-ink hover:text-primary-400 sm:px-4"
     >
       <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
       </svg>
-      GitHub
+      <span class="hidden sm:inline">GitHub</span>
     </a>
+    </div>
   </nav>
 
   <!-- PDF-92 D1/D3: the always-visible mobile anchor rail. An always-visible
@@ -80,7 +142,7 @@ const inventoryUrl = withBase('licensing/');
             href={sectionHref(section.id)}
             class="flex min-h-11 items-center rounded-md px-3 text-sm font-medium text-surface-300 hover:text-primary-400"
           >
-            {section.short}
+            {sectionShort(section)}
           </a>
         </li>
       ))}
@@ -89,7 +151,7 @@ const inventoryUrl = withBase('licensing/');
           href={inventoryUrl}
           class="flex min-h-11 items-center rounded-md px-3 text-sm font-medium text-surface-300 hover:text-primary-400"
         >
-          All packages
+          {t.allPackages}
         </a>
       </li>
     </ul>

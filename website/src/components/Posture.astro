@@ -1,69 +1,123 @@
 ---
-// PDF-97 D7. NEW. The production-posture section: the page's answer to "is
-// this ready, and where are the bugs" -- a question the site had no
-// section for before this item. Its section id is `status`, the last id
-// the published anchor set (`sections.ts`/`Navbar.astro`) reserves.
+// PDF-97 D7, rewritten. The production-posture section: the page's answer
+// to "can I depend on this". Its section id is `status`, the last id the
+// published anchor set (`sections.ts`/`Navbar.astro`) reserves.
 // (Deliberately not spelled as a literal `id=` example in this comment:
 // `tests/test_website_contract.py`'s AR2/AR4 scan `website/src` for
 // exactly that attribute shape, and a worked example here would double-
 // count as one of its own targets -- the same reason `sections.ts` and
 // `LicenseSummary.astro` give for the identical omission.)
 //
-// Three claims, each carrying a verbatim source anchor into `README.md`,
-// checked by `tests/test_website_contract.py`'s `SOURCE_ANCHORS` table
-// (D8): the output/exit-code contract is public API frozen at v1.0.0
-// (P1); open defects live in the maintainer's planning tree and that tree
-// is not part of this distribution (P2); Phase 1 (v1) is complete (P3).
+// WHAT CHANGED AND WHY. The first version of this section answered a
+// MAINTAINER's question. Two of its three cards pointed a reader at
+// `BACKLOG.md` and `qa/FINDINGS-LEDGER.md` -- artifacts the same cards
+// then admitted are not in the distribution -- and the third announced
+// "Phase 1 (v1) complete", a term that means nothing outside the project.
+// A signpost to a locked door is worse than silence: it spends the
+// reader's attention advertising that they cannot look. Meanwhile the
+// repository has an issue tracker nobody was told about and attested
+// provenance on PyPI that nothing on the site mentioned.
 //
-// Four things this section deliberately never names (D7, AC9): a sweep id,
-// a commit sha, an open-finding tally, and a version number outside the
-// one sanctioned, frozen phrase "public API from v1.0.0" -- which is a
-// historical fact that never rots, not a claim about the current release.
-// This section states WHERE defects are recorded and WHAT is frozen, never
-// HOW MANY are open right now and never WHICH build. `README.md`'s own
-// `## Known issues` section is the live pointer with a real count; this
-// page is not a second copy of it and does not try to stay in sync with a
-// number that is wrong the day after it is written.
+// Three claims now, each ACTIONABLE and each verifiable in one click,
+// with a verbatim source anchor into `README.md` checked by
+// `tests/test_website_contract.py`'s `SOURCE_ANCHORS` table (D8): the
+// output/exit-code contract is public API frozen at v1.0.0 (P1);
+// publication is CI-only over OIDC with attested provenance (P2); a bug
+// goes to the issue tracker and every fix lands in the changelog (P3).
 //
-// Boundary with `ClosingCta.astro` (D7): the DCO line, the install command
-// and the three ranked destinations are that component's, and this one
-// does not restate them.
+// Four things this section still deliberately never names (D7, AC9): a
+// sweep id, a commit sha, an open-finding tally, and a version number
+// outside the one sanctioned, frozen phrase "public API from v1.0.0" --
+// a historical fact that never rots, not a claim about the current
+// release. `README.md`'s own `## Known issues` section remains the place
+// where the maintainer's planning tree is disclosed to anyone reading
+// this source tree beside it; this page does not restate it, because a
+// website visitor cannot open it.
+//
+// Boundary with `ClosingCta.astro` (D7): the DCO line, the install
+// command and the three ranked destinations are that component's, and
+// this one does not restate them.
+import { pick } from '../lib/i18n';
+
+const issuesUrl = 'https://github.com/ArmandoHerra/pdf-tooling/issues';
+const changelogUrl = 'https://github.com/ArmandoHerra/pdf-tooling/blob/main/changelog.md';
+const releasesUrl = 'https://github.com/ArmandoHerra/pdf-tooling/releases';
+
+const t = pick(Astro.url, {
+  eyebrow: 'Production posture',
+  heading: 'What you can depend on',
+  lede: 'Three promises, and how to check each one.',
+  contractTitle: 'Frozen contract',
+  contractA:
+    'The structured output shapes and the exit-code table are public API from v1.0.0. Breaking either takes a new major version and a ',
+  contractB:
+    ' change, so a script you write today keeps working across every minor and patch release.',
+  deliveryTitle: 'How it reaches you',
+  releasesLink: 'Releases',
+  deliveryA:
+    " are built and published by CI from a tag, over OIDC. That means the workflow holds no upload token at all, so nothing can be published from a developer's machine. Both files PyPI serves carry signed provenance, so you can check that what you installed was built from this repository.",
+  troubleTitle: "When something's wrong",
+  issueLink: 'Open an issue',
+  troubleA:
+    '. The command, the flags, the input and what you expected is enough to act on. Every fix that ships is in the ',
+  changelogLink: 'changelog',
+  troubleB: ', written by the commit that made it.',
+}, {
+  eyebrow: 'Postura de producci\u00f3n',
+  heading: 'Con qu\u00e9 puedes contar',
+  lede: 'Tres promesas, y c\u00f3mo comprobar cada una.',
+  contractTitle: 'Contrato congelado',
+  contractA:
+    'Las formas de salida estructurada y la tabla de c\u00f3digos de salida son API p\u00fablica desde la v1.0.0. Romper cualquiera de las dos exige un cambio de versi\u00f3n mayor y un incremento de ',
+  contractB:
+    ', as\u00ed que un script que escribas hoy sigue funcionando en todas las versiones menores y de parche.',
+  deliveryTitle: 'C\u00f3mo te llega',
+  releasesLink: 'Las versiones',
+  deliveryA:
+    ' las construye y publica CI a partir de una etiqueta, sobre OIDC: el flujo de trabajo no guarda ning\u00fan token de subida, as\u00ed que nada se puede publicar desde la m\u00e1quina de alguien. El wheel y el sdist llevan procedencia atestiguada en PyPI, as\u00ed que puedes verificar que el artefacto que instalaste se construy\u00f3 desde este repositorio.',
+  troubleTitle: 'Cuando algo sale mal',
+  issueLink: 'Abre un issue',
+  troubleA:
+    ': con el comando, las banderas, la entrada y lo que esperabas es suficiente para actuar. Toda correcci\u00f3n que se publica queda en el ',
+  changelogLink: 'changelog',
+  troubleB: ', escrita por el commit que la hizo.',
+});
 ---
 
 <section id="status" class="u-crop mx-auto max-w-6xl px-6 py-24">
-  <p class="micro text-surface-400">Production posture</p>
+  <p class="micro text-surface-400">{t.eyebrow}</p>
   <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
   <h2 class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
-    Is this ready, and where the defects are recorded
+    {t.heading}
   </h2>
   <p class="mt-4 max-w-2xl text-lg text-surface-300">
-    Three facts about the project, not a live count.
+    {t.lede}
   </p>
 
   <dl class="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
     <div class="card p-4">
-      <dt class="micro text-primary-400">Public API</dt>
+      <dt class="micro text-primary-400">{t.contractTitle}</dt>
       <dd class="mt-2 text-sm leading-snug text-surface-200">
-        The structured output shapes and the exit-code table are public API from v1.0.0.
-        Breaking either requires a major version bump and a
-        <code class="code-inline text-xs">schema_version</code> increment.
+        {t.contractA}<code class="code-inline text-xs">schema_version</code>{t.contractB}
       </dd>
     </div>
     <div class="card p-4">
-      <dt class="micro text-primary-400">Open defects</dt>
+      <dt class="micro text-primary-400">{t.deliveryTitle}</dt>
       <dd class="mt-2 text-sm leading-snug text-surface-200">
-        Open defects and planned work are recorded, per finding, in the maintainer's planning
-        tree -- <code class="code-inline text-xs">BACKLOG.md</code> and
-        <code class="code-inline text-xs">qa/FINDINGS-LEDGER.md</code>. Those artifacts are not
-        part of this distribution: they are not shipped in the sdist or the wheel and are not
-        present in a clone.
+        <a href={releasesUrl} class="text-primary-400 underline hover:text-primary-300"
+          >{t.releasesLink}</a
+        >{t.deliveryA}
       </dd>
     </div>
     <div class="card p-4">
-      <dt class="micro text-primary-400">Phase</dt>
+      <dt class="micro text-primary-400">{t.troubleTitle}</dt>
       <dd class="mt-2 text-sm leading-snug text-surface-200">
-        Phase 1 (v1) complete. Per-spec status and the rest of the planned work live in that
-        same tree.
+        <a href={issuesUrl} class="text-primary-400 underline hover:text-primary-300"
+          >{t.issueLink}</a
+        >{t.troubleA}<a
+          href={changelogUrl}
+          class="text-primary-400 underline hover:text-primary-300">{t.changelogLink}</a
+        >{t.troubleB}
       </dd>
     </div>
   </dl>

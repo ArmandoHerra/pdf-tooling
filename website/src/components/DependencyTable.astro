@@ -40,6 +40,38 @@ const HTML_EXTRA = new Set([
 // it stays anyway: `licenses.json` is machine-generated and may legitimately
 // gain a row, and an empty Tier cell on a new package is precisely the
 // failure the Role column is being fixed for.
+const esLang = langOf(Astro.url) === 'es';
+const tierLabel = (label: string) => (esLang ? (TIERS_ES[label] ?? label) : label);
+const roleText = (name: string, role: string) => (esLang ? roleEs(name, role) : role);
+
+const t = pick(Astro.url, {
+  caption: 'Full third-party dependency inventory: package, version, license, tier and role, for all ',
+  captionEnd: ' packages.',
+  colPackage: 'Package',
+  colVersion: 'Version',
+  colLicense: 'License',
+  colTier: 'Tier',
+  colRole: 'Role',
+  legendTier: 'Tier',
+  legendTierRest: ' is which install pulls a package in. ',
+  legendRole: 'Role',
+  legendRoleRest:
+    ' answers "why is this package here": a direct dependency names what it does for pdf-tooling; a transitive one names what pulls it in.',
+}, {
+  caption: 'Inventario completo de dependencias de terceros: paquete, versi\u00f3n, licencia, nivel y funci\u00f3n, para los ',
+  captionEnd: ' paquetes.',
+  colPackage: 'Paquete',
+  colVersion: 'Versi\u00f3n',
+  colLicense: 'Licencia',
+  colTier: 'Nivel',
+  colRole: 'Funci\u00f3n',
+  legendTier: 'Nivel',
+  legendTierRest: ' es qu\u00e9 instalaci\u00f3n trae al paquete. ',
+  legendRole: 'Funci\u00f3n',
+  legendRoleRest:
+    ' responde "por qu\u00e9 est\u00e1 aqu\u00ed este paquete": una dependencia directa dice qu\u00e9 hace por pdf-tooling; una transitiva dice qu\u00e9 la trae.',
+});
+
 function tierBadge(name: string): { label: string; classes: string } {
   const n = normalize(name);
   if (DEFAULT_CLOSURE.has(n)) return { label: 'default install', classes: 'bg-surface-950 text-surface-300' };
@@ -56,11 +88,14 @@ function tierBadge(name: string): { label: string; classes: string } {
 // build time -- that would add a Python lockfile as a build input to an
 // Astro site for no reader benefit (D3); the staleness exposure is the same
 // one the eleven direct entries already carried before this item.
+import { langOf, pick } from '../lib/i18n';
+import { TIERS_ES, roleEs } from '../lib/copy-es';
+
 const ROLES: Record<string, string> = {
   // -- direct (11) --
   pypdf: 'merge, split, reorder, rotate, metadata, bookmarks, watermark overlay, encrypt/decrypt',
-  pypdfium2: 'PDF → images, page rendering, fast plain-text extraction',
-  reportlab: 'create PDFs from scratch, images → PDF (lossless DCTDecode embed)',
+  pypdfium2: 'PDF to images, page rendering, fast plain-text extraction',
+  reportlab: 'create PDFs from scratch, images to PDF (lossless DCTDecode embed)',
   pikepdf: 'repair, linearize, object-stream compression, robust encryption',
   // X-949 applied verbatim: the parenthetical comparing this renderer
   // against a non-dependency command-line PDF tool is dropped. A prose
@@ -75,7 +110,7 @@ const ROLES: Record<string, string> = {
   'pdfminer-six': 'layout analysis engine behind pdfplumber',
   pytesseract: 'OCR driver for the tesseract binary',
   pillow: 'image plumbing, downsampling for compression',
-  weasyprint: 'optional HTML/Markdown → PDF ([html] extra, Phase 2)',
+  weasyprint: 'optional HTML/Markdown to PDF ([html] extra, Phase 2)',
   typer: 'CLI surface',
   cryptography: 'AES-256 encryption backing pypdf[crypto]',
   // -- transitive (20), derived from uv.lock (PDF-94 E8) --
@@ -108,15 +143,15 @@ const ROLES: Record<string, string> = {
 <div tabindex="0" class="card mt-10 hidden overflow-x-auto sm:block">
   <table class="w-full border-collapse text-left text-sm">
     <caption class="sr-only">
-      Full third-party dependency inventory: package, version, license, tier and role, for all {rows.length} packages.
+      {t.caption}{rows.length}{t.captionEnd}
     </caption>
     <thead>
       <tr class="micro border-b border-line bg-surface-850 text-surface-400">
-        <th class="px-4 py-3 font-semibold">Package</th>
-        <th class="px-4 py-3 font-semibold">Version</th>
-        <th class="px-4 py-3 font-semibold">License</th>
-        <th class="px-4 py-3 font-semibold">Tier</th>
-        <th class="px-4 py-3 font-semibold">Role</th>
+        <th class="px-4 py-3 font-semibold">{t.colPackage}</th>
+        <th class="px-4 py-3 font-semibold">{t.colVersion}</th>
+        <th class="px-4 py-3 font-semibold">{t.colLicense}</th>
+        <th class="px-4 py-3 font-semibold">{t.colTier}</th>
+        <th class="px-4 py-3 font-semibold">{t.colRole}</th>
       </tr>
     </thead>
     <tbody>
@@ -130,10 +165,10 @@ const ROLES: Record<string, string> = {
             <td class="px-4 py-3 text-surface-200">{r.License}</td>
             <td class="px-4 py-3">
               <span class={`micro rounded-xs px-2 py-1 ${badge.classes}`}>
-                {badge.label}
+                {tierLabel(badge.label)}
               </span>
             </td>
-            <td class="px-4 py-3 text-surface-200">{role}</td>
+            <td class="px-4 py-3 text-surface-200">{roleText(normalize(r.Name), role)}</td>
           </tr>
         );
       })}
@@ -155,20 +190,20 @@ const ROLES: Record<string, string> = {
       <div class="card p-4 text-sm">
         <p class="font-semibold text-surface-50">{r.Name}</p>
         <p class="mt-2 text-surface-200">
-          <span class="text-surface-400">Version </span>
+          <span class="text-surface-400">{t.colVersion} </span>
           <span class="u-num font-mono text-xs text-primary-400">{r.Version}</span>
         </p>
         <p class="mt-1 text-surface-200">
-          <span class="text-surface-400">License </span>{r.License}
+          <span class="text-surface-400">{t.colLicense} </span>{r.License}
         </p>
         <p class="mt-1">
-          <span class="text-surface-400">Tier </span>
+          <span class="text-surface-400">{t.colTier} </span>
           <span class={`micro rounded-xs px-2 py-1 ${badge.classes}`}>
-            {badge.label}
+            {tierLabel(badge.label)}
           </span>
         </p>
         <p class="mt-1 text-surface-200">
-          <span class="text-surface-400">Role </span>{role}
+          <span class="text-surface-400">{t.colRole} </span>{roleText(normalize(r.Name), role)}
         </p>
       </div>
     );
@@ -176,7 +211,5 @@ const ROLES: Record<string, string> = {
 </div>
 
 <p class="mt-6 max-w-3xl text-sm leading-relaxed text-surface-300">
-  <strong>Tier</strong> is which install pulls a package in. <strong>Role</strong> answers
-  "why is this package here": a direct dependency names what it does for pdf-tooling; a
-  transitive one names what pulls it in.
+  <strong>{t.legendTier}</strong>{t.legendTierRest}<strong>{t.legendRole}</strong>{t.legendRoleRest}
 </p>

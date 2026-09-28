@@ -428,7 +428,7 @@ docs-gate: ## Re-run the documented figures and compare them (PDF-30). NOT a pre
 
 website: ## Build the project website and run its contract arms (PDF-91). NOT a prereq of `ci`: `make ci` is uv-only by design and a Node toolchain must not become a prerequisite of the Python gate
 	cd website && npm ci && npm run check && npm run build
-	PDF_TOOLING_WEBSITE_BUILT=1 $(UV_RUN) pytest tests/test_website_contract.py -rs -q
+	PDF_TOOLING_WEBSITE_BUILT=1 $(UV_RUN) pytest tests/test_website_contract.py tests/test_website_i18n.py -rs -q
 
 ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate; ends by printing what CI additionally gates
 	@uv run python scripts/gate_parity.py epilogue

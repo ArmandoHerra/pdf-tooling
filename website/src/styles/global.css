@@ -339,6 +339,45 @@ code {
   padding-inline: 0.375rem;
   padding-block: 0.125rem;
   font-family: var(--font-mono);
+  /* An inline command is one token. Without this the footer's
+     `git commit -s` broke after the hyphen at 375, 640, 1280 and 1440 --
+     rendering `git commit -` on one line and `s` with the closing
+     parenthesis on the next, which reads as a different command.
+
+     That measurement sampled 375 and up and its conclusion ("the widest
+     spans are single-token file paths that already do not break, so
+     nothing that fits today starts overflowing") was wrong at 320, the
+     one width it did not sample: `src/pdf_tooling/safety/atomic.py`
+     renders 284px wide in a 272px column and, unable to break, pushed
+     the whole DOCUMENT 3px sideways -- which ruling R4 forbids at any
+     width. The rule that actually holds is narrower than the one that
+     was written, so it is now written narrowly: never break at a chip's
+     own SPACES, because that is what turns one command into two; a chip
+     with no spaces at all has no such hazard and may break inside its
+     single token, which is what `.code-path` below is for. */
+  white-space: nowrap;
+}
+
+/* For a chip whose content is one unbroken token too long for a narrow
+   column -- in practice a filesystem path. A path that wraps after a
+   separator still reads as the same path, so the trade `.code-inline`
+   refuses is one this variant can make. Apply it to path chips only:
+   on anything containing a space it re-opens the exact defect above.
+   Measured: the two chips that needed it are the only `.code-inline`
+   spans on either locale's pages wider than their column at 320px. */
+/* Keeps one token off a line break. Used by `Prose.astro` around
+   command-line flags: a browser breaks after a hyphen by default, which
+   split `--in-place` into `--` and `in-place` in 34 measured places across
+   both locales. Scoped to an inline span so the sentence around it still
+   wraps normally -- `nowrap` on the paragraph would stop it wrapping at
+   all, which is a worse defect than the one being fixed. */
+.nowrap {
+  white-space: nowrap;
+}
+
+.code-path {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* Mono micro label: eyebrows, section numbers, chrome-bar meta, table

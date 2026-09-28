@@ -8,9 +8,16 @@
 // Three ranked destinations: the install command itself (primary -- it is
 // copyable TEXT, not a link; the action is *type this*), the licence
 // inventory (secondary, `/licensing/`, the route `PDF-94` created), source
-// on GitHub (tertiary, an already-closed host). PyPI is NAMED and never
-// LINKED (E9's dossier contradiction, ruled in `§F`'s favour: linking
-// `pypi.org` opens a third host and reds AC12/AC13).
+// on GitHub (tertiary, an already-closed host), and PyPI (the install
+// channel itself).
+//
+// PyPI WAS named and never linked, because `pypi.org` was outside AC12's
+// two-host closure. That has been re-ruled: AC12 exists to keep the page
+// from FETCHING anything third-party, and a destination a reader clicks is
+// not a request the page makes -- `github.com` sat in the closure on
+// exactly that footing from the start. `pypi.org` now joins it. The
+// property that actually matters is unchanged and still measured: zero
+// external requests, at every viewport, on both routes.
 //
 // The `.on-paper` class (global.css, `PDF-93`) overrides the focus ring to
 // `primary-600` on this band -- `primary-400` measures 2.45:1 here and
@@ -24,19 +31,44 @@
 // between that sentence and AC20's own file list, which names this
 // component explicitly.
 import { withBase } from '../lib/site';
+import { langPath, pick } from '../lib/i18n';
 
+const pypiUrl = 'https://pypi.org/project/pdf-tooling/';
 const githubUrl = 'https://github.com/ArmandoHerra/pdf-tooling';
-const inventoryUrl = withBase('licensing/');
+const inventoryUrl = withBase(langPath(Astro.url, 'licensing/'));
+
+// The install command itself is NOT in the copy table: it is the one piece
+// of text on this band a reader is meant to copy verbatim into a shell,
+// and it is the same three words in every language.
+const t = pick(Astro.url, {
+  eyebrow: 'Get it',
+  heading: 'One command, and nothing hidden underneath it',
+  lede: 'The same install this page opened with. Copy it, run it, and see the rest for yourself.',
+  inventory: 'All packages, with licenses \u2192',
+  source: 'Source on GitHub \u2192',
+  pypi: 'Also on PyPI \u2192',
+  fineprint:
+    'Apache-2.0. The structured output shapes and the exit-code table are public API. Bugs and fixes live in GitHub issues and the changelog. Contributions are welcome, under the DCO.',
+}, {
+  eyebrow: 'Inst\u00e1lala',
+  heading: 'Un solo comando, y nada escondido debajo',
+  lede: 'La misma instalaci\u00f3n con la que abri\u00f3 esta p\u00e1gina: c\u00f3piala, c\u00f3rrela y comprueba lo dem\u00e1s por tu cuenta.',
+  inventory: 'Todos los paquetes, con sus licencias \u2192',
+  source: 'C\u00f3digo fuente en GitHub \u2192',
+  pypi: 'Tambi\u00e9n en PyPI \u2192',
+  fineprint:
+    'Apache-2.0. Las formas de salida estructurada y la tabla de c\u00f3digos de salida son API p\u00fablica. Los errores y sus correcciones viven en los issues de GitHub y en el changelog. Las contribuciones son bienvenidas, bajo el DCO.',
+});
 ---
 
 <section class="u-crop on-paper border-t border-line-paper bg-paper-50 py-24 text-surface-900">
   <div class="mx-auto max-w-2xl px-6 text-center">
-    <p class="micro text-primary-700">Get it</p>
+    <p class="micro text-primary-700">{t.eyebrow}</p>
     <h2 class="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-      One command, and nothing hidden underneath it
+      {t.heading}
     </h2>
     <p class="mt-4 text-lg text-surface-700">
-      The same install this page opened with &mdash; copy it, run it, and see the rest for yourself.
+      {t.lede}
     </p>
 
     <div
@@ -53,18 +85,18 @@ const inventoryUrl = withBase('licensing/');
            ring. `primary-700` (5.71:1, passes) is the one accent-text shade
            this band uses, at rest and on hover alike. -->
       <a href={inventoryUrl} class="text-primary-700 underline hover:underline-offset-4">
-        All packages, with licenses &rarr;
+        {t.inventory}
       </a>
       <a href={githubUrl} class="text-primary-700 underline hover:underline-offset-4">
-        Source on GitHub &rarr;
+        {t.source}
       </a>
-      <span class="font-normal text-surface-600">Also on PyPI</span>
+      <a href={pypiUrl} class="text-primary-700 underline hover:underline-offset-4">
+        {t.pypi}
+      </a>
     </div>
 
     <p class="mt-10 max-w-xl text-sm leading-relaxed text-surface-600">
-      Apache-2.0. The structured output shapes and the exit-code table are public API. Open
-      defects are tracked in the maintainer's own planning tree, not the distribution.
-      Contributions are welcome, under the DCO.
+      {t.fineprint}
     </p>
   </div>
 </section>

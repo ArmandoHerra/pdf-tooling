@@ -50,7 +50,7 @@ export const verbs: Verb[] = [
   { name: 'info', family: 'diagnostics', purpose: 'Page count/sizes, encryption + permission bits, metadata, producer, font list, signature presence, per-page rotation.', status: 'available' },
   { name: 'version', family: 'diagnostics', purpose: 'Report the tool, runtime and engine versions.', status: 'available' },
   { name: 'merge', family: 'structure', purpose: 'Concatenate PDFs; per-input page selection via path:range; outline entry per source file.', status: 'available' },
-  { name: 'split', family: 'structure', purpose: 'One PDF → many, by fixed chunk size, explicit ranges, per page, or at top-level bookmarks.', status: 'available' },
+  { name: 'split', family: 'structure', purpose: 'One PDF into many, by fixed chunk size, explicit ranges, per page, or at top-level bookmarks.', status: 'available' },
   { name: 'extract', family: 'structure', purpose: 'Write the selected pages to a new PDF, in the order given.', status: 'available' },
   { name: 'delete', family: 'structure', purpose: 'Write everything except the selected pages.', status: 'available' },
   { name: 'rotate', family: 'structure', purpose: 'Rotate the selected pages by a multiple of 90°, absolute or relative.', status: 'available' },
@@ -60,9 +60,9 @@ export const verbs: Verb[] = [
   { name: 'permissions', family: 'structure', purpose: 'Report the permission bits and encryption algorithm of an encrypted PDF.', status: 'available' },
   { name: 'meta get', family: 'structure', purpose: 'Read the document information dictionary + XMP.', status: 'available' },
   { name: 'meta set', family: 'structure', purpose: 'Write/clear document information fields and XMP.', status: 'available' },
-  { name: 'rasterize', family: 'raster', purpose: 'PDF → PNG/JPEG/TIFF/WEBP at a chosen DPI or pixel width.', status: 'available' },
-  { name: 'compose', family: 'compose', purpose: 'Images → PDF. JPEG inputs embed as DCTDecode streams (byte-preserving, no re-encode).', status: 'available' },
-  { name: 'create', family: 'compose', purpose: 'Text (v1) → PDF. Markdown/HTML behind the [html] extra (Phase 2).', status: 'available' },
+  { name: 'rasterize', family: 'raster', purpose: 'PDF to PNG/JPEG/TIFF/WEBP at a chosen DPI or pixel width.', status: 'available' },
+  { name: 'compose', family: 'compose', purpose: 'Images to PDF. JPEG inputs embed as DCTDecode streams (byte-preserving, no re-encode).', status: 'available' },
+  { name: 'create', family: 'compose', purpose: 'Text (v1) to PDF. Markdown/HTML behind the [html] extra (Phase 2).', status: 'available' },
   { name: 'text', family: 'text', purpose: 'Extract text: fast path (pdfium) or layout-aware (pdfplumber) with per-block geometry.', status: 'available' },
   { name: 'tables', family: 'text', purpose: 'Detect and extract tables to CSV/JSON.', status: 'available' },
   { name: 'compress', family: 'optimize', purpose: 'Shrink: libqpdf object streams plus stream recompression (lossless), optional Pillow image downsample/recompress (lossy).', status: 'available' },
@@ -70,8 +70,8 @@ export const verbs: Verb[] = [
   { name: 'decrypt', family: 'crypto', purpose: 'Remove encryption given the correct password.', status: 'available' },
   { name: 'watermark', family: 'overlay', purpose: 'Overlay/underlay generated text across the selected pages.', status: 'available' },
   { name: 'stamp', family: 'overlay', purpose: 'Overlay/underlay an existing PDF page onto the selected pages.', status: 'available' },
-  { name: 'ocr', family: 'overlay', purpose: 'Add a Tesseract text layer over untouched pixels — a text-only PDF generated per page and merged.', status: 'available' },
-  { name: 'convert', family: 'external', purpose: 'Office → PDF via headless LibreOffice.', status: 'available' },
+  { name: 'ocr', family: 'overlay', purpose: 'Add a Tesseract text layer over untouched pixels: a text-only PDF generated per page and merged.', status: 'available' },
+  { name: 'convert', family: 'external', purpose: 'Office to PDF via headless LibreOffice.', status: 'available' },
 ];
 
 export const familyOrder = [

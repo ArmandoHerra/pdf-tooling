@@ -1,0 +1,57 @@
+---
+// Renders a string of prose, keeping any command-line FLAG inside it on one
+// line.
+//
+// The defect this closes, measured before the fix at seven viewports across
+// both locales: 34 places where a flag was split by a line break, rendering
+// `--` at the end of one line and `in-place` at the start of the next. A
+// reader does not see one token wrapped; they see two things, and one of
+// them looks like a stray dash. `--user-password`, `--owner-password`,
+// `--in-place`, `--force`, `--dry-run` and `-o` were all hit, and English
+// was hit harder than Spanish.
+//
+// Why this is a component and not a CSS rule: browsers break after a hyphen
+// by default and there is no property that says "break at spaces but never
+// inside this token". `white-space: nowrap` on the paragraph would stop it
+// wrapping at all; `overflow-wrap`/`word-break` do not govern hyphen breaks.
+// The only lever is an inline element around the token, which means the
+// string has to be split at render time -- so it is split here, once, and
+// every call site passes a plain string exactly as it did before.
+//
+// Why not a non-breaking hyphen (U+2011) in the data: it renders correctly
+// and copies WRONG. A reader who copies `--dry‑run` out of the page pastes a
+// character no shell recognises, and the failure appears somewhere else
+// entirely, with no hint that the page caused it. The rendered glyph must
+// stay a plain ASCII hyphen.
+//
+// `set:html` is deliberately not used: the text is emitted as text nodes and
+// the spans are real elements, so nothing here can inject markup even if a
+// future copy table carries an angle bracket.
+export interface Props {
+  /** The sentence to render. Plain text -- never markup.
+   *
+   *  Optional because some of the fields routed through here are optional
+   *  on their own shape: only L2 carries a `forkNote`, so `{l2.forkNote}`
+   *  is `string | undefined`. A bare expression rendered that as nothing;
+   *  this renders it as nothing too, rather than making every call site
+   *  guard. Caught by `astro check`, not by a browser -- an undefined here
+   *  would have thrown at build time on the first layer without the
+   *  field. */
+  text?: string;
+}
+
+const { text } = Astro.props;
+
+//: A command-line flag: one or two leading hyphens, then a letter, then word
+//: characters and inner hyphens. The lookbehind is what keeps it from firing
+//: inside an ordinary hyphenated word -- without it, `command-line` matches
+//: `-line` and `plan-then-verify-then-act` matches three times, and those
+//: breaks are perfectly good English that should stay breakable.
+const FLAG = /(?<![\w-])(--?[A-Za-z][\w-]*)/g;
+
+// `split` with ONE capturing group alternates: text, flag, text, flag, ...
+// so the odd indices are exactly the captures. Empty strings at the ends are
+// normal and render as nothing.
+const parts = (text ?? '').split(FLAG);
+---
+{parts.map((part, i) => (i % 2 === 1 ? <span class="nowrap">{part}</span> : part))}

@@ -23,42 +23,74 @@
 // reddened the exact arm this note describes) -- describe it by pointer
 // only, in this file and in the rendered station text alike.
 import contracts from '../data/contracts.json';
+import Prose from './Prose.astro';
+import { langOf, pick } from '../lib/i18n';
+import { STATIONS_ES, ATOMIC_ES } from '../lib/copy-es';
 
-const { atomicWrite } = contracts;
+const { atomicWrite: enAtomic } = contracts;
+
+// The GLYPHS are numerals and the source path is an identifier; both come
+// from `contracts.json` in either language. Only the station names, their
+// details and the failure line fork.
+const atomicWrite = langOf(Astro.url) === 'es'
+  ? {
+      ...enAtomic,
+      stations: enAtomic.stations.map((st, i) => ({ ...st, ...(STATIONS_ES[i] ?? {}) })),
+      failure: ATOMIC_ES.failure,
+      crossingLabel: ATOMIC_ES.crossingLabel,
+    }
+  : enAtomic;
 const crossingIndex = atomicWrite.stations.length - 1; // the only station on "your file"'s own track
+
+const t = pick(Astro.url, {
+  eyebrow: 'Your files',
+  heading: 'A run that dies halfway leaves your file untouched',
+  introA:
+    'Kill the process, lose the disk, pull the power: elsewhere the usual result is a half-written file where your document used to be. Here every step happens on a scratch file next to yours, and your own file is touched once, at the very end, by a rename the operating system cannot leave half-finished. Nothing else in the run can reach it. Only one file in the whole codebase is allowed to write anything (',
+  introB:
+    '), which is why this holds for every command, not just the ones someone remembered to make safe.',
+  legend:
+    'Everything before the crossing runs on a scratch file, on the same filesystem as the target; only the last station touches your file, and it does so atomically.',
+}, {
+  eyebrow: 'Tus archivos',
+  heading: 'Si una corrida muere a la mitad, tu archivo queda intacto',
+  introA:
+    'Mata el proceso, pierde el disco, desconecta la corriente: en otras herramientas el resultado habitual es un archivo truncado donde antes estaba tu documento. Aqu\u00ed cada paso ocurre en un archivo de trabajo junto al destino, y tu propio archivo se toca exactamente una vez, al final, con un rename que el sistema operativo no puede dejar a medias. Nada m\u00e1s en toda la corrida puede alcanzarlo. Para eso sirve la \u00fanica ruta de escritura de abajo: un solo archivo de este c\u00f3digo tiene permiso de escribir (',
+  introB:
+    '), y por eso la garant\u00eda aplica a todos los comandos y no nada m\u00e1s a los que alguien se acord\u00f3 de hacer seguros.',
+  legend:
+    'Todo lo que pasa antes del cruce sucede en un archivo de trabajo, en el mismo sistema de archivos que el destino; solo la \u00faltima estaci\u00f3n toca tu archivo, y lo hace de forma at\u00f3mica.',
+});
 ---
 
 <section id="atomic-write" aria-labelledby="atomic-h" class="u-crop mx-auto max-w-6xl px-6 py-24">
-  <p class="micro text-surface-400">What a write actually does</p>
+  <p class="micro text-surface-400">{t.eyebrow}</p>
   <div class="u-reveal-rule mt-3 h-px w-full bg-line" aria-hidden="true"></div>
   <h2 id="atomic-h" class="mt-6 max-w-2xl text-3xl font-semibold tracking-tight text-surface-50 sm:text-4xl">
-    Every write is atomic, and here is what that means
+    {t.heading}
   </h2>
-  <p class="mt-4 max-w-2xl text-lg text-surface-300">
-    <code class="code-inline text-sm">{atomicWrite.sourcePath}</code> is the single write chokepoint the
-    spine above names. Everything below happens on a scratch file; your file stays untouched until the
-    last station, where the two tracks touch exactly once.
+  <p class="mt-4 max-w-3xl text-lg text-surface-300">
+    {t.introA}<code class="code-inline code-path text-sm">{atomicWrite.sourcePath}</code>{t.introB}
   </p>
 
   <ol class="atomic-write mt-12 grid grid-cols-1 gap-4 md:grid-cols-6 md:gap-3" aria-describedby="atomic-legend">
     {atomicWrite.stations.map((station: { glyph: string; name: string; detail: string }, i: number) => (
       <li class={`station rounded-md border p-4 ${i === crossingIndex ? 'crossing border-primary-400/60 bg-primary-500/10' : 'border-line-soft bg-surface-950'}`}>
         {i === crossingIndex && (
-          <p class="crossing-label micro mb-2 text-primary-400">— {atomicWrite.crossingLabel} —</p>
+          <p class="crossing-label micro mb-2 text-primary-400">{atomicWrite.crossingLabel}</p>
         )}
         <span class="glyph block font-mono text-lg text-primary-400" aria-hidden="true">{station.glyph}</span>
-        <h3 class="name mt-1 text-sm font-semibold text-surface-50">{station.name}</h3>
-        <p class="detail mt-1 text-xs leading-snug text-surface-300">{station.detail}</p>
+        <h3 class="name mt-1 text-sm font-semibold text-surface-50"><Prose text={station.name} /></h3>
+        <p class="detail mt-1 text-xs leading-snug text-surface-300"><Prose text={station.detail} /></p>
       </li>
     ))}
   </ol>
 
   <p class="failure mt-6 max-w-2xl text-sm leading-relaxed text-surface-300">
-    <span class="text-primary-400" aria-hidden="true">&cross;</span> {atomicWrite.failure}
+    <span class="text-primary-400" aria-hidden="true">&cross;</span> <Prose text={atomicWrite.failure} />
   </p>
 
   <p id="atomic-legend" class="legend mt-4 max-w-2xl text-xs text-surface-400">
-    Everything before the crossing runs on a scratch file, on the same filesystem as the target;
-    only the last station touches your file, and it does so atomically.
+    {t.legend}
   </p>
 </section>

@@ -1,0 +1,47 @@
+---
+// The Spanish route. Deliberately a near-copy of `pages/index.astro`: the
+// SECTIONS and their order are the same page, and the only thing that
+// differs is the URL the components read their locale from. Nothing here
+// selects Spanish -- `lib/i18n.ts`'s `langOf` does, from `Astro.url`, so
+// this file cannot drift out of translation by forgetting a prop.
+//
+// Every import path gains one `../` because this page lives one directory
+// deeper. That is the entire diff.
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar.astro';
+import Hero from '../../components/Hero.astro';
+import Features from '../../components/Features.astro';
+import Architecture from '../../components/Architecture.astro';
+import AtomicWrite from '../../components/AtomicWrite.astro';
+import Verbs from '../../components/Verbs.astro';
+import Examples from '../../components/Examples.astro';
+import ExitCodes from '../../components/ExitCodes.astro';
+import LicenseSummary from '../../components/LicenseSummary.astro';
+import Posture from '../../components/Posture.astro';
+import ClosingCta from '../../components/ClosingCta.astro';
+import Footer from '../../components/Footer.astro';
+---
+
+<Layout>
+  <Navbar />
+  <main id="main" tabindex="-1">
+    <Hero />
+    <Features />
+    <Architecture />
+    <AtomicWrite />
+    <Verbs />
+    <Examples />
+    <ExitCodes />
+    <LicenseSummary />
+    <!-- PDF-97: production posture is the last content section before the
+         closing call to action, mirroring the IA's own #status-before-CTA
+         order even though #licensing itself sits later on this built page
+         than the IA's guidance table places it (a PDF-94/95 decision, not
+         this item's to move -- D9 forbids reordering anything to make the
+         height ceiling, and this placement is a content decision, not a
+         height lever). -->
+    <Posture />
+    <ClosingCta />
+  </main>
+  <Footer />
+</Layout>
