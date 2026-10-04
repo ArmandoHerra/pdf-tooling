@@ -214,6 +214,8 @@ MAKEFILE_TARGETS = {
     # must not become a prerequisite of the Python gate. It IS a CI job
     # (`.github/gate-parity.toml`'s `website` entry, `in_make_ci = false`).
     "website",
+    # PDF-104: npm audit gate; not in `ci` (uv-only, as PDF-91) nor `website` (needs network).
+    "website-audit",
     # PDF-46: the standing-residue reaper. Lists by default, removes only under
     # CONFIRM=1, and is a prerequisite of NOTHING -- asserted by parsing the
     # Makefile in tests/test_engine_hiding_shim.py, not by reading it here.
