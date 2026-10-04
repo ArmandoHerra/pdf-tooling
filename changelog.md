@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-98] Clear the dependency advisories that red `vulncheck` — 2026-10-04
+
+- **The `pypdf[crypto]` floor moved `6.16.2` → `6.19.0` (ceiling `<7` kept).** 6.19.0 is the lowest version that fixes all eight `PYSEC-2026-4153…4160` advisories (4157/4159/4160 are fixed only there); no fix needs 7.x.
+- **Targeted lock refresh, not a blanket upgrade:** `uv lock --upgrade-package pypdf --upgrade-package urllib3` moved exactly `pypdf 6.16.2 → 6.19.0` and `urllib3 2.7.0 → 2.8.0` (dev-only closure, three more advisories); 77 packages before and after. `uv run --frozen pip-audit` goes from 11 advisories to none.
+- **Version claims re-measured, not string-replaced:** the test-only `pdfstream` accessors (`get_data()` / private `_data`) and `PYPDF_PINNED_VERSION` were re-probed on 6.19.0 and re-pinned; the `XmpInformation` setters/getters and the `get_contents()` claims were re-read on 6.19.0. One comment was corrected rather than re-dated: `PdfWriter(clone_from=...)` leaves `_info` unset when the source has no `/Info`.
+- Nothing in user-visible behaviour moved; the generated license files change only pypdf's version line.
+
 ## [PDF-97] Density: verbs, features and posture — 2026-09-21
 
 - **The 26-row verb roster moved into a typed module (`website/src/lib/verbs.ts`) and its grouping field was renamed `port` → `family`.** Ruling `R3`: the rename only — the nine family values, their membership, and all 26 purposes and statuses carry byte-for-byte from the previous roster (`Verbs.astro` at `5265850`), verified by a direct comparison. Deriving a real port per verb stays out of scope, filed as `B-374`.

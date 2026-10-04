@@ -34,13 +34,21 @@ classifiers = [
 dependencies = [
   # PDF-23 (2026-09-02, §D8 Arm A): the `<7` ceiling STAYS. Probed at
   # implementation time (`json.load(urlopen('https://pypi.org/pypi/pypdf/json'))`)
-  # -- no `7.x` release exists (latest published: 6.16.2, the version already
-  # pinned as the floor). The deprecated reader-attached `replace_contents`
+  # -- no `7.x` release existed (latest published at that probe: 6.16.2, then
+  # the floor). The deprecated reader-attached `replace_contents`
   # call this ceiling used to contain is gone (AC12); the ceiling is now a
   # precaution against an unreleased major, not a containment for a known
   # unreliable call. Re-probe and lift to `<8` once 7.0.0 ships and the suite
   # has run against it -- tracked as a PDF-23 follow-up, not filed here.
-  "pypdf[crypto]>=6.16.2,<7",
+  #
+  # PDF-98 (2026-10-04): the floor moved 6.16.2 -> 6.19.0 to clear pip-audit
+  # PYSEC-2026-4153..4160; 6.19.0 is the lowest version that fixes 4157, 4159
+  # and 4160. Re-probe the same way: latest published is 6.19.0 and no `7.x`
+  # release exists, so the `<7` ceiling still stays (no fix needs 7.x, and
+  # lifting it needs the suite run against 7.x). The lock was refreshed
+  # targeted (pypdf and urllib3 only); urllib3 >= 2.8.0 clears three more
+  # advisories in the dev-only closure (requests <- pip-audit).
+  "pypdf[crypto]>=6.19.0,<7",
   "pypdfium2>=5.13.0,<6",
   "reportlab>=5.0.1,<6",
   "pikepdf>=10.12.0,<11",

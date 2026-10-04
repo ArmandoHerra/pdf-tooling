@@ -219,7 +219,7 @@ def test_ac29_positive_control_a_mutated_image_stream_fails_the_identity_check(
     image_obj = xobjects[image_key].get_object()
 
     mutated = bytearray(image_obj._data)  # noqa: SLF001 - the same private access AC3's own
-    # instrument (`tests/helpers/pdfstream.py`) uses, pinned to pypdf 6.16.2
+    # instrument (`tests/helpers/pdfstream.py`) uses, pinned to pypdf 6.19.0
     mutated[0] ^= 0xFF  # flip one byte -- deliberately corrupt the stored stream
     image_obj._data = bytes(mutated)  # noqa: SLF001
 
