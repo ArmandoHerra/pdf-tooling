@@ -1,0 +1,76 @@
+PDF-105 known-answer corpus: provenance.
+
+Two reconstructed historical states in which a landed spec id was invisible to every
+roster guard. Each state pairs a planning-tree commit (the meta-harness repository,
+/home/void/repos/Agentic-Meta-Harness) with a product commit (this repository).
+The corpus is read by tests/test_docs_antirot.py (the test_pdf105_fixture_* arms) and
+is never regenerated to make a red go green: the sha256 lines at the foot are checked.
+
+The planning extract contains only spec ids, status tokens and the counter declaration.
+
+Full commit SHAs
+  planning (a) 655fc724de578513aba4261dac61cbbca059d72c
+  planning (b) 12497571efee2ae11c19daa6a4da004fde8a71d0
+  product  (a) 2141c768156a559ad1a0aa7cc3ab30203d2034b2
+  product  (b) 7e2bd98a43ff53127bd3b00fceeec41b9675bed5
+
+State (a): planning 655fc72 x product 2141c76  (directory a_655fc72_x_2141c76)
+State (b): planning 1249757 x product 7e2bd98  (directory b_1249757_x_7e2bd98)
+
+Source blobs and commands (M = git -C /home/void/repos/Agentic-Meta-Harness)
+  a/spec-index.txt  <- M show 655fc72:ai_plans/pdf-tooling/specs/SPEC-INDEX.md
+                       blob d09ca2d85e0538fd5aa98fb1f60ddd0834d9ce1c
+  a/PDF-89.header.txt <- M show 655fc72:ai_plans/pdf-tooling/specs/PDF-89_refuse-a-destination-that-is-an-input.md
+                       blob 1e9fcefa168ff502a99a57dcd56aacaa52b1c3d7
+  b/spec-index.txt  <- M show 1249757:ai_plans/pdf-tooling/specs/SPEC-INDEX.md
+                       blob 1448f8ec7ea81dd8b7b723d5a6c129898a32e4c3
+  a/changelog-headings.txt <- git show 2141c76:changelog.md | grep '^## '   (then the neutralisation above)
+                       blob 455e6b1318f9b927943880d1595d2e405c20a94d
+  b/changelog-headings.txt <- git show 7e2bd98:changelog.md | grep '^## '   (then the neutralisation above)
+                       blob 94d9c469a2a537b4d4e6a476ca2712a6ea8d2409
+  a/subjects.txt    <- git log --format=%s 2141c76   (then the neutralisation above)
+  b/subjects.txt    <- git log --format=%s 7e2bd98   (then the neutralisation above)
+
+Reduction rules
+  Product files (changelog-headings.txt, subjects.txt): verbatim, EXCEPT one neutralisation.
+  tests/test_rename_completeness.py freezes the census of the retired spellings in the
+  tracked tree, and PDF-57's own heading and subject quote them. Every occurrence of the
+  retired environment-variable prefix is therefore replaced by `<retired-env-prefix>` and
+  every occurrence of the retired class-name prefix by `<retired-class-prefix>` (a plain
+  string replace over the extracted text, applied after the commands below). No id, no
+  bracket and no heading structure moves; four lines are affected and they are the PDF-57
+  heading and the PDF-57 subject in each state.
+  Reproducible neutralisation (the retired spellings are written split in two so this
+  file does not itself trip the rename census; the shell concatenates them):
+      E="PDF_TOOL""KIT"; C="Pdf""Toolkit"
+      git show <product-sha>:changelog.md | grep '^## ' \
+        | sed "s/$E/<retired-env-prefix>/g; s/$C/<retired-class-prefix>/g"   > changelog-headings.txt
+      git log --format=%s <product-sha> \
+        | sed "s/$E/<retired-env-prefix>/g; s/$C/<retired-class-prefix>/g"   > subjects.txt
+  Run in this repository's checkout at <product-sha> = 2141c76 (a) / 7e2bd98 (b); the
+  sha256 of each output equals the corresponding line at the foot (verified at landing).
+  Planning files:
+  spec-index.txt: every line matching the roster-row grammar becomes
+      | <id> | **<status_token of the status cell>** |
+  for example `| PDF-89 | **Proposed** |`. The date and every narrative are dropped. The
+  counter declaration is kept as its bold span alone, on its own line, and is the first
+  line. Nothing else is kept: no titles, dates, prose or shas, because this corpus ships
+  in the sdist.
+  PDF-89.header.txt: exactly two lines, `**Spec ID:** PDF-89` and
+  `**Status:** <status_token of the header's Status field>`.
+
+status_token equality check (run at extraction time)
+  For every row of both SPEC-INDEX blobs, and for the PDF-89 header, status_token() of
+  the full blob's cell equals status_token() of the reduction's cell: roster_rows() was
+  run over the full blob and over the reduction and the token maps compared; EQUAL for
+  (a) and (b). The PDF-89 header token is `Proposed` in both forms. Each declared
+  counter occurs exactly once in its blob.
+
+sha256 of every file in this corpus (PROVENANCE.txt cannot hold its own)
+sha256 8f1795fe290606cce797341754b8a91139d2e9e70854ac7d8e2edf893bb1b994  a_655fc72_x_2141c76/spec-index.txt
+sha256 b249095069e1c0202b4e28fe7dc625444396af50679ec9049289110e6bf55920  a_655fc72_x_2141c76/PDF-89.header.txt
+sha256 e8d6f1b0b896fb1f0a81bf5220167f01a9205b242f1b39f802dcc0b2db2e0525  a_655fc72_x_2141c76/changelog-headings.txt
+sha256 b0f1033ff317d34ee81b9f8bd574602688c8d72cbd0f7074794b690b67ae5100  a_655fc72_x_2141c76/subjects.txt
+sha256 c72aee59c6383648416bb75b88dd0f2e20ab41464c4c9c73986e3450545c321d  b_1249757_x_7e2bd98/spec-index.txt
+sha256 a3fbece4686746f258b08daa3f4ebd178de74df93816344ac7af0a4a57e33e94  b_1249757_x_7e2bd98/changelog-headings.txt
+sha256 f2d28ffb6567394f8681fb846d64cc536522466822e81bf090092995ba1bc1e2  b_1249757_x_7e2bd98/subjects.txt

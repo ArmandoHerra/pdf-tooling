@@ -399,7 +399,8 @@ jobs:
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
-      # The nine PLANNING arms legitimately skip here, because this checkout is
+      # The PLANNING arms (counted, derived, in the Makefile's docs-gate
+      # comment) legitimately skip here, because this checkout is
       # `apps/pdf-tooling` alone and the maintainer's planning tree lives in a
       # separate repository. The HISTORY arms do NOT skip: `fetch-depth: 0`
       # above is what lets them run (PDF-72 corrected this comment, which had
