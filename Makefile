@@ -41,7 +41,7 @@ endif
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
         samples-gate engines-gate engines-hidden licenses-check artifacts-check \
-        gate-timing docs-gate website website-audit shim-reap ci clean
+        gate-timing docs-gate website website-audit shim-reap ci clean verify
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -432,6 +432,9 @@ website: ## Build the project website and run its contract arms (PDF-91). NOT a 
 
 website-audit: ## Fail on any high-or-critical npm advisory in website/'s lock (PDF-104). Needs network; NOT a prereq of `ci` or `website`
 	cd website && npm audit --audit-level=high
+
+verify: ## Print one spec's per-AC AUDIT-CONVENTION evidence: make verify SPEC=PDF-85 (grants nothing; NOT a prereq of ci)
+	$(UV_RUN) python scripts/verify_spec.py $(SPEC)
 
 ci: fmt-check lint typecheck cover licenses sast vulncheck ## Run the full local gate; ends by printing what CI additionally gates
 	@uv run python scripts/gate_parity.py epilogue
