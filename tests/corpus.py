@@ -93,6 +93,12 @@ class FixtureSpec:
         encrypted: ``"AES-256"`` when the fixture is password-protected, else
             ``None``.
         table: The expected cell grid, row-major. Empty for non-tabular fixtures.
+        info_absent: Whether the trailer carries NO ``/Info`` entry at all.
+            Exhaustive in both directions (`tests/test_corpus.py`): every
+            OTHER fixture is asserted to carry one, so this field is a
+            statement rather than a hint -- the same rule as
+            ``rotate_key_absent_on``. PDF-99: ``no_info`` is the only fixture
+            for which it is true.
     """
 
     name: str
@@ -105,6 +111,7 @@ class FixtureSpec:
     metadata: Mapping[str, str] = field(default_factory=dict)
     encrypted: str | None = None
     table: tuple[tuple[str, ...], ...] = ()
+    info_absent: bool = False
 
 
 def _new_canvas(path: Path, page_size: tuple[float, float]) -> canvas.Canvas:
@@ -652,6 +659,45 @@ def _build_rotate_absent(root: Path) -> tuple[Path, FixtureSpec]:
     return path, spec
 
 
+def _build_no_info(root: Path) -> tuple[Path, FixtureSpec]:
+    """PDF-99 -- a document whose trailer carries NO ``/Info`` entry.
+
+    The state was UNREPRESENTABLE in this corpus until now: all seventeen
+    earlier fixtures carry ``/Info`` (reportlab always emits one, and the
+    pypdf/pikepdf-built ones start from a reportlab file or a ``PdfWriter()``
+    that stamps ``/Producer``). That is the same shape as B-084 /
+    ``rotate_absent``, and it hid a ``meta set`` crash
+    (``PdfWriter(clone_from=...)._info`` is ``None`` when the source has no
+    ``/Info``) from every test. See
+    ``ai_plans/pdf-tooling/specs/PDF-99_return-the-envelope-when-meta-set-meets-no-info.md``.
+
+    Built with the ``rotate_absent`` recipe: reportlab, then pikepdf deletes
+    the key, then ``deterministic_id`` keeps it byte-identical across builds
+    (measured), so it joins the determinism assertion without an exemption.
+    """
+    text = "no_info fixture -- the trailer carries no /Info entry."
+    staged = root / "_no_info_staged.pdf"
+    made = _new_canvas(staged, _LETTER)
+    made.drawString(72, 700, text)
+    made.showPage()
+    made.save()
+
+    path = root / "no_info.pdf"
+    with pikepdf.open(str(staged)) as pdf:
+        del pdf.trailer["/Info"]
+        pdf.save(str(path), deterministic_id=True)
+    staged.unlink()
+
+    spec = FixtureSpec(
+        name="no_info",
+        page_count=1,
+        page_size=_LETTER,
+        page_texts=(text,),
+        info_absent=True,
+    )
+    return path, spec
+
+
 #: Build order. `FIXTURE_NAMES` mirrors it for iteration by name.
 _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_multipage_text,
@@ -671,6 +717,7 @@ _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_stamp_source,
     _build_rotate_absent,
     _build_shared_contents_pages,
+    _build_no_info,
 )
 
 FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
@@ -693,6 +740,7 @@ FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
         "stamp_source",
         "rotate_absent",
         "shared_contents_pages",
+        "no_info",
     )
 )
 

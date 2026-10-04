@@ -18,8 +18,8 @@ module keeps its OWN plain-string mirror of the same field/`/Info`-key pairing
 directly -- the port is the boundary. It is a duplication of field NAMES,
 never of engine behaviour.
 
-Design D2.2/D2.3 -- `meta set` writes both halves, creates neither
-----------------------------------------------------------------------
+Design D2.2/D2.3 -- `meta set` writes both halves, creates no XMP packet
+------------------------------------------------------------------------
 The write itself -- including the D2.3 type-preservation mechanics and the
 "no packet, no sync" rule -- lives entirely in the adapter
 (`write_metadata`). This module's job is arity/usage validation (`meta set`
@@ -211,7 +211,7 @@ def meta_set_run(
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
 ) -> OperationResult:
-    """`meta set` -- write both halves (D2.2), creating neither, preserving
+    """`meta set` -- write both halves (D2.2), creating no XMP packet, preserving
     the original PdfObject type of every untouched `/Info` key (D2.3, inside
     the adapter). `--in-place`'s confirmation gate (R6/B-079) is the CLI
     layer's job (`cmd_meta_set.py`), mirroring `cmd_rotate.py`'s own call
