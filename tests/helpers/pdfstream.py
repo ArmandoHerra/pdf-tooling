@@ -26,9 +26,10 @@ module pins the accessors rather than leaving each test to pick one:
   detects a re-encode without being fooled by a transport layer, and without
   being weakened into accepting one.
 
-Pinned to pypdf 6.16.2
+Pinned to pypdf 6.19.0
 -----------------------
-Measured on that version, and the version is named here so an upgrade that
+Measured on 6.16.2 (PDF-10), re-measured on 6.19.0 (PDF-98, 2026-10-04); the
+version is named here so an upgrade that
 moves these accessors is a loud failure rather than a quiet weakening:
 
 * ``obj.get_data()`` leaves ``/DCTDecode`` **undecoded** and returns the JPEG
@@ -50,7 +51,7 @@ from pypdf import PdfReader
 __all__ = ["EmbeddedStream", "PYPDF_PINNED_VERSION", "embedded_image_streams", "page_media_box"]
 
 #: The version every accessor below was measured against.
-PYPDF_PINNED_VERSION = "6.16.2"
+PYPDF_PINNED_VERSION = "6.19.0"
 
 _DCT = "/DCTDecode"
 

@@ -101,7 +101,7 @@ def reject_missing_sources(sources: Sequence[Path]) -> None:
 # --------------------------------------------------------------------------- #
 # D2.1 -- disagreement computation, over already-extracted plain values only.
 # `MetadataFacts.xmp` carries each XMP property in whatever native shape
-# `XmpInformation`'s own getter returns (measured against pypdf 6.16.2): a
+# `XmpInformation`'s own getter returns (re-measured against pypdf 6.19.0): a
 # LangAlt as a `{"x-default": ...}` dict (empty `{}` when unset), a Seq as a
 # `list[str]` (empty `[]` when unset), a scalar as `str | None`, and the two
 # date fields as `datetime.datetime | None`.

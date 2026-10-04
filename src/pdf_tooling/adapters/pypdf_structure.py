@@ -247,7 +247,7 @@ def _set_xmp_field(xmp: Any, attr: str, field: str, value: str | None) -> None:
     XmpInformation setters themselves do not infer a shape from the
     property name, so this dispatch is what keeps D2.1's own table honest.
     ``value=None`` clears the property (every setter below accepts
-    ``Optional[...]``, verified against `pypdf` 6.16.2's own source)."""
+    ``Optional[...]``, verified against `pypdf` 6.19.0's own source)."""
     if field in ("title", "subject"):
         setattr(xmp, attr, {"x-default": value} if value is not None else None)
     elif field == "author":
@@ -739,8 +739,8 @@ class PypdfStructureAdapter:
             # elsewhere in this codebase's own conventions.
             writer_info: Any = writer._info  # noqa: SLF001 -- see above; `Any` sidesteps
             # the stub's `DictionaryObject | None` -- `PdfWriter(clone_from=...)`
-            # always populates `_info` (verified against pypdf 6.16.2's own
-            # `clone_from` path), so the `None` arm is unreachable here.
+            # populates `_info` only when the source HAS `/Info`, so the `None`
+            # arm IS reachable (probed on pypdf 6.16.2 and 6.19.0; PDF-98).
             writer_info.get_object().clear()
             writer.xmp_metadata = None
             wrote_xmp = had_xmp
@@ -842,7 +842,7 @@ class PypdfStructureAdapter:
                     copied.append(number)
             # `get_contents()` re-derives a FRESH `ContentStream` from the
             # underlying object on every call (verified against pypdf
-            # 6.16.2's own source) rather than caching a mutated one, which
+            # 6.19.0's own source) rather than caching a mutated one, which
             # is what makes reusing the SAME `layer_page` across every
             # selected page safe: `merge_page` never mutates its `page2`
             # argument, only `self`.
