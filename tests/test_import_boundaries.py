@@ -58,7 +58,10 @@ and broken ``--dry-run`` purity while passing a four-name walk.
     SITES and is blind to a mutation with none, which is why the mode a real
     write leaves behind is observed separately, by
     ``tests/integration/test_pdf90_output_mode.py`` and its neighbours,
-    rather than by this census)
+    rather than by this census). PDF-103 widened the row to the fd/link/xattr/
+    ``shutil`` siblings (``os.fchmod``, ``os.lchown``, ``os.setxattr``,
+    ``shutil.copystat`` ...); Section 8 holds the derivation arm, the plant
+    matrix and the statement of what stays invisible
 14. ``os.open`` / ``os.symlink`` / ``os.link`` (extension — ``os.open``'s flags
     are not reliably statically analysable, and no module outside ``safety/``
     has a legitimate use for any of the three)
@@ -206,6 +209,20 @@ QUALIFIED_FORBIDDEN: Final = frozenset(
         "os.open",
         "os.symlink",
         "os.link",
+        # PDF-103: census (E3) -- the fd/link family and the other metadata mutators.
+        "os.fchmod",
+        "os.fchown",
+        "os.lchown",
+        "os.ftruncate",
+        "os.lchmod",
+        "os.posix_fallocate",
+        "os.setxattr",
+        "os.removexattr",
+        "os.chflags",
+        "os.lchflags",
+        "shutil.copymode",
+        "shutil.copystat",
+        "shutil.chown",
     }
 )
 
@@ -237,6 +254,21 @@ METHOD_FORBIDDEN: Final = frozenset(
         "NamedTemporaryFile",
         "TemporaryFile",
         "TemporaryDirectory",
+        # PDF-103: census (E3). `fchmodat` is NOT a CPython callable; it is listed
+        # so that the ledger's four-spelling matrix (`a5086c8bd5`) reds.
+        "fchmod",
+        "fchown",
+        "lchown",
+        "ftruncate",
+        "posix_fallocate",
+        "setxattr",
+        "removexattr",
+        "chflags",
+        "lchflags",
+        "copymode",
+        "copystat",
+        "chown",
+        "fchmodat",
     }
 )
 
@@ -568,6 +600,12 @@ PLANTED: Final = (
         "pdf_tooling/ops/sneaky.py",
         "import os\n\n\ndef alias(a: str, b: str) -> None:\n    os.symlink(a, b)\n",
     ),
+    (
+        "plant-fchmod-via-fileno-in-ops",
+        "pdf_tooling/ops/sneaky.py",
+        "import os\n\n\ndef relax(p: str) -> None:\n    with open(p, 'rb') as f:\n"
+        "        os.fchmod(f.fileno(), 0o777)\n",
+    ),
 )
 
 
@@ -611,6 +649,7 @@ def test_a_non_literal_mode_is_a_violation() -> None:
 
 
 BENIGN = """
+import os
 import shutil
 from pathlib import Path
 
@@ -627,6 +666,18 @@ def read_only(p: Path, s: str, items: list[str], d: dict[str, str]) -> object:
     p.stat()
     p.exists()
     return s.replace("a", "b", 1)
+
+
+def near_misses(fd: int, p: str) -> None:
+    # PDF-103 D5: the read-only names closest to the new D2 entries.
+    os.fsync(fd)
+    os.fdatasync(fd)
+    os.fstat(fd)
+    os.getxattr(p, "user.x")
+    os.listxattr(p)
+    os.lseek(fd, 0, 0)
+    os.posix_fadvise(fd, 0, 0, 0)
+    os.access(p, os.W_OK)
 """
 
 
@@ -673,7 +724,12 @@ D7_GROUP_PLANTS: Final[tuple[tuple[int, str, tuple[str, ...]], ...]] = (
     (10, "the tempfile create family", ("plant-mkstemp-in-ops",)),
     (11, "os.mkdir / os.makedirs / Path.mkdir", ("plant-mkdir-in-cli",)),
     (12, "os.rmdir / shutil.rmtree", ("plant-rmtree-in-ports",)),
-    (13, "os.truncate / Path.touch / os.utime / os.chmod / os.chown", ("plant-chmod-in-output",)),
+    (
+        13,
+        "os.truncate / Path.touch / os.utime / os.chmod / os.chown, "
+        "and their fd/link/xattr/shutil siblings (PDF-103)",
+        ("plant-chmod-in-output", "plant-fchmod-via-fileno-in-ops"),
+    ),
     (14, "os.open / os.symlink / os.link", ("plant-os-symlink-in-ops",)),
 )
 
@@ -5621,4 +5677,207 @@ def test_ac18_a_stray_os_umask_call_reds_only_the_scope_arm(tmp_path: Path) -> N
     offenders = [site for site in umask_sites if site[1] != _READ_UMASK_ONCE]
     assert len(offenders) == 1 and offenders[0][0].endswith("_pdf90_planted_stray_umask"), (
         f"the walk did not notice the planted stray os.umask( call site: {offenders}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Section 8 -- PDF-103: D7 group 13 and the file-descriptor / link family
+# (ledger `a5086c8bd5`, backlog `B-367`, decision X-921 / X-931 / X-941).
+#
+# THE DEFECT WAS THE FAMILY, NOT THE ENTRY. `os.chmod` was forbidden outside
+# `safety/` but `os.fchmod` was not, so a module could change a mode, owner or
+# size through a DESCRIPTOR without the walk seeing it -- and a read-mode
+# `open()` plus `os.fchmod(f.fileno(), ...)` passed rows 1/2/14 as well. The
+# census (E3) found the hole wider than the fd family: `os.lchown`,
+# `posix_fallocate`, the xattr setters, `chflags` and `shutil.copymode` /
+# `copystat` / `chown` all passed undetected. The remedy is list entries (in
+# `QUALIFIED_FORBIDDEN` / `METHOD_FORBIDDEN` above) PLUS the derivation arm
+# below, which keeps the `f`/`l` siblings of every forbidden `os` call forbidden
+# on whatever interpreter runs the suite.
+#
+# What the walk covers after PDF-103:
+#   * every census name in any static spelling -- qualified, from-import,
+#     alias, `posix.`, and a descriptor obtained from `.fileno()`;
+#   * `os.chmod` / `chown` / `truncate` / `utime` given an int descriptor (the
+#     qualified-name rule keys on the call name and ignores argument types);
+#   * the fd and link siblings of every forbidden `os` call, on the running
+#     interpreter (the derivation arm).
+#
+# What it does NOT cover -- stated here rather than discovered later:
+#   1. dynamic dispatch: `getattr(os, "fchmod")(...)`, `vars(os)[...]`;
+#   2. raw `ctypes` / `cffi` syscalls, other than by a forbidden tail name;
+#   3. fd data writes (`os.write`, `pwrite`, `writev`, `sendfile`, ...): their
+#      precondition, a writable descriptor, is guarded by rows 1/2/14;
+#   4. engine-side metadata changes, under the destination-ownership rule in
+#      the module docstring;
+#   5. spawned binaries, which Section 2 governs;
+#   6. `os.umask`, which Section 7 owns;
+#   7. non-metadata census findings handed up to the PM, not folded in here:
+#      `os.renames`, `os.removedirs`, `os.mkfifo`, `os.mknod`,
+#      `shutil.make_archive`, `shutil.unpack_archive`;
+#   8. any CPython 3.14 or macOS member outside the f/l sibling rule that the
+#      census did not measure.
+# `os.fchmodat` is not a CPython callable (3.11-3.13); it is listed in
+# `METHOD_FORBIDDEN` only so the ledger's four-spelling matrix reds.
+# --------------------------------------------------------------------------- #
+
+
+def test_every_fd_and_link_sibling_of_a_forbidden_os_call_is_forbidden() -> None:
+    """D3: derive the `f`/`l` siblings of every forbidden `os.X` from the live
+    interpreter and require both lists to carry them, so the family cannot be
+    re-opened by a hand-maintained list falling behind."""
+    derived = {
+        f"os.{prefix}{name[3:]}"
+        for name in QUALIFIED_FORBIDDEN
+        if name.startswith("os.")
+        for prefix in ("f", "l")
+        if callable(getattr(os, prefix + name[3:], None))
+    }
+    assert "os.fchmod" in derived, "derivation is vacuous: os.fchmod must exist on CI platforms"
+    missing_qualified = sorted(derived - QUALIFIED_FORBIDDEN)
+    assert missing_qualified == [], (
+        f"fd/link siblings of forbidden os calls missing from QUALIFIED_FORBIDDEN: "
+        f"{missing_qualified}"
+    )
+    missing_method = sorted({n.split(".", 1)[1] for n in derived} - METHOD_FORBIDDEN)
+    assert missing_method == [], (
+        f"fd/link siblings of forbidden os calls missing from METHOD_FORBIDDEN: {missing_method}"
+    )
+
+
+def _b367_source(call: str, *, imports: str = "import os") -> str:
+    """A function appended to an existing module, so no import-executing arm
+    breaks on an undefined name (the method `a5086c8bd5` used)."""
+    return f"\n\ndef _b367_probe(fd: int, p: str) -> None:\n    {imports}\n    {call}\n"
+
+
+_B367_ROWS: Final = (
+    # 1. B-367 verbatim.
+    (
+        "chmod-in-atomic",
+        "safety/atomic.py",
+        _b367_source("os.chmod(fd, 0o600)"),
+        "none",
+    ),
+    (
+        "chmod-in-paths",
+        "safety/paths.py",
+        _b367_source("os.chmod(fd, 0o600)"),
+        "inner",
+    ),
+    (
+        "chmod-in-optimize",
+        "ops/optimize.py",
+        _b367_source("os.chmod(fd, 0o600)"),
+        "outer",
+    ),
+    (
+        "fchmod-in-optimize",
+        "ops/optimize.py",
+        _b367_source("os.fchmod(fd, 0o777)"),
+        "outer",
+    ),
+    # 2. Mirror rows.
+    (
+        "fchmod-in-atomic",
+        "safety/atomic.py",
+        _b367_source("os.fchmod(fd, 0o777)"),
+        "none",
+    ),
+    (
+        "fchmod-in-paths",
+        "safety/paths.py",
+        _b367_source("os.fchmod(fd, 0o777)"),
+        "inner",
+    ),
+    # 3. One outer row per remaining D2 qualified entry, plus the ledger spelling.
+    ("fchown", "ops/optimize.py", _b367_source("os.fchown(fd, 0, 0)"), "outer"),
+    ("lchown", "ops/optimize.py", _b367_source("os.lchown(p, 0, 0)"), "outer"),
+    ("ftruncate", "ops/optimize.py", _b367_source("os.ftruncate(fd, 0)"), "outer"),
+    ("lchmod", "ops/optimize.py", _b367_source("os.lchmod(p, 0o600)"), "outer"),
+    ("posix_fallocate", "ops/optimize.py", _b367_source("os.posix_fallocate(fd, 0, 1)"), "outer"),
+    ("setxattr", "ops/optimize.py", _b367_source("os.setxattr(p, 'user.x', b'1')"), "outer"),
+    ("removexattr", "ops/optimize.py", _b367_source("os.removexattr(p, 'user.x')"), "outer"),
+    ("chflags", "ops/optimize.py", _b367_source("os.chflags(p, 0)"), "outer"),
+    ("lchflags", "ops/optimize.py", _b367_source("os.lchflags(p, 0)"), "outer"),
+    (
+        "shutil-copymode",
+        "ops/optimize.py",
+        _b367_source("shutil.copymode(p, p)", imports="import shutil"),
+        "outer",
+    ),
+    (
+        "shutil-copystat",
+        "ops/optimize.py",
+        _b367_source("shutil.copystat(p, p)", imports="import shutil"),
+        "outer",
+    ),
+    (
+        "shutil-chown",
+        "ops/optimize.py",
+        _b367_source("shutil.chown(p, 'root')", imports="import shutil"),
+        "outer",
+    ),
+    ("fchmodat", "ops/optimize.py", _b367_source("os.fchmodat(fd, 'x', 0o777)"), "outer"),
+    # 4. Method forms of fchmod.
+    (
+        "fchmod-via-fileno",
+        "ops/optimize.py",
+        _b367_source("with open(p, 'rb') as f:\n        os.fchmod(f.fileno(), 0o777)"),
+        "outer",
+    ),
+    (
+        "fchmod-via-from-import",
+        "ops/optimize.py",
+        _b367_source("fchmod(fd, 0o777)", imports="from os import fchmod"),
+        "outer",
+    ),
+    (
+        "fchmod-via-alias",
+        "ops/optimize.py",
+        _b367_source("_o.fchmod(fd, 0o777)", imports="import os as _o"),
+        "outer",
+    ),
+    (
+        "fchmod-via-posix",
+        "ops/optimize.py",
+        _b367_source("posix.fchmod(fd, 0o777)", imports="import posix"),
+        "outer",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "relative", "source", "expected_tier"),
+    _B367_ROWS,
+    ids=[row[0] for row in _B367_ROWS],
+)
+def test_b367_plant_matrix(
+    label: str,
+    relative: str,
+    source: str,
+    expected_tier: str,
+    tmp_path: Path,
+) -> None:
+    """D4: append each spelling to an EXISTING module of a copy of src/ and
+    assert the exact tier it lands in -- `outer` is tier 1 only, `inner` is
+    tier 2 only, `none` is neither (the chokepoint file itself)."""
+    scratch = tmp_path / "src"
+    shutil.copytree(SRC, scratch)
+    target = scratch / "pdf_tooling" / relative
+    target.write_text(target.read_text() + source)
+
+    outer, inner = tier_violations(scan_tree(scratch))
+    # The real tree is clean (both allowlists empty), so anything found is the plant.
+    if outer and inner:
+        observed = "both"
+    elif outer:
+        observed = "outer"
+    elif inner:
+        observed = "inner"
+    else:
+        observed = "none"
+    assert observed == expected_tier, (
+        f"{label}: expected tier {expected_tier!r}, observed {observed!r} "
+        f"(outer={[str(c) for c in outer]}, inner={[str(c) for c in inner]})"
     )

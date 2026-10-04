@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-103] Close D7's file-descriptor blind spot — 2026-10-04
+
+- **The defect was the family, not the entry.** `tests/test_import_boundaries.py` forbade `os.chmod` outside `safety/` but not `os.fchmod`, so a mode, owner or size could change through a descriptor with the walk green (`a5086c8bd5`, `B-367`). The census found twelve more metadata mutators passing undetected (`os.lchown`, `posix_fallocate`, the xattr setters, `chflags`, `shutil.copymode`/`copystat`/`chown`); 13 entries now join each of `QUALIFIED_FORBIDDEN` and `METHOD_FORBIDDEN`.
+- **A runtime derivation arm** keeps every `f`/`l` sibling of a forbidden `os` call forbidden on whatever interpreter runs the suite, so the fd family is derived from the list instead of maintained by hand. A 23-row plant matrix asserts the exact tier (none/inner/outer) for each spelling, and `BENIGN` grew the read-only near-misses (`fsync`, `fstat`, `getxattr`, ...).
+- **Section 8 states the blind spot** (dynamic dispatch, `ctypes`, fd data writes, engine-side changes, `os.umask`, the non-metadata census findings) instead of leaving it to be found later. No product source and no allowlist changed.
+
 ## [PDF-104] Clear the four high npm advisories in `website/` and gate `npm audit` — 2026-10-04
 
 - **Four transitive packages moved, nothing else:** `devalue 5.9.2 → 5.9.4`, `fast-uri 3.1.6 → 3.1.8` (dev-only, but it runs at build time under `astro check`), `http-cache-semantics 4.2.0 → 4.3.0`, `undici 8.10.0 → 8.11.2`. `npm update devalue fast-uri http-cache-semantics undici --package-lock-only` changes exactly those four lock entries (a blanket `npm update --package-lock-only` changes 106); `website/package.json` is byte-unchanged and every fix sits inside its parent's declared range. `npm audit --audit-level=high` goes from 4 high (21 GHSAs) to `found 0 vulnerabilities`.
