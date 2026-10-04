@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-106] Make verification mechanical: a per-spec AUDIT-CONVENTION runner, and audit modules for PDF-82/85/86/88 — 2026-10-04
+
+- **One command per spec's evidence.** `make verify SPEC=PDF-NN` (`scripts/verify_spec.py`, with a small `-p` outcome plugin `scripts/_verify_outcomes.py`) runs one spec's covering node ids plus its module's aggregator controls and prints a per-AC table: which ids ran and how each came out, which ACs are evidenced only by a CI run or a command, and which have no red at all. It exits 0/1/2/3 and prints the code as `runner exit: N` because `make` collapses every non-zero status to 2. It **grants nothing**: the output never contains a verdict word, and the qa-sentinel signs while the project-manager transitions.
+- **Four modules, 72 criteria, taken at the branch base.** `tests/acceptance/audit_pdf_{82,85,86,88}.py` hold one `ACAudit` row per AC (27 / 14 / 16 / 15). The frozen aggregator discovered them by glob with no edit (`tests/test_acceptance_audit.py` 56 -> 80), and `_model.py` was not touched: the CI-evidenced, command-evidenced and unreddenable classes are leading tokens in `red`, enforced by a cohort arm in `tests/test_verify_spec.py` rather than by a new `RedKind`.
+- **Independence by construction.** Three fresh dispatches wrote the runner and the four modules; none of them implemented `PDF-82`, `85`, `86` or `88`. Each module's docstring says so, and every `locally driven` red was re-driven in a private scratch worktree, never copied from the audited spec.
+- **The audit found gaps, and they are handed up as findings, not absorbed.** Examples: over-marking a gated arm reds nothing (`PDF-82` AC10); an in-place edit of a ceiling's genesis record is green (`PDF-82` AC11); five of the eight frozen ceilings can be raised silently (`PDF-86` AC11); and the new startup message's figures do not reach the `-ra` summary at 80 columns (`PDF-86` AC2).
+- **Nothing outside the tests moved.** `src/`, `.github/`, `pyproject.toml`, the four guarded documents, every ceiling, residue and the coverage floor are byte-identical.
+
 ## [PDF-101] Leave no `.pdftoolkit-*` residue when a terminal Ctrl-C reaches the whole process group — 2026-10-04
 
 - **What leaked:** a terminal Ctrl-C signals the whole foreground process group, so every `rasterize` render worker received SIGINT directly. The workers' SIGINT and SIGHUP were reset to `SIG_DFL`, so each died while holding an open `AtomicWriter` and left its empty temp file beside the outputs (ledger `88fae0dff3`, `B-379`; 5 and 1 left in the ledger repro, 5-7 in every one of 10 re-drives).

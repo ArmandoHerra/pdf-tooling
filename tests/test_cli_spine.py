@@ -222,6 +222,7 @@ MAKEFILE_TARGETS = {
     "shim-reap",
     "ci",
     "clean",
+    "verify",
 }
 
 
