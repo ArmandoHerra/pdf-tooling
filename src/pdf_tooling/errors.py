@@ -338,7 +338,7 @@ class DestinationIsInputError(RefusedError):
     """Exit 5 — the resolved destination is one of this run's own inputs.
 
     PDF-89 (`a44a845dbe`). Additive by construction, like every class in this
-    block: the eighth subclass of :class:`RefusedError`, so it introduces no
+    block: the seventh subclass of :class:`RefusedError`, so it introduces no
     new integer and inherits ``kind: "refused"`` unchanged. Raised by
     :func:`~pdf_tooling.safety.paths.ensure_destination_is_not_an_input`, the
     single ``same_destination`` call site this refusal exists to wrap.

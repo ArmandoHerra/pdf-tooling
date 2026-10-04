@@ -52,22 +52,33 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from functools import cache
 from pathlib import Path
 
 import pytest
+
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from spec_id_grammar import (  # noqa: E402
+    CHANGELOG_CANONICAL,
+    CHANGELOG_HISTORICAL,
+    SPEC_ID_GRAMMAR,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = "changelog.md"
 ANCHOR = "<!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->"
 
 HEADING = re.compile(r"^## .*$", re.MULTILINE)
-CANONICAL = re.compile(r"^## \[(?P<id>PDF-\d\d|B-\d+)\] .+ — (?P<date>\d{4}-\d{2}-\d{2})$")
+CANONICAL = CHANGELOG_CANONICAL
 #: B-107. `changelog.md:7` fixes the format; these two landed before it was
 #: enforced by anything, carry a `Task:` prefix inside the bracket and separate
 #: the date with a hyphen rather than an em dash. `grep '^## \[PDF-16\]'`
 #: therefore returns nothing and an id-keyed audit reports both entries missing.
-HISTORICAL = re.compile(r"^## \[Task: (?P<id>PDF-\d\d) — .+\] - (?P<date>\d{4}-\d{2}-\d{2})$")
+HISTORICAL = CHANGELOG_HISTORICAL
 
 #: The last commit that introduced a non-canonical heading. Every heading
 #: introduced AFTER it must be canonical; measured, not assumed.
@@ -110,7 +121,7 @@ LOST_NEEDLE = (
 #: everything that already existed" is the wrong rule.
 PREPEND_EXEMPT = {"cd33ced": "[B-088] fix: restore the changelog entry overwritten at 33bf481"}
 
-OWES_AN_ENTRY = re.compile(r"^\[(PDF-\d\d|B-\d+)\]")
+OWES_AN_ENTRY = re.compile(r"^\[(" + SPEC_ID_GRAMMAR + r"|B-\d+)\]")
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -487,3 +498,64 @@ def test_the_entry_owed_guard_can_fail() -> None:
         "with the register emptied the guard must name exactly the registered "
         f"commits; it named {sorted(offenders)}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-100 — the spec-id grammar admits three digits (X-953, B-383)
+# --------------------------------------------------------------------------- #
+
+
+def malformed_spec_id_subjects(subjects: list[str]) -> list[str]:
+    """Subjects that open with a `[PDF-...]` tag the obligation detector cannot read.
+
+    A strict `OWES_AN_ENTRY` has one blind spot: an ill-formed id owes nothing and nobody
+    notices. This names every such subject, so the blind spot is loud.
+    """
+    return [s for s in subjects if re.match(r"^\[PDF-[^\]]*\]", s) and not OWES_AN_ENTRY.match(s)]
+
+
+def test_a_three_digit_heading_is_canonical_and_parses_its_id_and_date() -> None:
+    match = CANONICAL.match("## [PDF-100] Harness papercuts — 2026-10-05")
+
+    assert match is not None
+    assert match.group("id") == match.group(1) == "PDF-100"
+    assert match.group("date") == match.group(2) == "2026-10-05"
+    assert CANONICAL.match("## [PDF-007] x — 2026-10-05") is None
+    assert CANONICAL.match("## [PDF-1] x — 2026-10-05") is None
+    assert CANONICAL.match("## [PDF-100] x — 26-10-05") is None
+
+
+def test_the_historical_form_stays_two_digit() -> None:
+    text = (REPO_ROOT / CHANGELOG).read_text()
+    task_headings = re.findall(r"^## \[Task: .*$", text, re.MULTILINE)
+
+    assert len(task_headings) == 2
+    assert all(HISTORICAL.match(h) for h in task_headings)
+    assert HISTORICAL.match("## [Task: PDF-100 — x] - 2026-10-05") is None
+
+
+def test_a_three_digit_subject_owes_an_entry() -> None:
+    for owing in ("[PDF-100] fix: x", "[PDF-09] fix: x", "[B-383] fix: x"):
+        assert OWES_AN_ENTRY.match(owing), owing
+    for exempt in ("[PDF-007] fix: x", "[PDF-1] fix: x"):
+        assert OWES_AN_ENTRY.match(exempt) is None, exempt
+
+
+def test_malformed_spec_id_subjects_names_only_the_unreadable_tags() -> None:
+    subjects = [
+        "[PDF-007] fix: a",
+        "[PDF-7] fix: b",
+        "[PDF-100] fix: c",
+        "[B-12] fix: d",
+        "chore: e",
+    ]
+
+    assert malformed_spec_id_subjects(subjects) == ["[PDF-007] fix: a", "[PDF-7] fix: b"]
+
+
+def test_no_commit_subject_carries_a_malformed_spec_id() -> None:
+    require_full_history()
+
+    offenders = malformed_spec_id_subjects([subject_of(sha) for sha in commits()])
+
+    assert offenders == [], "\n  ".join(["commit subject(s) with an illegal spec id:", *offenders])

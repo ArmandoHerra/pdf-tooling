@@ -55,6 +55,7 @@ from registry import (  # noqa: E402
     discover_verbs,
 )
 from registry import run_cli as registry_run_cli  # noqa: E402
+from spec_id_grammar import CHANGELOG_CANONICAL, CHANGELOG_HISTORICAL  # noqa: E402
 from test_license_policy import EXTRA_FORBIDDEN, PLAN_FORBIDDEN  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -2871,12 +2872,10 @@ def test_changelog_prepends_every_spec_entry_below_the_anchor() -> None:
     # Tolerant on the way in: the canonical form AND the two frozen historical
     # `[Task: PDF-NN ...]` headings, so an id-keyed read finds PDF-16's two
     # entries without any landed entry being rewritten to suit this parser.
-    canonical = re.compile(r"^## \[(PDF-\d\d|B-\d+)\] .+ \u2014 (\d{4}-\d{2}-\d{2})$")
-    historical = re.compile(r"^## \[Task: (PDF-\d\d) \u2014 .+\] - (\d{4}-\d{2}-\d{2})$")
     entries: list[tuple[str, str]] = []
     unparsed: list[str] = []
     for heading in headings:
-        match = canonical.match(heading) or historical.match(heading)
+        match = CHANGELOG_CANONICAL.match(heading) or CHANGELOG_HISTORICAL.match(heading)
         if match is None:
             unparsed.append(heading)
         else:

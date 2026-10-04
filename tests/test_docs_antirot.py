@@ -81,6 +81,12 @@ from typing import Any, Final, NamedTuple
 
 import pytest
 
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from spec_id_grammar import SPEC_ID_GRAMMAR  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: The two documents an agent or a newcomer reads first.
@@ -2228,7 +2234,8 @@ BOLD_SPAN = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 #: give the wrong answer on `PDF-25` and `PDF-29`, which both contain "WITHHELD"
 #: and are both genuinely `Verified`.
 VERIFICATION_GRANT = re.compile(r"^(?:VERIFIED|Verified)\s*\(\d{4}-\d{2}-\d{2}\)")
-ROSTER_ROW = re.compile(r"^\|\s*(PDF-\d\d)\s*\|")
+ROSTER_ROW = re.compile(r"^\|\s*(" + SPEC_ID_GRAMMAR + r")\s*\|")
+SPEC_FILE_ID = re.compile(r"^(" + SPEC_ID_GRAMMAR + r")_")
 HEADER_STATUS = re.compile(r"^\*\*Status:\*\*\s*(.*)$", re.MULTILINE)
 
 
@@ -2267,9 +2274,10 @@ def roster_rows(spec_index_text: str) -> dict[str, str]:
 def spec_header_statuses(root: Path) -> dict[str, str]:
     statuses: dict[str, str] = {}
     for path in sorted((root / "specs").glob("PDF-*.md")):
+        id_match = SPEC_FILE_ID.match(path.name)
         match = HEADER_STATUS.search(path.read_text())
-        if match:
-            statuses[path.name[:6]] = match.group(1).strip()
+        if id_match and match:
+            statuses[id_match.group(1)] = match.group(1).strip()
     return statuses
 
 
@@ -4825,3 +4833,32 @@ def test_pdf79_the_register_agreement_arm_can_fail() -> None:
     assert "OR-21" in complaint
     assert "README.md" in complaint
     assert "NEVER AN EDIT TO THIS ARM" in complaint
+
+
+def test_the_roster_parser_keys_three_digit_rows() -> None:
+    """PDF-100: a three-digit roster row is keyed; an ill-formed spelling is not."""
+    ids = ("PDF-09", "PDF-10", "PDF-99", "PDF-100", "PDF-101", "PDF-007", "PDF-1")
+    rows = "\n".join(f"| {i} | t | d | - | 1 | Low | **Proposed (2026-10-04)** |" for i in ids)
+
+    assert set(roster_rows(rows)) == {"PDF-09", "PDF-10", "PDF-99", "PDF-100", "PDF-101"}
+
+
+def test_spec_headers_are_keyed_by_id_not_by_a_six_character_slice(tmp_path: Path) -> None:
+    """`PDF-100_b.md` sliced to six characters collides with `PDF-10` and vanishes."""
+    specs = tmp_path / "specs"
+    specs.mkdir(parents=True)
+    (specs / "PDF-10_a.md").write_text("**Status:** Implemented (2026-08-29)\n")
+    (specs / "PDF-100_b.md").write_text("**Status:** Proposed\n")
+    (specs / "PDF-101_c.md").write_text("**Status:** Implemented (2026-10-05)\n")
+
+    assert spec_header_statuses(tmp_path) == {
+        "PDF-10": "Implemented (2026-08-29)",
+        "PDF-100": "Proposed",
+        "PDF-101": "Implemented (2026-10-05)",
+    }
+
+
+def test_the_prime_doc_spec_id_deny_list_catches_three_digit_ids() -> None:
+    """The deny-grammar is unanchored, so it already refuses a three-digit id as a prefix."""
+    assert SPEC_ID.search("see PDF-100")
+    assert SPEC_ID.search("pdf-101")

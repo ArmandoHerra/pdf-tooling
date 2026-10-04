@@ -687,7 +687,7 @@ def test_ac11_in_place_with_a_destination_flag_is_still_usage_error(
 
 
 # --------------------------------------------------------------------------- #
-# AC14 -- the eighth subclass is additive and takes nothing from `bf697fd3cd`.
+# AC14 -- the seventh subclass is additive and takes nothing from `bf697fd3cd`.
 # --------------------------------------------------------------------------- #
 
 
