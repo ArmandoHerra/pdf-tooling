@@ -484,16 +484,10 @@ jobs:
 
   website:
     name: website
-    # PDF-91. "green runs" below counts deploy-website.yml's `Build` JOB's own
-    # runs, NOT this job's own -- this job does not exist yet, so a p95 over
-    # its own green runs cannot. That population covers `npm ci` + `astro
-    # build` only; `astro check` has no CI population at all, so its summand
-    # below is a SINGLE OBSERVATION on a loaded developer host, not a p95, and
-    # the re-derivation over this job's own first five green runs is OWED once
-    # it exists -- until then the second summand is provisional.
-    # PDF-91 bound: p95 342.0s over 13 green runs (deploy-website.yml `Build`, 33276605892..35539031026, 2026-08-29..2026-09-20);
-    # + 46.0s for `astro check` (no CI population); 3x(342.0+46.0) = 19.4 min, rounded up. Derivation rule above `jobs:`.
-    timeout-minutes: 20
+    # PDF-104 bound: p95 35.0s over 25 green runs (ci.yml `website` job, 35546106008..37230496908, 2026-09-20..2026-10-04) -- this job's OWN population, paying PDF-91's owed re-derivation;
+    # + 3.84s for `make website-audit` (local p95 over 20 runs on a loaded host, no CI population yet); 3x(35.0+3.84) = 2 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    # PDF-91's deploy-website.yml `Build` figure (p95 342.0s) did not reproduce from that job's own timestamps (12-25s), so do not restore it.
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       # fetch-depth: 0 is load-bearing here for the identical reason it is on
@@ -521,3 +515,4 @@ jobs:
           python-version: "3.13"
       - run: uv sync --locked
       - run: make website
+      - run: make website-audit

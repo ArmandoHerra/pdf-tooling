@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-104] Clear the four high npm advisories in `website/` and gate `npm audit` — 2026-10-04
+
+- **Four transitive packages moved, nothing else:** `devalue 5.9.2 → 5.9.4`, `fast-uri 3.1.6 → 3.1.8` (dev-only, but it runs at build time under `astro check`), `http-cache-semantics 4.2.0 → 4.3.0`, `undici 8.10.0 → 8.11.2`. `npm update devalue fast-uri http-cache-semantics undici --package-lock-only` changes exactly those four lock entries (a blanket `npm update --package-lock-only` changes 106); `website/package.json` is byte-unchanged and every fix sits inside its parent's declared range. `npm audit --audit-level=high` goes from 4 high (21 GHSAs) to `found 0 vulnerabilities`.
+- **The gate:** a new `make website-audit` target (`cd website && npm audit --audit-level=high`) and one new step, `- run: make website-audit`, inside the existing `website` job after `make website`. That job is already a required context on `main`, so no branch-protection edit and no job-set move. `deploy-website.yml` inherits the step through its `gate` job. The target is deliberately in neither `make ci` (uv-only) nor `make website` (it needs the registry and its verdict moves with the advisory database).
+- **Derived triple** `12 · 19 · 21` → `12 · 19 · 22`; the manifest gains one `[[check]]`. A new arm, `test_pdf104_the_website_job_gates_npm_audit_at_high`, parses the `website` job with `yaml.safe_load` and drives four scratch-text mutations (step deleted, `continue-on-error`, level lowered, `|| true`) to red.
+- **Bound re-derived over the job's own runs:** p95 35.0s over 25 green `website` runs (35546106008..37230496908) plus 3.84s for the audit, so `3x(35.0+3.84)` is 2 min and the 5 min floor binds: `timeout-minutes` 20 → 5. PDF-91's deploy-`Build` figure (342.0s) did not reproduce from that job's own timestamps (12-25s).
+
 ## [PDF-100] Harness papercuts, batch 1, and a spec-id grammar that admits three digits — 2026-10-04
 
 - **One shared spec-id grammar** (`tests/spec_id_grammar.py`: two digits, or three-plus not starting with `0`) now drives the changelog heading, commit-obligation and roster guards, so the first three-digit id is readable. The `[Task: ...]` historical form stays two-digit on purpose. A census arm refuses a second copy, and a new arm names any commit subject carrying an illegal spec id.

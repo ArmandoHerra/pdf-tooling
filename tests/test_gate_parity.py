@@ -202,20 +202,94 @@ def load_manifest() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_independent_scan_finds_twelve_jobs_nineteen_legs_twenty_one_gating_steps() -> None:
+def test_the_independent_scan_finds_twelve_jobs_nineteen_legs_twenty_two_gating_steps() -> None:
     """PDF-91: `website` is a new single-leg job with one gating step
     (`make website`), re-derived at implementation HEAD -- 11/18/20 -> 12/19/21.
-    PDF-34 D4 made the previous move, `docs-gate`'s: 10/17/19 -> 11/18/20."""
+    PDF-34 D4 made the previous move, `docs-gate`'s: 10/17/19 -> 11/18/20.
+    PDF-104: one gating step inside website, 12/19/21 -> 12/19/22."""
     names, leg_count, gating_counts = independent_derive_from_ci()
     assert len(names) == 12, names
     assert leg_count == 19, leg_count
-    assert sum(gating_counts.values()) == 21, gating_counts
+    assert sum(gating_counts.values()) == 22, gating_counts
 
 
 def test_manifest_parses_with_tomllib_and_declares_schema_version_1() -> None:
     manifest = load_manifest()
     assert manifest["schema_version"] == 1
-    assert len(manifest["check"]) == 21
+    assert len(manifest["check"]) == 22
+
+
+_AUDIT_RECIPE: Final[str] = "cd website && npm audit --audit-level=high"
+
+
+def pdf104_audit_gate_problems(ci_text: str, makefile_text: str) -> list[str]:
+    """PDF-104: pure check that `website` gates `npm audit` at high. `[]` iff
+    (a) the `website` job (scanned with this module's own job/step helpers,
+    not a key grep) has exactly one step running `make website-audit`, with no
+    `continue-on-error` and no `if`, and
+    (b) the Makefile's `website-audit` recipe line is exactly `_AUDIT_RECIPE`."""
+    problems: list[str] = []
+    # This module is deliberately PyYAML-free (see its docstring and
+    # test_this_module_imports_only_the_pure_validator_from_gate_parity), so the
+    # `website` job is read with the same scan helpers the derivation uses.
+    _names, blocks = _job_blocks(ci_text)
+    hits = [
+        chunk
+        for chunk in _step_chunks(blocks.get("website", []))
+        if _extract_run_and_name(chunk)[0] == "make website-audit"
+    ]
+    if len(hits) != 1:
+        problems.append(f"website job has {len(hits)} `make website-audit` steps, want exactly 1")
+    for chunk in hits:
+        if any(re.match(r"^\s*(- )?continue-on-error:", line) for line in chunk):
+            problems.append("the `make website-audit` step carries continue-on-error")
+        if any(re.match(r"^\s*(- )?if:", line) for line in chunk):
+            problems.append("the `make website-audit` step carries an `if` condition")
+    lines = makefile_text.splitlines()
+    recipe = None
+    for i, line in enumerate(lines):
+        if line.startswith("website-audit:"):
+            recipe = lines[i + 1] if i + 1 < len(lines) else ""
+            break
+    if recipe is None:
+        problems.append("Makefile has no `website-audit` target")
+    elif recipe != "\t" + _AUDIT_RECIPE:
+        problems.append(f"website-audit recipe is {recipe!r}, want a tab + {_AUDIT_RECIPE!r}")
+    return problems
+
+
+def test_pdf104_the_website_job_gates_npm_audit_at_high() -> None:
+    found = pdf104_audit_gate_problems(CI_WORKFLOW.read_text(), MAKEFILE_PATH.read_text())
+    assert not found, found
+
+
+def test_pdf104_scratch_text_reds_the_audit_gate() -> None:
+    """PDF-60 HC-4 pattern: mutate IN-MEMORY text, never the tracked file."""
+    ci, mk = CI_WORKFLOW.read_text(), MAKEFILE_PATH.read_text()
+    step = "      - run: make website-audit\n"
+    assert step in ci and _AUDIT_RECIPE in mk
+    mutations = {
+        "step deleted": (ci.replace(step, "", 1), mk, "0 `make website-audit` steps"),
+        "continue-on-error": (
+            ci.replace(step, step + "        continue-on-error: true\n", 1),
+            mk,
+            "continue-on-error",
+        ),
+        "level lowered": (
+            ci,
+            mk.replace("--audit-level=high", "--audit-level=critical", 1),
+            "recipe is",
+        ),
+        "|| true": (
+            ci,
+            mk.replace("npm audit --audit-level", "npm audit || true --audit-level", 1),
+            "recipe is",
+        ),
+    }
+    for label, (ci_text, mk_text, needle) in mutations.items():
+        problems = pdf104_audit_gate_problems(ci_text, mk_text)
+        assert problems, label
+        assert any(needle in p for p in problems), (label, problems)
 
 
 def test_gate_parity_check_subcommand_agrees_with_the_independent_scan() -> None:
