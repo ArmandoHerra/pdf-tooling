@@ -6,8 +6,8 @@ That integration file is what actually proves the guarantee end to end
 (real CLI subprocess, real signals, real process teardown); this file
 proves the PIECES the mechanism is built from, each in isolation:
 
-* the worker `initializer=` resets SIGINT/SIGHUP and installs a
-  worker-local SIGTERM handler -- observed FROM INSIDE a real
+* the worker `initializer=` installs ONE worker-local handler on all three
+  guarded signals (PDF-101) -- observed FROM INSIDE a real
   `ProcessPoolExecutor` worker (never by calling the initializer in this
   test's own process, which would mutate the test runner's own signal
   state);
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import operator
 import re
 import signal
 import sys
@@ -30,7 +31,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
 
@@ -62,11 +63,16 @@ def _sleep_forever_ish(_marker: int) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_worker_initializer_resets_sigint_and_sighup_to_default() -> None:
+def test_worker_initializer_installs_the_worker_local_handler_on_all_three_signals() -> None:
+    """PDF-101 (AC9): this replaces the pin that SIGINT/SIGHUP are ``SIG_DFL``.
+    A group Ctrl-C reaches a worker directly, and ``SIG_DFL`` killed it while it
+    held an open writer -- so all three guarded signals report the unwinding handler.
+    """
     with ProcessPoolExecutor(max_workers=1, initializer=procpool._worker_initializer) as executor:
         state = executor.submit(_report_signal_state, 0).result(timeout=30)
-    assert state["SIGINT"] == repr(signal.SIG_DFL), state
-    assert state["SIGHUP"] == repr(signal.SIG_DFL), state
+    for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+        assert "_raise_worker_unwind" in state[name], state
+        assert state[name] != repr(signal.SIG_DFL), state
 
 
 def test_worker_initializer_installs_a_worker_local_sigterm_handler() -> None:
@@ -99,14 +105,78 @@ def test_worker_initializer_called_directly_sets_the_exact_dispositions_describe
     before = {sig: signal.getsignal(sig) for sig in signals}
     try:
         procpool._worker_initializer()
-        assert signal.getsignal(signal.SIGINT) is signal.SIG_DFL
-        assert signal.getsignal(signal.SIGHUP) is signal.SIG_DFL
-        assert signal.getsignal(signal.SIGTERM) is procpool._raise_worker_unwind
+        for sig in signals:
+            assert signal.getsignal(sig) is procpool._raise_worker_unwind
     finally:
         for sig, handler in before.items():
             signal.signal(sig, handler)  # type: ignore[arg-type]
     after = {sig: signal.getsignal(sig) for sig in signals}
     assert after == before
+
+
+# --------------------------------------------------------------------------- #
+# PDF-101: the worker-only code, covered IN-PROCESS (coverage.py does not trace
+# into pool workers). Every disposition touched is restored.
+# --------------------------------------------------------------------------- #
+
+
+class _Exited(BaseException):
+    """Stands in for ``os._exit`` so a test can observe the status it was given."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(status)
+        self.status = status
+
+
+def test_the_first_signal_repoints_all_three_to_a_python_absorber_then_raises() -> None:
+    signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+    before: dict[signal.Signals, Any] = {sig: signal.getsignal(sig) for sig in signals}
+    try:
+        with pytest.raises(procpool._WorkerUnwind) as caught:
+            procpool._raise_worker_unwind(signal.SIGINT, None)
+        assert caught.value.signum == signal.SIGINT
+        for sig in signals:
+            # A Python callable, never SIG_IGN: CPython raises "Signal N ignored due to
+            # race condition" inside cleanup code when a tripped signal goes to SIG_IGN.
+            assert signal.getsignal(sig) is procpool._absorb_signal
+    finally:
+        for sig, handler in before.items():
+            signal.signal(sig, handler)
+    assert {sig: signal.getsignal(sig) for sig in signals} == before
+
+
+def test_a_worker_unwind_is_a_quiet_system_exit_that_is_not_an_exception() -> None:
+    unwind = procpool._WorkerUnwind(signal.SIGHUP)
+    assert isinstance(unwind, SystemExit)
+    assert not isinstance(unwind, Exception)
+    assert unwind.signum == signal.SIGHUP
+
+
+def test_run_task_returns_the_value_of_a_task_that_completes() -> None:
+    assert procpool._run_task(operator.add, 2, 3) == 5
+
+
+def test_run_task_lets_every_other_exception_through_unchanged() -> None:
+    def boom() -> None:
+        raise ValueError("not a teardown")
+
+    with pytest.raises(ValueError, match="not a teardown"):
+        procpool._run_task(boom)
+
+
+def test_run_task_exits_the_worker_with_128_plus_the_signal_once_the_unwind_is_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_exit(status: int) -> None:
+        raise _Exited(status)
+
+    def unwinding() -> None:
+        raise procpool._WorkerUnwind(signal.SIGINT)
+
+    monkeypatch.setattr(procpool.os, "_exit", fake_exit)
+    with pytest.raises(_Exited) as caught:
+        procpool._run_task(unwinding)
+    assert caught.value.status == 128 + signal.SIGINT == 130
 
 
 # --------------------------------------------------------------------------- #

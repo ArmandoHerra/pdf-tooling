@@ -36,13 +36,15 @@ uses.
 **A second stdlib fact that shapes the worker-side handler.**
 ``concurrent.futures.process._process_worker`` wraps every submitted call in
 ``except BaseException`` and loops back to wait for the next work item — it
-does NOT exit the process. This means raising an exception from inside a
-render call (however it is raised, ``SystemExit`` included) can unwind an
-in-flight :class:`~pdf_tooling.safety.atomic.AtomicWriter` cleanly, but
-cannot by itself end the worker. :func:`_terminate_pool`'s own SIGKILL, sent
-once the grace window elapses, is what actually ends it. The raised exception
-in :func:`_worker_initializer` therefore exists ONLY to buy the write
-chokepoint a chance to discard its temp file before that SIGKILL lands
+does NOT exit the process. Raising an exception from inside a render call
+(however it is raised, ``SystemExit`` included) can unwind an in-flight
+:class:`~pdf_tooling.safety.atomic.AtomicWriter` cleanly, but the stdlib then
+leaves the worker alive. PDF-101 therefore submits every task through
+:func:`_run_task` (see :class:`_GuardedExecutor`), which ends the worker with
+``os._exit`` the moment its unwind has completed. The raised exception from
+:func:`_worker_initializer`'s handler buys the write chokepoint its chance to
+discard the temp file, and :func:`_run_task` makes the exit prompt instead of
+leaving it to :func:`_terminate_pool`'s SIGKILL at the end of the grace window
 (design consideration (e) — trading orphaned processes for orphaned
 ``.pdftoolkit-*`` temp files would not be a fix either).
 
@@ -90,15 +92,14 @@ Python's default ``KeyboardInterrupt`` unwind: measured directly against
 this exact command (``rasterize --threads 8`` over a 40-page document,
 ``kill -INT <parent pid only>``, unfixed code), a bare single-process SIGINT
 does NOT stop the job — the run completes in full, identically to the
-SIGTERM defect this spec was filed against. "SIGINT is already clean" is
-true only for an interactive terminal Ctrl-C, which signals the WHOLE
-foreground process group and kills workers directly, independent of
-anything this process does; ``kill -INT <pid>`` (a supervisor's own
-single-process signal, and the exact discipline the automated regression
-test below uses) receives no such help by accident. Folding SIGINT into
-this same teardown makes it clean by construction instead, which is a
-strict improvement over relying on process-group luck and answers "did you
-regress SIGINT?" with a mechanism instead of a hope.
+SIGTERM defect this spec was filed against. An interactive terminal Ctrl-C
+signals the WHOLE foreground process group, so a group delivery reaches every
+worker directly as well as the parent, and each worker unwinds through the
+same worker-local handler (PDF-101); ``kill -INT <pid>`` (a supervisor's own
+single-process signal, and the discipline the parent-only regression arms
+below use) reaches the parent alone. Folding SIGINT into this same teardown
+makes both clean by construction, which answers "did you regress SIGINT?"
+with a mechanism instead of a hope.
 
 **SIGKILL to the parent cannot be handled. This is stated, not implied.** A
 ``SIGKILL``ed process gets no code to run at all — no signal handler,
@@ -125,10 +126,10 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Iterator
-from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ProcessPoolExecutor
 from contextlib import contextmanager
-from typing import Final
+from typing import Final, ParamSpec, TypeVar
 
 __all__ = ["guarded_process_pool"]
 
@@ -222,6 +223,12 @@ def _mp_context() -> multiprocessing.context.BaseContext:
 #: it is not merely a ceiling; treat raising it as directly, linearly
 #: costing wall-clock, and consider it money well spent against residue
 #: rather than a knob to shrink casually.
+#:
+#: 2026-10-04 (PDF-101): CORRECTION to the "paid in full" sentence above. A worker
+#: now ends itself once its unwind has completed (`_run_task`), so this window is a
+#: CEILING again and not a bill. It is paid in full only by a worker held inside a
+#: C call for longer than the grace, which is the quantity the PDF-78 block below
+#: measures and still bounds.
 #:
 #: ------------------------- PDF-78: THE MEASUREMENT -------------------------
 #: EVERYTHING ABOVE THIS LINE IS WHY 6.0 WAS PLAUSIBLE. It was never measured
@@ -327,24 +334,89 @@ _POLL_S: Final[float] = 0.05
 _GUARDED_SIGNAL_NAMES: Final[tuple[str, ...]] = ("SIGTERM", "SIGINT", "SIGHUP")
 
 
-class _WorkerUnwind(BaseException):
-    """Raised inside a render worker's own SIGTERM handler (never elsewhere).
+class _WorkerUnwind(SystemExit):
+    """Raised inside a render worker's own signal handler (never elsewhere).
 
-    Deliberately a `BaseException`, not an `Exception`: `_render_one`'s own
-    `except PdfToolingError` (a plain `Exception` subclass) must never catch
-    it and turn a teardown into an ordinary failed-page result.
+    Not an `Exception`: `_render_one`'s own `except PdfToolingError` (a plain
+    `Exception` subclass) must never catch it and turn a teardown into an
+    ordinary failed-page result. It is a `SystemExit` rather than a bare
+    `BaseException` (PDF-101) for the idle worker: a signal that lands while the
+    worker waits in `call_queue.get()` raises OUTSIDE any task, and
+    `multiprocessing`'s bootstrap treats a `SystemExit` as a quiet exit where any
+    other `BaseException` gets a printed traceback.
 
-    Never escapes the worker PROCESS on its own -- see this module's
-    docstring for the verified stdlib fact that makes that true. Its only
-    job is to propagate through whatever `with AtomicWriter(...)` block the
-    worker happens to be inside when the signal arrives, so that block's
-    `__exit__` discards its temp file before `_terminate_pool`'s SIGKILL
-    lands.
+    `signum` is the signal that started the unwind. `SystemExit.code` carries
+    ``128 + signum`` so an idle worker's exit status matches the one
+    :func:`_run_task` gives a worker that was mid-task. Product code reads
+    `signum`, never `code` (whose type is ``str | int | None``).
+
+    Inside a task it is caught by :func:`_run_task`, which ends the worker once
+    the unwind has finished: its only job is to propagate through whatever
+    `with AtomicWriter(...)` block the worker happens to be inside when the signal
+    arrives, so that block's `__exit__` discards its temp file.
     """
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(128 + signum)
+        self.signum = signum
+
+
+def _absorb_signal(signum: int, _frame: object) -> None:
+    """Swallow a signal that arrives AFTER a worker's unwind has begun.
+
+    A Python callable and never `SIG_IGN`: CPython raises ``OSError: Signal N
+    ignored due to race condition`` at the next bytecode boundary when a signal
+    that was already tripped at the C level has had its disposition changed to
+    `SIG_IGN` or `SIG_DFL`, and in an unwinding worker that boundary is inside
+    the cleanup code. A callable is simply invoked and returns.
+    """
+    return None
 
 
 def _raise_worker_unwind(signum: int, _frame: object) -> None:
+    """The one worker-local handler for every guarded signal (PDF-101).
+
+    One-shot: the FIRST signal re-points all three names to :func:`_absorb_signal`
+    and then raises. A group Ctrl-C delivers SIGINT and the parent's own
+    `_terminate_pool` delivers SIGTERM milliseconds later. Those are different
+    signal numbers, so they do not coalesce, and a second raise landing inside
+    `AtomicWriter._discard` would lose the unlink (measured: residue in 10 of 10
+    trials).
+    """
+    for name in _GUARDED_SIGNAL_NAMES:
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(sig, _absorb_signal)
     raise _WorkerUnwind(signum)
+
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def _run_task(fn: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) -> T:
+    """Run one task in a worker and end the worker once its unwind is complete.
+
+    Without this the unwound worker is caught by `concurrent.futures.process.
+    _process_worker`'s own `except BaseException`, which loops back to
+    `call_queue.get()` and leaves the worker alive until the parent's SIGKILL at
+    the end of `TEARDOWN_GRACE_S` (measured 16.1-16.3 s on a 0.1 s Ctrl-C).
+    """
+    try:
+        return fn(*args, **kwargs)
+    except _WorkerUnwind as unwind:
+        # Every `with` block inside `fn` -- the AtomicWriter included -- has exited
+        # by now, and `_raise_worker_unwind` has re-pointed all three signals to the
+        # absorber, so nothing can interrupt this exit.
+        os._exit(128 + unwind.signum)
+
+
+class _GuardedExecutor(ProcessPoolExecutor):
+    """A `ProcessPoolExecutor` whose tasks run under :func:`_run_task`."""
+
+    def submit(self, fn: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) -> Future[T]:
+        return super().submit(_run_task, fn, *args, **kwargs)
 
 
 def _worker_initializer() -> None:
@@ -370,26 +442,19 @@ def _worker_initializer() -> None:
     # branching on start method) is correct under all three and a genuine
     # no-op under the two that do not need it.
     #
-    # SIGTERM gets a WORKER-LOCAL handler instead of a bare reset to
-    # SIG_DFL: `Process.terminate()` -- the only way this module ever
-    # signals a worker directly -- always sends SIGTERM, and SIG_DFL kills
-    # the process with no chance for an open `AtomicWriter` to unwind, which
-    # is precisely what would leave `.pdftoolkit-*` residue (design (e)).
-    # SIGINT/SIGHUP reset to plain SIG_DFL: nothing in this product ever
-    # signals a worker with either directly (they would only reach a worker
-    # via a real, whole-process-group delivery this teardown never controls
-    # in the first place), and inheriting the parent's pool-shaped handler
-    # for them under `fork` would be the identical hazard SIGTERM has.
-    for name in ("SIGINT", "SIGHUP"):
+    # EVERY guarded signal gets the ONE worker-local handler (PDF-101), not a bare
+    # reset to SIG_DFL. A terminal Ctrl-C signals the whole foreground process
+    # group, so a worker receives SIGINT (and a hang-up, SIGHUP) directly, and
+    # SIG_DFL killed it with no chance for an open `AtomicWriter` to unwind --
+    # which is exactly what left `.pdftoolkit-*` residue (design (e)).
+    # `Process.terminate()` sends SIGTERM and the parent's teardown follows a group
+    # signal milliseconds later, so all three names unwind through the same handler.
+    for name in _GUARDED_SIGNAL_NAMES:
         sig = getattr(signal, name, None)
         if sig is None:  # pragma: no cover - POSIX-only names, not on Windows
             continue
         with contextlib.suppress(ValueError, OSError):
-            signal.signal(sig, signal.SIG_DFL)
-    term = getattr(signal, "SIGTERM", None)
-    if term is not None:  # pragma: no branch - SIGTERM exists on every CI platform
-        with contextlib.suppress(ValueError, OSError):
-            signal.signal(term, _raise_worker_unwind)
+            signal.signal(sig, _raise_worker_unwind)
 
     # (b) SIGKILL to the PARENT is uncatchable -- nothing in this process
     # can react to it. PR_SET_PDEATHSIG is the one thing the CHILD side can
@@ -502,7 +567,7 @@ def guarded_process_pool(max_workers: int) -> Iterator[ProcessPoolExecutor]:
     signals guarded and others not, would be a worse, silently inconsistent
     state than none at all).
     """
-    executor = ProcessPoolExecutor(
+    executor = _GuardedExecutor(
         max_workers=max_workers,
         mp_context=_mp_context(),
         initializer=_worker_initializer,

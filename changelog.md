@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-101] Leave no `.pdftoolkit-*` residue when a terminal Ctrl-C reaches the whole process group — 2026-10-04
+
+- **What leaked:** a terminal Ctrl-C signals the whole foreground process group, so every `rasterize` render worker received SIGINT directly. The workers' SIGINT and SIGHUP were reset to `SIG_DFL`, so each died while holding an open `AtomicWriter` and left its empty temp file beside the outputs (ledger `88fae0dff3`, `B-379`; 5 and 1 left in the ledger repro, 5-7 in every one of 10 re-drives).
+- **Fix:** one worker-local handler now covers SIGTERM, SIGINT and SIGHUP. The first signal re-points all three to a Python absorber and raises `_WorkerUnwind` (now a `SystemExit` subclass carrying `signum`), so the parent's follow-up SIGTERM cannot interrupt the unwind; a new `_run_task` wrapper, applied inside `procpool` by `_GuardedExecutor`, then `os._exit`s the worker once the unwind has finished, so the parent no longer waits out `TEARDOWN_GRACE_S`. `_terminate_pool`, `_is_alive`, `_teardown_and_die` and `TEARDOWN_GRACE_S` are unchanged.
+- **Unchanged contract:** the parent still dies by the signal (`rc -2`, `$?` 130); no CLI, exit-code or envelope change. The grace is a ceiling again rather than a bill, so the three parent-only signal arms stop paying it in full.
+- **Tests:** new `tests/integration/test_procpool_group_signals.py` (deterministic group-signal harness: workers parked in pure Python holding an open writer, signalled only after every ready marker exists), the two `SIG_DFL` pins in `tests/unit/test_procpool.py` inverted, and in-process arms for the worker-only code. Prose that claimed a group delivery "kills workers directly" is corrected in `procpool.py` and `test_rasterize_signals.py`.
+
 ## [PDF-102] Stop `make docs-gate` reddening for the verifier: the xdist race and the newest-sweep pointer — 2026-10-04
 
 - **The old-env-var plant left the shared tree.** `test_ac4_the_env_var_row_reds_on_a_planted_old_occurrence` now plants into a per-test scratch git repo (`tmp_path`), with a negative twin and a structural guard that the scratch root is outside the repository, so no `git grep --untracked` reader on another xdist worker can see it.
