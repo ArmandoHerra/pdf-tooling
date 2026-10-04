@@ -47,6 +47,15 @@ def test_every_fixture_matches_its_own_spec(built: Corpus, name: str) -> None:
     else:
         assert not reader.is_encrypted, f"{name}: spec says plain but reader disagrees"
 
+    # PDF-99 -- `/Info`'s ABSENCE is asserted in both directions (the B-084
+    # rule): every fixture but `no_info` must CARRY one, so a builder change
+    # cannot quietly remove the only absent case or add a second by accident.
+    # The encrypted fixture is checked after `decrypt` (above).
+    assert ("/Info" in reader.trailer) is (not spec.info_absent), (
+        f"{name}: spec says info_absent={spec.info_absent} but the trailer "
+        f"{'carries' if '/Info' in reader.trailer else 'has no'} /Info"
+    )
+
     assert len(reader.pages) == spec.page_count, f"{name}: page count"
     for index, page in enumerate(reader.pages):
         text = page.extract_text()

@@ -728,6 +728,21 @@ class PypdfStructureAdapter:
         xmp = writer.xmp_metadata
         had_xmp = xmp is not None
 
+        # PDF-99: `PdfWriter(clone_from=reader)._info` is `None` -- not an empty
+        # dictionary -- whenever the source has no usable `/Info`. Measured on
+        # pypdf 6.19.0: a missing trailer entry and a dangling `/Info` reference
+        # both reach it, and `writer.metadata` (the public getter, a COPY, so
+        # useless as an edit target) is `None` for both, which makes it the
+        # absence test. `/Info` is created through the public `add_metadata({})`
+        # only when a set needs somewhere to write; a clear-only run on an absent
+        # `/Info` has nothing to clear, so the `/Info` half is a no-op and the
+        # XMP half still runs. The private `_info` below is read only when `/Info`
+        # exists (or was just created), for the live dict edit PDF-14 D2.3 needs.
+        info_absent = writer.metadata is None
+        if info_absent and sets and not clear_all:
+            writer.add_metadata({})
+            info_absent = False
+
         if clear_all:
             # D2.3's documented, commented deviation: the public setter
             # cannot preserve non-string types AND cannot remove a key, so
@@ -736,17 +751,19 @@ class PypdfStructureAdapter:
             # removing `/Info` from the trailer entirely -- AC7 accepts
             # either ("empty/absent"), and an empty dictionary is the
             # behaviour `PdfWriter.metadata = None` itself already produces
-            # elsewhere in this codebase's own conventions.
-            writer_info: Any = writer._info  # noqa: SLF001 -- see above; `Any` sidesteps
-            # the stub's `DictionaryObject | None` -- `PdfWriter(clone_from=...)`
-            # populates `_info` only when the source HAS `/Info`, so the `None`
-            # arm IS reachable (probed on pypdf 6.16.2 and 6.19.0; PDF-98).
-            writer_info.get_object().clear()
+            # elsewhere in this codebase's own conventions. When `/Info` is
+            # ABSENT (PDF-99) it is left absent instead: creating an empty
+            # `/Info` on a run whose purpose is to remove metadata would be
+            # the wrong direction.
+            if not info_absent:
+                writer_info: Any = writer._info  # noqa: SLF001 -- see above; `Any` sidesteps
+                # the stub's `DictionaryObject | None`; `info_absent` is the guard.
+                writer_info.get_object().clear()
             writer.xmp_metadata = None
             wrote_xmp = had_xmp
         else:
-            writer_info = writer._info  # noqa: SLF001 -- see above
-            info: Any = writer_info.get_object()
+            writer_info = None if info_absent else writer._info  # noqa: SLF001 -- see above
+            info: Any = None if writer_info is None else writer_info.get_object()
             for field, value in sets.items():
                 _, info_name, xmp_attr = _alignment_row(field)
                 info[NameObject("/" + info_name)] = TextStringObject(value)
@@ -755,7 +772,7 @@ class PypdfStructureAdapter:
             for field in clears:
                 _, info_name, xmp_attr = _alignment_row(field)
                 key = NameObject("/" + info_name)
-                if key in info:
+                if info is not None and key in info:
                     del info[key]
                 if xmp is not None:
                     _set_xmp_field(xmp, xmp_attr, field, None)

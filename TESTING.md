@@ -29,16 +29,16 @@ uv run pytest --update-golden -q          # regenerate tests/golden/ files; revi
 
 ## The generated fixture corpus
 
-`tests/corpus.py` builds seventeen deterministic PDFs (`multipage_text`,
+`tests/corpus.py` builds eighteen deterministic PDFs (`multipage_text`,
 `ten_page_text`, `rotated`, `jpeg_page`, `encrypted_aes256`, `metadata_rich`,
 `single_page`, `tabular`, `metadata_typed`, `xmp_bearing`, `xmp_disagreement`,
 `residual_surfaces`, `no_contents_page`, `empty_contents_page`, `stamp_source`,
-`rotate_absent`, `shared_contents_pages`)
+`rotate_absent`, `shared_contents_pages`, `no_info`)
 with `reportlab`, once per test session, into pytest's own scratch directory
 — never into the repository tree. Each fixture's expected values (page count,
 per-page text, rotation, metadata, encryption, cell grid) live in the same
 file as its generator, so a fixture can never silently drift from what a test
-asserts against it. Sixteen of the seventeen are byte-identical across two
+asserts against it. Seventeen of the eighteen are byte-identical across two
 independent builds; `encrypted_aes256` is the one honest exemption (a fresh
 AES-256 salt every build) and is instead proven semantically. See
 `tests/corpus.py`'s module docstring and `tests/test_corpus.py`.

@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-99] Return the envelope, not a traceback, when `meta set` meets a PDF with no `/Info` — 2026-10-04
+
+- **What crashed:** `meta set` on a PDF with no document-information dictionary (a missing `/Info`, a dangling `/Info` reference, or an XMP-only file) exited 1 with a raw `AttributeError` traceback and no JSON envelope, for `--title`/`--author`-style sets, `--clear-producer`, `--clear-all` and `--in-place`. `--dry-run` predicted 0.
+- **Now:** every one of those exits 0 with the normal envelope. A set creates `/Info` and writes the field; `--clear-all` and `--clear-producer` leave an absent `/Info` absent, and an XMP packet, if present, is still synced or removed. `--dry-run` and the real run agree.
+- **Unchanged:** a PDF that already has `/Info` takes the exact same path as before (original value types preserved, `--clear-all` leaves an empty `/Info`); no XMP packet is ever created.
+- **Tests:** new corpus fixture `no_info` (the trailer carries no `/Info`, asserted in both directions across the corpus) and a document-shape × verb matrix with a census that fails when a new metadata access site appears.
+
 ## [PDF-98] Clear the dependency advisories that red `vulncheck` — 2026-10-04
 
 - **The `pypdf[crypto]` floor moved `6.16.2` → `6.19.0` (ceiling `<7` kept).** 6.19.0 is the lowest version that fixes all eight `PYSEC-2026-4153…4160` advisories (4157/4159/4160 are fixed only there); no fix needs 7.x.
