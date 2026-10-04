@@ -381,6 +381,13 @@ PURITY_INVOCATIONS: Final = (
 SPAWNING_PORTS: Final = ("OcrEngine", "OfficeConverter")
 
 
+def expected_purity_exit(argv: tuple[str, ...], report: dict[str, Any]) -> int:
+    """`doctor` exits 0 with engines missing; `--strict` exits 3 when any port is unavailable
+    (cmd_doctor.py's contract, tests :222/:236). The literal 3 is deliberate: the oracle must
+    not import the constant it checks."""
+    return 3 if "--strict" in argv and not all_engines_present(report) else 0
+
+
 def _purity_environment(base: Path) -> tuple[dict[str, str], tuple[Path, ...]]:
     """A redirected `$HOME`/`$TMPDIR` plus a scratch working tree as roots.
 
@@ -424,7 +431,12 @@ def test_doctor_writes_nothing_on_an_engines_present_host(
     env, roots = _purity_environment(tmp_path)
     before = snapshot(*roots)
     result = run_cli(*argv, env=env)
-    assert result.returncode == 0, f"{argv}: exit {result.returncode}: {result.stderr}"
+    expected = expected_purity_exit(argv, report)
+    assert result.returncode == expected, f"{argv}: exit {result.returncode}: {result.stderr}"
+    if expected == 3:
+        for row in report["ports"]:
+            if not row["available"]:
+                assert row["port"] in result.stderr, f"{argv}: stderr omits {row['port']}"
     differences = diff(before, snapshot(*roots))
     assert differences == [], (
         f"`pdftooling {' '.join(argv)}` made {len(differences)} filesystem difference(s) "
@@ -435,6 +447,21 @@ def test_doctor_writes_nothing_on_an_engines_present_host(
         "adapters/subprocess_util.probe_env() is what stops the soffice version query "
         "writing into the operator's home."
     )
+
+
+def test_the_purity_cells_expected_exit_follows_the_strict_contract() -> None:
+    present = {"ports": [{"port": "OcrEngine", "available": True}]}
+    missing = {
+        "ports": [
+            {"port": "OcrEngine", "available": False},
+            {"port": "OfficeConverter", "available": True},
+        ]
+    }
+
+    assert expected_purity_exit(("doctor", "--strict"), present) == 0
+    assert expected_purity_exit(("doctor", "--strict"), missing) == 3
+    assert expected_purity_exit(("doctor",), missing) == 0
+    assert expected_purity_exit(("doctor", "-o", "json"), missing) == 0
 
 
 def test_the_sandbox_did_not_blind_the_probe(report: dict[str, Any], tmp_path: Path) -> None:

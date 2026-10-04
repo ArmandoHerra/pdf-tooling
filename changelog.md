@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-100] Harness papercuts, batch 1, and a spec-id grammar that admits three digits — 2026-10-04
+
+- **One shared spec-id grammar** (`tests/spec_id_grammar.py`: two digits, or three-plus not starting with `0`) now drives the changelog heading, commit-obligation and roster guards, so the first three-digit id is readable. The `[Task: ...]` historical form stays two-digit on purpose. A census arm refuses a second copy, and a new arm names any commit subject carrying an illegal spec id.
+- **The spec-header map is keyed by id, not by a six-character slice** (`PDF-100_….md` used to collapse into `PDF-10` and every three-digit header silently vanished from the roster-agreement arms).
+- **`doctor --strict` purity cell:** its expected exit is now computed from the doctor report (exit 3 when a port is unavailable), so it stops going red on a host with soffice but no tesseract, and its filesystem-purity assertions finally run there.
+- **Two prose falsehoods removed:** the `make doctor` help string (it exits 0, not 2) and the ordinal in `DestinationIsInputError`'s docstring (the seventh subclass of `RefusedError`, not the eighth).
+
 ## [PDF-99] Return the envelope, not a traceback, when `meta set` meets a PDF with no `/Info` — 2026-10-04
 
 - **What crashed:** `meta set` on a PDF with no document-information dictionary (a missing `/Info`, a dangling `/Info` reference, or an XMP-only file) exited 1 with a raw `AttributeError` traceback and no JSON envelope, for `--title`/`--author`-style sets, `--clear-producer`, `--clear-all` and `--in-place`. `--dry-run` predicted 0.
