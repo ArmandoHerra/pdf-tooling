@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-102] Stop `make docs-gate` reddening for the verifier: the xdist race and the newest-sweep pointer — 2026-10-04
+
+- **The old-env-var plant left the shared tree.** `test_ac4_the_env_var_row_reds_on_a_planted_old_occurrence` now plants into a per-test scratch git repo (`tmp_path`), with a negative twin and a structural guard that the scratch root is outside the repository, so no `git grep --untracked` reader on another xdist worker can see it.
+- **The newest-sweep pointer asserts a dated predicate, not a superlative.** The arm is now `test_the_named_sweep_was_the_newest_when_the_pointer_was_written`: no sweep-class, verdict-bearing run was minted between the named sweep and the commit that wrote the pointer, so a later sweep can no longer falsify it.
+- **The run classifier lets the first of `sweep`/`verif` in a Mode line decide**, so a full sweep that also verified findings is filed as a sweep; all frozen rows are unchanged.
+- **Suffixed run ids (`2026-09-18_091200_sweep`) now parse whole** in the sweep-id grammar.
+- **README `## Known issues` re-pointed** at the newest sweep and reworded as a dated claim.
+
 ## [PDF-103] Close D7's file-descriptor blind spot — 2026-10-04
 
 - **The defect was the family, not the entry.** `tests/test_import_boundaries.py` forbade `os.chmod` outside `safety/` but not `os.fchmod`, so a mode, owner or size could change through a descriptor with the walk green (`a5086c8bd5`, `B-367`). The census found twelve more metadata mutators passing undetected (`os.lchown`, `posix_fallocate`, the xattr setters, `chflags`, `shutil.copymode`/`copystat`/`chown`); 13 entries now join each of `QUALIFIED_FORBIDDEN` and `METHOD_FORBIDDEN`.
