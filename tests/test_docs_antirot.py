@@ -2437,7 +2437,9 @@ def test_no_roster_row_contradicts_its_own_evidence() -> None:
 # --------------------------------------------------------------------------- #
 
 KNOWN_ISSUES_HEADING = "## Known issues"
-SWEEP_ID = re.compile(r"\b(\d{4}-\d{2}-\d{2}_\d{6})\b")
+#: PDF-102 D4: the captured group is the WHOLE directory name, so a run whose
+#: name carries a `_suffix` (B-362: `2026-09-18_091200_sweep`) can be named.
+SWEEP_ID = re.compile(r"\b(\d{4}-\d{2}-\d{2}_\d{6}(?:_[A-Za-z0-9][A-Za-z0-9-]*)?)(?![A-Za-z0-9_-])")
 SHORT_SHA = re.compile(r"\b([0-9a-f]{7,40})\b")
 
 #: AC22, strengthened by X-368. A sweep directory that carries none of these is
@@ -2483,7 +2485,9 @@ def classify_run(*, name: str, mode_line: str | None) -> str:
     1. Declared mode wins. A `**Mode:**` line matching `verif` case-
        insensitively (catches `` `verify` ``, `` `verify PDF-26` `` and
        `narrow re-verify`) is a **verification**; one matching `sweep` is a
-       **sweep**.
+       **sweep**. When a line declares BOTH words, the one that occurs
+       FIRST decides (PDF-102 D3): `sweep + verify PDF-98` is a sweep, and
+       `` `verify` (closing sweep ...) `` stays a verification.
     2. With no declared mode, name shape is the fallback, and ONLY the
        fallback: a `_verify` substring in the directory *name* makes it a
        verification; anything else is a sweep.
@@ -2497,9 +2501,11 @@ def classify_run(*, name: str, mode_line: str | None) -> str:
     """
     if mode_line is not None:
         lowered = mode_line.lower()
-        if "verif" in lowered:
+        verif_at = lowered.find("verif")
+        sweep_at = lowered.find("sweep")
+        if verif_at != -1 and (sweep_at == -1 or verif_at < sweep_at):
             return RUN_CLASS_VERIFICATION
-        if "sweep" in lowered:
+        if sweep_at != -1:
             return RUN_CLASS_SWEEP
         raise ValueError(
             f"run {name!r} declares a `**Mode:**` line that matches neither "
@@ -2536,21 +2542,79 @@ def sweep_class_runs_with_verdict(runs_root: Path) -> tuple[str, ...]:
     return tuple(names)
 
 
-def newest_sweep_claim(body_text: str, runs_root: Path) -> tuple[str | None, str | None, int]:
-    """D1/D6. Pure over both parameters — extracts the sweep id `body_text`
-    names (via `SWEEP_ID`; `None` if it names none) and compares it against
-    the sweep-class-with-verdict population under `runs_root`.
+RUN_STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}_\d{6})")
 
-    Returns ``(named_id, newest_id, newer_count)``. `newer_count` is how
-    many population members sort strictly after `named_id`, which is
-    exactly the number the failure message names (D1).
-    """
-    match = SWEEP_ID.search(body_text)
-    named_id = match.group(1) if match else None
+
+def run_stamp(name: str) -> str:
+    """The leading `YYYY-MM-DD_HHMMSS` of a run directory name."""
+    match = RUN_STAMP.match(name)
+    if match is None:
+        raise ValueError(
+            f"sweep-class run {name!r} has no leading YYYY-MM-DD_HHMMSS stamp, "
+            "so it cannot be placed in time"
+        )
+    return match.group(1)
+
+
+def _isolated_git_env() -> dict[str, str]:
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}
+    }
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    return env
+
+
+def pointer_written_at(repo: Path, named: str) -> str | None:
+    """PDF-102 D2. The AUTHOR time (`YYYY-MM-DD_HHMMSS`, in the commit's own
+    recorded offset) of the most recent commit whose diff changes the number
+    of occurrences of *named* in `README.md`; `None` when no commit did (the
+    id exists only in an uncommitted edit, so the pointer is being written
+    now). Author date, not committer date: a rebase-merge rewrites the
+    latter."""
+    proc = subprocess.run(
+        [
+            "git",
+            "log",
+            "-1",
+            "--format=%ad",
+            "--date=format:%Y-%m-%d_%H%M%S",
+            f"-S{named}",
+            "--",
+            "README.md",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_isolated_git_env(),
+    )
+    return proc.stdout.strip() or None
+
+
+def superseding_sweeps(named: str, runs_root: Path, cutoff: str | None) -> tuple[str, ...]:
+    """PDF-102 D2. The dated predicate that replaced "the named sweep is the
+    newest": every sweep-class, verdict-bearing run strictly newer than
+    *named* and not newer than *cutoff* (`None` = no upper bound), name-
+    sorted. Raises `AssertionError` when *named* is absent, carries no
+    verdict, or is not sweep-class."""
+    run_dir = runs_root / named
+    assert run_dir.is_dir(), (
+        f"the pointer names sweep {named}, which does not exist under {runs_root}"
+    )
+    assert run_has_verdict(run_dir), (
+        f"the pointer names sweep {named}, which carries no verdict artifact"
+    )
     sweeps = sweep_class_runs_with_verdict(runs_root)
-    newest_id = sweeps[-1] if sweeps else None
-    newer_count = sum(1 for s in sweeps if named_id is not None and s > named_id)
-    return named_id, newest_id, newer_count
+    assert named in sweeps, f"the pointer names {named}, which is not a sweep-class run"
+    named_stamp = run_stamp(named)
+    return tuple(
+        s
+        for s in sweeps
+        if named_stamp < run_stamp(s) and (cutoff is None or run_stamp(s) <= cutoff)
+    )
 
 
 def commit_occurs_in_run(sha: str, run_dir: Path) -> bool:
@@ -2711,7 +2775,7 @@ def test_the_named_sweep_resolves_to_a_readable_verdict() -> None:
     `sweep` `` (10%); the sentinel's frequent event is a scoped `verify`
     run, which `classify_run`/`sweep_class_runs_with_verdict` above do not
     count as sweep-class. Recency IS asserted now, over that narrower
-    population, by `test_the_named_sweep_is_the_newest_sweep` below."""
+    population, by `test_the_named_sweep_was_the_newest_when_the_pointer_was_written` below."""
     root = require_planning_dir()
     body = known_issues_body()
     match = SWEEP_ID.search(body)
@@ -2747,22 +2811,26 @@ def test_the_sweep_pointer_check_can_fail() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_named_sweep_is_the_newest_sweep() -> None:
-    """AC1/D1, the deliverable's primary arm. `README.md:250` claims the
-    named id is "the most recent sweep carrying a readable verdict" — that
-    claim has a checkable population (D2) and this is the missing half of
-    it. Applies the pure `newest_sweep_claim` to the real README and the
-    real inventory; every red this arm can produce is reproduced against
-    synthetic inputs by `test_the_newest_sweep_arm_still_bites_after_the_refresh`
-    below (AC8), so a green here is never the only evidence this arm works."""
+def test_the_named_sweep_was_the_newest_when_the_pointer_was_written() -> None:
+    """AC1/D1, the deliverable's primary arm, restated by PDF-102 D2 as a
+    DATED predicate (X-906: never store a superlative). The README claims
+    the named id was the most recent sweep carrying a readable verdict; the
+    checkable form is "no sweep-class, verdict-bearing run was minted between
+    that sweep and the commit that wrote the pointer". A sweep minted AFTER
+    that commit can never falsify it. Every red this arm can produce is
+    reproduced by `test_the_newest_sweep_arm_still_bites_after_the_refresh`
+    and the pure matrix below, so a green here is never the only evidence."""
     root = require_planning_dir()
-    named, newest, newer = newest_sweep_claim(known_issues_body(), root / "qa" / "runs")
-    assert named, "the section names no sweep id"
-    assert named == newest, (
-        f"README names sweep {named}; the newest sweep-class run carrying a "
-        f"readable verdict is {newest}, and {newer} sweep-class run(s) are "
-        "newer. Refresh `## Known issues` (README.md:250) -- this pointer "
-        "is what the section exists for."
+    match = SWEEP_ID.search(known_issues_body())
+    assert match, "the section names no sweep id"
+    named = match.group(1)
+    cutoff = pointer_written_at(REPO_ROOT, named)
+    superseding = superseding_sweeps(named, root / "qa" / "runs", cutoff)
+    assert superseding == (), (
+        f"README names sweep {named}, but {', '.join(superseding)} (sweep-class, "
+        f"verdict-bearing) were already newer when the pointer was written "
+        f"(cutoff {cutoff or 'now: uncommitted edit'}). Refresh the "
+        "`## Known issues` pointer -- this pointer is what the section exists for."
     )
 
 
@@ -2997,12 +3065,121 @@ def test_an_unclassifiable_declared_mode_is_a_failure_not_a_default(tmp_path: Pa
         classify_run(name=run_dir.name, mode_line=mode_line)
 
 
+# --- PDF-102 D5: self-tests that run everywhere (no planning/history gate) --- #
+
+
+@pytest.mark.parametrize(
+    ("mode_line", "expected"),
+    [
+        ("**Mode:** sweep + verify `PDF-98` + verify `PDF-89`", RUN_CLASS_SWEEP),
+        ("**Mode:** `verify` (closing sweep -- PDF-15)", RUN_CLASS_VERIFICATION),
+        ("**Mode:** `sweep`", RUN_CLASS_SWEEP),
+        ("**Mode:** narrow re-verify", RUN_CLASS_VERIFICATION),
+    ],
+)
+def test_a_mode_line_naming_both_words_is_classified_by_the_first_one(
+    mode_line: str, expected: str
+) -> None:
+    assert classify_run(name="2026-01-01_000000", mode_line=mode_line) == expected
+
+
+def test_a_mode_line_naming_neither_word_still_raises() -> None:
+    with pytest.raises(ValueError, match="neither"):
+        classify_run(name="2026-01-01_000000", mode_line="**Mode:** `audit`")
+
+
+def test_the_sweep_id_grammar_accepts_a_suffixed_run_name_whole() -> None:
+    suffixed = SWEEP_ID.search("taken at sweep `2026-09-18_091200_sweep`.")
+    assert suffixed is not None and suffixed.group(1) == "2026-09-18_091200_sweep"
+    plain = SWEEP_ID.search("the sweep `2026-09-19_120144`, at commit")
+    assert plain is not None and plain.group(1) == "2026-09-19_120144"
+
+
+def _mint_run(runs_root: Path, name: str, mode: str) -> None:
+    run = runs_root / name
+    run.mkdir(parents=True)
+    (run / "report.md").write_text(f"# run\n\n**Mode:** {mode}\n")
+
+
+def test_the_pointer_predicate_matrix(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    _mint_run(runs, "2026-09-01_100000", "`sweep`")  # named
+    _mint_run(runs, "2026-09-02_100000", "`sweep`")  # newer than named, <= cutoff
+    _mint_run(runs, "2026-09-05_100000", "`sweep`")  # newer than cutoff
+    _mint_run(runs, "2026-09-03_100000", "`verify`")  # verification-class
+    named = "2026-09-01_100000"
+    # (a) the only newer sweep is after the cutoff -> nothing supersedes
+    assert superseding_sweeps(named, runs, "2026-09-01_120000") == ()
+    # (b) a sweep between named and cutoff supersedes
+    assert superseding_sweeps(named, runs, "2026-09-04_000000") == ("2026-09-02_100000",)
+    # (c) no cutoff: every newer sweep supersedes, verification excluded
+    assert superseding_sweeps(named, runs, None) == (
+        "2026-09-02_100000",
+        "2026-09-05_100000",
+    )
+    # (d) absent
+    with pytest.raises(AssertionError, match="2099-01-01_000000"):
+        superseding_sweeps("2099-01-01_000000", runs, None)
+    # (e) no verdict artifact
+    bare = runs / "2026-09-06_100000"
+    bare.mkdir()
+    (bare / "notes.txt").write_text("**Mode:** `sweep`\n")
+    with pytest.raises(AssertionError, match="no verdict"):
+        superseding_sweeps("2026-09-06_100000", runs, None)
+    # (f) verification-class
+    with pytest.raises(AssertionError, match="not a sweep-class"):
+        superseding_sweeps("2026-09-03_100000", runs, None)
+    # (g) a sweep-class dir that cannot be placed in time
+    (runs / "scratch-sweep").mkdir()
+    (runs / "scratch-sweep" / "report.md").write_text("**Mode:** `sweep`\n")
+    with pytest.raises(ValueError, match="scratch-sweep"):
+        superseding_sweeps(named, runs, None)
+
+
+def _git(repo: Path, *args: str, when: str | None = None) -> None:
+    env = _isolated_git_env()
+    if when is not None:
+        env["GIT_AUTHOR_DATE"] = when
+        env["GIT_COMMITTER_DATE"] = when
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def test_the_pointer_cutoff_is_the_commit_that_wrote_the_id(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    readme = repo / "README.md"
+    named = "2026-09-19_120144"
+    readme.write_text(f"intro\nsweep `{named}`\nother\n")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-q", "-m", "a", when="2026-09-19T12:57:04 -0600")
+    readme.write_text(f"intro changed\nsweep `{named}`\nother\n")
+    _git(repo, "commit", "-q", "-am", "b", when="2026-09-25T08:00:00 -0600")
+    assert pointer_written_at(repo, named) == "2026-09-19_125704"
+    assert pointer_written_at(repo, "2026-10-01_000000") is None
+
+
 def test_the_newest_sweep_arm_still_bites_after_the_refresh() -> None:
-    """AC8, half 1. A green `test_the_named_sweep_is_the_newest_sweep` on
-    the CORRECTED README is not evidence that arm works; this re-drives it
-    red with a PLANTED superseded id, checked against the REAL inventory
-    (never by editing the real `README.md`) — the same pure
-    `newest_sweep_claim` the applied arm uses."""
+    """AC8, half 1. A green pointer arm on the CORRECTED README is not
+    evidence it works; this re-drives the predicate red with a PLANTED
+    superseded id, checked against the REAL inventory (never by editing the
+    real `README.md`) -- the same pure `superseding_sweeps` the applied arm
+    uses, with no upper bound."""
     root = require_planning_dir()
     runs_root = root / "qa" / "runs"
     sweeps = sweep_class_runs_with_verdict(runs_root)
@@ -3012,15 +3189,10 @@ def test_the_newest_sweep_arm_still_bites_after_the_refresh() -> None:
         "has shrunk below what this control needs"
     )
     superseded = sweeps[0]
-    planted_body = (
-        f"The most recent sweep carrying a readable verdict is `{superseded}`, "
-        "taken at commit `deadbee`."
-    )
-    named, newest, newer = newest_sweep_claim(planted_body, runs_root)
-    assert named == superseded
-    assert named != newest and newer > 0, (
-        f"planted id {superseded} did not disagree with the real inventory's "
-        f"newest ({newest}); this control proves nothing if it cannot fail"
+    superseding = superseding_sweeps(superseded, runs_root, None)
+    assert superseding, (
+        f"planted id {superseded} was not superseded by anything in the real "
+        "inventory; this control proves nothing if it cannot fail"
     )
 
 
@@ -3794,11 +3966,11 @@ def _assert_env_var_names(new_password: str, new_owner: str) -> None:
     )
 
 
-def _assert_old_env_prefix_absent() -> None:
+def _assert_old_env_prefix_absent(root: Path = REPO_ROOT) -> None:
     old_prefix = "PDF" + "_" + "TOOLKIT"
     proc = subprocess.run(
         ["git", "grep", "--untracked", "-c", old_prefix, "--", "src/"],
-        cwd=REPO_ROOT,
+        cwd=root,
         capture_output=True,
         text=True,
         check=False,
@@ -4135,20 +4307,31 @@ def test_the_migration_row_derivations_can_fail(monkeypatch: pytest.MonkeyPatch)
         _assert_info_shape(5, {"error": {}})
 
 
-def test_ac4_the_env_var_row_reds_on_a_planted_old_occurrence() -> None:
-    """AC4's second RED: a NEW untracked file under `src/`, deleted in a
-    `finally` regardless of outcome. Never a mutation of a TRACKED file, so
-    HC-4's restore idiom (`git show HEAD:<path> > <path>`) does not apply
-    here at all -- a plant that was never tracked is restored by deletion."""
-    scratch = REPO_ROOT / "src" / "pdf_tooling" / "_pdf62_scratch_probe.py"
-    assert not scratch.exists(), "a stray scratch probe was already on disk"
+def test_ac4_the_env_var_row_reds_on_a_planted_old_occurrence(tmp_path: Path) -> None:
+    """AC4's second RED, planted in a per-test scratch git repo (PDF-102 D1)
+    and NEVER in the shared `src/` tree: every `git grep --untracked` reader
+    on any other xdist worker would otherwise see the plant and red. The
+    un-planted twin proves the scratch repo is a valid oracle, so an rc-128
+    `git grep` error cannot pass this control for the wrong reason."""
+    scratch_root = tmp_path / "repo"
+    assert not scratch_root.resolve().is_relative_to(REPO_ROOT.resolve()), (
+        "the plant must never be written under the shared tree"
+    )
+    scratch_root.mkdir()
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=scratch_root,
+        check=True,
+        env=_isolated_git_env(),
+    )
+    package = scratch_root / "src" / "pdf_tooling"
+    package.mkdir(parents=True)
+    # Negative twin: no plant yet, so the check must return.
+    _assert_old_env_prefix_absent(scratch_root)
     old_prefix = "PDF" + "_" + "TOOLKIT"
-    try:
-        scratch.write_text(f"# {old_prefix}_PASSWORD\n")
-        with pytest.raises(AssertionError, match="still appears"):
-            _assert_old_env_prefix_absent()
-    finally:
-        scratch.unlink(missing_ok=True)
+    (package / "_pdf62_scratch_probe.py").write_text(f"# {old_prefix}_PASSWORD\n")
+    with pytest.raises(AssertionError, match=r"src/pdf_tooling/_pdf62_scratch_probe\.py:1"):
+        _assert_old_env_prefix_absent(scratch_root)
 
 
 def test_ac6_the_console_script_row_survives_a_locally_built_wheel() -> None:
