@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-105] Give the roster gates a third operand — 2026-10-04
+
+- **Three new planning arms read a population the planning pass does not write.** The landed ids are derived from `changelog.md` headings and `[PDF-NN]` commit subjects (the two structural positions only, with `PDF-100`'s widened grammar imported, never re-spelled). `test_pdf105_every_landed_id_has_a_roster_row`, `test_pdf105_every_landed_id_is_below_the_counter` and `test_pdf105_no_landed_id_reads_proposed_on_the_roster` red on a landed id with no row, at or above the counter, or still `Proposed`.
+- **The instrument is proven by a known-answer corpus, not by HEAD.** `tests/fixtures/roster_population/` holds two reconstructed historical states that went unnoticed (`PDF-89` landed but `Proposed` while the header/roster agreement arm stayed green; `PDF-91`..`PDF-97` landed with no row and the counter below them). The fixture arms share every oracle with the live arms and run in CI, where the live arms skip. The planning extract is ids, status tokens and the counter declaration only, sealed by `PROVENANCE.txt` sha256s.
+- **The counter is exactly one bold declaration**, never a maximum over tokens, so prose restatements and planted strings cannot move it.
+- **A shallow clone fails the live arms loudly** instead of silently shrinking the population; an absent changelog skips them.
+- **The docs-gate census moved by derivation:** three more planning-gated arms, no new history-gated arm. `test_every_spec_header_agrees_with_its_roster_row` is byte-unchanged.
+
 ## [PDF-106] Make verification mechanical: a per-spec AUDIT-CONVENTION runner, and audit modules for PDF-82/85/86/88 — 2026-10-04
 
 - **One command per spec's evidence.** `make verify SPEC=PDF-NN` (`scripts/verify_spec.py`, with a small `-p` outcome plugin `scripts/_verify_outcomes.py`) runs one spec's covering node ids plus its module's aggregator controls and prints a per-AC table: which ids ran and how each came out, which ACs are evidenced only by a CI run or a command, and which have no red at all. It exits 0/1/2/3 and prints the code as `runner exit: N` because `make` collapses every non-zero status to 2. It **grants nothing**: the output never contains a verdict word, and the qa-sentinel signs while the project-manager transitions.

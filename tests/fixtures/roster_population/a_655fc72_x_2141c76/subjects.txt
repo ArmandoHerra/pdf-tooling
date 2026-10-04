@@ -1,0 +1,154 @@
+[PDF-89] fix: refuse a destination that is one of the run's own inputs
+docs: point Known issues at the sweep whose id is actually parseable
+[PDF-88] test: derive the acceptance premise from the host the arm runs on
+[PDF-86] test: condition the total-startup-cost ceiling on the cells it was measured in
+[PDF-85] test: re-scope the filesystem-acceptance oracle to the branch it was built for
+fix: unshallow the two suite-running CI jobs, and exclude bytecode from a census
+[PDF-76] test: cover --force / no-clobber at the two multi-file producers
+[PDF-79] docs: rule `-o table` out of the output contract, and guard the ruling
+[PDF-81] fix: restore the standard streams the linearization engine rebinds
+[PDF-72] docs: four true statements, and instruments for the shapes that hid them
+[PDF-83] docs: name the password carve-out on the frozen code-`0` row
+[PDF-84] fix: wire the clobber route into the bulk-destructive gate at every batch verb
+[PDF-78] fix: derive `TEARDOWN_GRACE_S` under a declared load instead of bumping it
+[PDF-75] test: derive `destructive`, widen the bulk-destructive gate, and stop pre-satisfying it
+[PDF-82] test: gate the eighteen engine-dependent arms and ratchet the class
+[PDF-77] test: give hypothesis a profile, a recoverable counterexample and pinned seeds
+[PDF-68] test: bound total startup import cost with an arm that runs by default
+[PDF-67] feat: carve out the engine-residual case and disclose the unrun engine
+[PDF-80] fix: read a destination back through the writer that resolved it
+[PDF-73] test: measure branch coverage once out of band and publish the delta
+[PDF-71] test: make contract row C8 drive the product instead of the help formatter
+[PDF-65] refactor: remove --no-color and make the flag partition assert liveness
+[PDF-69] test: make the secret-leak sweeps able to fail
+[PDF-66] test: stop the secret sweep accusing a contributor of leaking a password
+[PDF-74] test: name the argument value-shape dimension and cover it
+[PDF-70] test: give both residue instruments a downward ratification path
+[PDF-64] fix: let a dry run predict a new relative --out-dir instead of crashing
+[PDF-62] docs: one migration note for the one breaking release
+[PDF-61] test: mechanize what schema_version does at the 1.0.0 boundary
+[PDF-60] feat: add the DCO check, and make CONTRIBUTING say what must be green (Lane A)
+[PDF-59] feat: settle what 1.0.0 claims to support — the maturity classifier and the interpreter
+[PDF-58] feat!: remove the deprecated console scripts, and make the README say one thing
+[PDF-57] feat!: the one breaking release — rename the frozen <retired-env-prefix>_* and <retired-class-prefix>* names
+[PDF-56] test: make the README's defect pointer go stale loudly
+[PDF-55] test: give the startup budget an instrument that runs by default and survives contention
+[PDF-54] test: extend the frozen envelope register to the failure arms
+[PDF-53] fix: make convert --dry-run predict the real run's exit code and per-item ok
+[PDF-63] test: drive convert in the read-seam sweep so the triage's byte reads are observed
+[PDF-52] fix: disclose password verification in the dry-run tier and the five honoured verbs
+style: reformat two test modules left unformatted by PDF-50 and PDF-51
+[PDF-51] fix: make info return the run-scoped error envelope on a nonexistent input
+[PDF-50] fix: return the error envelope, not a traceback, when the .bak sidecar cannot be created
+Create FUNDING.yml
+[PDF-49] docs: document two correct-but-surprising behaviours and cut the 0.3.1 patch
+[PDF-48] fix: the rename census was blind to its own untracked new files
+[PDF-48] The complete rename: console scripts, import package, and the last old-name surfaces
+[PDF-47] test: make the published publisher row a standing differential, not a screenshot
+[PDF-46] fix: reclaim the engine-hiding shim directory the gate's own runs kept leaking
+[PDF-45] scope the Pages write grants to `deploy`, and verify the gitleaks tarball before extracting it
+[PDF-38] follow-up: re-measure the documented engines-hidden figure this spec moved
+[PDF-38] fix: predict the .bak sidecar refusal at the one planner every --in-place verb reaches
+[PDF-44] fix: make the orphan probe able to fail for the reason it claims
+[PDF-44] fix: guard the dry-run helper that promised a guard and ran json.loads first
+[PDF-43] feat: measure §D3's completeness with an instrument, not a fourth belt
+[PDF-42] fix: write the AC7 guard this spec's own comment claimed already existed
+[PDF-42] fix: stop quoting a literal that another guard pins, in this spec's own sample data
+[PDF-42] test: give the startup claim a latency control that RUNS, and close both abstention walk-pasts
+[PDF-41] fix: give the B-245 pin an assertion that can actually fire its retirement signal
+[PDF-41] test: give the AGPL|GPL|LGPL deny pattern and the empty ALLOWLIST a control that runs
+[PDF-40] fix: derive each batch arm's operand kind, and stop the scanner reading a keyword pair as a key
+[PDF-40] fix: a --out-dir batch payload never denies an artifact that is on disk
+[PDF-39] feat: rule the pre-v1.0.0 envelope inconsistencies before the freeze, not after
+[PDF-37] fix: --password-file is honoured or refused, never silently ignored
+[PDF-36] fix: no traceback, and no heap address, on the user's error path
+[PDF-35] fix: the new fixture must not carry the superseded display name
+[PDF-35] fix: pin the render pool to spawn, so PDEATHSIG is armed against the CLI
+[PDF-33] fix: import Callable from collections.abc (ruff UP035)
+[PDF-33] feat: the display name follows pdf-tooling, held by a classifier that can fail
+[PDF-34] test: X-474 (2/2) reset docs-gate's cron to weekly — AC17 PARTIAL, zero scheduled runs observed
+[PDF-34] test: X-474 (1/2) tighten docs-gate's cron to */5 for a bounded observation window
+[PDF-34] feat: docs-gate runs in CI, test's history arms stop skipping, weekly cadence
+[PDF-34] fix: be89f36 is registered not paid — ENTRY_OWED_EXEMPT grows to five with its finding
+[PDF-34] fix: three gates that exited 0 on a red suite, and a publish path with no gate
+[PDF-31] chore: repo, website and layer names follow the pdf-tooling distribution
+[PDF-32] chore(deps): sweep website lockfile; PR #2 (TypeScript 7) triaged NEEDS-REVIEW
+fix(website): base path follows the pdf-tooling repo rename
+docs: scope the uv-only convention to this repo's dev environment
+[B-218] docs: install lines flip to PyPI now that pdf-tooling 0.1.1 is live
+[B-218] chore: rename distribution to pdf-tooling, version 0.1.1
+[PDF-30] fix: two false claims inside the spec's own instruments
+[PDF-30] fix: history-depth guard was shallow-blind and passed unmeasurable
+[PDF-30] feat: a documented figure is derived, gated, or absent
+[PDF-26] fix: create was the belt's other non-PDF input reader
+[PDF-26] fix: the belt reached compose.py and stopped at one seam of three
+[PDF-26] fix: classify an unreadable operand as a failure, not a typo
+[PDF-29] test: the anti-abstention guard named one mechanism, not the claim
+[PDF-25] test: RETURN_SIGNALLED_CODES claimed the product's set and held a subset
+[PDF-29] fix: `-n auto` pushed a redirected $TMPDIR one byte past AF_UNIX
+[PDF-29] perf: a measured gate, a bounded CI, and a startup budget that was refuted
+[PDF-25] test: AC16's README control could not fail, and now can
+[PDF-25] fix: route every usage error through the structured envelope
+chore(release): sync uv.lock with the 0.1.0 version — the release commit was one line short
+chore(release): v0.1.0 — finalize the version string for the first tagged release
+[PDF-24] fix: govern the whole global-flag block, and re-derive PDF-01
+[PDF-23] fix: page-scoped overlays & merge_page migration
+[PDF-22] test: code-derived secret-leak regression matrix
+[PDF-21] fix: PR_SET_PDEATHSIG does not protect a forkserver worker
+[PDF-21] fix: the SIGKILL arm counted multiprocessing's own helpers as orphans
+[PDF-21] verify: PDF-09 rasterize re-derived, 27 criteria against observed reds
+[PDF-20] fix: sandbox the probe environment, carry dry_run, one password hint
+[PDF-19] test: re-derive PDF-04's safety spine with controls proven to fire
+[PDF-28] docs: point the gate-parity epilogue at `make test PYTHON=3.11`
+[PDF-28] feat: local-gate/CI-gate equivalence & PDF-02 re-verification
+[PDF-27] docs: correct the pre-existing /tmp directory count (333, not 244)
+[PDF-27] PDF-03 page-range grammar re-verification
+[PDF-18] docs: give the AC12 convert-cell fix (b3c92f7) its own changelog entry
+[PDF-18] fix: AC12's convert cell must respect engine absence, not assume it
+[PDF-18] One planning tier: unify _plan_filesystem, refuse the unwritable-parent tier
+[PDF-17] fix: the branch-coverage expiry alarm fired, correctly, on CPython 3.14
+[PDF-17] Contract-harness repair & PDF-06 re-verification
+[B-101] fix: README and exit_codes.py still asserted the --dry-run clause OR-7 struck
+[PDF-16] Re-derive Verbs, exit-code prose and QuickStart from the shipped CLI (Phase B)
+[B-102] fix: a test_raster.py comment contradicted the commit that wrote it
+[B-099] fix: TESTING.md's quoted engines-hidden pass count was one low
+[B-093] fix: the bulk-destructive confirmation gate did not mirror under --dry-run
+[B-094] fix: stop double-applying /Rotate -- 90/180/270 pages rendered wrong
+[B-096] fix: convert --dry-run exited 0 with no soffice while the real run exited 3
+[PDF-15] fix: declare convert's genuine engine precondition so C12/C14 skip visibly instead of failing
+[PDF-15] feat: ocr + convert — the two system-binary verbs
+[B-076] fix: --in-place silently dropped -O/--out-dir/--name and exited 0
+[B-079] fix: the bulk-destructive confirmation gate was unwired on five verbs
+[B-090] fix: drop the un-failable `|| true` the stale-lock check introduced
+[B-090] fix: make ci had no concurrency guard and manufactured PHANTOM REDS
+[B-088] fix: restore the changelog entry silently overwritten at 33bf481
+[PDF-14] fix: add the missing meta get golden (AC18/Scope > Tests)
+[PDF-14] feat: meta get/set over /Info + XMP; watermark and stamp via the compositing port
+[B-078] fix: open_document did not raise AuthError on a user-password-protected input
+[PDF-08] fix: Path.stem is not stable across 3.11-3.14, and an xfail reason tripped assert_skips
+[PDF-08] feat: extract + delete + rotate + reorder, and the rotation port seam
+[B-068] fix: --password-file's refusal echoed the given value on stdout/stderr
+[PDF-13] fix: wait for /proc to show the child's argv before reading it
+[PDF-13] feat: encrypt + decrypt + permissions, and the password contract
+[PDF-12] feat: compress + repair + linearize
+[PDF-11] feat: text + tables, and the one samples-gate target
+[B-055] widen the SIGTERM/SIGINT/SIGHUP grace window and make its own test spawn-safe
+[B-055] fix: rasterize's worker pool no longer survives SIGTERM/SIGINT/SIGHUP
+[B-054] fix: make --dry-run predict filesystem-tier refusals for --out-dir verbs
+[PDF-10] feat: compose + create, and the ItemResult.detail seam
+[PDF-09] fix: make AC5/AC26 tests spawn-safe, not fork-only
+[PDF-09] feat: rasterize — PDF pages to images
+[PDF-07] feat: merge + split, and the OR-3 output-flag consumption mechanism
+[B-034] fix: config-only coverage-instrumentation speedup for local make ci
+[PDF-04] fix: implement ruling X-67 — --dry-run runs the plan and predicts the refusal
+[PDF-06] fix: measure subprocess-executed CLI code, close the coverage floor
+[PDF-06] feat: fixture corpus, CLI contract harness & real-sample guard
+[PDF-05] feat: engine ports, adapters, the only spawn point, doctor & info
+[PDF-04] fix: two platform-dependent safety-spine test defects
+[PDF-04] feat: safety spine — atomic writes, no-clobber, --in-place, -y gate
+[PDF-03] feat: page-range grammar & selection engine
+[PDF-16] fix: ruff-format the OG image generator script
+[PDF-16] feat: project website (GitHub Pages) — Phase A
+[PDF-02] feat: CI, license gate & release skeleton
+[PDF-01] feat: project scaffold and CLI spine
+chore: initial repository scaffold

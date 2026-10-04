@@ -2199,7 +2199,8 @@ def planning_dir() -> Path | None:
 def require_planning_dir() -> Path:
     """The declared planning tree, or a SKIP naming why there is none.
 
-    Nine call sites. Their assertions are untouched by PDF-70; what changed is
+    The call sites are counted by :func:`planning_gated_arms`, never by a number
+    written here. Their assertions are untouched by PDF-70; what changed is
     only *when* they skip. The reason string still leads with
     :data:`SKIP_PLANNING_ABSENT`, so `scripts/assert_skips.py`'s existing
     ``planning-directory-absent`` class keeps matching and no census changes.
@@ -2430,6 +2431,416 @@ def test_no_roster_row_contradicts_its_own_evidence() -> None:
         if status_token(cell) == "Implemented" and verification_grants(cell)
     ]
     assert contradictions == [], "\n  ".join(["defective roster row(s):", *contradictions])
+
+
+# --------------------------------------------------------------------------- #
+# PDF-105 — a third operand for the roster gates (B-365, B-374)
+#
+# `test_every_spec_header_agrees_with_its_roster_row` compares two operands the
+# SAME pass writes, so it stayed green for a day while both read `Proposed` for
+# the landed `PDF-89`; and an id with neither a roster row nor a spec file enters
+# no loop at all (`PDF-91`..`PDF-97`). The third operand is DERIVED: the ids that
+# have landed, read from `changelog.md` headings and `[PDF-NN]` commit subjects.
+# Nothing the planning pass writes feeds it.
+#
+# The oracles are pure functions over text, shared by the live arms (planning
+# tree set, never run in CI) and the fixture arms (a committed known-answer
+# corpus, run everywhere). A mutation in an oracle therefore reds the fixture arm
+# in CI even though the live arm skips there.
+# --------------------------------------------------------------------------- #
+
+#: The live arms read this path; a control redirects it (D7).
+LIVE_CHANGELOG = REPO_ROOT / "changelog.md"
+
+#: X-905: the ONE declaration, bold, in the roster header. The prose restatements
+#: ("moved `PDF-99` -> `PDF-107`") are history, not declarations, and never match.
+COUNTER_DECLARATION = re.compile(r"\*\*Next allocatable ID: `(" + SPEC_ID_GRAMMAR + r")`\.\*\*")
+
+ROSTER_POPULATION_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "roster_population"
+ROSTER_STATE_A = "a_655fc72_x_2141c76"
+ROSTER_STATE_B = "b_1249757_x_7e2bd98"
+EXTRACT_SENTENCE = (
+    "The planning extract contains only spec ids, status tokens and the counter declaration."
+)
+
+
+def _spec_number(spec_id: str) -> int:
+    return int(spec_id.split("-", 1)[1])
+
+
+def landed_ids(changelog_text: str, subjects: Iterable[str]) -> frozenset[str]:
+    """Every `PDF` id that has landed: a changelog heading's id UNION a subject's leading id.
+
+    Only two STRUCTURAL positions are uses (X-905): a heading's bracketed id and a
+    commit subject's leading bracketed id. A token in a bullet, in a subject's tail,
+    or in a `## [B-NNN]` heading's prose is never one. Both grammars are the ones
+    `tests/test_changelog_history.py` already owns (PDF-100 widened them); nothing
+    here spells an id pattern of its own.
+    """
+    history = _tests_module("test_changelog_history")
+    found = {
+        spec_id
+        for spec_id, _date, _raw in history.parse_headings(changelog_text)
+        if spec_id.startswith("PDF-")
+    }
+    for subject in subjects:
+        match = history.OWES_AN_ENTRY.match(subject)
+        if match and match.group(1).startswith("PDF-"):
+            found.add(match.group(1))
+    return frozenset(found)
+
+
+def declared_counter(spec_index_text: str) -> int:
+    """The number in the roster's single bold `Next allocatable ID` declaration."""
+    found = COUNTER_DECLARATION.findall(spec_index_text)
+    if len(found) != 1:
+        raise AssertionError(
+            f"expected exactly one `**Next allocatable ID: `PDF-NNN`.**` declaration, "
+            f"found {len(found)}"
+        )
+    return _spec_number(found[0])
+
+
+def unrostered(population: Iterable[str], rows: Mapping[str, str]) -> list[str]:
+    """Landed ids with no roster row (B-374, half 1)."""
+    return sorted((i for i in population if i not in rows), key=_spec_number)
+
+
+def at_or_above_counter(population: Iterable[str], counter: int) -> list[str]:
+    """Landed ids the counter would hand out again (B-374, half 2). EQUAL is a collision."""
+    return sorted((i for i in population if _spec_number(i) >= counter), key=_spec_number)
+
+
+def landed_but_proposed(population: Iterable[str], rows: Mapping[str, str]) -> list[str]:
+    """Landed ids whose roster row still reads `Proposed` (B-365).
+
+    An id with no row is `unrostered`'s business and is not reported twice. `PDF-87`
+    (Proposed, no heading, no commit) is green by construction: the oracle is
+    *Proposed AND landed*, never *Proposed AND no commit*.
+    """
+    return sorted(
+        (i for i in population if i in rows and status_token(rows[i]) == "Proposed"),
+        key=_spec_number,
+    )
+
+
+def _read_roster_state(name: str) -> tuple[frozenset[str], dict[str, str], int]:
+    base = ROSTER_POPULATION_FIXTURES / name
+    spec_index = (base / "spec-index.txt").read_text(encoding="utf-8")
+    population = landed_ids(
+        (base / "changelog-headings.txt").read_text(encoding="utf-8"),
+        (base / "subjects.txt").read_text(encoding="utf-8").splitlines(),
+    )
+    return population, roster_rows(spec_index), declared_counter(spec_index)
+
+
+def _live_roster_inputs() -> tuple[frozenset[str], dict[str, str], int]:
+    """D7 then D8, then the real operands. Called AFTER `require_planning_dir()`.
+
+    D7 skips, not fails, when the changelog is absent (B-365 constraint ii). D8
+    FAILS on a shallow clone and never skips: a skip would put the arm in
+    `history_gated_arms()` as well as `planning_gated_arms()` and the derived
+    census total would count it twice; and a planning-dir-set shallow clone is a
+    misconfiguration, because the subject half would be silently truncated.
+    """
+    root = planning_dir()
+    assert root is not None  # the caller has already passed `require_planning_dir()`
+    if not LIVE_CHANGELOG.is_file():
+        pytest.skip(f"changelog absent: {LIVE_CHANGELOG} is not a file")
+    history = _tests_module("test_changelog_history")
+    depth = history.history_depth()
+    if depth < history.MINIMUM_HISTORY_DEPTH:
+        pytest.fail(
+            f"shallow clone: git rev-list --count HEAD is {depth}, below the minimum of "
+            f"{history.MINIMUM_HISTORY_DEPTH}. The commit-subject half of the landed-id "
+            "population would be truncated and the population would silently shrink, so "
+            "this arm refuses rather than passes. Fetch full history."
+        )
+    log = subprocess.run(
+        ["git", "log", "--format=%s", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert log.returncode == 0, f"git log failed: {log.stderr.strip()}"
+    spec_index = (root / "specs" / "SPEC-INDEX.md").read_text(encoding="utf-8")
+    population = landed_ids(LIVE_CHANGELOG.read_text(encoding="utf-8"), log.stdout.splitlines())
+    return population, roster_rows(spec_index), declared_counter(spec_index)
+
+
+_PM_REPAIR = (
+    "The repair is a project-manager roster transition in the planning tree, never an "
+    "edit to this arm."
+)
+
+
+def test_pdf105_every_landed_id_has_a_roster_row() -> None:
+    """B-374 half 1, live: a landed id with no roster row is invisible to every other arm."""
+    require_planning_dir()
+    population, rows, _counter = _live_roster_inputs()
+    missing = unrostered(population, rows)
+    assert missing == [], (
+        f"landed ids (changelog heading or [PDF-NN] subject) with no roster row: {missing}. "
+        + _PM_REPAIR
+    )
+
+
+def test_pdf105_every_landed_id_is_below_the_counter() -> None:
+    """B-374 half 2, live: the counter must sit strictly above every landed id."""
+    require_planning_dir()
+    population, _rows, counter = _live_roster_inputs()
+    collided = at_or_above_counter(population, counter)
+    assert collided == [], (
+        f"landed ids at or above `Next allocatable ID` (PDF-{counter}): {collided}. " + _PM_REPAIR
+    )
+
+
+def test_pdf105_no_landed_id_reads_proposed_on_the_roster() -> None:
+    """B-365, live: a landed id whose roster row still says `Proposed`."""
+    require_planning_dir()
+    population, rows, _counter = _live_roster_inputs()
+    stale = landed_but_proposed(population, rows)
+    assert stale == [], f"landed ids whose roster row still reads Proposed: {stale}. " + _PM_REPAIR
+
+
+def test_pdf105_changelog_absent_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """D7 / B-365 constraint (ii): an absent changelog SKIPS each live arm, never fails it."""
+    (tmp_path / "specs").mkdir()
+    (tmp_path / "specs" / "SPEC-INDEX.md").write_text("", encoding="utf-8")
+    monkeypatch.setenv(PLANNING_DIR_ENV, str(tmp_path))
+    monkeypatch.setattr(sys.modules[__name__], "LIVE_CHANGELOG", tmp_path / "no-such-changelog.md")
+    for arm in (
+        test_pdf105_every_landed_id_has_a_roster_row,
+        test_pdf105_every_landed_id_is_below_the_counter,
+        test_pdf105_no_landed_id_reads_proposed_on_the_roster,
+    ):
+        with pytest.raises(pytest.skip.Exception, match="changelog absent"):
+            arm()
+
+
+def test_pdf105_a_shallow_clone_fails_each_live_arm_loudly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D8: a planning-dir-set shallow clone FAILS naming `shallow`; it never skips or passes."""
+    (tmp_path / "specs").mkdir()
+    (tmp_path / "specs" / "SPEC-INDEX.md").write_text("", encoding="utf-8")
+    monkeypatch.setenv(PLANNING_DIR_ENV, str(tmp_path))
+    monkeypatch.setattr(_tests_module("test_changelog_history"), "history_depth", lambda: 1)
+    for arm in (
+        test_pdf105_every_landed_id_has_a_roster_row,
+        test_pdf105_every_landed_id_is_below_the_counter,
+        test_pdf105_no_landed_id_reads_proposed_on_the_roster,
+    ):
+        with pytest.raises(pytest.fail.Exception, match="shallow"):
+            arm()
+
+
+# -- the known-answer corpus: fixture arms, run everywhere ------------------- #
+
+
+def corpus_sha_mismatches(provenance: str, read: Callable[[str], bytes]) -> list[str]:
+    """Every file `PROVENANCE.txt` pins whose bytes no longer hash to the recorded sha256."""
+    import hashlib
+
+    pinned = re.findall(r"^sha256 ([0-9a-f]{64})  (\S+)$", provenance, re.MULTILINE)
+    if not pinned:
+        return ["PROVENANCE.txt pins no file"]
+    return [
+        relpath for digest, relpath in pinned if hashlib.sha256(read(relpath)).hexdigest() != digest
+    ]
+
+
+_EXTRACT_SHAPES = (
+    re.compile(r"^\| " + SPEC_ID_GRAMMAR + r" \| \*\*[A-Za-z][A-Za-z-]*\*\* \|$"),
+    re.compile(r"^" + COUNTER_DECLARATION.pattern + r"$"),
+    re.compile(r"^\*\*Spec ID:\*\* " + SPEC_ID_GRAMMAR + r"$"),
+    re.compile(r"^\*\*Status:\*\* [A-Za-z][A-Za-z-]*$"),
+)
+
+
+def extract_prose_violations(files: Mapping[str, str], provenance: str) -> list[str]:
+    """Planning-extract lines outside the four allowed shapes, plus a missing D4 sentence."""
+    violations = [
+        f"{name}:{number}: {line!r}"
+        for name, text in sorted(files.items())
+        for number, line in enumerate(text.splitlines(), start=1)
+        if not any(shape.match(line) for shape in _EXTRACT_SHAPES)
+    ]
+    if EXTRACT_SENTENCE not in provenance:
+        violations.append(f"PROVENANCE.txt lacks the sentence {EXTRACT_SENTENCE!r}")
+    return violations
+
+
+def _extract_files() -> dict[str, str]:
+    base = ROSTER_POPULATION_FIXTURES
+    paths = [*base.glob("*/spec-index.txt"), *base.glob("*/PDF-89.header.txt")]
+    assert paths, f"no planning extract under {base}"
+    return {str(p.relative_to(base)): p.read_text(encoding="utf-8") for p in paths}
+
+
+def test_pdf105_the_corpus_matches_its_provenance() -> None:
+    """AC1: every fixture file hashes to the sha256 `PROVENANCE.txt` recorded for it."""
+    provenance = (ROSTER_POPULATION_FIXTURES / "PROVENANCE.txt").read_text(encoding="utf-8")
+    assert (
+        corpus_sha_mismatches(
+            provenance, lambda rel: (ROSTER_POPULATION_FIXTURES / rel).read_bytes()
+        )
+        == []
+    )
+
+
+def test_pdf105_the_corpus_integrity_check_fires_on_a_flipped_byte() -> None:
+    """AC1 red: one flipped byte in memory is reported, naming the file."""
+    provenance = (ROSTER_POPULATION_FIXTURES / "PROVENANCE.txt").read_text(encoding="utf-8")
+    target = f"{ROSTER_STATE_B}/subjects.txt"
+
+    def read(relpath: str) -> bytes:
+        data = (ROSTER_POPULATION_FIXTURES / relpath).read_bytes()
+        return bytes([data[0] ^ 1]) + data[1:] if relpath == target else data
+
+    assert corpus_sha_mismatches(provenance, read) == [target]
+
+
+def test_pdf105_the_corpus_integrity_check_refuses_an_empty_provenance() -> None:
+    """A provenance file that pins nothing must not read as a clean corpus."""
+    assert corpus_sha_mismatches("", lambda rel: b"") == ["PROVENANCE.txt pins no file"]
+
+
+def test_pdf105_the_planning_extract_carries_no_prose() -> None:
+    """AC1 / D4 sdist ruling: the shipped planning extract is ids, tokens and the counter only."""
+    provenance = (ROSTER_POPULATION_FIXTURES / "PROVENANCE.txt").read_text(encoding="utf-8")
+    assert extract_prose_violations(_extract_files(), provenance) == []
+
+
+def test_pdf105_the_no_prose_check_fires_on_prose_and_on_a_missing_sentence() -> None:
+    """AC1 red: an unreduced `655fc72` status cell, and a PROVENANCE without the D4 sentence."""
+    provenance = (ROSTER_POPULATION_FIXTURES / "PROVENANCE.txt").read_text(encoding="utf-8")
+    files = _extract_files()
+    name = f"{ROSTER_STATE_A}/spec-index.txt"
+    unreduced = "**Proposed (2026-09-18) — DRAFTED AND GATED 2026-09-18; AWAITING IMPLEMENTATION.**"
+    lines = files[name].splitlines()
+    index = lines.index("| PDF-89 | **Proposed** |")
+    lines[index] = f"| PDF-89 | {unreduced} |"
+    got = extract_prose_violations({**files, name: "\n".join(lines) + "\n"}, provenance)
+    assert got == [f"{name}:{index + 1}: {lines[index]!r}"]
+    got = extract_prose_violations(files, provenance.replace(EXTRACT_SENTENCE, ""))
+    assert got == [f"PROVENANCE.txt lacks the sentence {EXTRACT_SENTENCE!r}"]
+
+
+def test_pdf105_fixture_population_known_answers() -> None:
+    """AC2: the derived population on both reconstructed historical states."""
+    population_a, _rows_a, _counter_a = _read_roster_state(ROSTER_STATE_A)
+    population_b, _rows_b, _counter_b = _read_roster_state(ROSTER_STATE_B)
+    assert len(population_a) == 88
+    assert "PDF-89" in population_a and "PDF-87" not in population_a
+    assert len(population_b) == 96
+    assert {f"PDF-{n}" for n in range(91, 98)} <= population_b
+    assert "PDF-87" not in population_b
+
+
+def test_pdf105_fixture_population_takes_both_halves_and_the_widened_grammar(
+    tmp_path: Path,
+) -> None:
+    """AC3: subject-only, heading-only and historical-form ids all land in the union."""
+    changelog = tmp_path / "changelog.md"
+    changelog.write_text(
+        "## [PDF-121] Heading only — 2026-10-05\n"
+        "## [Task: PDF-16 — Website, the historical form] - 2026-09-01\n",
+        encoding="utf-8",
+    )
+    subjects = tmp_path / "subjects.txt"
+    subjects.write_text("[PDF-120] fix: subject only\n", encoding="utf-8")
+    population = landed_ids(
+        changelog.read_text(encoding="utf-8"), subjects.read_text(encoding="utf-8").splitlines()
+    )
+    assert population == {"PDF-120", "PDF-121", "PDF-16"}
+
+
+def test_pdf105_fixture_population_counts_uses_and_not_declarations() -> None:
+    """AC4 (X-905): decoys in a bullet, a subject tail, a B-heading's prose and a planted string."""
+    changelog = (
+        "## [PDF-130] The one real entry — 2026-10-05\n"
+        "- PDF-999 is cited in a bullet\n"
+        "- Planted by PDF-24: see PDF-99.\n"
+        "## [B-371] fix: prose that mentions PDF-997 — 2026-09-19\n"
+    )
+    subjects = ["docs: cite [PDF-998]", "[B-372] chore: not a spec id"]
+    assert landed_ids(changelog, subjects) == {"PDF-130"}
+
+
+def test_pdf105_the_counter_is_the_one_declaration_and_nothing_else() -> None:
+    """AC4 (X-905): prose restatements and decoys never read as the counter."""
+    header = (
+        "> Next. **Next allocatable ID: `PDF-107`.** It was moved `PDF-99` → `PDF-107`, "
+        "and `PDF-91` → `PDF-98` → `PDF-99`; (`PDF-120` is not allocated).\n"
+    )
+    assert declared_counter(header) == 107
+    with pytest.raises(AssertionError, match="found 2"):
+        declared_counter(header + header)
+    with pytest.raises(AssertionError, match="found 0"):
+        declared_counter("> moved `PDF-99` → `PDF-107`\n")
+
+
+def test_pdf105_fixture_unrostered_known_answers() -> None:
+    """AC5 (B-374 half 1): `PDF-91`..`PDF-97` have no roster row at state (b); none at (a)."""
+    population_a, rows_a, _ = _read_roster_state(ROSTER_STATE_A)
+    population_b, rows_b, _ = _read_roster_state(ROSTER_STATE_B)
+    assert unrostered(population_a, rows_a) == []
+    assert unrostered(population_b, rows_b) == [f"PDF-{n}" for n in range(91, 98)]
+
+
+def test_pdf105_fixture_unrostered_is_blind_to_spec_files_by_design(tmp_path: Path) -> None:
+    """AC5 discriminator: a spec FILE with no roster ROW is still unrostered.
+
+    The reconstructed states cannot tell a roster-row lookup from a spec-file lookup:
+    `PDF-91`..`PDF-97` lack both, so both lookups flag them. This synthetic tree is the
+    case that does: `PDF-120` has a spec file and no row, and only a row lookup flags it.
+    """
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "SPEC-INDEX.md").write_text("| PDF-119 | **Implemented** |\n", encoding="utf-8")
+    (specs / "PDF-120_has-a-file-but-no-row.md").write_text(
+        "**Spec ID:** PDF-120\n**Status:** Implemented\n", encoding="utf-8"
+    )
+    rows = roster_rows((specs / "SPEC-INDEX.md").read_text(encoding="utf-8"))
+    assert "PDF-120" in spec_header_statuses(tmp_path)
+    assert unrostered({"PDF-119", "PDF-120"}, rows) == ["PDF-120"]
+
+
+def test_pdf105_fixture_counter_known_answers() -> None:
+    """AC6 (B-374 half 2): the counter sat at `PDF-91` with `PDF-91`..`PDF-97` already landed."""
+    population_a, _rows_a, counter_a = _read_roster_state(ROSTER_STATE_A)
+    population_b, _rows_b, counter_b = _read_roster_state(ROSTER_STATE_B)
+    assert counter_a == 90
+    assert at_or_above_counter(population_a, counter_a) == []
+    assert counter_b == 91
+    assert at_or_above_counter(population_b, counter_b) == [f"PDF-{n}" for n in range(91, 98)]
+
+
+def test_pdf105_fixture_proposed_known_answers() -> None:
+    """AC7 (B-365): `PDF-89` landed but `Proposed`, the agreement arm blind to it, `PDF-87` fine."""
+    population_a, rows_a, _ = _read_roster_state(ROSTER_STATE_A)
+    population_b, rows_b, _ = _read_roster_state(ROSTER_STATE_B)
+    assert landed_but_proposed(population_a, rows_a) == ["PDF-89"]
+    assert landed_but_proposed(population_b, rows_b) == []
+
+    # constraint (iii): PDF-87 is legitimately Proposed and is NOT flagged.
+    assert status_token(rows_a["PDF-87"]) == "Proposed"
+    assert "PDF-87" not in landed_but_proposed(population_a, rows_a)
+
+    # B-365's blindness: the EXISTING oracle compares two operands the PM wrote and AGREES.
+    header = (ROSTER_POPULATION_FIXTURES / ROSTER_STATE_A / "PDF-89.header.txt").read_text(
+        encoding="utf-8"
+    )
+    header_status = HEADER_STATUS.search(header)
+    assert header_status is not None
+    assert status_token(header_status.group(1)) == status_token(rows_a["PDF-89"]) == "Proposed"
+
+    # constraint (i): a row forced to Proposed against a landed id is caught.
+    forced = dict(rows_b)
+    forced["PDF-90"] = "**Proposed (2026-09-19)**"
+    assert landed_but_proposed(population_b, forced) == ["PDF-90"]
 
 
 # --------------------------------------------------------------------------- #

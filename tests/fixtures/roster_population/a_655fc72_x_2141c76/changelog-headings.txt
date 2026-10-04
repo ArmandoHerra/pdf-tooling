@@ -1,0 +1,141 @@
+## [PDF-89] Refuse a destination that is one of the run's own inputs — 2026-09-18
+## [PDF-88] Derive the acceptance premise from the host the arm runs on — 2026-09-18
+## [PDF-86] Condition the total-startup-cost ceiling on the cells it was measured in — 2026-09-18
+## [PDF-85] Re-scope the filesystem-acceptance oracle to the branch it was built for — 2026-09-18
+## [PDF-76] Cover `--force` / no-clobber at the two multi-file producers — 2026-09-17
+## [PDF-79] Record that `-o table` is not public API, and keep that statement honest — 2026-09-17
+## [PDF-81] Stop `linearize` losing `sys.stderr` to the engine, and prove it is restored — 2026-09-17
+## [PDF-72] Correct four documentation falsehoods and anchor the suite-size figure — 2026-09-17
+## [PDF-83] Disclose the second exception in the frozen exit-code row — 2026-09-17
+## [PDF-84] Wire the clobber route into the bulk-destructive gate at every batch verb — 2026-09-17
+## [PDF-78] De-flake the rasterize signal arm — the repair is a derivation, not a bump — 2026-09-17
+## [PDF-75] Derive `destructive`, widen the bulk-destructive gate, and stop pre-satisfying it — 2026-09-17
+## [PDF-82] Unblock the engines-absent gate, and retire the excuse that hid it — 2026-09-16
+## [PDF-77] Give hypothesis a profile, a recoverable counterexample and pinned seeds — 2026-09-16
+## [PDF-68] Bound total startup import cost with an arm that runs by default — 2026-09-16
+## [PDF-67] Carve out the engine-residual case in the frozen exit-code row, and instrument the amended claim — 2026-09-16
+## [PDF-80] Make the product agree with itself about a destination's `~` — 2026-09-16
+## [PDF-73] Measure branch coverage once, out of band, and publish the delta — 2026-09-16
+## [PDF-71] Repair contract row C8 — it asserted a third-party library, at 26 leaves — 2026-09-16
+## [PDF-65] Settle `--no-color` by removing it, and make the flag partition assert liveness — 2026-09-15
+## [PDF-69] Make `tests/test_secret_leak_sweeps.py` able to fail — 2026-09-15
+## [PDF-66] Remove the sentinel-substring false red that accuses a contributor of leaking a secret — 2026-09-15
+## [PDF-74] Name the argument value-shape dimension and cover it — 2026-09-15
+## [PDF-70] Give both residue instruments a downward ratification path, and stop the gate depending on another repository's tree — 2026-09-15
+## [PDF-64] The dry run crashes on the input the real run handles — predict a new relative `--out-dir` instead of raising — 2026-09-15
+## [PDF-62] Ship one migration note for the one breaking release — 2026-09-15
+## [PDF-61] Mechanize what `schema_version` does at the `1.0.0` boundary — 2026-09-15
+## [PDF-60] Require `ci.yml` green to merge, and add the DCO check — 2026-09-15
+## [PDF-59] Settle what 1.0.0 claims to support — the maturity classifier and the interpreter — 2026-09-14
+## [PDF-58] Remove the deprecated console scripts, and make the README say one thing about when they go — 2026-09-12
+## [PDF-57] The one breaking release: `<retired-env-prefix>_*` / `<retired-class-prefix>Error` are gone — 2026-09-12
+## [PDF-56] Make the README's defect pointer able to go stale loudly — 2026-09-12
+## [PDF-55] Give the startup budget an instrument that runs by default and survives contention — 2026-09-12
+## [PDF-54] Extend the frozen envelope register to the failure arms — 2026-09-12
+## [PDF-53] Make `convert --dry-run` predict the real run's exit code and per-item `ok` — 2026-09-11
+## [PDF-63] Drive `convert` in the read-seam sweep, so the triage's own byte reads are observed rather than counted — 2026-09-11
+## [PDF-52] Disclose password verification in the dry-run tier and in the five honoured verbs — 2026-09-11
+## [PDF-51] Make `info` return the run-scoped error envelope on a nonexistent input — 2026-09-11
+## [PDF-50] Return the error envelope, not a traceback, when the `.bak` sidecar cannot be created — 2026-09-11
+## [PDF-49] Document two correct-but-surprising behaviours and cut the 0.3.1 patch — 2026-09-07
+## [PDF-48] fix: the rename census was blind to its own untracked new files — 2026-09-06
+## [PDF-48] The complete rename: console scripts, import package, and the last old-name surfaces — 2026-09-06
+## [PDF-47] Make the published publisher row a standing differential, and guard the premise it retires — 2026-09-06
+## [PDF-46] Stop the temp-directory leak the gate's own runs kept feeding — 2026-09-06
+## [PDF-45] Job-scoped Pages permissions, and a checksum on the `gitleaks` download — 2026-09-06
+## [PDF-38] Follow-up: the documented engines-hidden figure this spec's own arms moved — 2026-09-05
+## [PDF-38] `--dry-run` predicts the `.bak` refusal on all twelve `--in-place` verbs — 2026-09-05
+## [PDF-44] Half B: the orphan probe that could not fail for the reason it claimed — 2026-09-05
+## [PDF-44] Half A: the dry-run helper that promised a guard and ran `json.loads` first — 2026-09-05
+## [PDF-43] A runtime `open()` completeness instrument for §D3 — and the three seams it already names — 2026-09-05
+## [PDF-42] Follow-up: the AC7 guard this spec's own comment pointed at did not exist — 2026-09-05
+## [PDF-42] Follow-up: this spec's own sample data reddened another spec's guard — 2026-09-05
+## [PDF-42] A startup control that can see latency, and an abstention guard that cannot be walked past — 2026-09-05
+## [PDF-41] Follow-up: the `B-245` pin could never have fired its own retirement signal — 2026-09-05
+## [PDF-41] The `AGPL|GPL|LGPL` deny pattern and the empty `ALLOWLIST` get a standing test — 2026-09-05
+## [PDF-40] Follow-up: the batch arms fed `convert` the one operand kind it cannot take, and a keyword pair the secret scanner reads as a key — 2026-09-05
+## [PDF-40] A `--out-dir` batch payload never denies an artifact that is on disk — 2026-09-05
+## [PDF-39] Rule the pre-`v1.0.0` envelope inconsistencies, and document the mapping that ships — 2026-09-05
+## [PDF-37] `--password-file` is honoured or refused, never accepted-and-silently-ignored — 2026-09-05
+## [PDF-36] No traceback, and no heap address, on the user's error path — 2026-09-04
+## [PDF-35] Follow-up: the new fixture carried the superseded display name, and the gate that could not have caught it locally — 2026-09-04
+## [PDF-35] Pin the render pool's start method — 2026-09-04
+## [PDF-33] Lint follow-up: `Callable` imported from `collections.abc`, and the gate that caught it — 2026-09-04
+## [PDF-33] The display name follows `pdf-tooling` on every surface a human reads — 2026-09-04
+## [PDF-34] X-474 (2/2): the bounded observation window closed with zero scheduled runs — AC17 PARTIAL, cron reset to weekly — 2026-09-04
+## [PDF-34] X-474 (1/2): AC17's cron tightened to `*/5 * * * *` for a bounded observation window — 2026-09-04
+## [PDF-34] D4/D5/AC10/AC11/AC12/AC17: the deferred unit lands — `docs-gate` runs in CI, `test`'s history arms stop skipping, and a weekly cadence — 2026-09-04
+## [PDF-34] X-467: `be89f36` is registered, not paid — the register grows to five with its finding attached — 2026-09-04
+## [PDF-34] No gate exits 0 while its arms are red — `pipefail`, a strict posture, and the publish path gated — 2026-09-04
+## [B-218] correction: `be89f36` landed owing a changelog entry and wrote none — 2026-09-04
+## [PDF-31] Name sync — repo, website and layer follow the `pdf-tooling` distribution — 2026-09-04
+## [PDF-32] Website dependency currency — Dependabot PR #2 triaged NEEDS-REVIEW, in-range bumps swept — 2026-09-04
+## [B-218] chore: rename distribution to pdf-tooling, version 0.1.1 — 2026-09-03
+## [PDF-30] fix: two false claims inside the spec's own instruments — 2026-09-03
+## [PDF-30] forward-fix: the history-depth meta-guard was shallow-blind and silently passed unmeasurable — 2026-09-03
+## [PDF-30] Mechanized doc claims & README known-issues pointer — 2026-09-03
+## [PDF-26] the §D3 belt's second and last carrier — `cli/cmd_create.py` — 2026-09-03
+## [PDF-26] the §D3 belt reached `ops/compose.py` and stopped at one seam of three — 2026-09-03
+## [PDF-26] Per-input failure classification for batch verbs — 2026-09-03
+## [PDF-29] the anti-abstention guard named one mechanism and missed the one shipped beside it — 2026-09-03
+## [PDF-25] `RETURN_SIGNALLED_CODES` claimed the product's set and held a subset — 2026-09-03
+## [PDF-29] `-n auto` broke a 3.14-only AF_UNIX path budget — 2026-09-03
+## [PDF-29] make ci budget & startup-gate baseline — 2026-09-03
+## [PDF-25] AC16's README control could not fail — 2026-09-03
+## [PDF-25] Structured envelope for every usage error — 2026-09-02
+## [PDF-24] PDF-01 CLI-spine re-verification — 2026-09-02
+## [PDF-23] Page-scoped overlays & merge_page migration — 2026-09-02
+## [PDF-22] Code-derived secret-leak regression matrix — 2026-09-02
+## [PDF-21] fix: PR_SET_PDEATHSIG does not protect a forkserver worker — 2026-09-02
+## [PDF-21] fix: the SIGKILL arm counted multiprocessing's own helpers as orphans — 2026-09-02
+## [PDF-21] `PDF-09` rasterize re-grant — 2026-09-02
+## [PDF-20] `PDF-05` engine-ports re-verification & purity tail — 2026-09-02
+## [PDF-19] `PDF-04` safety-spine re-verification — 2026-09-02
+## [PDF-28] docs: correct the epilogue's reproduce-one-CI-leg command — `make test PYTHON=3.11`, not `make ci PYTHON=3.11` — 2026-09-02
+## [PDF-28] Local-gate/CI-gate equivalence & PDF-02 re-verification — 2026-09-02
+## [PDF-27] docs: correct the pre-existing `/tmp` directory count — the figure was 333, not 244 — 2026-09-02
+## [PDF-27] PDF-03 page-range grammar re-verification — 2026-09-02
+## [PDF-18] fix: AC12's convert cell must respect engine absence, not assume it — 2026-09-02
+## [PDF-18] One planning tier: unify `_plan_filesystem`, refuse the unwritable-parent tier — 2026-09-02
+## [PDF-17] fix: the branch-coverage expiry alarm fired, correctly, on CPython 3.14 — 2026-09-01
+## [PDF-17] Contract-harness repair & PDF-06 re-verification — 2026-09-01
+## [B-101] fix: the last two surfaces still asserting the `--dry-run` clause OR-7 struck — 2026-08-31
+## [Task: PDF-16 — Project website (GitHub Pages), Phase B] - 2026-08-31
+## [B-102] fix: a `test_raster.py` comment contradicted the commit that wrote it — 2026-08-31
+## [B-099] fix: `TESTING.md`'s quoted engines-hidden pass count was one low — 2026-08-31
+## [B-093] fix: the bulk-destructive confirmation gate did not mirror under `--dry-run` — 2026-08-31
+## [B-094] fix: `/Rotate` was applied twice in `pdfium_raster`, so 90/180/270 pages rendered wrong — 2026-08-30
+## [B-096] fix: `convert --dry-run` exited 0 with no `soffice`, while the real run exited 3 — 2026-08-30
+## [PDF-15] fix: declare `convert`'s genuine engine precondition so C12/C14 skip visibly instead of failing — 2026-08-30
+## [PDF-15] feat: `ocr` + `convert` — the two system-binary verbs — 2026-08-30
+## [B-076] fix: `--in-place` silently dropped `-O`/`--out-dir`/`--name` and exited 0 — 2026-08-30
+## [B-079] fix: the bulk-destructive confirmation gate was unwired on five verbs — 2026-08-30
+## [B-090] fix: drop the un-failable `|| true` the stale-lock check introduced — 2026-08-30
+## [B-090] fix: `make ci` had no concurrency guard and manufactured PHANTOM REDS — 2026-08-30
+## [B-088] fix: restore the changelog entry silently overwritten at `33bf481` — 2026-08-30
+## [PDF-14] fix: add the missing `meta get` golden (AC18/Scope > Tests) — 2026-08-30
+## [PDF-14] feat: `meta get`/`meta set` over /Info + XMP; `watermark`/`stamp` via the compositing port — 2026-08-30
+## [B-078] fix: `open_document` now raises `AuthError` on a user-password-protected input — 2026-08-30
+## [PDF-08] fix: two CI-only defects the local gate could not see — 2026-08-30
+## [PDF-08] extract / delete / rotate / reorder — 2026-08-30
+## [PDF-13] fix: wait for /proc to show the child's argv before reading it — 2026-08-30
+## [B-068] fix: `--password-file`'s refusal echoed the given value on stdout/stderr — 2026-08-30
+## [PDF-13] encrypt / decrypt / permissions + password handling — 2026-08-30
+## [PDF-12] compress + repair + linearize — 2026-08-30
+## [PDF-11] text + tables — 2026-08-30
+## [B-055] widen the SIGTERM/SIGINT/SIGHUP teardown grace window and make its own test spawn-safe — 2026-08-30
+## [B-055] `rasterize`'s worker pool no longer survives SIGTERM/SIGINT/SIGHUP to the parent — 2026-08-30
+## [B-054] `--dry-run` predicts the filesystem-tier refusal for `--out-dir` verbs — 2026-08-30
+## [PDF-10] compose + create — 2026-08-30
+## [PDF-09] rasterize — PDF pages to images — 2026-08-30
+## [PDF-07] merge + split — the OR-3 output-flag consumption mechanism — 2026-08-30
+## [B-034] `make ci` was locally unrunnable under coverage instrumentation — 2026-08-30
+## [PDF-04] Ruling X-67 fix-forward: `--dry-run` now runs the plan and predicts the refusal — 2026-08-29
+## [PDF-06] Coverage floor fix-forward: subprocess-executed CLI code was unmeasured — 2026-08-29
+## [PDF-06] Fixture corpus, CLI contract harness & real-sample guard — 2026-08-29
+## [PDF-05] Engine ports, adapters, doctor & info — 2026-08-29
+## [PDF-04] Safety spine (atomic writes, no-clobber, --in-place, -y gate) — 2026-08-29
+## [PDF-03] Page-range grammar & selection engine — 2026-08-29
+## [Task: PDF-16 — Project website (GitHub Pages), Phase A] - 2026-08-29
+## [PDF-02] CI, license gate & release skeleton — 2026-08-29
+## [PDF-01] Project scaffold & CLI spine — 2026-08-29
