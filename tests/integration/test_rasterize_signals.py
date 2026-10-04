@@ -10,10 +10,13 @@ AC5/AC26 tests spawn-safe, not fork-only") is exactly the failure mode this
 shape avoids by not depending on it in the first place.
 
 Every signal here is sent to the **parent PID only, never its process
-group**. Signalling the whole group would kill the render workers directly
-and prove nothing — that is precisely the defect this spec fixes: a bare,
-single-process ``kill <pid>`` (what ``timeout``, ``kill``, systemd,
-``docker stop`` and CI job cancellation all send) must be enough on its own.
+group**. A group delivery reaches every render worker directly, and each one
+now unwinds itself (PDF-101, proved by
+``tests/integration/test_procpool_group_signals.py``), so it would not isolate
+the thing these arms measure: the PARENT's own teardown. That is the defect
+this spec fixes: a bare, single-process ``kill <pid>`` (what ``timeout``,
+``kill``, systemd, ``docker stop`` and CI job cancellation all send) must be
+enough on its own.
 
 Every launched process uses ``start_new_session=True``, which makes it a new
 session AND process-group leader in the same syscall (POSIX ``setsid()``);
@@ -148,6 +151,8 @@ _PARENT_OVERHEAD_P95_S = 0.327
 #: = 16.327 s, and
 #: `tests/unit/test_procpool.py::test_the_grace_fits_inside_the_parent_exit_bound`
 #: reddens by name the day a raised grace stops fitting.
+#: 2026-10-04 (PDF-101): "paid in full" is now true only of a worker held inside a C
+#: call longer than the grace; a worker that unwinds exits at once (`_run_task`).
 #:
 #: THE VALUE IS HELD AT 25.0 AND NOT NARROWED TO 17, and that is a decision
 #: rather than an omission. This is a BOUND, not a budget: it is paid only on
@@ -440,9 +445,9 @@ def _send_signal_and_measure(
     try:
         _wait_for_progress(out_dir, at_least=_SIGNAL_AT_COUNT, timeout=_PROGRESS_TIMEOUT_S)
 
-        # THE PID ONLY -- never the group. Signalling the group would kill
-        # the workers directly and prove nothing about the parent's own
-        # teardown (see module docstring).
+        # THE PID ONLY -- never the group. A group delivery reaches the workers
+        # directly, where each one unwinds itself, so it would not isolate the
+        # parent's own teardown that this arm measures (see module docstring).
         os.kill(proc.pid, sig)
 
         try:
@@ -625,11 +630,11 @@ def test_sigint_to_parent_only_stops_new_output_and_leaves_no_survivors(
 
     Measured directly against the unfixed code (module docstring / spec
     report): a bare ``kill -INT <parent pid only>`` does NOT stop the job --
-    it runs to completion, identically to the SIGTERM defect. "SIGINT is
-    already clean" was true only for an interactive Ctrl-C, which signals
-    the whole foreground process group and kills workers directly,
-    independent of anything this process does. This arm proves SIGINT is
-    clean under the harder, accident-free discipline too, because
+    it runs to completion, identically to the SIGTERM defect. An interactive
+    Ctrl-C signals the whole foreground process group, so each worker also
+    receives it directly and unwinds itself (PDF-101), independent of
+    anything this process does. This arm proves SIGINT is clean under the
+    harder, accident-free discipline too, because
     `guarded_process_pool` now handles it through the identical routine.
     """
     proc, count_at_death, count_after_settle, strays = _send_signal_and_measure(
@@ -655,8 +660,9 @@ def test_sighup_to_parent_only_stops_new_output_and_leaves_no_survivors(
     tmp_path: Path,
 ) -> None:
     """SIGHUP gets the SAME measurement discipline as the SIGTERM and SIGINT
-    arms: the PARENT PID ALONE (X-119 -- signalling the group would kill the
-    workers directly and manufacture a pass), the positive control (parent
+    arms: the PARENT PID ALONE (X-119 -- a group delivery reaches the workers
+    directly and would not isolate the parent's own teardown), the positive
+    control (parent
     alive, pool members present, ``count_at_death < _PAGE_COUNT``), zero new
     output after death, and zero survivors -- here ENUMERATED by pid as well as
     probed with ``killpg(pgid, 0)``.
