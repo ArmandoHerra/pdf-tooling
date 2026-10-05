@@ -49,6 +49,9 @@ clear is applied to BOTH /Info and XMP. If it has NO packet, sets and clears
 apply to /Info only -- no XMP packet is ever CREATED by this command; that
 would change the document's shape and could invalidate a PDF/A conformance
 claim the operator never asked to touch.
+A packet this command cannot rewrite safely (not well-formed, a non-empty
+rdf:about, or a rewrite that does not verify) is left unchanged, and the run
+says so in its message and a warning.
 
 --clear-producer and --clear-all REMOVE keys; they never set a field to the
 empty string.

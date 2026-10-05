@@ -288,7 +288,18 @@ def meta_set_run(
 
     bytes_after = writer.bytes_written
     duration_ms = int((time.monotonic() - started) * 1000)
-    message = "ok" if outcome.wrote_xmp or clear_all else "ok (no XMP packet; /Info only)"
+    # PDF-107: a packet this write could not rewrite safely is preserved
+    # byte-for-byte and SAID so -- never a bare `ok` over a lost packet.
+    reason = outcome.xmp_left_unchanged
+    warnings: tuple[str, ...] = ()
+    if reason is not None:
+        message = f"ok (XMP packet left unchanged: {reason}; /Info only)"
+        warnings = (
+            f"{VERB_META_SET}: {reason}; the XMP packet was left unchanged "
+            "and only /Info was written",
+        )
+    else:
+        message = "ok" if outcome.wrote_xmp or clear_all else "ok (no XMP packet; /Info only)"
     item = ItemResult(
         input=str(source),
         output=str(target),
@@ -305,6 +316,6 @@ def meta_set_run(
         verb=VERB_META_SET,
         dry_run=False,
         items=(item,),
-        warnings=(),
+        warnings=warnings,
         duration_ms=0,
     )

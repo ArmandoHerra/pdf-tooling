@@ -11,6 +11,8 @@ byte-identity by construction.
 from __future__ import annotations
 
 import hashlib
+import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pikepdf
@@ -105,6 +107,43 @@ def test_every_fixture_matches_its_own_spec(built: Corpus, name: str) -> None:
         for row in spec.table:
             for cell in row:
                 assert cell in text, f"{name}: cell {cell!r} missing from extracted text"
+
+
+def test_xmp_pikepdf_declares_its_namespaces_on_each_property_element(built: Corpus) -> None:
+    """PDF-107 D4's precondition: the fixture IS the pikepdf shape.
+
+    Every property element carries its own ``xmlns:`` declaration and the
+    ``rdf:Description`` carries none -- the one layout pypdf's XMP setters turn
+    into an unparseable packet. A builder that fell back to
+    ``XmpInformation.create()`` would put all six declarations on the Description
+    and make every PDF-107 shape cell vacuous, so this asserts the layout itself,
+    not merely that a packet exists.
+    """
+    with pikepdf.open(str(built.path("xmp_pikepdf"))) as pdf:
+        raw = bytes(pdf.Root.Metadata.read_bytes()).decode("utf-8")
+
+    rdf = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}"
+    description = ET.fromstring(raw.split("?>", 1)[1].rsplit("<?xpacket", 1)[0]).find(
+        f".//{rdf}Description"
+    )
+    assert description is not None, "the packet has no rdf:Description"
+    properties = list(description)
+    assert len(properties) >= 7, "dc/pdf/xmp/pdfaid properties are missing"
+
+    description_tag = re.search(r"<rdf:Description\b[^>]*>", raw)
+    assert description_tag is not None
+    assert "xmlns:" not in description_tag.group(0), "the Description declares a namespace"
+    declarations = re.findall(r"<(?:dc|pdf|xmp|pdfaid):\w+\s+xmlns:(?:dc|pdf|xmp|pdfaid)=", raw)
+    assert len(declarations) == len(properties), (
+        f"{len(declarations)} per-element declarations for {len(properties)} property elements"
+    )
+
+    packet = pypdf.PdfReader(str(built.path("xmp_pikepdf"))).xmp_metadata
+    assert packet is not None, "the packet must parse under pypdf"
+    assert packet.dc_title == {"x-default": "pikepdf Title"}
+    assert not packet.dc_description, "the create arm needs dc:description absent"
+    assert "dc:description" not in raw
+    assert "pdfaid:part" in raw and "pdfaid:conformance" in raw
 
 
 def test_the_encrypted_fixture_rejects_the_wrong_password(built: Corpus) -> None:

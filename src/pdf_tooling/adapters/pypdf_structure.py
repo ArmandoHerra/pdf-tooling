@@ -725,8 +725,18 @@ class PypdfStructureAdapter:
         except PdfReadError as error:
             raise FailureError(f"could not read PDF: {error}") from error
 
-        xmp = writer.xmp_metadata
-        had_xmp = xmp is not None
+        # PDF-107: presence is read from the SOURCE's catalogue without parsing it.
+        # `writer.xmp_metadata` (the getter) parses the packet and raises on one
+        # that is not well-formed XML, which turned `meta set` -- and even
+        # `--clear-all`, whose job is to delete that packet -- into a raw
+        # traceback. The writer's own `/Metadata` stream is left untouched here:
+        # pypdf's `XmpInformation` setters mutate the stream they wrap IN PLACE,
+        # so any edit runs over a detached copy (`_rewrite_xmp_packet`) and the
+        # verified bytes are committed once, below.
+        catalogue: Any = reader.trailer["/Root"].get_object()
+        metadata_ref = catalogue.get("/Metadata")
+        had_xmp = metadata_ref is not None
+        xmp_left_unchanged: str | None = None
 
         # PDF-99: `PdfWriter(clone_from=reader)._info` is `None` -- not an empty
         # dictionary -- whenever the source has no usable `/Info`. Measured on
@@ -765,24 +775,29 @@ class PypdfStructureAdapter:
             writer_info = None if info_absent else writer._info  # noqa: SLF001 -- see above
             info: Any = None if writer_info is None else writer_info.get_object()
             for field, value in sets.items():
-                _, info_name, xmp_attr = _alignment_row(field)
+                _, info_name, _xmp_attr = _alignment_row(field)
                 info[NameObject("/" + info_name)] = TextStringObject(value)
-                if xmp is not None:
-                    _set_xmp_field(xmp, xmp_attr, field, value)
             for field in clears:
-                _, info_name, xmp_attr = _alignment_row(field)
+                _, info_name, _xmp_attr = _alignment_row(field)
                 key = NameObject("/" + info_name)
                 if info is not None and key in info:
                     del info[key]
-                if xmp is not None:
-                    _set_xmp_field(xmp, xmp_attr, field, None)
-            if xmp is not None:
-                writer.xmp_metadata = xmp
-            wrote_xmp = xmp is not None and bool(sets or clears)
+            wrote_xmp = False
+            if metadata_ref is not None and (sets or clears):
+                rewritten, xmp_left_unchanged = _rewrite_xmp_packet(
+                    metadata_ref.get_object(), sets, clears
+                )
+                if rewritten is not None:
+                    writer.xmp_metadata = rewritten
+                    wrote_xmp = True
 
         out_buffer = io.BytesIO()
         writer.write(out_buffer)
-        return MetadataWriteOutcome(output=out_buffer.getvalue(), wrote_xmp=wrote_xmp)
+        return MetadataWriteOutcome(
+            output=out_buffer.getvalue(),
+            wrote_xmp=wrote_xmp,
+            xmp_left_unchanged=xmp_left_unchanged,
+        )
 
     # -- PDF-14 (`watermark`/`stamp`), appended at the end of the class ---- #
 
@@ -1079,6 +1094,171 @@ def _xmp(reader: PdfReader) -> str | None:
         return None
     data = raw.get_data()
     return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-107 -- the namespace-correct, verified XMP rewrite `meta set` commits.
+# --------------------------------------------------------------------------- #
+
+_RDF_NAMESPACE: Final[str] = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+_XMLNS_NAMESPACE: Final[str] = "http://www.w3.org/2000/xmlns/"
+
+#: The three reasons a packet is PRESERVED rather than rewritten. Fixed strings,
+#: never document content (message hygiene); `ops/metadata.py` renders them.
+_XMP_NOT_WELL_FORMED: Final[str] = "the XMP packet is not well-formed XML"
+_XMP_NON_EMPTY_ABOUT: Final[str] = "the XMP packet describes a non-empty rdf:about"
+_XMP_UNVERIFIED: Final[str] = "rewriting the XMP packet did not verify"
+
+
+def _xmp_over(data: bytes) -> Any:
+    """An ``XmpInformation`` over a DETACHED copy of *data*. pypdf's setters
+    mutate the stream they wrap in place, so wrapping the writer's live
+    ``/Metadata`` stream would make "leave the packet unchanged" impossible."""
+    from pypdf.generic import StreamObject
+    from pypdf.xmp import XmpInformation
+
+    stream = StreamObject()
+    stream.set_data(data)
+    return XmpInformation(stream)
+
+
+def _serialize_xmp(xmp: Any) -> bytes:
+    """The candidate packet bytes, from the DOM pypdf already parsed (no ``xml.*``
+    import: the DOM is reached through the nodes pypdf hands back)."""
+    document = xmp.rdf_root.ownerDocument
+    data: bytes = document.toxml(encoding="utf-8")
+    return data
+
+
+def _descriptions(xmp: Any) -> list[Any]:
+    return list(xmp.rdf_root.getElementsByTagNameNS(_RDF_NAMESPACE, "Description"))
+
+
+def _remove_everywhere(xmp: Any, namespace: str, local: str) -> None:
+    """D1 step 1: remove ``{namespace}local`` from EVERY ``rdf:Description``, in
+    element form and attribute form. pypdf's own setters remove it from the
+    first ``about=""`` Description only, which leaves a duplicate (or, for a
+    clear, the value) behind on a packet that spreads properties over several."""
+    for description in _descriptions(xmp):
+        for child in list(description.childNodes):
+            if (
+                child.nodeType == child.ELEMENT_NODE
+                and child.namespaceURI == namespace
+                and child.localName == local
+            ):
+                description.removeChild(child)
+        if description.hasAttributeNS(namespace, local):
+            description.removeAttributeNS(namespace, local)
+
+
+def _prefix_is_bound(element: Any) -> bool:
+    """Whether *element*'s prefix is bound, in scope, to its own namespace URI."""
+    declaration = f"xmlns:{element.prefix}"
+    node = element
+    while node is not None and node.nodeType == node.ELEMENT_NODE:
+        if node.hasAttribute(declaration):
+            return bool(node.getAttribute(declaration) == element.namespaceURI)
+        node = node.parentNode
+    return False
+
+
+def _bind_unbound_prefixes(xmp: Any) -> None:
+    """D1 step 3: declare ``xmlns:<prefix>`` ON each element whose prefix is not
+    bound to its own namespace in scope -- the pikepdf layout. Element-local, so
+    no existing binding is ever re-bound; on a packet that already binds its
+    prefixes this adds nothing and the bytes stay as pypdf wrote them."""
+    for element in xmp.rdf_root.ownerDocument.getElementsByTagName("*"):
+        if element.prefix in (None, "xml", "xmlns") or element.namespaceURI is None:
+            continue
+        if not _prefix_is_bound(element):
+            element.setAttributeNS(
+                _XMLNS_NAMESPACE, f"xmlns:{element.prefix}", element.namespaceURI
+            )
+
+
+def _read_xmp_field(xmp: Any, attr: str) -> Any:
+    """One aligned property, or ``None`` when pypdf's own getter raises (a date
+    it cannot parse): the same posture as ``_xmp_report_fields``."""
+    try:
+        return getattr(xmp, attr)
+    except Exception:
+        return None
+
+
+def _xmp_shape(field: str, value: str) -> Any:
+    """The value a setter must read back as, in its ``_ALIGNMENT`` shape."""
+    if field in ("title", "subject"):
+        return {"x-default": value}
+    if field == "author":
+        return [value]
+    return value
+
+
+def _edit_and_verify(
+    original: bytes, sets: Mapping[str, str], clears: Sequence[str]
+) -> bytes | None:
+    """D1 + D2: edit a detached copy, then re-parse the serialized candidate with
+    a FRESH ``XmpInformation`` (the parser ``meta get`` uses). ``None`` when the
+    candidate does not say exactly what was asked and nothing else changed."""
+    working = _xmp_over(original)
+    before = {field: _read_xmp_field(working, attr) for field, _name, attr in _ALIGNMENT}
+    for field, value in [*sets.items(), *((field, None) for field in clears)]:
+        _, _, attr = _alignment_row(field)
+        namespace, local = _xmp_property(attr)
+        _remove_everywhere(working, namespace, local)
+        _set_xmp_field(working, attr, field, value)
+    _bind_unbound_prefixes(working)
+    candidate = _serialize_xmp(working)
+
+    fresh = _xmp_over(candidate)
+    for field, _name, attr in _ALIGNMENT:
+        after = _read_xmp_field(fresh, attr)
+        if field in sets:
+            ok = after == _xmp_shape(field, sets[field])
+        elif field in clears:
+            ok = not after
+        else:
+            ok = after == before[field]
+        if not ok:
+            return None
+    return candidate
+
+
+def _xmp_property(attr: str) -> tuple[str, str]:
+    """``(namespace URI, local name)`` of the XMP property an ``XmpInformation``
+    attribute reads -- the settable rows of ``_ALIGNMENT``, and nothing else."""
+    from pypdf.xmp import DC_NAMESPACE, PDF_NAMESPACE, XMP_NAMESPACE
+
+    return {
+        "dc_title": (DC_NAMESPACE, "title"),
+        "dc_creator": (DC_NAMESPACE, "creator"),
+        "dc_description": (DC_NAMESPACE, "description"),
+        "pdf_keywords": (PDF_NAMESPACE, "Keywords"),
+        "xmp_creator_tool": (XMP_NAMESPACE, "CreatorTool"),
+        "pdf_producer": (PDF_NAMESPACE, "Producer"),
+    }[attr]
+
+
+def _rewrite_xmp_packet(
+    metadata: Any, sets: Mapping[str, str], clears: Sequence[str]
+) -> tuple[bytes | None, str | None]:
+    """D2/D3: ``(verified bytes, None)``, or ``(None, reason)`` when the packet
+    must be preserved byte-for-byte (P1 unparseable, P2 non-empty ``rdf:about``,
+    P3 the rewrite did not verify). Never raises for a packet's content."""
+    try:
+        original = metadata.get_data()
+        probe = _xmp_over(original)
+    except Exception:
+        return None, _XMP_NOT_WELL_FORMED
+    if any(d.getAttributeNS(_RDF_NAMESPACE, "about") != "" for d in _descriptions(probe)):
+        return None, _XMP_NON_EMPTY_ABOUT
+    try:
+        candidate = _edit_and_verify(original, sets, clears)
+    except Exception:
+        return None, _XMP_UNVERIFIED
+    if candidate is None:
+        return None, _XMP_UNVERIFIED
+    return candidate, None
 
 
 def _should_skip_image(image_file: ImageFile) -> bool:

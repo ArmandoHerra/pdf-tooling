@@ -319,6 +319,13 @@ class MetadataWriteOutcome:
     neither" rule -- ``False`` on a document with no packet, even when
     ``sets``/``clears``/``clear_all`` were non-empty)."""
 
+    xmp_left_unchanged: str | None = None
+    """PDF-107: when an XMP packet EXISTS but this write could not rewrite it
+    safely, the fixed reason string (not well-formed XML, a non-empty
+    ``rdf:about``, or a rewrite that did not verify) -- and the packet in
+    ``output`` is then byte-identical to the input's. ``None`` otherwise.
+    ``wrote_xmp`` is ``False`` whenever this is set."""
+
 
 @dataclass(frozen=True, slots=True)
 class CompositeOutcome:

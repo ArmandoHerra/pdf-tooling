@@ -698,6 +698,52 @@ def _build_no_info(root: Path) -> tuple[Path, FixtureSpec]:
     return path, spec
 
 
+def _build_xmp_pikepdf(root: Path) -> tuple[Path, FixtureSpec]:
+    """PDF-107 -- a document whose XMP packet was authored the way pikepdf
+    authors it: every property element carries its OWN ``xmlns:`` declaration
+    and the ``rdf:Description`` carries none.
+
+    Every earlier XMP fixture (`xmp_bearing`, `xmp_disagreement`,
+    `residual_surfaces`) is built with ``XmpInformation.create()``, which declares
+    all six canonical prefixes on the Description. That is the one shape in which
+    pypdf's own setters happen to emit well-formed XML, so the suite never saw
+    ``meta set`` write an unparseable packet behind a reported ``ok`` (ledger
+    ``652385c7bf``). This is pikepdf's real authoring path, which breaks that
+    assumption.
+
+    It also carries the ``pdfaid`` sentinel (``part`` = 2, ``conformance`` = B):
+    PDF/A identification lives in XMP, so a rewrite that loses a property is not
+    cosmetic. There is deliberately NO ``dc:description``, so ``--subject`` drives
+    the create-a-new-element arm.
+
+    Deterministic: ``set_pikepdf_as_editor=False`` (the default stamps
+    ``xmp:MetadataDate``) plus ``deterministic_id=True``, measured byte-identical
+    across two builds.
+    """
+    text = "xmp_pikepdf fixture -- the packet declares its namespaces per element."
+    staged = root / "_xmp_pikepdf_staged.pdf"
+    made = _new_canvas(staged, _LETTER)
+    made.drawString(72, 700, text)
+    made.showPage()
+    made.save()
+
+    path = root / "xmp_pikepdf.pdf"
+    with pikepdf.open(str(staged)) as pdf:
+        with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
+            meta["dc:title"] = "pikepdf Title"
+            meta["dc:creator"] = ["pikepdf Author"]
+            meta["pdf:Keywords"] = "pikepdf, keywords"
+            meta["xmp:CreatorTool"] = "pikepdf Creator Tool"
+            meta["pdf:Producer"] = "pikepdf Producer"
+            meta["pdfaid:part"] = "2"
+            meta["pdfaid:conformance"] = "B"
+        pdf.save(str(path), deterministic_id=True)
+    staged.unlink()
+
+    spec = FixtureSpec(name="xmp_pikepdf", page_count=1, page_size=_LETTER, page_texts=(text,))
+    return path, spec
+
+
 #: Build order. `FIXTURE_NAMES` mirrors it for iteration by name.
 _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_multipage_text,
@@ -718,6 +764,7 @@ _BUILDERS: Final[tuple[Callable[[Path], tuple[Path, FixtureSpec]], ...]] = (
     _build_rotate_absent,
     _build_shared_contents_pages,
     _build_no_info,
+    _build_xmp_pikepdf,
 )
 
 FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
@@ -741,6 +788,7 @@ FIXTURE_NAMES: Final[tuple[str, ...]] = tuple(
         "rotate_absent",
         "shared_contents_pages",
         "no_info",
+        "xmp_pikepdf",
     )
 )
 
