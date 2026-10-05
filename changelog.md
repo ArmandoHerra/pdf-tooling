@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-87] Make the pool teardown state its own postcondition — 2026-10-04
+
+- **What changed:** `_terminate_pool` now returns a per-process report instead of `None`, and it no longer treats "could not be interrogated" as "dead". A worker whose `is_alive()` raises is signalled (at most one SIGTERM and one SIGKILL) and reported as a survivor. After the reap, every process is re-read, and a survivor gets one read-only `/proc` observation so its first report line names the tail: `join-timed-out`, `outlived-sigkill`, `stale-liveness`, `liveness-unknown` or `undetermined`.
+- **Reap budget:** the joins share one deadline, `_REAP_BUDGET_S = 8.0` (arithmetic, not measured: 25.0 − 16.0 − 0.327 = 8.673 s of room), instead of a fresh `TEARDOWN_GRACE_S` per process, whose worst case grew as N × 16.0 s against a 25.0 s parent exit bound. `TEARDOWN_GRACE_S` is unchanged. A caller using the default now joins each process for at most 8.0 s, down from 16.0 s.
+- **A hardening, NOT a repair of `B-087`:** nothing here makes a worker stop surviving, and nothing is retried. The real arm `test_terminate_pool_ends_and_reaps_a_live_worker` keeps its own independent liveness check; only its failure message gains the report. The ledger row `e00d48aa2b` is not claimed by this entry. `7b6f1aac03`'s arm never calls `_terminate_pool` (it SIGKILLs the driver), so this entry cannot touch or measure it.
+- **Unchanged contract:** the signal path emits nothing new (no stderr, log or exit-code change), `_teardown_and_die` ignores the report, and `__all__` is unchanged.
+- **Tests:** planted-object, fake-clock and planted-`/proc` arms in `tests/unit/test_procpool.py` for each clause, an arithmetic guard beside `test_the_grace_fits_inside_the_parent_exit_bound`, and an AST guard that the teardown path emits nothing.
+
 ## [PDF-105] Give the roster gates a third operand — 2026-10-04
 
 - **Three new planning arms read a population the planning pass does not write.** The landed ids are derived from `changelog.md` headings and `[PDF-NN]` commit subjects (the two structural positions only, with `PDF-100`'s widened grammar imported, never re-spelled). `test_pdf105_every_landed_id_has_a_roster_row`, `test_pdf105_every_landed_id_is_below_the_counter` and `test_pdf105_no_landed_id_reads_proposed_on_the_roster` red on a landed id with no row, at or above the counter, or still `Proposed`.
