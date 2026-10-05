@@ -209,6 +209,16 @@ def _metadata_bytes(path: Path) -> bytes | None:
 # The nine shapes, each asserting what it claims to be.
 # --------------------------------------------------------------------------- #
 
+#: Ledger `17add7b3e9`: inputs whose `/Encrypt` says `/EncryptMetadata false`, so the
+#: `/Metadata` stream is stored in PLAINTEXT and pypdf's cipher turns it into garbage.
+#: `rc4_owner` is the product's own `encrypt --legacy` (always writes the flag);
+#: the AES-256 R=6 pair is Acrobat's "encrypt all contents except metadata". All are
+#: owner-password-only (the empty user password opens them), which is the form that
+#: reaches `meta set` without a password flag. The malformed twin makes the P1
+#: "left unchanged" arm reachable on an encrypted input, so the byte-equality
+#: assertion there is against the TRUE packet and cannot pass on garbage.
+ENCRYPTED_SHAPES: Final[tuple[str, ...]] = ("rc4_owner", "aes256_nometa", "aes256_nometa_malformed")
+
 SHAPES: Final[tuple[str, ...]] = (
     "xmp_bearing",
     "xmp_pikepdf",
@@ -219,12 +229,14 @@ SHAPES: Final[tuple[str, ...]] = (
     "attribute_form",
     "about_uuid",
     "malformed",
+    *ENCRYPTED_SHAPES,
 )
 
 #: shape -> None (parseable, rewritten) or the preserve reason it must trigger.
 PRESERVED: Final[Mapping[str, str]] = {
     "about_uuid": REASON_NON_EMPTY_ABOUT,
     "malformed": REASON_NOT_WELL_FORMED,
+    "aes256_nometa_malformed": REASON_NOT_WELL_FORMED,
 }
 PARSEABLE: Final[tuple[str, ...]] = tuple(s for s in SHAPES if s not in PRESERVED)
 
@@ -296,8 +308,59 @@ def _malformed_packet(corpus: Any) -> bytes:
     return raw.replace(declaration.encode(), b"", 1)
 
 
+def _plain_source_with_packet(corpus: Any, tmp_path: Path, packet: bytes) -> Path:
+    source = tmp_path / "plain_source.pdf"
+    with pikepdf.open(str(corpus.path("single_page"))) as pdf:
+        stream = pdf.make_stream(packet)
+        stream["/Type"] = pikepdf.Name.Metadata
+        stream["/Subtype"] = pikepdf.Name.XML
+        pdf.Root.Metadata = stream
+        pdf.save(str(source), fix_metadata_version=False, deterministic_id=True)
+    return source
+
+
+def _build_encrypted_shape(shape: str, corpus: Any, tmp_path: Path) -> tuple[Path, bytes]:
+    """An `/EncryptMetadata false` input and its TRUE packet (read through pikepdf)."""
+    if shape == "aes256_nometa_malformed":
+        packet = _malformed_packet(corpus)
+    else:
+        packet = _packet(_description(ALL_DECLS, _TITLE + _PRODUCER + _PDFAID))
+    plain = _plain_source_with_packet(corpus, tmp_path, packet)
+    target = tmp_path / f"{shape}.pdf"
+    if shape == "rc4_owner":
+        password_file = tmp_path / "owner.pw"
+        password_file.write_text("ownerpw\n")
+        password_file.chmod(0o600)
+        made = run_cli(
+            "encrypt", str(plain), "--legacy", "--owner-password-file", str(password_file),
+            "-O", str(target), "-o", "json",
+        )  # fmt: skip
+        assert made.returncode == 0, made.stderr[-500:]
+    else:
+        with pikepdf.open(str(plain)) as pdf:
+            pdf.save(
+                str(target),
+                fix_metadata_version=False,
+                encryption=pikepdf.Encryption(owner="ownerpw", user="", R=6, metadata=False),
+            )
+    with pikepdf.open(str(target)) as pdf:
+        assert pdf.is_encrypted
+        assert pdf.trailer.Encrypt.get("/EncryptMetadata") is False, shape
+    raw = _metadata_bytes(target)
+    assert raw is not None and raw.startswith(b"<?xpacket"), f"{shape}: not the stored packet"
+    # Non-vacuity: this shape really is the one on which pypdf's view is wrong, so a
+    # test that compared against pypdf's bytes would be comparing against garbage.
+    reader = PdfReader(str(target))
+    assert reader.decrypt("") != 0
+    pypdf_view = reader.trailer["/Root"]["/Metadata"].get_object().get_data()
+    assert pypdf_view != raw, f"{shape}: pypdf already reads the true packet (no defect shape)"
+    return target, raw
+
+
 def build_shape(shape: str, corpus: Any, tmp_path: Path) -> tuple[Path, bytes]:
     """Return ``(path, input packet bytes)`` for a fresh copy of *shape*."""
+    if shape in ENCRYPTED_SHAPES:
+        return _build_encrypted_shape(shape, corpus, tmp_path)
     target = tmp_path / f"{shape}.pdf"
     if shape in ("xmp_bearing", "xmp_pikepdf"):
         target.write_bytes(corpus.path(shape).read_bytes())
@@ -405,13 +468,22 @@ def _assert_round_trip(out: Path, cell: str) -> None:
     assert field not in [d["field"] for d in report["disagreements"]], report["disagreements"]
 
 
+def _packet_warnings(run: Cell) -> list[str]:
+    """The run's warnings minus PDF-108's carriage line. An encrypted input writes
+    an unencrypted output, and PDF-108 says so exactly once; this arm's oracle is
+    about the XMP packet, so that line is asserted present and then set aside."""
+    carriage = [w for w in run.payload["warnings"] if "input is encrypted;" in w]
+    assert len(carriage) == (1 if run.shape in ENCRYPTED_SHAPES else 0), run.payload["warnings"]
+    return [w for w in run.payload["warnings"] if w not in carriage]
+
+
 def _assert_rewritten(run: Cell) -> None:
     """AC3/AC4/AC5's oracles for one cell that must have been rewritten."""
     assert run.returncode == 0, f"rc {run.returncode}; stderr={run.stderr[-400:]!r}"
     item = run.item
     assert item["message"] == "ok", item
     assert item["detail"] == {"wrote_xmp": True}
-    assert run.payload["warnings"] == []
+    assert _packet_warnings(run) == []
     raw = _assert_parses_under_both(run.out)
     _assert_round_trip(run.out, run.cell)
 
@@ -483,8 +555,9 @@ def test_an_unrewritable_packet_is_preserved_byte_for_byte_and_announced(
     assert item["ok"] is True
     assert item["message"] == _preserved_message(reason)
     assert item["detail"] == {"wrote_xmp": False}
-    assert len(run.payload["warnings"]) == 1
-    assert reason in run.payload["warnings"][0]
+    packet = _packet_warnings(run)
+    assert len(packet) == 1
+    assert reason in packet[0]
     assert _metadata_bytes(run.out) == run.before, "the packet was not preserved byte-for-byte"
 
     info = PdfReader(str(run.out)).metadata
@@ -569,7 +642,32 @@ def test_a_bare_ok_always_leaves_a_parseable_packet_that_reads_back(
         _assert_round_trip(run.out, cell)
     else:
         assert message.startswith("ok (XMP packet left unchanged:"), message
+        # BYTE-equality with the input's TRUE on-disk packet (`run.before` is read
+        # through pikepdf, never through pypdf's view of an encrypted stream).
         assert _metadata_bytes(run.out) == run.before
+
+
+def test_the_invariant_arm_covers_encrypted_inputs_and_is_not_vacuous() -> None:
+    """The AC12 arm above must have seen encrypted cells, and the qualified
+    ("left unchanged") branch must be reachable on one -- otherwise the byte-equality
+    assertion against the true packet would be a loop over nothing."""
+    encrypted = [(s, c) for s, c in DRY_CELLS if s in ENCRYPTED_SHAPES]
+    assert len(encrypted) == len(ENCRYPTED_SHAPES) * len(ALL_CELLS) > 0
+    qualified = [(s, c) for s, c in encrypted if s in PRESERVED and c != "clear_all"]
+    assert qualified, "no encrypted cell can ever reach the 'left unchanged' branch"
+
+
+@pytest.mark.parametrize("cell", PRESERVE_CELLS)
+def test_an_encrypted_unparseable_packet_is_preserved_as_the_true_bytes(
+    corpus: Any, tmp_path: Path, cell: str
+) -> None:
+    """Ledger `17add7b3e9` at its sharpest: the qualifier fires on a packet that is
+    really malformed, and the output carries the stored bytes -- not pypdf's
+    mis-decrypted ones."""
+    run = run_cell("aes256_nometa_malformed", cell, corpus, tmp_path)
+    assert run.returncode == 0, run.stderr[-400:]
+    assert run.item["message"] == _preserved_message(REASON_NOT_WELL_FORMED)
+    assert _metadata_bytes(run.out) == run.before
 
 
 # --------------------------------------------------------------------------- #
@@ -672,3 +770,24 @@ def test_an_unreadable_packet_date_does_not_block_a_rewrite(corpus: Any, tmp_pat
     assert result.returncode == 0
     assert payload["items"][0]["message"] == "ok"
     assert PdfReader(str(out)).xmp_metadata.dc_title == {"x-default": NEW}  # type: ignore[union-attr]
+
+
+def test_an_encrypted_input_whose_true_packet_cannot_be_read_fails_closed(
+    corpus: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback for ledger `17add7b3e9`: never write pypdf's mis-decrypted bytes
+    when the true ones cannot be obtained -- a typed error, nothing returned."""
+    from pdf_tooling.adapters import pypdf_structure
+    from pdf_tooling.errors import FailureError
+
+    source, _ = build_shape("aes256_nometa", corpus, tmp_path)
+    data = source.read_bytes()
+
+    def refuse(*_args: Any, **_kwargs: Any) -> Any:
+        raise pikepdf.PdfError("injected")
+
+    monkeypatch.setattr(pikepdf, "open", refuse)
+    with pytest.raises(FailureError, match="could not read this document's XMP packet"):
+        pypdf_structure.ADAPTER.write_metadata(
+            data, sets={"title": NEW}, clears=[], clear_all=False
+        )

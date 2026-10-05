@@ -330,6 +330,57 @@ READ_SEAM_RESIDUE_LEDGER: Final[tuple[_ReadSeamRatification, ...]] = (
             "Every other key is carried byte-identical from the previous record."
         ),
     ),
+    _ReadSeamRatification(
+        date="2026-10-04",
+        spec="PDF-107",
+        direction="up",
+        ruling="X-981",
+        ceilings=MappingProxyType(
+            {
+                "pdf_tooling/adapters/pdfplumber_text.py": 1,
+                "pdf_tooling/adapters/pikepdf_structure.py": 10,
+                #: X-981 -- in-memory parse of bytes already read: `_true_metadata_packet`
+                #: does `pikepdf.open(io.BytesIO(data))` + `.read_bytes()` on the in-memory
+                #: stream. No file I/O, no audit event; the static detector counts it by
+                #: call name. `data` is `ops/metadata.py:275` `read_source_bytes(source)`.
+                #: Measured control: the BytesIO probe emits no audit event. Increment 2.
+                "pdf_tooling/adapters/pypdf_structure.py": 9,
+                "pdf_tooling/adapters/soffice_office.py": 1,
+                "pdf_tooling/adapters/tesseract_ocr.py": 2,
+                "pdf_tooling/cli/cmd_create.py": 2,
+                "pdf_tooling/cli/common.py": 1,
+                "pdf_tooling/cli/password.py": 1,
+                "pdf_tooling/ops/carriage.py": 1,
+                "pdf_tooling/ops/compose.py": 2,
+                "pdf_tooling/ops/crypto.py": 4,
+                "pdf_tooling/ops/document_password.py": 3,
+                "pdf_tooling/ops/metadata.py": 1,
+                "pdf_tooling/ops/office.py": 1,
+                "pdf_tooling/ops/optimize.py": 3,
+                "pdf_tooling/ops/procpool.py": 2,
+                "pdf_tooling/safety/_faults.py": 1,
+                "pdf_tooling/safety/atomic.py": 4,
+            }
+        ),
+        reason=(
+            "X-981. pdf_tooling/adapters/pypdf_structure.py gains 2 counted read-shaped "
+            "sites, the measured increment (7 -> 9): in _true_metadata_packet, "
+            "pikepdf.open(io.BytesIO(data)) and .read_bytes() on the in-memory stream. "
+            "CLASS: in-memory parse of bytes already read; no file I/O, no audit event, "
+            "counted by the static detector by call name (it over-counts in-memory "
+            "parses). CONTROL (measured): the BytesIO probe emits no audit event under "
+            "the sweep's sys.addaudithook; the pikepdf.open(<path>) probe DID emit an "
+            "open event and is the refuted premise of X-980, not the shipped call. "
+            "PROVENANCE: data is read EARLIER on the driven path: ops/metadata.py:275 "
+            "data = read_source_bytes(source) -> engine.write_metadata(data, ...) "
+            "(adapters/pypdf_structure.py:673; PdfReader(io.BytesIO(data)) at :688) -> "
+            "_true_metadata_packet(data, ...) (:753) -> pikepdf.open(io.BytesIO(data)). "
+            "read_source_bytes (safety/paths.py:615) is the operand's own read. "
+            "CONDITION: no observable sibling is bought out. Ruling X-981; the detector "
+            "gap is filed as B-401. "
+            "Every other key is carried byte-identical from the previous record."
+        ),
+    ),
 )
 
 #: The LIVE ceiling: the newest record's mapping, and nothing else. No

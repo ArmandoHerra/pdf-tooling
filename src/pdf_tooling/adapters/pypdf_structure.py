@@ -691,11 +691,15 @@ class PypdfStructureAdapter:
         except (OSError, ValueError) as error:
             raise FailureError(f"could not read PDF: {error}") from error
 
+        # Which secret actually unlocked the reader: the empty user password
+        # wins when it works (the precedence `_true_metadata_packet` keeps).
+        unlocked_by_empty = False
         if reader.is_encrypted:
             try:
                 unlocked = bool(reader.decrypt(""))
             except Exception:
                 unlocked = False
+            unlocked_by_empty = unlocked
             if not unlocked:
                 _unlock_with_password(
                     reader,
@@ -737,6 +741,17 @@ class PypdfStructureAdapter:
         metadata_ref = catalogue.get("/Metadata")
         had_xmp = metadata_ref is not None
         xmp_left_unchanged: str | None = None
+
+        # PDF-107 remediation (ledger `17add7b3e9`): on `/EncryptMetadata false`
+        # pypdf's `/Metadata` bytes are garbage, so every packet decision below
+        # runs over the TRUE bytes, and the writer's stream is overwritten with
+        # them (`packet_out`, committed once at the single assignment site below)
+        # even when the packet is preserved. `--clear-all` deletes the packet and
+        # needs neither.
+        true_packet: bytes | None = None
+        if had_xmp and not clear_all and _encrypt_metadata_is_false(reader):
+            true_packet = _true_metadata_packet(data, None if unlocked_by_empty else password)
+        packet_out: bytes | None = true_packet
 
         # PDF-99: `PdfWriter(clone_from=reader)._info` is `None` -- not an empty
         # dictionary -- whenever the source has no usable `/Info`. Measured on
@@ -785,11 +800,13 @@ class PypdfStructureAdapter:
             wrote_xmp = False
             if metadata_ref is not None and (sets or clears):
                 rewritten, xmp_left_unchanged = _rewrite_xmp_packet(
-                    metadata_ref.get_object(), sets, clears
+                    metadata_ref.get_object(), sets, clears, original=true_packet
                 )
                 if rewritten is not None:
-                    writer.xmp_metadata = rewritten
+                    packet_out = rewritten
                     wrote_xmp = True
+            if packet_out is not None:
+                writer.xmp_metadata = packet_out
 
         out_buffer = io.BytesIO()
         writer.write(out_buffer)
@@ -1239,14 +1256,77 @@ def _xmp_property(attr: str) -> tuple[str, str]:
     }[attr]
 
 
+def _encrypt_metadata_is_false(reader: PdfReader) -> bool:
+    """Whether *reader* is encrypted with ``/EncryptMetadata false`` -- the one
+    shape on which pypdf's view of ``/Metadata`` is wrong (ledger ``17add7b3e9``).
+
+    The spec says the catalogue's ``/Metadata`` stream is then stored in
+    PLAINTEXT, but pypdf ignores the flag and runs its cipher over it, handing
+    back garbage that has the right length. RC4-128 (`encrypt --legacy`) always
+    writes the flag; AES with ``metadata=False`` does too. ``/EncryptMetadata
+    true`` (the AES default) is decrypted correctly by pypdf and does not come
+    through here."""
+    if not reader.is_encrypted:
+        return False
+    try:
+        encrypt: Any = reader.trailer["/Encrypt"].get_object()
+        flag = encrypt.get("/EncryptMetadata")
+    except Exception:
+        return False
+    return flag is not None and getattr(flag, "value", flag) is False
+
+
+def _true_metadata_packet(data: bytes, password: Secret | None) -> bytes:
+    """The decoded ``/Root /Metadata`` bytes exactly as stored, read through
+    pikepdf (qpdf honours ``/EncryptMetadata``). Measured byte-exact against the
+    stored stream for RC4-128 and for AES-256 R=6 with ``metadata=False``.
+
+    *password* is the secret that unlocked the document: ``None`` means the empty
+    user password did (it is tried first everywhere in this module).
+
+    Fails closed: a document whose true packet cannot be read is refused rather
+    than written with pypdf's mis-decrypted bytes, and the message is a fixed
+    string (message hygiene)."""
+    import pikepdf
+
+    refusal = (
+        "could not read this document's XMP packet (it is encrypted with "
+        "/EncryptMetadata false); nothing was written"
+    )
+    try:
+        # ONE open (X-980): the empty-then-supplied precedence is decided by the
+        # caller (which knows what unlocked pypdf), not by a retry here.
+        pdf = pikepdf.open(
+            io.BytesIO(data),
+            password="" if password is None else password.reveal(),
+        )
+        with pdf:
+            stream = pdf.Root.get("/Metadata")
+            if stream is None or not isinstance(stream, pikepdf.Stream):
+                raise FailureError(refusal)
+            return bytes(stream.read_bytes())
+    except FailureError:
+        raise
+    except Exception as error:
+        raise FailureError(refusal) from error
+
+
 def _rewrite_xmp_packet(
-    metadata: Any, sets: Mapping[str, str], clears: Sequence[str]
+    metadata: Any,
+    sets: Mapping[str, str],
+    clears: Sequence[str],
+    *,
+    original: bytes | None = None,
 ) -> tuple[bytes | None, str | None]:
     """D2/D3: ``(verified bytes, None)``, or ``(None, reason)`` when the packet
     must be preserved byte-for-byte (P1 unparseable, P2 non-empty ``rdf:about``,
-    P3 the rewrite did not verify). Never raises for a packet's content."""
+    P3 the rewrite did not verify). Never raises for a packet's content.
+
+    *original* is the packet's TRUE bytes when the caller had to read them around
+    pypdf (``/EncryptMetadata false``); otherwise pypdf's own view is the packet."""
     try:
-        original = metadata.get_data()
+        if original is None:
+            original = metadata.get_data()
         probe = _xmp_over(original)
     except Exception:
         return None, _XMP_NOT_WELL_FORMED

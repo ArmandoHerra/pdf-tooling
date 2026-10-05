@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-107] Remediation: `meta set` no longer destroys the XMP packet of an `/EncryptMetadata false` input — 2026-10-04
+
+- **The defect (ledger `17add7b3e9`, high, data integrity; exposed by PDF-107's first commit):** `encrypt --legacy` (RC4-128) always writes `/EncryptMetadata false`, as does AES with `metadata=False`. On those files the `/Metadata` stream is stored as plaintext, but pypdf ignores the flag and runs its cipher over it, so `meta set` saw garbage, judged it "not well-formed XML", and copied the garbage into the output behind `ok (XMP packet left unchanged: ...)`. The original packet, `pdfaid` included, was lost. Before PDF-107 the same input failed closed.
+- **Fix:** when the input is encrypted and `/Encrypt` carries `/EncryptMetadata false`, the adapter reads the true packet through pikepdf (byte-exact against the stored stream, measured for RC4-128 and AES-256 R=6) and every packet decision runs over those bytes; the writer's `/Metadata` is overwritten with them before anything can preserve it. A well-formed packet is then rewritten and verified like any other, and a qualifier ("left unchanged") now implies the output packet is byte-equal to the input's true packet. If the true bytes cannot be read the run fails closed with a typed error and writes nothing. `--clear-all`, unencrypted inputs and `/EncryptMetadata true` take the code path they always did.
+- **Not fixed here, handed up:** the output of every mutating verb is unencrypted (`906a87ebde`), and `meta get`/`info` report `xmp: null` on AES-256 `/EncryptMetadata true` input (`99dbb7ff96`, a different cause: pypdf's `xmp_metadata` property reads the stream undecrypted).
+- **Tests:** `tests/integration/test_pdf107_meta_set_xmp_shapes.py` gains three encrypted shapes (`rc4_owner` built by `encrypt --legacy`, `aes256_nometa`, and a malformed `aes256_nometa_malformed` that makes the qualified branch reachable), run through every existing arm including AC12's invariant, which now compares the output packet byte-for-byte with the input's true packet and carries a non-vacuity guard, plus a fail-closed arm.
+
 ## [PDF-108] Say what a write drops: encryption and document metadata — 2026-10-04
 
 - **A write that loses the input's encryption, `/Info` or XMP now says so.** The warning rides the existing `warnings` array and the `warning:` lines on stderr, in every `-o` shape, and `--dry-run` prints the same text word for word. The descriptive half only: whether the product should carry or refuse is still open (`B-389`, `B-390`). No exit code, envelope key, flag or default moved.
