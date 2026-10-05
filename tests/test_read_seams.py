@@ -244,6 +244,47 @@ READ_SEAM_RESIDUE_LEDGER: Final[tuple[_ReadSeamRatification, ...]] = (
             "entry above. PDF-70 transcribes this record without moving a value."
         ),
     ),
+    _ReadSeamRatification(
+        date="2026-10-04",
+        spec="PDF-87",
+        direction="up",
+        ruling="X-975",
+        ceilings=MappingProxyType(
+            {
+                "pdf_tooling/adapters/pdfplumber_text.py": 1,
+                "pdf_tooling/adapters/pikepdf_structure.py": 10,
+                "pdf_tooling/adapters/pypdf_structure.py": 7,
+                "pdf_tooling/adapters/soffice_office.py": 1,
+                "pdf_tooling/adapters/tesseract_ocr.py": 2,
+                "pdf_tooling/cli/cmd_create.py": 2,
+                "pdf_tooling/cli/common.py": 1,
+                "pdf_tooling/cli/password.py": 1,
+                "pdf_tooling/ops/compose.py": 2,
+                "pdf_tooling/ops/crypto.py": 4,
+                "pdf_tooling/ops/document_password.py": 3,
+                "pdf_tooling/ops/metadata.py": 1,
+                "pdf_tooling/ops/office.py": 1,
+                "pdf_tooling/ops/optimize.py": 3,
+                #: X-975 -- fault-path-only, CLI-undrivable by construction: `_kernel_state`
+                #: (`:545` open, `:546` read of /proc/<pid>/stat) runs only for a worker that
+                #: survives SIGKILL + join. Control: PDF-87 AC8's in-process planted-survivor
+                #: arms (tests/unit/test_procpool.py) execute it. Prior residue was 0.
+                "pdf_tooling/ops/procpool.py": 2,
+                "pdf_tooling/safety/_faults.py": 1,
+                "pdf_tooling/safety/atomic.py": 4,
+            }
+        ),
+        reason=(
+            "X-975. pdf_tooling/ops/procpool.py gains 2 undriven read seams, the "
+            "measured increment (:545 open, :546 read of /proc/<pid>/stat in "
+            "_kernel_state). CLASS: fault-path-only, CLI-undrivable by construction; "
+            "_kernel_state runs only for a worker that survives SIGKILL+join, which no "
+            "CLI cell can manufacture. CONTROL: PDF-87 AC8's in-process planted-survivor "
+            "arms in tests/unit/test_procpool.py execute _kernel_state. CONDITION: "
+            "procpool.py's prior residue was 0, so no observable sibling is bought out. "
+            "Every other key is carried byte-identical from the previous record."
+        ),
+    ),
 )
 
 #: The LIVE ceiling: the newest record's mapping, and nothing else. No

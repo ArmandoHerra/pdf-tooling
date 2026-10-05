@@ -323,6 +323,36 @@ TEARDOWN_GRACE_S: Final[float] = 16.0
 #: Poll interval while waiting out `TEARDOWN_GRACE_S`.
 _POLL_S: Final[float] = 0.05
 
+#: The budget for the WHOLE reap phase of `_terminate_pool` -- one deadline shared
+#: by every `join`, so it does not grow with the worker count.
+#:
+#: BASIS: ARITHMETIC, NOT MEASURED. The room the reap phase has is
+#: `_PARENT_EXIT_TIMEOUT_S` - `TEARDOWN_GRACE_S` - `_PARENT_OVERHEAD_P95_S`, the
+#: first and last read from the signalled-arm tests (see
+#: `tests/integration/test_rasterize_signals.py::_PARENT_EXIT_TIMEOUT_S`):
+#: 25.0 - 16.0 - 0.327 = 8.673 s. 8.0 is the largest whole second inside it, which leaves 0.673 s of
+#: margin (about twice the measured p95 overhead). That figure is a WORST-CASE
+#: bound: it counts the grace as spent in full, which a worker that unwinds early
+#: does not cost.
+#:
+#: DIRECTION. This replaces a worst case of N x 16.0 s (at least 16.0 s for any
+#: N >= 1), so it may only make that smaller. Raising it toward the room is the
+#: widening trap under a new name: `TEARDOWN_GRACE_S`, `_PARENT_EXIT_TIMEOUT_S`
+#: and `_PARENT_OVERHEAD_P95_S` are not headroom.
+#:
+#: STOPS HOLDING IF (a) on a supported host a SIGKILLed worker can take longer
+#: than 8.0 s to become reapable -- the budget then reports a survivor that a
+#: longer join would have collected, and a report with `join-timed-out`,
+#: `kernel=zombie` and `join_elapsed_s` close to `join_timeout_s` is how that
+#: shows up; or (b) any of the three operands above moves.
+#:
+#: COST, DISCLOSED. A caller using the default now joins each process for at most
+#: 8.0 s, down from 16.0 s: a slow reap has a smaller window in which to succeed.
+#: That is the permitted direction. The arithmetic is guarded by the arm named
+#: `test_the_grace_and_the_reap_budget_fit_inside_the_parent_exit_bound`, which
+#: sits beside the grace's own guard in the unit tests for this module.
+_REAP_BUDGET_S: Final[float] = 8.0
+
 #: Every signal torn down through the ONE routine below (design (a)). SIGKILL
 #: to the PARENT cannot appear here -- it is uncatchable by definition; see
 #: `_worker_initializer` for the one thing the CHILD side can still do about
@@ -489,15 +519,139 @@ def _set_pdeathsig_sigkill() -> None:
         raise OSError(errno_value, os.strerror(errno_value))
 
 
-def _is_alive(process: object) -> bool:
+_ALIVE: Final[str] = "alive"
+_DEAD: Final[str] = "dead"
+_UNKNOWN: Final[str] = "unknown"
+
+
+def _liveness(process: object) -> str:
+    """Tri-state: a process that cannot be interrogated is `unknown`, never `dead`."""
     try:
-        return bool(process.is_alive())  # type: ignore[attr-defined]
+        return _ALIVE if process.is_alive() else _DEAD  # type: ignore[attr-defined]
     except Exception:
-        return False
+        return _UNKNOWN
 
 
-def _terminate_pool(executor: ProcessPoolExecutor, *, grace_s: float = TEARDOWN_GRACE_S) -> None:
-    """SIGTERM every known worker, wait out the grace window, SIGKILL the rest.
+def _kernel_state(pid: int, proc_root: str = "/proc") -> str:
+    """One kernel-side observation of ``pid`` (read-only; survivors only).
+
+    `Process.is_alive()` and `.exitcode` both answer from `waitpid(WNOHANG)`,
+    which reports "no exit yet" for a zombie, a still-running process and an
+    already-reaped child alike, so only the filesystem can tell them apart.
+    Returns `zombie`, `running:<state>` (only while the parent pid is ours),
+    `absent`, or `unavailable` (no such filesystem, or it would not parse).
+    """
+    try:
+        with open(f"{proc_root}/{pid}/stat") as handle:
+            text = handle.read()
+    except FileNotFoundError:
+        return "absent" if os.path.isdir(proc_root) else "unavailable"
+    except OSError:
+        return "unavailable"
+    try:
+        # `comm` may itself contain spaces and parentheses: split at the LAST one.
+        fields = text[text.rindex(")") + 1 :].split()
+        state, ppid = fields[0], int(fields[1])
+    except (ValueError, IndexError):
+        return "unavailable"
+    if state == "Z":
+        return "zombie"
+    return f"running:{state}" if ppid == os.getpid() else "absent"
+
+
+class _ProcessOutcome:
+    """What `_terminate_pool` observed about one process. Plain `__slots__`
+    class: this module takes no new import, so no dataclass / NamedTuple."""
+
+    __slots__ = (
+        "exitcode_after",
+        "join_elapsed_s",
+        "join_raised",
+        "join_timeout_s",
+        "kernel",
+        "liveness_after",
+        "liveness_at_kill",
+        "pid",
+        "sigkill",
+        "tail",
+    )
+
+    def __init__(
+        self,
+        pid: int,
+        liveness_at_kill: str,
+        sigkill: str,
+        join_timeout_s: float,
+        join_elapsed_s: float,
+        join_raised: bool,
+        exitcode_after: object,
+        liveness_after: str,
+        kernel: str,
+    ) -> None:
+        self.pid = pid
+        self.liveness_at_kill = liveness_at_kill
+        self.sigkill = sigkill
+        self.join_timeout_s = join_timeout_s
+        self.join_elapsed_s = join_elapsed_s
+        self.join_raised = join_raised
+        self.exitcode_after = exitcode_after
+        self.liveness_after = liveness_after
+        self.kernel = kernel
+        self.tail = "reaped" if liveness_after == _DEAD else _classify_tail(self)
+
+    def __str__(self) -> str:
+        return (
+            f"pid={self.pid} tail={self.tail} liveness_at_kill={self.liveness_at_kill} "
+            f"sigkill={self.sigkill} join_timeout_s={self.join_timeout_s:.3f} "
+            f"join_elapsed_s={self.join_elapsed_s:.3f} join_raised={self.join_raised} "
+            f"exitcode_after={self.exitcode_after} liveness_after={self.liveness_after} "
+            f"kernel={self.kernel}"
+        )
+
+
+def _classify_tail(outcome: _ProcessOutcome) -> str:
+    """Name which teardown tail a survivor is in; the first matching rule wins."""
+    if _UNKNOWN in (outcome.liveness_at_kill, outcome.liveness_after):
+        return "liveness-unknown"
+    if outcome.kernel == "zombie":
+        return "join-timed-out"
+    if outcome.kernel.startswith("running:") and outcome.sigkill == "sent":
+        return "outlived-sigkill"
+    if outcome.kernel == "absent":
+        return "stale-liveness"
+    return "undetermined"
+
+
+class _TeardownReport:
+    """Per-process outcomes of one `_terminate_pool` call, in pool order."""
+
+    __slots__ = ("outcomes",)
+
+    def __init__(self, outcomes: tuple[_ProcessOutcome, ...]) -> None:
+        self.outcomes = outcomes
+
+    @property
+    def survivors(self) -> tuple[_ProcessOutcome, ...]:
+        return tuple(o for o in self.outcomes if o.liveness_after != _DEAD)
+
+    def __str__(self) -> str:
+        survivors = self.survivors
+        total = len(self.outcomes)
+        if not survivors:
+            return f"every worker reaped ({total} of {total})"
+        names = ", ".join(f"{o.pid}={o.tail}" for o in survivors)
+        head = f"a worker survived _terminate_pool: {len(survivors)} of {total} \u2014 {names}"
+        return "\n".join([head, *(str(o) for o in survivors)])
+
+
+def _terminate_pool(
+    executor: ProcessPoolExecutor,
+    *,
+    grace_s: float = TEARDOWN_GRACE_S,
+    reap_s: float = _REAP_BUDGET_S,
+) -> _TeardownReport:
+    """SIGTERM every known worker, wait out the grace window, SIGKILL the rest,
+    then reap and REPORT what could not be verified.
 
     Mirrors ``adapters/subprocess_util.py::_terminate_group``'s grace-then-kill
     shape, but per-PID rather than per-group: this product spawns each worker
@@ -512,31 +666,83 @@ def _terminate_pool(executor: ProcessPoolExecutor, *, grace_s: float = TEARDOWN_
     none of this codebase's own AST guards (write-chokepoint mutation, engine
     import, subprocess spawn) apply to it or to ``Process.terminate/.kill/
     .join`` — this stays entirely off every forbidden-call list.
+
+    Anything not proven dead is signalled, at most once each; the reap phase
+    shares ONE deadline (``reap_s``) whatever the worker count; nothing is
+    retried and nothing is raised or emitted. The returned report is a
+    hardening of what is observable, not a claim that any worker stops
+    surviving.
     """
     processes = list(getattr(executor, "_processes", {}).values())
     if not processes:
-        return
+        return _TeardownReport(())
 
     for process in processes:
-        if _is_alive(process):
+        if _liveness(process) != _DEAD:
             with contextlib.suppress(OSError, ValueError):
                 process.terminate()  # SIGTERM -- lets AtomicWriter unwind
 
     deadline = time.monotonic() + grace_s
-    while time.monotonic() < deadline and any(_is_alive(p) for p in processes):
+    while time.monotonic() < deadline and any(_liveness(p) != _DEAD for p in processes):
         time.sleep(_POLL_S)
 
+    at_kill: list[str] = []
+    sigkill: list[str] = []
     for process in processes:
-        if _is_alive(process):
-            with contextlib.suppress(OSError, ValueError):
-                process.kill()  # SIGKILL -- whatever the grace window left
+        state = _liveness(process)
+        at_kill.append(state)
+        if state == _DEAD:
+            sigkill.append("not-needed")
+            continue
+        try:
+            process.kill()  # SIGKILL -- whatever the grace window left
+            sigkill.append("sent")
+        except (OSError, ValueError):
+            sigkill.append("raised")
 
+    reap_deadline = time.monotonic() + reap_s
+    timeouts: list[float] = []
+    elapsed: list[float] = []
+    raised: list[bool] = []
     for process in processes:
+        timeout = max(0.0, reap_deadline - time.monotonic())
+        started = time.monotonic()
+        join_raised = False
+        try:
+            process.join(timeout=timeout)
+        except Exception:
+            join_raised = True
+        timeouts.append(timeout)
+        elapsed.append(time.monotonic() - started)
+        raised.append(join_raised)
+
+    outcomes: list[_ProcessOutcome] = []
+    for index, process in enumerate(processes):
+        after = _liveness(process)
+        exitcode: object = None
+        pid: int = -1
         with contextlib.suppress(Exception):
-            process.join(timeout=grace_s)
+            exitcode = getattr(process, "exitcode", None)
+        with contextlib.suppress(Exception):
+            pid = getattr(process, "pid", -1)
+        kernel = "not-read" if after == _DEAD else _kernel_state(pid)
+        outcomes.append(
+            _ProcessOutcome(
+                pid,
+                at_kill[index],
+                sigkill[index],
+                timeouts[index],
+                elapsed[index],
+                raised[index],
+                exitcode,
+                after,
+                kernel,
+            )
+        )
 
     with contextlib.suppress(Exception):
         executor.shutdown(wait=False, cancel_futures=True)
+    return _TeardownReport(tuple(outcomes))
 
 
 @contextmanager

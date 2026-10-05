@@ -22,9 +22,13 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import errno
+import inspect
 import operator
+import os
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -185,6 +189,17 @@ def test_run_task_exits_the_worker_with_128_plus_the_signal_once_the_unwind_is_d
 # --------------------------------------------------------------------------- #
 
 
+def _assert_no_survivor(processes: Sequence[Any], report: Any) -> None:
+    """The real arm's assertion, with the teardown's own report in its message.
+
+    The verdict is this test's OWN, independent liveness read -- never the
+    function's self-report. The report only ever decorates the message, so a
+    failure names which tail occurred on its first line.
+    """
+    alive = [p.pid for p in processes if p.is_alive()]
+    assert alive == [], f"a worker survived _terminate_pool -- {report}"
+
+
 def test_terminate_pool_ends_and_reaps_a_live_worker() -> None:
     executor = ProcessPoolExecutor(max_workers=1, initializer=procpool._worker_initializer)
     try:
@@ -198,9 +213,9 @@ def test_terminate_pool_ends_and_reaps_a_live_worker() -> None:
         assert processes, "no worker process was ever spawned -- test is not measuring anything"
         assert all(p.is_alive() for p in processes)
 
-        procpool._terminate_pool(executor)
+        report = procpool._terminate_pool(executor)
 
-        assert all(not p.is_alive() for p in processes), "a worker survived _terminate_pool"
+        _assert_no_survivor(processes, report)
         with contextlib.suppress(Exception):
             future.cancel()
     finally:
@@ -213,9 +228,11 @@ def test_terminate_pool_is_a_no_op_over_an_empty_pool() -> None:
     is scheduled hits exactly this path)."""
     executor = ProcessPoolExecutor(max_workers=1, initializer=procpool._worker_initializer)
     try:
-        procpool._terminate_pool(executor)
+        report = procpool._terminate_pool(executor)
     finally:
         executor.shutdown(wait=False)
+    assert report.outcomes == ()
+    assert report.survivors == ()
 
 
 # --------------------------------------------------------------------------- #
@@ -810,3 +827,448 @@ def test_a_planted_residue_sweep_reddens(tmp_path: Path) -> None:
     found = disposal_calls(ast.parse(planted.read_text()))
     assert found, "a planted post-teardown sweep was not caught -- this guard checks nothing"
     assert any("unlink" in entry for entry in found), found
+
+
+# --------------------------------------------------------------------------- #
+# PDF-87 -- `_terminate_pool` states its own postcondition. Everything below is
+# driven with planted objects, a planted `/proc` root or a real local child: no
+# arm here depends on how a real pool worker happens to die on this host. It is a
+# hardening of what the teardown REPORTS; no arm asserts that any worker stops
+# surviving.
+# --------------------------------------------------------------------------- #
+
+
+class _Planted:
+    """A stand-in `Process` with spies. Distinct small-int pids: a real
+    `/proc/<pid>` read is always monkeypatched away in the arms that use these."""
+
+    def __init__(
+        self,
+        pid: int,
+        *,
+        is_alive_raises: bool = False,
+        dies_on_kill: bool = False,
+        every_method_raises: bool = False,
+    ) -> None:
+        self.pid = pid
+        self._alive = True
+        self._exitcode: int | None = None
+        self._is_alive_raises = is_alive_raises or every_method_raises
+        self._dies_on_kill = dies_on_kill
+        self._every_method_raises = every_method_raises
+        self.terminate_calls = 0
+        self.kill_calls = 0
+        self.join_timeouts: list[float] = []
+        self.on_join: Any = None
+
+    def is_alive(self) -> bool:
+        if self._is_alive_raises:
+            raise OSError(errno.ESRCH, "No such process")
+        return self._alive
+
+    @property
+    def exitcode(self) -> int | None:
+        if self._every_method_raises:
+            raise OSError(errno.ESRCH, "No such process")
+        return self._exitcode
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+        if self._every_method_raises:
+            raise OSError(errno.ESRCH, "No such process")
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        if self._every_method_raises:
+            raise OSError(errno.ESRCH, "No such process")
+        if self._dies_on_kill:
+            self._alive = False
+            self._exitcode = -9
+
+    def join(self, timeout: float | None = None) -> None:
+        assert timeout is not None
+        self.join_timeouts.append(timeout)
+        if self._every_method_raises:
+            raise OSError(errno.ESRCH, "No such process")
+        if self.on_join is not None:
+            self.on_join(timeout)
+
+
+class _StubExecutor:
+    def __init__(self, *planted: _Planted) -> None:
+        self._processes = {p.pid: p for p in planted}
+        self.shutdown_calls: list[tuple[bool, bool]] = []
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        self.shutdown_calls.append((wait, cancel_futures))
+
+
+def _plant_kernel(monkeypatch: pytest.MonkeyPatch, answer: str) -> list[int]:
+    """Every planted pid reads as `answer`; returns the pids actually asked about."""
+    asked: list[int] = []
+
+    def fake(pid: int, proc_root: str = "/proc") -> str:
+        asked.append(pid)
+        return answer
+
+    monkeypatch.setattr(procpool, "_kernel_state", fake)
+    return asked
+
+
+def _teardown(*planted: _Planted, grace_s: float = 0.0, reap_s: float = 0.0) -> Any:
+    return procpool._terminate_pool(_StubExecutor(*planted), grace_s=grace_s, reap_s=reap_s)  # type: ignore[arg-type]
+
+
+def test_an_uninterrogable_worker_is_signalled_and_reported_as_a_survivor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plant_kernel(monkeypatch, "unavailable")
+    opaque = _Planted(11, is_alive_raises=True)
+
+    report = _teardown(opaque)
+
+    assert opaque.terminate_calls == 1
+    assert opaque.kill_calls == 1
+    assert [o.pid for o in report.survivors] == [11]
+    assert report.survivors[0].tail == "liveness-unknown"
+
+
+def test_a_planted_survivor_is_reported_and_a_reaped_worker_is_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plant_kernel(monkeypatch, "zombie")
+    survivor = _Planted(21)
+    reaped = _Planted(22, dies_on_kill=True)
+
+    report = _teardown(survivor, reaped)
+
+    assert len(report.outcomes) == 2
+    assert [o.pid for o in report.survivors] == [21]
+    assert report.survivors[0].tail == "join-timed-out"
+    reaped_outcome = next(o for o in report.outcomes if o.pid == 22)
+    assert reaped_outcome.exitcode_after == -9
+    assert reaped_outcome.sigkill == "sent"
+
+
+def test_a_mixed_pool_reports_exactly_the_opaque_and_the_surviving_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plant_kernel(monkeypatch, "zombie")
+    opaque = _Planted(31, is_alive_raises=True)
+    survivor = _Planted(32)
+    reaped = _Planted(33, dies_on_kill=True)
+
+    report = _teardown(opaque, survivor, reaped)
+
+    assert {o.pid for o in report.survivors} == {31, 32}
+
+
+def test_teardown_signals_each_worker_at_most_once_and_joins_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plant_kernel(monkeypatch, "zombie")
+    pool = [_Planted(40 + n) for n in range(8)]
+
+    report = _teardown(*pool)
+
+    assert len(report.survivors) == 8
+    for planted in pool:
+        assert planted.terminate_calls <= 1
+        assert planted.kill_calls <= 1
+        assert len(planted.join_timeouts) == 1
+
+
+def test_a_worker_whose_every_method_raises_yields_a_report_not_an_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plant_kernel(monkeypatch, "unavailable")
+    hostile = _Planted(51, every_method_raises=True)
+
+    report = _teardown(hostile)
+
+    assert [o.pid for o in report.survivors] == [51]
+    survivor = report.survivors[0]
+    assert survivor.tail == "liveness-unknown"
+    assert survivor.join_raised is True
+    assert survivor.sigkill == "raised"
+    assert survivor.exitcode_after is None
+
+
+class _FakeClock:
+    """Replaces the module-global name `time` inside `procpool` only."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.mark.parametrize("workers", [1, 8, 64])
+def test_the_reap_phase_is_bounded_by_one_deadline_whatever_the_worker_count(
+    monkeypatch: pytest.MonkeyPatch, workers: int
+) -> None:
+    clock = _FakeClock()
+    monkeypatch.setattr(procpool, "time", clock)
+    _plant_kernel(monkeypatch, "zombie")
+    reap_started: list[float] = []
+
+    def unreapable_join(timeout: float) -> None:
+        if not reap_started:
+            reap_started.append(clock.now)
+        clock.now += timeout
+
+    pool = [_Planted(100 + n) for n in range(workers)]
+    for planted in pool:
+        planted.on_join = unreapable_join
+    begin = clock.now
+
+    procpool._terminate_pool(_StubExecutor(*pool), grace_s=16.0)  # type: ignore[arg-type]
+
+    assert clock.now - reap_started[0] <= procpool._REAP_BUDGET_S + 1e-9
+    assert clock.now - begin <= 16.0 + procpool._POLL_S + procpool._REAP_BUDGET_S + 1e-9
+    assert all(t >= 0.0 for planted in pool for t in planted.join_timeouts)
+    assert all(len(planted.join_timeouts) == 1 for planted in pool)
+
+
+def reap_budget_problems(grace: float, reap: float, overhead: float, bound: float) -> list[str]:
+    problems: list[str] = []
+    if not grace + overhead + reap < bound:
+        problems.append(
+            f"grace {grace} + overhead {overhead} + reap {reap} = {grace + overhead + reap} "
+            f"does not fit inside the parent exit bound {bound}"
+        )
+    if not reap < grace:
+        problems.append(f"reap budget {reap} is not below the grace {grace}")
+    return problems
+
+
+def test_the_grace_and_the_reap_budget_fit_inside_the_parent_exit_bound() -> None:
+    source = PROCPOOL_SOURCE.read_text()
+    signals = SIGNALS_SOURCE.read_text()
+    grace, _ = constant_with_block(source, "TEARDOWN_GRACE_S")
+    reap, _ = constant_with_block(source, "_REAP_BUDGET_S")
+    bound, _ = constant_with_block(signals, "_PARENT_EXIT_TIMEOUT_S")
+    overhead, _ = constant_with_block(signals, "_PARENT_OVERHEAD_P95_S")
+    assert reap_budget_problems(grace, reap, overhead, bound) == []
+
+
+def test_a_reap_budget_that_does_not_fit_reddens(tmp_path: Path) -> None:
+    scratch = tmp_path / "planted.py"
+    scratch.write_text("# unrelated\n_REAP_BUDGET_S = 9.0\n")
+    reap, _ = constant_with_block(scratch.read_text(), "_REAP_BUDGET_S")
+    assert reap == 9.0
+    problems = reap_budget_problems(16.0, reap, 0.327, 25.0)
+    assert len(problems) == 1
+    assert "25.327" in problems[0]
+
+
+_REAP_TOKENS: Final = (
+    "BASIS:",
+    "ARITHMETIC, NOT MEASURED",
+    "STOPS HOLDING IF",
+    "TEARDOWN_GRACE_S",
+    "_PARENT_EXIT_TIMEOUT_S",
+    "_PARENT_OVERHEAD_P95_S",
+    "8.673",
+)
+
+
+def test_the_reap_budget_states_its_basis_and_where_it_stops_holding() -> None:
+    _, block = constant_with_block(PROCPOOL_SOURCE.read_text(), "_REAP_BUDGET_S")
+    assert [token for token in _REAP_TOKENS if token not in block] == []
+
+
+def test_a_reap_budget_with_no_evidence_block_names_every_missing_token(tmp_path: Path) -> None:
+    scratch = tmp_path / "planted.py"
+    scratch.write_text("# unrelated\n_REAP_BUDGET_S = 8.0\n")
+    _, block = constant_with_block(scratch.read_text(), "_REAP_BUDGET_S")
+    assert [token for token in _REAP_TOKENS if token not in block] == list(_REAP_TOKENS)
+
+
+def _write_stat(root: Path, pid: int, comm: str, state: str, ppid: int) -> None:
+    (root / str(pid)).mkdir()
+    (root / str(pid) / "stat").write_text(f"{pid} ({comm}) {state} {ppid} 1 1 0 -1 0\n")
+
+
+@pytest.mark.parametrize(
+    ("comm", "state", "ppid_ours", "expected"),
+    [
+        ("python", "Z", True, "zombie"),
+        ("python", "S", True, "running:S"),
+        ("python", "D", True, "running:D"),
+        ("python", "R", False, "absent"),
+        ("a) Z (b", "S", True, "running:S"),
+    ],
+    ids=["zombie", "sleeping", "disk-wait", "foreign-ppid", "paren-in-comm"],
+)
+def test_kernel_state_classifies_a_planted_proc_root(
+    tmp_path: Path, comm: str, state: str, ppid_ours: bool, expected: str
+) -> None:
+    _write_stat(tmp_path, 7, comm, state, os.getpid() if ppid_ours else os.getpid() + 1)
+    assert procpool._kernel_state(7, str(tmp_path)) == expected
+
+
+def test_kernel_state_is_absent_when_the_proc_root_has_no_such_pid(tmp_path: Path) -> None:
+    assert procpool._kernel_state(7, str(tmp_path)) == "absent"
+
+
+def test_kernel_state_is_unavailable_for_garbage_and_for_a_missing_proc_root(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "8").mkdir()
+    (tmp_path / "8" / "stat").write_text("garbage with no parenthesis")
+    assert procpool._kernel_state(8, str(tmp_path)) == "unavailable"
+    (tmp_path / "9").mkdir()
+    (tmp_path / "9" / "stat").write_text("9 (x) Z")
+    assert procpool._kernel_state(9, str(tmp_path)) == "unavailable"
+    assert procpool._kernel_state(7, str(tmp_path / "no-such-root")) == "unavailable"
+
+
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="no /proc on this host")
+def test_kernel_state_tracks_a_real_child_through_zombie_to_absent() -> None:
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert procpool._kernel_state(child.pid).startswith("running:")
+        child.kill()
+        deadline = time.monotonic() + 10.0
+        while procpool._kernel_state(child.pid) != "zombie":
+            assert time.monotonic() < deadline, "the killed child never became a zombie"
+            time.sleep(0.01)
+        child.wait()
+        assert procpool._kernel_state(child.pid) == "absent"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_kernel_state_is_not_read_for_a_reaped_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _plant_kernel(monkeypatch, "zombie")
+    pool = [_Planted(60 + n, dies_on_kill=True) for n in range(3)]
+
+    report = _teardown(*pool)
+
+    assert report.survivors == ()
+    assert asked == []
+
+
+_TAIL_CASES: Final = (
+    ("join-timed-out", "zombie", {}),
+    ("liveness-unknown", "unavailable", {"is_alive_raises": True}),
+    ("outlived-sigkill", "running:S", {}),
+    ("stale-liveness", "absent", {}),
+    ("undetermined", "unavailable", {}),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "kernel", "plant"), _TAIL_CASES, ids=[case[0] for case in _TAIL_CASES]
+)
+def test_the_report_first_line_names_the_tail(
+    monkeypatch: pytest.MonkeyPatch, label: str, kernel: str, plant: dict[str, bool]
+) -> None:
+    _plant_kernel(monkeypatch, kernel)
+
+    report = _teardown(_Planted(71, **plant))
+
+    lines = str(report).splitlines()
+    assert lines[0].startswith("a worker survived _terminate_pool: 1 of 1 — ")
+    assert f"71={label}" in lines[0]
+    for other, _, _ in _TAIL_CASES:
+        if other != label:
+            assert f"={other}" not in lines[0]
+    for field in (
+        "pid=",
+        "tail=",
+        "liveness_at_kill=",
+        "sigkill=",
+        "join_timeout_s=",
+        "join_elapsed_s=",
+        "join_raised=",
+        "exitcode_after=",
+        "liveness_after=",
+        "kernel=",
+    ):
+        assert field in lines[1]
+
+
+def test_a_reaped_pool_report_says_so_in_one_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    _plant_kernel(monkeypatch, "zombie")
+    report = _teardown(_Planted(81, dies_on_kill=True), _Planted(82, dies_on_kill=True))
+    assert str(report) == "every worker reaped (2 of 2)"
+
+
+def test_a_survivor_reaching_the_real_arm_assertion_is_named_by_its_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plant_kernel(monkeypatch, "zombie")
+    survivor = _Planted(91)
+    report = _teardown(survivor)
+
+    with pytest.raises(AssertionError) as caught:
+        _assert_no_survivor([survivor], report)
+
+    first = str(caught.value).splitlines()[0]
+    assert first.startswith(
+        "a worker survived _terminate_pool -- a worker survived _terminate_pool: 1 of 1 — "
+    )
+    assert "=join-timed-out" in first
+    assert ".is_alive()" in inspect.getsource(_assert_no_survivor)
+
+
+_EMISSION_NAMES: Final = frozenset(
+    {
+        "print",
+        "write",
+        "writelines",
+        "warn",
+        "warning",
+        "info",
+        "debug",
+        "error",
+        "exception",
+        "critical",
+        "log",
+    }
+)
+_TEARDOWN_SYMBOLS: Final = (
+    "_terminate_pool",
+    "_liveness",
+    "_kernel_state",
+    "_classify_tail",
+    "_ProcessOutcome",
+    "_TeardownReport",
+)
+
+
+def teardown_emissions(tree: ast.Module, symbols: Sequence[str]) -> list[str]:
+    found: list[str] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.ClassDef)) or node.name not in symbols:
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call) and _terminal_name(sub.func) in _EMISSION_NAMES:
+                found.append(f"line {sub.lineno}: {node.name}() calls `{_terminal_name(sub.func)}`")
+            if isinstance(sub, ast.Attribute) and sub.attr in {"stderr", "stdout"}:
+                found.append(f"line {sub.lineno}: {node.name}() reads `{sub.attr}`")
+    return found
+
+
+def test_the_teardown_path_emits_nothing() -> None:
+    tree = ast.parse(PROCPOOL_SOURCE.read_text())
+    present = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+    assert set(_TEARDOWN_SYMBOLS) <= present, sorted(set(_TEARDOWN_SYMBOLS) - present)
+    assert teardown_emissions(tree, _TEARDOWN_SYMBOLS) == []
+
+
+def test_a_planted_emission_on_the_teardown_path_reddens(tmp_path: Path) -> None:
+    planted = tmp_path / "planted.py"
+    planted.write_text(
+        'import sys\n\n\ndef _terminate_pool(executor):\n    sys.stderr.write("x")\n'
+    )
+    found = teardown_emissions(ast.parse(planted.read_text()), _TEARDOWN_SYMBOLS)
+    assert any(entry.startswith("line 5:") and "_terminate_pool" in entry for entry in found), found
