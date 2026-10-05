@@ -48,6 +48,7 @@ __all__ = [
     "PERMISSION_TOKENS",
     "PERMISSION_TOKEN_MAP",
     "CompositeOutcome",
+    "CarriageFacts",
     "CompressOutcome",
     "EncryptionFacts",
     "ImagePassEngine",
@@ -499,6 +500,25 @@ def algorithm_name(version: int, method: str, bits: int) -> str | None:
 
 
 @dataclass(frozen=True, slots=True)
+class CarriageFacts:
+    """PDF-108 -- what a source holds that a write may fail to carry, read
+    with the EMPTY user password only.
+
+    ``readable`` is whether that credential-free open succeeded; ``None`` in
+    ``info_keys``/``has_xmp`` means "needs a password to read", which is
+    different from "absent". There is deliberately no password anywhere on
+    the method that builds this: the seam that reports a loss must never
+    become a second consumer of the secret.
+    """
+
+    encrypted: bool
+    readable: bool
+    info_keys: frozenset[str] | None
+    producer: str | None
+    has_xmp: bool | None
+
+
+@dataclass(frozen=True, slots=True)
 class EncryptionFacts:
     """What one document's security handler says, read without a write.
 
@@ -644,6 +664,20 @@ class StructureEngine(Protocol):
 
         Raises:
             FailureError: Exit 1 -- malformed, corrupt or unparseable.
+        """
+        ...
+
+    def read_carriage_facts(self, data: bytes) -> CarriageFacts:
+        """PDF-108: the facts a write may drop, read credential-free.
+
+        Takes **no password, ever** -- the same empty-user-password open as
+        ``read_encryption(data, None)``. A password-protected document is
+        reported ``encrypted=True, readable=False``; it never raises for
+        that.
+
+        Raises:
+            FailureError: Exit 1 -- not a PDF, or damaged. The seam's caller
+                records nothing for such an operand; the verb owns the error.
         """
         ...
 

@@ -44,6 +44,7 @@ from pdf_tooling.output.logging import get_logger
 from pdf_tooling.ports.structure import (
     PASSWORD_HINT,
     PERMISSION_TOKENS,
+    CarriageFacts,
     CompressOutcome,
     EncryptionFacts,
     ImageXObjectFacts,
@@ -354,6 +355,65 @@ class PikepdfStructureAdapter:
     # through pikepdf. A hand-rolled anything in this path is an automatic
     # rejection (`PLAN.md` §5.7, this spec's Non-goals).
 
+    @staticmethod
+    def _open_for_read(data: bytes, password: Secret | None, *, failure: str) -> pikepdf.Pdf:
+        """The ONE credential-aware open of the read-only fact methods.
+
+        ``read_encryption`` and ``read_carriage_facts`` share it so the empty
+        user password is opened by the same call, and the secret (when there
+        is one) is revealed at the exact point libqpdf demands a ``str`` and
+        never bound to a local. ``pikepdf.PasswordError`` propagates to the
+        caller (it is a *fact*, not a failure); any other engine error is
+        belted here, at the engine boundary, as ``FailureError(<failure>: ...)``.
+        """
+        import pikepdf
+
+        try:
+            return pikepdf.Pdf.open(
+                io.BytesIO(data), password=password.reveal() if password else ""
+            )
+        except pikepdf.PasswordError:
+            raise
+        except pikepdf.PdfError as error:
+            raise FailureError(f"{failure}: {error}") from error
+
+    def read_carriage_facts(self, data: bytes) -> CarriageFacts:
+        """PDF-108: what a write may drop, read with the EMPTY user password.
+
+        Deliberately takes no password: this is the credential-free open
+        :meth:`read_encryption` performs for ``None``, and the seam it feeds
+        must never become a second consumer of the secret.
+        """
+        import pikepdf
+
+        try:
+            pdf = self._open_for_read(data, None, failure="could not read this document")
+        except pikepdf.PasswordError:
+            return CarriageFacts(
+                encrypted=True, readable=False, info_keys=None, producer=None, has_xmp=None
+            )
+
+        with pdf:
+            info_keys: set[str] = set()
+            producer: str | None = None
+            if "/Info" in pdf.trailer:
+                try:
+                    info = pdf.trailer["/Info"]
+                    info_keys.update(str(key) for key in info.keys())
+                    if "/Producer" in info:
+                        producer = str(info["/Producer"])
+                except (AttributeError, TypeError, ValueError, pikepdf.PdfError):
+                    # A malformed /Info is not a fact this seam can report;
+                    # whatever was read stands, and the seam never raises.
+                    pass
+            return CarriageFacts(
+                encrypted=bool(pdf.is_encrypted),
+                readable=True,
+                info_keys=frozenset(info_keys),
+                producer=producer,
+                has_xmp="/Metadata" in pdf.Root,
+            )
+
     def read_encryption(self, data: bytes, password: Secret | None) -> EncryptionFacts:
         """The read half: what this document's security handler says.
 
@@ -368,7 +428,9 @@ class PikepdfStructureAdapter:
 
         logger = get_logger("adapters.pikepdf")
         try:
-            pdf = pikepdf.Pdf.open(io.BytesIO(data), password=password.reveal() if password else "")
+            pdf = self._open_for_read(
+                data, password, failure="could not read this document's encryption"
+            )
         except pikepdf.PasswordError:
             # Encrypted, and this credential is not the one. Not the password
             # and not its length reach any sink -- only the caller's own
@@ -385,8 +447,6 @@ class PikepdfStructureAdapter:
                 granted=(),
                 permissions_readable=False,
             )
-        except pikepdf.PdfError as error:
-            raise FailureError(f"could not read this document's encryption: {error}") from error
 
         with pdf:
             if not pdf.is_encrypted:

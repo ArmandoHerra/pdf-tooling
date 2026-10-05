@@ -13,6 +13,8 @@ must not have to also read stderr to learn that the run failed.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from contextvars import ContextVar, Token
 from enum import StrEnum
 from typing import Any
 
@@ -26,8 +28,32 @@ __all__ = [
     "auto_format",
     "emit_error",
     "emit_result",
+    "install_result_hook",
     "render_payload",
+    "reset_result_hook",
 ]
+
+#: PDF-108. A run-scoped amender :func:`emit_result` applies to a result before
+#: rendering it, so what the amender adds to ``warnings`` reaches the envelope
+#: and the stderr loop through the one existing path. L6 only defines the slot;
+#: the CLI layer installs whatever fills it, so this layer imports nothing
+#: from ``ops/``.
+_RESULT_HOOK: ContextVar[Callable[[OperationResult], OperationResult] | None] = ContextVar(
+    "output_result_hook", default=None
+)
+
+
+def install_result_hook(
+    hook: Callable[[OperationResult], OperationResult],
+) -> Token[Callable[[OperationResult], OperationResult] | None]:
+    """Install *hook* for the current run; pair with :func:`reset_result_hook`."""
+    return _RESULT_HOOK.set(hook)
+
+
+def reset_result_hook(
+    token: Token[Callable[[OperationResult], OperationResult] | None],
+) -> None:
+    _RESULT_HOOK.reset(token)
 
 
 class OutputFormat(StrEnum):
@@ -58,6 +84,9 @@ def render_payload(payload: dict[str, Any], fmt: OutputFormat) -> str:
 
 def emit_result(result: OperationResult, fmt: OutputFormat) -> None:
     """Write the payload to stdout and any warnings to stderr."""
+    hook = _RESULT_HOOK.get()
+    if hook is not None:
+        result = hook(result)
     payload = result.to_dict()
     text = render_payload(payload, fmt)
     if text:

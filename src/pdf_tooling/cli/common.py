@@ -1381,6 +1381,8 @@ def _verb_handler(
 def _attach(
     func: Callable[..., Any],
     handler: Callable[[typer.Context, dict[str, Any]], None],
+    *,
+    verb_scope: bool = False,
 ) -> Callable[..., Any]:
     """Append the global block to ``func``'s signature and resolve it before the body runs.
 
@@ -1420,7 +1422,23 @@ def _attach(
         if ctx is None or not hasattr(ctx, "get_parameter_source"):  # pragma: no cover
             raise TypeError(f"{func.__name__}() must declare a 'ctx: typer.Context' parameter")
         handler(ctx, values)
-        return func(**kwargs)
+        if not verb_scope:
+            return func(**kwargs)
+        # PDF-108: a VERB (not the root callback, which also runs for
+        # `<verb> --help`) opens the run-scoped carriage ledger and installs the
+        # one amender `emit_result` applies. Imported HERE, not at module level,
+        # so `--help` never pays for it; spelled as a module import so the
+        # registry's AST walk sees the real edge.
+        from pdf_tooling.ops.carriage import amend, close_ledger, open_ledger
+        from pdf_tooling.output import install_result_hook, reset_result_hook
+
+        ledger_token = open_ledger()
+        hook_token = install_result_hook(amend)
+        try:
+            return func(**kwargs)
+        finally:
+            reset_result_hook(hook_token)
+            close_ledger(ledger_token)
 
     wrapper.__signature__ = new_signature  # type: ignore[attr-defined]
     wrapper.__annotations__ = hints
@@ -1464,7 +1482,7 @@ def global_options(
         def handler(ctx: typer.Context, values: dict[str, Any]) -> None:
             _verb_handler(ctx, values, consumes=consumes, module=module)
 
-        return _attach(func, handler)
+        return _attach(func, handler, verb_scope=True)
 
     return decorator
 

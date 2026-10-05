@@ -175,6 +175,12 @@ class PasswordResolver:
         call raises the correct "a password is required" :class:`AuthError`
         on its own, with the never-echo-safe message that call site owns.
         """
+        # PDF-108: the source's carriage facts are read FIRST, before any early
+        # return below and before any write. Imported here, not at module level,
+        # so `--help` (which imports this module) never loads `ops.carriage`.
+        from pdf_tooling.ops.carriage import record as record_carriage
+
+        record_carriage(source)
         if self._password.read is None:
             return None
         facts = require_encryption().read_encryption(read_source_bytes(source), None)
@@ -204,6 +210,10 @@ def predict_password_refusal(
     resolvable-but-wrong password predicts success here, and the real run is
     what finds out, `ops/crypto.py:44-53`'s own ruling, inherited).
     """
+    # PDF-108: first statement of the seam, as in `PasswordResolver.for_source`.
+    from pdf_tooling.ops.carriage import record as record_carriage
+
+    record_carriage(source)
     if password.resolvable:
         return None
     facts = require_encryption().read_encryption(read_source_bytes(source), None)

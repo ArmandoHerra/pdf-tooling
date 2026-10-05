@@ -285,6 +285,51 @@ READ_SEAM_RESIDUE_LEDGER: Final[tuple[_ReadSeamRatification, ...]] = (
             "Every other key is carried byte-identical from the previous record."
         ),
     ),
+    _ReadSeamRatification(
+        date="2026-10-04",
+        spec="PDF-108",
+        direction="up",
+        ruling="X-978",
+        ceilings=MappingProxyType(
+            {
+                "pdf_tooling/adapters/pdfplumber_text.py": 1,
+                "pdf_tooling/adapters/pikepdf_structure.py": 10,
+                "pdf_tooling/adapters/pypdf_structure.py": 7,
+                "pdf_tooling/adapters/soffice_office.py": 1,
+                "pdf_tooling/adapters/tesseract_ocr.py": 2,
+                "pdf_tooling/cli/cmd_create.py": 2,
+                "pdf_tooling/cli/common.py": 1,
+                "pdf_tooling/cli/password.py": 1,
+                #: X-978 -- helper-attributed read: `record()` reads the source via
+                #: `read_source_bytes` (:224); the call site IS driven (compress/PDF-delete)
+                #: but the open is credited to safety/paths.py:627, never the caller.
+                #: Control: compose.py:494. Prior residue 0; increment 1. Repair: B-401.
+                "pdf_tooling/ops/carriage.py": 1,
+                "pdf_tooling/ops/compose.py": 2,
+                "pdf_tooling/ops/crypto.py": 4,
+                "pdf_tooling/ops/document_password.py": 3,
+                "pdf_tooling/ops/metadata.py": 1,
+                "pdf_tooling/ops/office.py": 1,
+                "pdf_tooling/ops/optimize.py": 3,
+                "pdf_tooling/ops/procpool.py": 2,
+                "pdf_tooling/safety/_faults.py": 1,
+                "pdf_tooling/safety/atomic.py": 4,
+            }
+        ),
+        reason=(
+            "X-978. pdf_tooling/ops/carriage.py gains 1 undriven read seam, the "
+            "measured increment (carriage.py:224 record() calls read_source_bytes). "
+            "CLASS: helper-attributed read; the call site is driven by the "
+            "compress/PDF-delete cell, but seams._frames credits the open event to the "
+            "innermost first-party frame safety/paths.py:627 (read_source_bytes), never "
+            "the caller. CONTROL (measured): compose.py:494, the same idiom, reached by "
+            "compose/JPEG, is credited to paths.py:627 and absorbed by compose's frozen "
+            "ceiling. CONDITION: carriage.py's prior residue was 0, measured increment 1, "
+            "so no observable sibling is bought out. Durable repair filed as B-401 "
+            "(the read-seam observer credits helper frames). "
+            "Every other key is carried byte-identical from the previous record."
+        ),
+    ),
 )
 
 #: The LIVE ceiling: the newest record's mapping, and nothing else. No
