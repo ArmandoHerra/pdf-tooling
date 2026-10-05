@@ -106,7 +106,7 @@ with a mechanism instead of a hope.
 no ``finally``, nothing. The only thing the CHILD side can still do is
 PR_SET_PDEATHSIG (Linux only; ``prctl`` is a Linux syscall, so macOS gets no
 coverage here — stated rather than silently absent, matching CI's own
-matrix, which runs ``ubuntu-latest`` and ``macos-14`` and no Windows job).
+matrix, which runs ``ubuntu-latest`` and ``macos-15`` and no Windows job).
 
 **Exit code on signal.** The parent dies BY the signal (``signal.signal(sig,
 signal.SIG_DFL)`` then ``os.kill(os.getpid(), sig)``) rather than

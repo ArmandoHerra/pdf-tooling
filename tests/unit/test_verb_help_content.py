@@ -296,7 +296,7 @@ def test_ac9_rasterize_help_qualifies_the_single_channel_claim_for_webp() -> Non
 
 def test_ac12_rasterize_help_states_the_teardown_guarantee_per_platform() -> None:
     """X-153: the `PR_SET_PDEATHSIG` worker guard that closed `cb948ad85b` is
-    Linux-only (`prctl` is a Linux syscall), while `macos-14` is a supported CI
+    Linux-only (`prctl` is a Linux syscall), while `macos-15` is a supported CI
     platform -- and a user reading `rasterize --help` saw no platform scope at
     all. Both halves are asserted: the catchable signals are POSIX-wide, and the
     uncatchable SIGKILL-to-parent case is Linux-only, with its reason."""

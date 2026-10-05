@@ -191,7 +191,8 @@ def pytest_report_header(config: pytest.Config) -> str:
 # `__module__ == 'conftest'`. So the rule is NOT "a custom subclass is unsafe
 # in a test module" -- `tests/test_import_boundaries.py`'s
 # `UncalibratedStartupCondition` is exactly that and renders cleanly on all
-# four `macos-14` legs of this product's own CI. The rule is: the class must be
+# four `macos-14` legs of this product's own CI (observed on that runner; PDF-109
+# moved the matrix to macos-15). The rule is: the class must be
 # defined where EVERY process that may have to render it can import it.
 #
 # AND THIS IS THE RULE THIS FILE ALREADY STATES ABOUT ITSELF, one word

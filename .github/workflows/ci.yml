@@ -156,6 +156,9 @@ jobs:
     # PDF-29 bound: p95 524.0s over 15 green runs (33609241110..33724105752, 2026-09-02..2026-09-03);
     # 3x p95 = 26.2 min, rounded up; 120 matrix legs in the window. Derivation rule above `jobs:`.
     timeout-minutes: 27
+    # This window's macOS legs ran on the earlier macOS runner; PDF-109 moved them
+    # to macos-15 and the bound is NOT re-derived there (owed: re-derive from 15
+    # green runs that include macos-15 legs). The value does not move.
     strategy:
       fail-fast: false
       matrix:
@@ -164,12 +167,16 @@ jobs:
         # indefinitely, holding the whole run open so it never reaches a
         # terminal state. Do not add it back without checking pool health.
         python-version: ["3.11", "3.12", "3.13", "3.14"]
-        os: [ubuntu-latest, macos-14]
+        # macos-15 (arm64) is the supported macOS floor (OR-27, PDF-109): pikepdf
+        # >= 10.14.0 publishes macOS wheels only as macosx_15_0_arm64, so the older
+        # macOS runner fell back to an sdist build that fails (run 37235305338).
+        os: [ubuntu-latest, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       # PDF-34 D5 (X-473 measured: delta ~=0-1s on both ubuntu-latest and
       # macos-14 -- seconds against PDF-29's 331.25s `make ci` budget, and a
       # DIFFERENT budget besides: this is CI wall clock, not the local gate).
+      # (Measured on the matrix's earlier macOS runner; not re-measured on macos-15.)
       # fetch-depth: 0 closes 833321e40b literally here: the ten history-depth
       # arms and both `036fd0a353` changelog-debt arms now RUN on the job that
       # matters most instead of skipping silently against a shallow checkout.

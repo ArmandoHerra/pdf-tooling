@@ -29,7 +29,7 @@ unreaped zombie) still exist under this pgid at all", which is the T4
 platform-specific ``ps`` output (BSD ``ps`` on macOS and GNU ``ps`` on Linux
 do not agree on a stable ``sid``/``pgid`` column spelling; killpg's signal-0
 probe has no such disagreement — it is the same syscall on both CI platforms
-in this project's matrix, ``ubuntu-latest`` and ``macos-14``).
+in this project's matrix, ``ubuntu-latest`` and ``macos-15``).
 
 **Why the observation window here is shorter than the >=5s used in the
 manual repro, and still decisive.** ``guarded_process_pool``'s own signal
@@ -691,7 +691,7 @@ def test_sighup_to_parent_only_stops_new_output_and_leaves_no_survivors(
     reason=(
         "the SIGKILL-to-parent orphan guard is PR_SET_PDEATHSIG, and prctl is a "
         "Linux syscall (ops/procpool.py:235). There is no macOS equivalent, so on "
-        "macos-14 this arm is a VISIBLE SKIP rather than a silent absence -- the "
+        "macOS this arm is a VISIBLE SKIP rather than a silent absence -- the "
         "verification gap X-153 rules is filed, not closed (see PDF-21 D7)."
     ),
 )
