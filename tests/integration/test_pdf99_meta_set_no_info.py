@@ -274,8 +274,10 @@ METADATA_ACCESS_CENSUS: Final[Mapping[tuple[str, str, str], tuple[int, str]]] = 
         "`meta get`: try/except plus `if xmp is None`",
     ),
     ("adapters/pypdf_structure.py", "write_metadata", "writer.xmp_metadata"): (
-        3,
-        "`meta set`: `had_xmp` / `if xmp is not None`; two setters",
+        2,
+        "`meta set`: two SETTERS only (`--clear-all`'s `None`, and PDF-107's verified-bytes "
+        "commit). PDF-107 moved presence off the getter, which parses and raised on an "
+        "unparseable packet, onto the source catalogue's `/Metadata` entry (no parse)",
     ),
     ("adapters/pypdf_structure.py", "write_metadata", "writer.metadata"): (
         1,
