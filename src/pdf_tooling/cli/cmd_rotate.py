@@ -67,9 +67,11 @@ RELATIVE BY DEFAULT. --angle 90 ADDS 90 degrees to a page's existing rotation;
 is normalized into 0/90/180/270, so a page at 270 rotated by 90 becomes 0
 (never 360) and --absolute --angle -90 becomes 270 (never -90).
 
-rotate changes a page's /Rotate entry and nothing else. Page boxes are not
-touched: rotation is metadata, not geometry. Pages you do not select are left
-exactly as they were, including leaving /Rotate absent where it was absent.
+Within each page, rotate changes only the /Rotate entry: page boxes are not
+touched, and pages you do not select are left exactly as they were. The
+document is rebuilt around those pages, so the input's /Info and XMP metadata
+are not carried to the output, and an encrypted input is written unencrypted;
+the run says so in its warnings.
 
 DESTINATIONS. -O writes one file (multiple inputs sharing one -O is an arity
 error, exit 2 -- use --out-dir instead). --out-dir writes one file per input,

@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-108] Say what a write drops: encryption and document metadata — 2026-10-04
+
+- **A write that loses the input's encryption, `/Info` or XMP now says so.** The warning rides the existing `warnings` array and the `warning:` lines on stderr, in every `-o` shape, and `--dry-run` prints the same text word for word. The descriptive half only: whether the product should carry or refuse is still open (`B-389`, `B-390`). No exit code, envelope key, flag or default moved.
+- **One seam, not a per-verb edit.** `ops/carriage.py` holds the declaration table (REBUILD, REWRITE, CRYPTO, N/A; an undeclared verb drops everything), a run-scoped fact ledger, and the one amender `output.emit_result` applies through a hook the verb wrapper installs. Facts come from `StructureEngine.read_carriage_facts(data)`, which takes no password at all: the empty-user-password open only, recorded first-read-wins at the PDF-37 per-source seam before its early returns, so `--in-place` reports the pre-image.
+- **Texts:** `<input>: input is encrypted; <verb> writes its output unencrypted` (with an `--in-place` suffix when the output replaces the input), `<input>: <verb> does not carry the input's <parts> to its output`, and an explicit "not checked" line for a password-protected input. The engine's own `/Producer` entry is discounted so a rebuild output is not flagged again.
+- **`rotate --help` no longer claims it changes "nothing else"**, and README gains `What a write does not carry`.
+- **Handed up, not fixed:** the seven dry tiers that authenticate (README's no-oracle sentence), `stamp --from` an encrypted source, and the website `merge` transcripts, which depict stdout only.
+
 ## [PDF-107] Stop `meta set` writing an unparseable XMP packet — 2026-10-04
 
 - **The defect (ledger `652385c7bf`, high, data integrity):** pypdf's XMP setters assume the property lives in the first `rdf:Description rdf:about=""` and that the canonical prefix (`dc`, `pdf`, `xmp`) is already bound on or above it. pikepdf's `open_metadata()` declares each prefix on each property element instead, so any `meta set` wrote `<dc:title>` with no declaration, the packet became `unbound prefix` XML, the run reported rc 0 `ok`, and `meta get` read `xmp: null`. The same cause broke three more realistic shapes (one Description per schema, a non-canonical prefix, a non-empty `rdf:about`), left `--clear-producer` not clearing on a multi-Description packet, and raised a raw traceback (even for `--clear-all`) when the input packet was already unparseable.
