@@ -848,8 +848,11 @@ def test_the_unmutated_host_decides_the_branch_and_both_instruments_agree(
     """AC1/AC3. NO injection anywhere: the premise is taken from the host this arm runs on.
 
     On every Linux leg the probe accepts and the branch is `accepted`; on the
-    four `macos-14` legs the probe refuses with the measured encoding errno and
-    the branch is `recorded`. **The arm asserts the MAPPING and never the
+    four `macos-14` legs of CI run `35295764623` the probe refused with the
+    measured encoding errno and the branch was `recorded`; which answer the
+    macos-15 filesystem gives was not measured when PDF-109 moved the matrix,
+    and this arm asserts the mapping either way. **The arm asserts the MAPPING
+    and never the
     value** — which of the two answers this host gave, and that the helper
     reached the branch that answer implies. Asserting the value is precisely
     the undeclared premise PDF-88 exists to remove, and an arm that re-asserted
@@ -980,7 +983,8 @@ def test_the_publication_channel_is_defined_where_every_process_can_import_it() 
 
     The rule is NOT "a custom subclass is unsafe in a test module":
     `tests/test_import_boundaries.py` sits directly under `tests/` and renders
-    its own subclass cleanly on all four `macos-14` legs. The rule is that the
+    its own subclass cleanly — observed on all four `macos-14` legs, before
+    PDF-109 moved the matrix to macos-15. The rule is that the
     class must be defined where every process that may have to render it can
     import it, and the failing control for this arm is one move of the class.
     """

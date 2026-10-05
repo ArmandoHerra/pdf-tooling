@@ -97,7 +97,7 @@ _LINUX_ONLY = pytest.mark.skipif(
     reason=(
         "the SIGKILL-to-parent orphan guard is PR_SET_PDEATHSIG, and prctl is a "
         "Linux syscall (ops/procpool.py::_set_pdeathsig_sigkill). There is no macOS "
-        "equivalent, so on macos-14 these arms are a VISIBLE SKIP rather than a "
+        "equivalent, so on macOS these arms are a VISIBLE SKIP rather than a "
         "silent absence -- a control that cannot be run must be visible as skipped, "
         "never quietly counted as agreement (X-153)."
     ),

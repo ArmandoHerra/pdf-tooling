@@ -2921,7 +2921,7 @@ HELP_MODULE_CEILING: Final = 320
 #      `STARTUP_COST_CALIBRATION` -- `(linux, 3.11)`, `(linux, 3.12)`,
 #      `(linux, 3.13)`, `(linux, 3.14)` -- which are the four `ubuntu-latest`
 #      legs, both single-configuration jobs and every local `make test`. The
-#      four `macos-14` legs are DECLARED UNMEASURED and publish instead of
+#      four `macos-15` legs are DECLARED UNMEASURED and publish instead of
 #      asserting a level. Anything else REDS.
 #      THREE RESIDUALS THIS DESIGN DECLARES AND DOES NOT CLOSE:
 #      (a) THE PATCH-LEVEL COORDINATE. The registry is keyed at interpreter
@@ -3360,8 +3360,9 @@ STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = 26_500
 #               `UncalibratedStartupCondition`. It NEVER abstains, on any leg,
 #               and that is measured rather than preferred: the execution
 #               receipt in `tests/test_gate_budget.py` asserts over the RUNTIME
-#               JUnit XML that no Section 6 member skipped, it is green on all
-#               four macos-14 legs today, and a skip here reddens it. No
+#               JUnit XML that no Section 6 member skipped, it was green on all
+#               four macos-14 legs when PDF-86 measured it, and a skip here
+#               reddens it. No
 #               source-text sanction can reach that clause -- there is no source
 #               text in a `<skipped>` element -- so the MECHANISM a missing
 #               precondition usually gets is given up and the PURPOSE is kept by
@@ -3467,7 +3468,7 @@ class StartupDeclaration(NamedTuple):
 #:   recorded. The four members are the four `ubuntu-latest` legs of the CI
 #:   matrix plus every local `make test`; `engines-present` and
 #:   `without-engines` both land on `(linux, 3.13)`.
-#: UNMEASURED: the four `macos-14` legs. This loop has no macOS host and never
+#: UNMEASURED: the four `macos-15` legs. This loop has no macOS host and never
 #:   has, so no distribution of this statistic has ever been taken there. They
 #:   are DECLARED in `STARTUP_COST_UNCALIBRATED`, which carries the reason and
 #:   the promotion rule and no macOS figure at all.
@@ -3578,7 +3579,7 @@ _NO_HOST_FOR_THIS_PLATFORM: Final = StartupDeclaration(
 #: measured that minor on the platform it has never had. Two properties fall out
 #: of the derivation rather than out of care -- the mapping contains no numeric
 #: literal at all (AC6), and a fifth interpreter joining the campaign extends
-#: this registry with no second edit. A macos-14 leg on a minor NOBODY has
+#: this registry with no second edit. A macos-15 leg on a minor NOBODY has
 #: measured on either platform is therefore UNDECLARED and RED, which is the
 #: correct answer and not an oversight.
 STARTUP_COST_UNCALIBRATED: Final[Mapping[StartupCondition, StartupDeclaration]] = MappingProxyType(

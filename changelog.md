@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-109] Move CI and the supported-macOS floor to 15, and lift the pikepdf hold — 2026-10-04
+
+- **The ruling (`OR-27`, `X-986`):** pikepdf 10.14.0 and later publish macOS wheels only as `macosx_15_0_arm64`, so the `macos-14` CI legs fell back to an sdist build that fails (run `37235305338`). The CI matrix is now `[ubuntu-latest, macos-15]`, replacing the `a3a0238` hold at pikepdf `10.13.0.post1` rather than pinning `<10.14`.
+- **Lock and licenses:** `uv lock --upgrade-package pikepdf` moves exactly one package, `pikepdf 10.13.0.post1 -> 10.16.0`, byte-equal to the pre-hold lock block; `THIRD_PARTY_LICENSES` and `website/src/data/licenses.json` regenerate one line each. `pyproject.toml` is untouched.
+- **The floor:** README now states it: macOS 15.0 on Apple silicon. Intel Macs lose binary wheels at every macOS version and fall back to a source build that is not supported.
+- **Historical records stay:** every `macos-14` token that records what a past run measured or observed is left as written; only current-configuration statements moved to `macos-15`, and present-tense observations were re-tensed.
+- **Not re-derived:** the `test` job's `timeout-minutes: 27` bound was derived on `macos-14` and is not re-derived for `macos-15`; the value does not move, and the owed re-derivation is noted beside it.
+
 ## [PDF-107] Remediation: `meta set` no longer destroys the XMP packet of an `/EncryptMetadata false` input — 2026-10-04
 
 - **The defect (ledger `17add7b3e9`, high, data integrity; exposed by PDF-107's first commit):** `encrypt --legacy` (RC4-128) always writes `/EncryptMetadata false`, as does AES with `metadata=False`. On those files the `/Metadata` stream is stored as plaintext, but pypdf ignores the flag and runs its cipher over it, so `meta set` saw garbage, judged it "not well-formed XML", and copied the garbage into the output behind `ok (XMP packet left unchanged: ...)`. The original packet, `pdfaid` included, was lost. Before PDF-107 the same input failed closed.

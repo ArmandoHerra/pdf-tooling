@@ -75,7 +75,7 @@ cover: ## Run the suite under coverage against the project's floor
 	# this one absolute COVERAGE_FILE race and corrupt it -- the observed
 	# signature was `make: *** [Makefile:44: cover] Error 1` alongside pytest
 	# itself reporting a full, clean pass. `flock(1)` is util-linux and is NOT
-	# on macOS, and this target runs on macos-14 as well as ubuntu-latest, so
+	# on macOS, and this target runs on macos-15 as well as ubuntu-latest, so
 	# the guard below uses `mkdir`, which is atomic on every POSIX filesystem
 	# this repo targets and needs no new dependency. Guarding `cover` alone
 	# (the one target that actually writes COVERAGE_FILE) is deliberate:
