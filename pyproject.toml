@@ -61,8 +61,8 @@ dependencies = [
 [project.optional-dependencies]
 # HTML/Markdown composition. Needs system pango/cairo, so it is never a base
 # dependency; the base install must stay system-library-free.
-html = ["weasyprint>=69.0,<70"]
-all = ["weasyprint>=69.0,<70"]
+html = ["weasyprint>=69.0,<71"]
+all = ["weasyprint>=69.0,<71"]
 
 [project.scripts]
 pdftooling  = "pdf_tooling.cli.main:main"
