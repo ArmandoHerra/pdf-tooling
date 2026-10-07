@@ -18,7 +18,20 @@ name: CI
   # release.yml calls this whole workflow as its gate, which makes PLAN §11's
   # "the release job is gated behind the full ci.yml job set" literally true
   # rather than approximately so.
+  #
+  # PDF-117 / X-1003: the one input below is how an ADVISORY job (today only
+  # `startup-latency`) is kept out of that gate. Default TRUE means "skip", and
+  # push, pull_request, schedule and workflow_dispatch carry no such input at
+  # all (null), so there the advisory job runs. The polarity is load-bearing:
+  # GitHub coerces null and false both to 0, so an input named the other way
+  # round (`run_advisory_jobs`, tested `!= false`) would evaluate false on a
+  # push and the job would silently NEVER run. tests/test_gate_parity.py pins it.
   workflow_call:
+    inputs:
+      skip_advisory_jobs:
+        description: "Skip advisory (non-required) jobs when ci.yml is a gate (X-1003)"
+        type: boolean
+        default: true
   # PDF-34 D8 Tier 1 / AC17: a cadence that fires with time, not only with a
   # commit -- an action deprecation, a `git` behaviour change, a base-image
   # bump. Weekly, Sunday 06:00 UTC. This is workflow-level (GitHub has no
@@ -524,3 +537,22 @@ jobs:
       - run: uv sync --locked
       - run: make website
       - run: make website-audit
+
+  startup-latency:
+    name: startup-latency
+    # PDF-117 bound: p95 42.2s over 15 green runs (the JOB's own conclusion: `startup-latency` instances, 5 legs x 3 sequential dispatches of the landing form, throwaway branch pdf117-measure, runs 37580161961..37580642220, 2026-10-07);
+    # 3x p95 = 2.1 min, raised to the 5 min floor. Derivation rule above `jobs:`.
+    timeout-minutes: 5
+    # X-1003 / OR-32: ADVISORY. Not a required context (branch protection is the operator's), ubuntu
+    # only, serial. SKIPPED when ci.yml is CALLED (release.yml and deploy-website.yml gates) via the
+    # `skip_advisory_jobs` input default, so an advisory red can never block a release or a publish.
+    if: ${{ inputs.skip_advisory_jobs != true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --locked
+      - run: make startup-gate

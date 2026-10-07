@@ -42,7 +42,7 @@
 # file and the workflow ever disagree -- and this file now also sits inside
 # tests/test_gate_parity.py's stale-count guard.
 #
-# Applying this rule to ci.yml yields 22 gating steps across the 12 jobs --
+# Applying this rule to ci.yml yields 23 gating steps across the 13 jobs --
 # reproduced, today and at every commit, by
 # `uv run python scripts/gate_parity.py check`.
 #
@@ -231,6 +231,15 @@ step = "make website-audit"
 local = "website-audit"
 in_make_ci = false
 note = "PDF-104: npm audit at --audit-level=high over website/'s lock. NOT in `make ci` for PDF-91's reason (uv-only), and NOT folded into `make website` because it needs the registry and its verdict moves with the advisory database, not with the tree."
+
+# --- startup-latency (PDF-117, X-1003: ADVISORY -- not a required context) -- #
+
+[[check]]
+job = "startup-latency"
+step = "make startup-gate"
+local = "startup-gate"
+in_make_ci = false
+note = "X-1003: advisory, not in branch protection, skipped when ci.yml is called as a release/publish gate. NOT in `make ci`: a wall-clock budget derived on the ubuntu runner is a statement about that runner; locally it measures your host and abstains unless the host is quiet."
 
 # --- rejected proposals ----------------------------------------------------- #
 

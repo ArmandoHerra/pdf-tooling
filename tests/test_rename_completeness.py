@@ -427,7 +427,10 @@ UNDERSCORE_REMAINDER: Final[dict[str, int]] = {
 #: the two frozen historical measurement citations (D3, quoting a specific
 #: past run, never edited) survive; PDF-58's own replacement absence-probe
 #: arm adds one new mention of the retired no-separator alias name -- net
-#: -7 removed +1 added, 9 -> 3.
+#: -7 removed +1 added, 9 -> 3. PDF-117 RE-STATES it again, 3 -> 2: the
+#: `STARTUP_BUDGET_MS` evidence block it replaced carried the one
+#: `.venv/bin/<retired name>` BINARY citation of PDF-29's workstation measurement;
+#: the replacement block measures a runner and names no console script.
 #: DRIVEN RED: delete `tests/test_cli_spine.py`'s one new mention ->
 #: its found count is 2, registry says 3, `_remainder_check` names the drift.
 BARE_REMAINDER: Final[dict[str, int]] = {
@@ -461,7 +464,7 @@ BARE_REMAINDER: Final[dict[str, int]] = {
     "tests/integration/test_rasterize_cli.py": 1,
     "tests/integration/test_rasterize_signals.py": 2,
     "tests/integration/test_split_merge_atomicity.py": 2,
-    "tests/test_cli_spine.py": 3,
+    "tests/test_cli_spine.py": 2,
     "tests/test_import_boundaries.py": 5,
     "tests/unit/test_compose.py": 1,
     "tests/unit/test_tempnames.py": 3,

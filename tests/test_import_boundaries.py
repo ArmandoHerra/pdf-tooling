@@ -2632,9 +2632,11 @@ def test_benign_section_5_mentions_are_never_flagged() -> None:
 # And under `-n auto` (this project's default since PDF-29) it cannot even
 # abstain honestly and still run: eight workers saturate the box by
 # construction, so the wall-clock test SKIPS on every worker and therefore
-# **does not run in CI at all**. A control that silently stops running is the
-# exact class this cycle exists to end, so it is not left implied: THIS SECTION
-# IS WHAT RUNS INSTEAD, on every leg of every CI job.
+# **does not run on any `test` or engine leg**. It runs, serially, in exactly one
+# advisory CI job, `startup-latency` (PDF-117), and nowhere else. A control that
+# silently stops running is the exact class this cycle exists to end, so it is
+# not left implied: THIS SECTION IS WHAT RUNS INSTEAD, on every leg of every CI
+# job.
 #
 # WHY IMPORT SET IS THE RIGHT SUBSTITUTE. Startup latency in a Python CLI is
 # dominated by module import, and the import SET is deterministic, load-immune
@@ -2974,6 +2976,16 @@ HELP_MODULE_CEILING: Final = 320
 #      `-q` where a skip reason reached only `-ra`, and what it does not assert
 #      is written down here. And the warning's CLASS NAME is one greppable token
 #      across a whole job log, which a skip line keyed on a path never was.
+#   7. PDF-117. POST-IMPORT RUNTIME LATENCY ON THE `--help` PATH: work done
+#      after the last import, for example in `main()` before Click renders help.
+#      It is invisible to EVERY arm in this section BY CONSTRUCTION, because the
+#      `-X importtime` columns this section reads cover imports only. Measured:
+#      a `time.sleep(0.75)` at the top of `main()` when `--help` is in argv moved
+#      `--help` by about 750 ms and left this whole section green (177 passed, 1
+#      xfailed). It is held ONLY by the advisory `startup-latency` job (PDF-117,
+#      `make startup-gate`), ubuntu only, and NOT on any macOS leg, any `test`
+#      leg or a default local run. (The numbering follows the register above:
+#      PDF-117's spec called this "entry 5" before entries 5 and 6 existed.)
 # --------------------------------------------------------------------------- #
 
 #: PDF-55 D3. Below this, the ratio's denominator is not trusted -- roughly a
@@ -3160,7 +3172,8 @@ PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE: Final = 2_600
 # proportional inflation of the census (see DECLARED BLIND SPOT 4). The only
 # surviving absolute, `STARTUP_BUDGET_MS` in tests/test_cli_spine.py, abstains
 # on every xdist worker BY DESIGN and `-n auto` is this project's default -- so
-# it never runs here and never runs in CI. That abstention is CORRECT and is
+# it never runs here and never runs on a `test` leg; it runs, serially, only in
+# the advisory `startup-latency` job (PDF-117). That abstention is CORRECT and is
 # untouched by this block: the answer to a control that must abstain is a
 # control that does not have to.
 #
@@ -4445,7 +4458,8 @@ def test_total_startup_import_cost_stays_under_its_ceiling(
     blind to a uniform proportional inflation of the census BY ALGEBRA rather
     than by threshold (DECLARED BLIND SPOT 4). The only arm that would see it
     abstains on every xdist worker, and `-n auto` is the default -- so it never
-    runs here or in CI.
+    runs here or on a `test` leg; it runs, serially, only in the advisory
+    `startup-latency` job (PDF-117).
 
     This one runs, on every leg, because it never asks how busy the box is: it
     counts the product's total import cost in units of the IN-RUN FLOOR -- the

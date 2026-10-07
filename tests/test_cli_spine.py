@@ -204,6 +204,10 @@ MAKEFILE_TARGETS = {
     # list -- a gate that measures itself on every run pays for the measurement
     # on every run, and `--baseline` refuses on a host it cannot verify quiet.
     "gate-timing",
+    # PDF-117: the advisory `startup-latency` CI job's command. Deliberately NOT in
+    # `ci`'s prerequisite list -- its budget is derived on the ubuntu runner, so
+    # locally it measures YOUR host and abstains unless the host is quiet.
+    "startup-gate",
     # PDF-30: the documentation gate. Deliberately NOT in `ci`'s prerequisite
     # list either -- `PDF-29` is halving a gate that had doubled, and two of
     # this target's arms cannot run in CI's shallow, planning-tree-less checkout
@@ -2325,52 +2329,50 @@ ENGINE_MODULES = {"pypdf", "pikepdf", "pypdfium2", "reportlab", "pdfplumber", "f
 #: disagreeing about what the budget is. PDF-01 owns the measurement; this is
 #: only its name.
 #:
-#: PDF-29 RE-BASELINED THIS FROM 250.0, AND THE EVIDENCE IS RIGHT HERE. The rule
-#: applied is Design §6's, mechanically: measure first, then p95 < 225 ms leaves
-#: the constant alone and p95 >= 225 ms re-baselines to p95 x 1.25 rounded up to
-#: the next 25 ms. Nothing about the number was chosen; only the measurement was.
+#: PDF-117 RE-DERIVED THIS ON THE ONLY HOST THE ARM NOW RUNS ON. The wall-clock
+#: arm abstains under xdist, so it runs, serially, in exactly one advisory CI job
+#: (`startup-latency`, `make startup-gate`, ubuntu only). A budget for that job is
+#: a statement about that runner, so it is measured there. PDF-29's 2026-09-03
+#: workstation derivation (325.0) is superseded; see changelog [PDF-29] and
+#: [PDF-117]. Still ONE constant: a second literal is how two tests start
+#: disagreeing about what the budget is.
 #:
 #: ----------------------------- THE MEASUREMENT -----------------------------
-#: STATISTIC:    fastest-of-5, 20 independent trials.  THE STATISTIC IS PART OF
-#:               THE NUMBER. A *median under contention* and a *fastest-of-5 at
-#:               low load* are different statistics of the same distribution and
-#:               differ by tens of ms; quoting either as "headroom" without
-#:               naming which one is how this row's own ledger came to hold two
-#:               irreconcilable headroom figures (4.7 ms and ~29 ms).
-#: DATE:         2026-09-03
-#: COMMIT:       0665e64bc88d58b77993521ab3de528b99988959 (tree carrying only
-#:               PDF-29's own scripts/measure_gate.py at measurement time)
-#: HOST:         Linux-7.0.0-30-generic x86_64, 8 cpus; loadavg 1.15 at start /
-#:               1.31 peak; ZERO foreign processes at or above 25% cpu for the
-#:               whole run -- i.e. `quiet: true` by perf/README.md's definition
-#: INTERPRETER:  CPython 3.12.13, resolved through `uv run python` into this
-#:               repository's own `.venv` (never the system `python3`, which
-#:               reports 3.14.4 on this host)
-#: ENGINES:      tesseract AND soffice both present on PATH
-#: BINARY:       .venv/bin/pdftoolkit, `venv-sibling` arm (asserted, not assumed)
-#: DISTRIBUTION: min 219.712 / median 235.791 / p95 247.901 / max 247.990 ms,
-#:               SPREAD 28.278 ms
+#: STATISTIC:    fastest-of-5 `--help` wall-clock (the test's own estimator), 20
+#:               independent trials x 15 fresh VMs = N 300, POOLED. The statistic
+#:               is part of the number: between-VM variance is the noise a CI
+#:               gate actually meets, so the p95 is taken over the pool.
+#: DATE:         2026-10-07 (M1 dispatched 05:05Z, 05:37Z and 06:09Z, sequentially)
+#: COMMIT:       branch pdf117-measure head 898637f2a02fcd0e331e2d5b0f2cc6b77e5023b0
+#:               cut from origin/main 9809a7f (a trimmed ci.yml carrying only the
+#:               measurement job; scripts/measure_gate.py --target help-startup)
+#: HOST:         GitHub `ubuntu-latest`, 4 vCPUs. ImageOS ubuntu24; ImageVersion
+#:               20260927.320.1 on 9 legs and 20261004.327.1 on 6 legs. 14 of 15
+#:               VMs were quiet by measure_gate's definition (loadavg <= 0.25 x
+#:               cpus = 1.00); one started at 1.11. Runs 37574610962,
+#:               37577246614, 37579980979, every leg `success`.
+#: INTERPRETER:  CPython 3.13.16 via `uv run python` into the job's own `.venv`
+#: ENGINES:      absent; this job installs none
+#: DISTRIBUTION: min 102.1 / median 173.6 / p95 183.5 / max 187.6 ms, spread
+#:               85.5 ms. Per-VM median range 110.6 .. 183.6 ms.
 #:
-#: WHAT THAT DISTRIBUTION MEANS. Against the old 250.0 budget the p95 left
-#: **2.1 ms of headroom against a 28.3 ms spread, on a host verified quiet**.
-#: A best-of-5 estimator whose dispersion is thirteen times its headroom flakes
-#: BY CONSTRUCTION -- on a quiet host as much as a loaded one -- which is
-#: exactly what the ledger recorded happening to three different agents in one
-#: day, and what reddened `test (3.12, macos-14)` in run 33721445070 at
-#: "fastest --help was 308 ms of 250.0 ms". The old number was not defended by
-#: this measurement; it was refuted by it.
+#: ARITHMETIC. B = pooled p95 = 183.459 ms; 2 x B = 366.919; rounded up to the
+#: next 25 ms = 375.0. The factor is OR-32's 2x and was not widened (X-476).
+#: SEPARATION CHECK (before landing): pooled max 187.587 / 375.0 = 0.50, inside
+#: the 0.75 ceiling.
 #:
-#: 247.901 x 1.25 = 309.876 -> rounded up to the next 25 ms = 325.0.
+#: SENSITIVITY (D9), STATED RATHER THAN TUNED. The arm CANNOT see an additive
+#: `--help` regression smaller than budget - pooled max = 187.4 ms, and ALWAYS
+#: sees one larger than budget - pooled min = 272.9 ms. The `57156e22c0` plant
+#: (+500 ms) and PDF-55's (+750 ms) are both above 272.9 ms, so both are
+#: always seen. A regression between 187 and 273 ms is seen on some VMs and not
+#: others. The budget was not moved toward either plant (X-476).
 #:
-#: AND THE RISK THIS CARRIES, STATED. Widening a budget can silence a genuine
-#: startup regression, and the three medians on record (224.7 -> 242.7 -> 243.2)
-#: DO trend upward across the same instrument while verbs were added. That risk
-#: is the reason this block exists rather than a round number, and the reason
-#: PDF-29 also landed a control that CANNOT be widened away: Section 6 of
-#: tests/test_import_boundaries.py pins WHAT `--help` imports, which is
-#: deterministic, load-immune and parallel-safe. A new eager import of a heavy
-#: module reddens there whatever this number says.
-STARTUP_BUDGET_MS = 325.0
+#: A red right after a runner-image roll is a re-derivation trigger, not a reason
+#: to widen in place. Section 6 of tests/test_import_boundaries.py holds WHAT
+#: `--help` imports; this arm holds how long it takes, including work after the
+#: last import, which Section 6 cannot see (DECLARED BLIND SPOT 7 there).
+STARTUP_BUDGET_MS = 375.0
 
 #: The venv console script, as a path rather than a fallback chain. C-4: the
 #: three-arm `console_script()` below can resolve a globally installed (possibly
@@ -2435,13 +2437,16 @@ def startup_gate_abstention_reason() -> str | None:
 
 @pytest.mark.e2e
 def test_help_stays_within_the_startup_budget() -> None:
-    """R-13's wall-clock claim -- an OBSERVATION that abstains, not a CI gate.
+    """R-13's wall-clock claim -- abstains under xdist; gated by one advisory CI job.
 
     READ THIS BEFORE TREATING A GREEN HERE AS EVIDENCE. Under `-n auto` (this
     project's default since PDF-29) this test SKIPS on every worker, so it does
-    not run in CI at all, and saying so plainly is the point: a control that can
-    silently stop running is the exact class this cycle exists to end. What
-    replaced it in CI is **Section 6 of tests/test_import_boundaries.py**, which
+    not run on any `test`/engine leg or under the default `-n auto` anywhere, and
+    saying so plainly is the point: a control that can silently stop running is
+    the exact class this cycle exists to end. It runs, serially, in exactly ONE
+    advisory CI job, `startup-latency` (PDF-117, `make startup-gate`), whose
+    wrapper refuses to read a skip as a pass. What replaced it everywhere else
+    is **Section 6 of tests/test_import_boundaries.py**, which
     pins the import set behind `--help`. Import set is deterministic,
     load-immune and parallel-safe; wall-clock is none of those. The number is
     re-measured deliberately, on a verified-quiet host, by
@@ -2521,6 +2526,12 @@ def test_help_stays_within_the_startup_budget() -> None:
     # actually buys: over 20 such trials on a verified-quiet host the p95 was
     # 247.9 ms with a 28.3 ms spread, so at the old 250.0 budget it bought
     # 2.1 ms. See STARTUP_BUDGET_MS's block for the full distribution.
+    # PDF-117: one stable line for scripts/startup_gate.py to lift out of the JUnit
+    # receipt and for a human to read in the job log, pass or fail.
+    print(
+        f"STARTUP-READING fastest_ms={min(timings):.1f} budget_ms={budget_ms} "
+        f"loadavg={os.getloadavg()[0]:.2f}"
+    )
     assert min(timings) < budget_ms, (
         f"fastest --help was {min(timings):.0f} ms of {budget_ms} ms "
         f"(all five: {[round(value) for value in timings]}), measured on "

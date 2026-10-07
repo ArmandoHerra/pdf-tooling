@@ -408,8 +408,20 @@ def _contributing_required_checks() -> list[str]:
     return [line for line in fenced.group(1).splitlines() if line.strip()]
 
 
+#: PDF-117 / X-1003: jobs that are deliberately NOT required contexts. CONTRIBUTING
+#: lists what must be green before a merge, and an advisory job is by definition
+#: not that. The set is pinned to exactly `{startup-latency}` by
+#: `tests/test_gate_parity.py::test_advisory_set_is_exactly_startup_latency`, so a
+#: required job cannot be hidden from CONTRIBUTING by being added here.
+_ADVISORY_JOBS: Final[frozenset[str]] = frozenset({"startup-latency"})
+
+
+def _required_job_names() -> set[str]:
+    return (set(_independent_ci_job_names()) - _ADVISORY_JOBS) | {"dco"}
+
+
 def test_ac11_contributing_lists_exactly_the_derived_check_set() -> None:
-    expected = set(_independent_ci_job_names()) | {"dco"}
+    expected = _required_job_names()
     actual = set(_contributing_required_checks())
     assert actual == expected, (actual, expected)
 
@@ -417,7 +429,7 @@ def test_ac11_contributing_lists_exactly_the_derived_check_set() -> None:
 def test_ac11_red_a_deleted_job_name_breaks_the_reconciliation_on_scratch_text() -> None:
     """RED #1 of AC11's three, driven on SCRATCH text — never the tracked
     file (HC-4: no `git stash`, no working-tree mutation)."""
-    expected = set(_independent_ci_job_names()) | {"dco"}
+    expected = _required_job_names()
     scratch = set(_contributing_required_checks())
     scratch.discard("build")
     assert scratch != expected
