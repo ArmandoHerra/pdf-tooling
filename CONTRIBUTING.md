@@ -10,7 +10,7 @@ Every commit must be signed off:
 git commit -s -m "feat: add the thing"
 ```
 
-That adds a `Signed-off-by:` trailer, which is your statement that you have the right to submit the work under this project's licence. There is no CLA. Commits without the trailer are rejected.
+That adds a `Signed-off-by:` trailer, which is your statement that you have the right to submit the work under this project's licence. There is no CLA. Commits without the trailer are rejected: the `dco` check fails any pull request into `main` that contains such a commit, and `main`'s branch protection accepts a change, whether merged or pushed directly, only when `dco` is green on it. Commits authored by a GitHub-verified bot account are exempt.
 
 ## Commit conventions
 

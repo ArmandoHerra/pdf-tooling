@@ -32,7 +32,8 @@ THE POLICY (D4/D5), evaluated per commit, IN ORDER:
   4. Otherwise the commit message must carry at least one
      `Signed-off-by: <name> <email>` trailer whose `<email>` equals
      `commit.author.email`, compared CASE-INSENSITIVELY and ONLY on the
-     email — never the name (P0/P2 are both refused on this point).
+     email — never the name (P0/P2 are both refused on this point). A
+     trailer is single-line: it never spans a newline (PDF-118 D4).
 
 An empty commit list is a FAILURE, not a vacuous pass — a check that examines
 zero commits and exits 0 is the silently-skipped-verification defect this
@@ -59,7 +60,11 @@ from typing import Any, TextIO
 #: on the header itself (DCO tooling in the wild is not fussy about its
 #: casing either); the case-insensitive comparison the policy actually cares
 #: about is done separately, on the captured email, in `_evaluate`.
-_TRAILER_LINE = re.compile(r"^Signed-off-by:\s*.*?<([^<>]+)>\s*$", re.MULTILINE | re.IGNORECASE)
+#: A trailer is ONE line (PDF-118 D4): nothing in the pattern may cross a
+#: newline, so a split or crafted trailer neither signs nor smuggles a line.
+_TRAILER_LINE = re.compile(
+    r"^Signed-off-by:[ \t]*[^\n]*?<([^<>\n]+)>[ \t]*$", re.MULTILINE | re.IGNORECASE
+)
 
 
 def trailer_emails(message: str) -> list[str]:
@@ -106,7 +111,7 @@ def evaluate_commit(record: dict[str, Any]) -> tuple[str, str]:
     if author_email and any(t.strip().lower() == author_email.strip().lower() for t in trailers):
         return "pass", ""
 
-    found = ", ".join(trailers) if trailers else "none"
+    found = ", ".join(repr(t) for t in trailers) if trailers else "none"
     return (
         "fail",
         f"{sha}: no Signed-off-by trailer matches the author email {author_email!r} "
