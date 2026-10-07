@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-113] Lift weasyprint to >=70.0,<71, and state the supported platform — 2026-10-07
+
+- weasyprint 69.0 carries CVE-2026-55073 / GHSA-jf6q-chmf-3h3v (pip-audit PYSEC-2026-3940); the `html`/`all` extras now require `>=70.0,<71`, the only fixed floor. v1 imports no weasyprint, so it was unreachable today.
+- `uv lock --upgrade-package weasyprint` with uv 0.12.3 moved one package, 69.0 -> 70.0, `revision` unchanged at 3.
+- `THIRD_PARTY_LICENSES` and `website/src/data/licenses.json` regenerated with `make licenses`: one line each, BSD, 32 packages.
+- README and the website hero (EN and ES) state "macOS 15 or later on Apple silicon; Intel Macs are not supported."; the floor is derived from pikepdf's wheel tags in the lock.
+- Dependabot PR #34 (`>=69.0,<71`, keeps the vulnerable floor, stale license inventory) is superseded by this design.
+
 ## [PDF-111] Make the start-method survivor arm deterministic, or prove the product defect it hides — 2026-10-07
 
 - **A product race, fixed:** `_worker_initializer` armed `PR_SET_PDEATHSIG` and never checked whether the parent was already dead, and prctl(2) sends no signal in that case, so a `spawn` worker still bootstrapping when the CLI was SIGKILLed rendered a queued chunk after the parent's death and blocked forever. It now arms, THEN verifies `getppid()` against the pid the pool builds it with, and ends itself by SIGKILL on a mismatch. `_pool_options` is the one source of the worker bootstrap, so the tests' raw executor cannot drift from `guarded_process_pool`.

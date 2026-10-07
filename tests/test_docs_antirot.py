@@ -289,6 +289,34 @@ def _tests_module(name: str):  # type: ignore[no-untyped-def]
     return importlib.import_module(name)
 
 
+def pikepdf_macos_floor(lock_text: str | None = None) -> tuple[int, frozenset[str]]:
+    """The macOS floor and architectures pikepdf publishes, read from `uv.lock`.
+
+    Collects every pikepdf wheel tagged `macosx_<major>_<minor>_<arch>` and
+    returns `(lowest major, {arch, ...})`. An empty set is an error: a
+    derivation over nothing would be a vacuous guard."""
+    text = (REPO_ROOT / "uv.lock").read_text() if lock_text is None else lock_text
+    tags = re.findall(r"pikepdf-[^\s\"/]*?-macosx_(\d+)_\d+_([A-Za-z0-9_]+)\.whl", text)
+    assert tags, "uv.lock carries no pikepdf macOS wheel; the platform floor cannot be derived"
+    return min(int(major) for major, _ in tags), frozenset(arch for _, arch in tags)
+
+
+def platform_sentence(lang: str = "en", lock_text: str | None = None) -> str:
+    """The OR-33 platform sentence, with its floor derived from the lock.
+
+    If pikepdf ever ships a non-arm64 macOS wheel the sentence changes, so the
+    registry arm reds and a human re-rules the Intel half."""
+    major, arches = pikepdf_macos_floor(lock_text)
+    if arches != {"arm64"}:
+        return (
+            f"pikepdf now ships macOS wheels for {sorted(arches)}; re-rule OR-33 "
+            "before stating the platform."
+        )
+    if lang == "es":
+        return f"macOS {major} o posterior en Apple silicon; las Mac con Intel no son compatibles."
+    return f"macOS {major} or later on Apple silicon; Intel Macs are not supported."
+
+
 def fixture_names() -> tuple[str, ...]:
     return tuple(_tests_module("corpus").FIXTURE_NAMES)
 
@@ -992,6 +1020,16 @@ DERIVED_FIGURES: tuple[DerivedFigure, ...] = (
             "NO backticks on purpose: cardinal_residue blanks code spans before it masks "
             "a registered figure, so a rendered claim containing one would be counted as "
             "unregistered residue in the document with zero headroom."
+        ),
+    ),
+    DerivedFigure(
+        document="README.md",
+        anchor="or later on Apple silicon",
+        derive=lambda: platform_sentence("en"),
+        note=(
+            "OR-33 / B-416 (PDF-113). The floor is pikepdf's macOS wheel tag, not a typed "
+            "figure: PDF-109 moved it 14 -> 15 once already, and a typed `15` is a cardinal "
+            "the residue ceiling (29/29) has no room for."
         ),
     ),
 )

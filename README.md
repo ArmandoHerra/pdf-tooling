@@ -57,7 +57,7 @@ uv sync
 uv run pdftooling --help
 ```
 
-**Platforms.** Linux and macOS. On macOS the supported floor is macOS 15.0 on Apple silicon: `pikepdf`, a runtime engine, publishes its macOS wheels only as `macosx_15_0_arm64`, so an older macOS or an Intel Mac falls back to building it from source, which this project does not support.
+**Platforms.** Linux and macOS. macOS 15 or later on Apple silicon; Intel Macs are not supported. The reason is `pikepdf`, a runtime engine, which publishes its macOS wheels only as `macosx_15_0_arm64`.
 
 `uv sync` installs the runtime stack *and* the development tooling, so there is no separate bootstrap step.
 
