@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-118] Make the DCO gate mean what CONTRIBUTING.md says, and give Dependabot a cooldown — 2026-10-07
+
+- **`dco` no longer grades a PR with the PR's own checker:** `dco.yml` stays on `pull_request`, narrowed to `branches: [main]`, and checks out only `scripts/dco_check.py` from the PR's base SHA into `dco-base/` (`persist-credentials: false`, PR tree never checked out). A self-check step fails the job unless that checkout is the base SHA and prints the evidence line `dco: checker <sha256> from base <sha> (PR head <sha>)`. No `${{ }}` remains inside any `run:` (CICD-I4).
+- **Trailers are single-line and printing is inert (CICD-I5):** the `Signed-off-by` grammar no longer crosses newlines, and found trailers print via `repr()`, so no printed line can start a workflow command. The pre-change grammar also accepted two split-trailer shapes; those now fail. The history census over `main` changes no verdict.
+- **`CONTRIBUTING.md` says how "rejected" is true:** the `dco` check fails a PR into `main`, and `main`'s branch protection (required, strict, enforced on admins; re-read live) accepts nothing without a green `dco`. The sentence depends on that repository setting. Bot-authored commits are stated as exempt.
+- **Dependabot:** `cooldown: default-days: 7` on the `uv`, `github-actions` and `npm` entries; four comments that contradicted the live repository were corrected. The `dco` timeout derivation PDF-60 left pending is closed (p95 7.0s over 52 green runs, value stays 5 minutes).
+- **Residual, not closed here:** under `pull_request` the workflow definition is the PR's own, so a PR that edits `dco.yml` or adds a job named `dco` is graded by its own definition. That holds for every required context (all bound to the Actions app) and is an operator settings question. The live red PR (AC14) was not authorised and is not exercised; the offline which-ref simulation is the red control of record.
+
 ## [PDF-113] Lift weasyprint to >=70.0,<71, and state the supported platform — 2026-10-07
 
 - weasyprint 69.0 carries CVE-2026-55073 / GHSA-jf6q-chmf-3h3v (pip-audit PYSEC-2026-3940); the `html`/`all` extras now require `>=70.0,<71`, the only fixed floor. v1 imports no weasyprint, so it was unreachable today.

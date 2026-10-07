@@ -346,6 +346,10 @@ def test_d6_dco_workflow_triggers_on_pull_request_only() -> None:
     # (it says why the job must NOT use it) — the assertion binds the actual
     # trigger KEYS captured above, never a raw substring search over prose.
     assert "pull_request_target" not in on_match.group(1)
+    # PDF-118 D3: the trigger is narrowed to pull requests into main.
+    assert re.search(r"^ {4}branches: \[main\]$", text, re.MULTILINE), (
+        "dco.yml lacks branches: [main]"
+    )
 
 
 def test_d6_dco_workflow_declares_no_write_permission() -> None:
@@ -476,3 +480,283 @@ def test_ac11_red_a_planted_claim_is_caught_on_scratch_text() -> None:
     """RED #3 of AC11's three, driven on SCRATCH text."""
     planted = _required_checks_prose() + " This is exactly the checks CI runs."
     assert _BANNED_LOCAL_EQUALS_CI_CLAIM.search(planted) is not None
+
+
+# --------------------------------------------------------------------------- #
+# PDF-118 — the checker comes from the BASE SHA; trailers are single-line;
+# Dependabot has a cooldown. Everything offline: stdlib + yaml + git.
+# --------------------------------------------------------------------------- #
+
+import pytest  # noqa: E402
+import yaml  # noqa: E402
+
+DEPENDABOT_PATH: Final[Path] = REPO_ROOT / ".github" / "dependabot.yml"
+_BASE_EXPR: Final[str] = "${{ github.event.pull_request.base.sha }}"
+_HEAD_EXPR: Final[str] = "${{ github.event.pull_request.head.sha }}"
+
+
+def _dco_steps(text: str) -> list[dict[str, Any]]:
+    doc = yaml.safe_load(text)
+    steps = doc["jobs"]["dco"]["steps"]
+    assert steps, "dco.yml has no steps"
+    return steps
+
+
+def _checkouts(text: str) -> list[dict[str, Any]]:
+    return [s for s in _dco_steps(text) if str(s.get("uses", "")).startswith("actions/checkout@")]
+
+
+def _checker_run_steps(text: str) -> list[dict[str, Any]]:
+    return [
+        s
+        for s in _dco_steps(text)
+        if re.search(r"python3\s+\S*dco_check\.py", str(s.get("run", "")))
+    ]
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _simulate(dco_yml_text: str, tmp_path: Path) -> tuple[int, str]:
+    """Run the checker the given workflow text would run, on a self-editing PR.
+
+    BASE holds the real checker; HEAD is an unsigned commit replacing it with
+    `raise SystemExit(0)`. The checkout step's `ref` picks the commit that is
+    materialised; an absent `ref` is the merge ref, which carries HEAD's file.
+    """
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    _git(repo, "init", "-q")
+    (repo / "scripts" / "dco_check.py").write_text(DCO_SCRIPT.read_text())
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "scripts" / "dco_check.py").write_text("raise SystemExit(0)\n")
+    _git(repo, "commit", "-q", "-am", "unsigned: replace the checker")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    checkouts = _checkouts(dco_yml_text)
+    assert len(checkouts) == 1, f"expected exactly one checkout step, found {len(checkouts)}"
+    with_ = checkouts[0].get("with") or {}
+    ref = with_.get("ref")
+    if ref is None:
+        target = head
+    elif ref == _BASE_EXPR:
+        target = base
+    elif ref == _HEAD_EXPR:
+        target = head
+    else:
+        raise AssertionError(f"unknown ref expression: {ref!r}")
+    work = tmp_path / "work"
+    where = work / str(with_.get("path", "."))
+    _git(repo, "worktree", "add", "--detach", str(where), target)
+
+    runs = _checker_run_steps(dco_yml_text)
+    assert len(runs) == 1, "expected exactly one step that runs dco_check.py"
+    m = re.search(r"python3\s+(\S*dco_check\.py)", runs[0]["run"])
+    assert m is not None, runs[0]["run"]
+    script = work / m.group(1)
+
+    record = {
+        "sha": head,
+        "author": {"login": "mallory", "type": "User"},
+        "commit": {
+            "author": {"email": "t@example.com"},
+            "message": "unsigned: replace the checker\n",
+        },
+        "parents": [{"sha": base}],
+    }
+    inp = tmp_path / "commits.json"
+    inp.write_text(json.dumps([record]))
+    result = subprocess.run(
+        [sys.executable, str(script), "--input", str(inp), "--declared-count", "1"],
+        capture_output=True,
+        text=True,
+    )
+    _git(repo, "worktree", "remove", "--force", str(where))
+    return result.returncode, result.stdout
+
+
+def test_pdf118_trigger_is_pull_request_into_main_only() -> None:
+    doc = yaml.safe_load(DCO_WORKFLOW_PATH.read_text())
+    on = doc["on"]
+    assert set(on) == {"pull_request"}, on
+    pr = on["pull_request"] or {}
+    assert pr.get("branches") == ["main"], f"pull_request.branches is {pr.get('branches')!r}"
+
+
+def test_pdf118_the_only_checkout_is_the_base_sha_without_credentials() -> None:
+    text = DCO_WORKFLOW_PATH.read_text()
+    checkouts = _checkouts(text)
+    assert len(checkouts) == 1, checkouts
+    with_ = checkouts[0]["with"]
+    assert with_["ref"] == _BASE_EXPR
+    assert with_["persist-credentials"] is False
+    assert with_["path"] == "dco-base"
+    steps = _dco_steps(text)
+    assert steps
+    for step in steps:
+        blob = json.dumps(step)
+        assert "pull_request.head.ref" not in blob and "github.head_ref" not in blob, step
+        if "head.sha" in blob:
+            assert "head.sha" in json.dumps(step.get("env", {})), step
+            assert "head.sha" not in json.dumps(step.get("run", "")), step
+            assert "head.sha" not in json.dumps(step.get("with", {})), step
+
+
+def test_pdf118_the_checker_runs_from_the_base_checkout() -> None:
+    text = DCO_WORKFLOW_PATH.read_text()
+    runs = _checker_run_steps(text)
+    assert len(runs) == 1, runs
+    assert "python3 dco-base/scripts/dco_check.py" in runs[0]["run"]
+    for step in _dco_steps(text):
+        for line in str(step.get("run", "")).splitlines():
+            if "scripts/dco_check.py" in line:
+                assert "dco-base/scripts/dco_check.py" in line, line
+
+
+def test_pdf118_a_self_edited_checker_does_not_self_attest(tmp_path: Path) -> None:
+    rc, out = _simulate(DCO_WORKFLOW_PATH.read_text(), tmp_path)
+    assert rc == 1, f"expected rc 1, got {rc}"
+    assert "no Signed-off-by trailer" in out, out
+    assert re.search(r"[0-9a-f]{40}", out), out  # HEAD sha named
+
+
+def test_pdf118_red_the_simulation_self_attests_under_todays_ref_shape_on_scratch_text(
+    tmp_path: Path,
+) -> None:
+    text = DCO_WORKFLOW_PATH.read_text()
+    no_ref = "\n".join(ln for ln in text.splitlines() if not ln.strip().startswith("ref:"))
+    assert no_ref != text
+    head_ref = text.replace(f"ref: {_BASE_EXPR}", f"ref: {_HEAD_EXPR}")
+    assert head_ref != text
+    for i, variant in enumerate((no_ref, head_ref)):
+        sub = tmp_path / f"v{i}"
+        sub.mkdir()
+        rc, _ = _simulate(variant, sub)
+        assert rc == 0, f"variant {i} should self-attest (rc 0), got {rc}"
+
+
+def test_pdf118_no_expression_inside_run() -> None:
+    runs = [str(s["run"]) for s in _dco_steps(DCO_WORKFLOW_PATH.read_text()) if "run" in s]
+    assert len(runs) >= 3, runs
+    for run_text in runs:
+        assert "${{" not in run_text, run_text
+
+
+def test_pdf118_the_self_check_step_exits_one_on_a_base_mismatch(tmp_path: Path) -> None:
+    step = next(
+        s
+        for s in _dco_steps(DCO_WORKFLOW_PATH.read_text())
+        if "rev-parse HEAD" in str(s.get("run", ""))
+    )
+    repo = tmp_path / "dco-base"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "dco_check.py").write_text("x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "b")
+    real = _git(repo, "rev-parse", "HEAD")
+    # The step runs on ubuntu-latest, where sha256sum exists; macOS runners
+    # ship only `shasum`, so the test provides a same-output shim there.
+    shim = tmp_path / "shim-bin"
+    shim.mkdir()
+    shim_script = shim / "sha256sum"
+    shim_script.write_text('#!/bin/sh\nexec shasum -a 256 "$@"\n')
+    shim_script.chmod(0o755)
+    env = {"PATH": f"{shim}:/usr/bin:/bin", "HEAD_SHA": "h" * 40}
+    ok = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**env, "BASE_SHA": real},
+        capture_output=True,
+        text=True,
+    )
+    assert ok.returncode == 0, ok.stderr
+    assert f"from base {real}" in ok.stdout
+    bad = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**env, "BASE_SHA": "a" * 40},
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode == 1, bad.stdout
+
+
+def test_pdf118_a_trailer_split_across_lines_does_not_sign() -> None:
+    for message in (
+        "feat: x\n\nSigned-off-by: A <\nm@example.com>\n",
+        "feat: x\n\nSigned-off-by:\nA <m@example.com>\n",
+    ):
+        record = _human_record(email="m@example.com")
+        record["commit"]["message"] = message
+        verdict, _ = dco_check.evaluate_commit(record)
+        assert verdict == "fail", message
+    ok = _human_record(email="m@example.com")
+    assert dco_check.evaluate_commit(ok)[0] == "pass"
+
+
+def test_pdf118_no_printed_line_starts_a_workflow_command() -> None:
+    record = _human_record(email="x@example.com")
+    record["commit"]["message"] = "Signed-off-by: Mallory <m@x\n::error title=pwn::injected\n>\n"
+    code, lines = dco_check.run([record], 1)
+    assert code == 1
+    printed = "\n".join(lines).split("\n")
+    assert any("trailers found" in ln for ln in printed), printed
+    assert not [ln for ln in printed if ln.startswith("::")], printed
+
+
+def test_pdf118_printing_is_inert_even_if_a_trailer_carried_a_newline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defence in depth: the grammar no longer yields a newline-bearing email,
+    so plant one at the seam and prove the printer alone neutralises it."""
+    monkeypatch.setattr(
+        dco_check, "trailer_emails", lambda _m: ["m@x\n::error title=pwn::injected\n"]
+    )
+    code, lines = dco_check.run([_human_record(email="x@example.com")], 1)
+    assert code == 1
+    printed = "\n".join(lines).split("\n")
+    assert any("trailers found" in ln for ln in printed), printed
+    assert not [ln for ln in printed if ln.startswith("::")], printed
+
+
+def test_pdf118_dependabot_cooldown_on_every_ecosystem() -> None:
+    text = DEPENDABOT_PATH.read_text()
+    updates = yaml.safe_load(text)["updates"]
+    assert len(updates) == 3
+    assert {u["package-ecosystem"] for u in updates} == {"uv", "github-actions", "npm"}
+    for u in updates:
+        days = u.get("cooldown", {}).get("default-days")
+        assert isinstance(days, int) and 1 <= days <= 90, u["package-ecosystem"]
+    assert "no branch protection" not in text
+    assert "enforce_admins: false" not in text
+
+
+def test_pdf118_contributing_names_the_mechanism() -> None:
+    text = CONTRIBUTING_PATH.read_text()
+    m = re.search(
+        r"^## Developer Certificate of Origin\n(.*?)(?=^## )", text, re.MULTILINE | re.DOTALL
+    )
+    assert m is not None
+    assert "`dco`" in m.group(1) and "main" in m.group(1)
+    doc = yaml.safe_load(DCO_WORKFLOW_PATH.read_text())
+    assert "main" in doc["on"]["pull_request"]["branches"]

@@ -1,14 +1,19 @@
 version: 2
 
+# Cooldown (PDF-118): a release becomes eligible for a version-update PR only
+# after 7 days. Updates run weekly on Monday, so the latency is 7 to 13 days.
+# Dependabot security updates are disabled on this repo, so an advisory is
+# caught by `vulncheck` (every PR and weekly), and a manual bump is not delayed.
 updates:
   # Python dependencies. `uv` (NOT `pip`) is the correct ecosystem for this
   # project: it reads pyproject.toml AND uv.lock together. The `pip` ecosystem
-  # would bump pyproject.toml and leave uv.lock stale, and every CI job runs
-  # `uv sync --locked`, so every one of them would then go red on a lockfile
+  # would bump pyproject.toml and leave uv.lock stale, and every job that
+  # installs the Python environment runs `uv sync --locked`, so every one of
+  # them would then go red on a lockfile
   # that no longer matches — a self-inflicted permanent red on Dependabot PRs.
   #
-  # Minor+patch are grouped into one PR to keep volume low on a repo with no
-  # branch protection; majors stay ungrouped so each one gets its own review.
+  # Minor+patch are grouped into one PR to keep volume low, because every PR
+  # runs the full required-check set; majors stay ungrouped so each one gets its own review.
   - package-ecosystem: uv
     directory: "/"
     schedule:
@@ -17,6 +22,8 @@ updates:
       time: "06:00"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
@@ -25,7 +32,7 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
 
-  # Workflow actions across ci.yml and release.yml, both SHA-pinned. Dependabot
+  # Workflow actions across every workflow under .github/workflows/, all SHA-pinned. Dependabot
   # updates the 40-hex SHA and its trailing `# vX.Y.Z` comment together, which
   # is the second reason those comments are part of the pinning convention.
   - package-ecosystem: github-actions
@@ -36,6 +43,8 @@ updates:
       time: "06:00"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(ci)"
     groups:
@@ -52,9 +61,8 @@ updates:
   # earlier against a different, now-closed roster (#2, #3, #4) -- so
   # Dependabot DOES sign off; the first clause was wrong regardless of which
   # PRs happen to be open when you check.
-  # And `enforce_admins: false` (same probe, against
-  # .../branches/main/protection) means a required status check never blocks
-  # the maintainer's own direct pushes to main, so HC-3 was never a real
+  # And branch protection now requires `dco` and enforces it on admins (read
+  # 2026-10-07, .../branches/main/protection), so HC-3 was never a real
   # second reason either. Neither premise kept a DCO check out of scope --
   # `.github/workflows/dco.yml` now exists. One real consequence survives and
   # is why the engine exempts bots by identity rather than by email: the
@@ -80,6 +88,8 @@ updates:
       time: "06:00"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"

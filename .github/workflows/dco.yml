@@ -15,10 +15,23 @@
 #     moves none of them — the engine (`scripts/dco_check.py`) is exercised
 #     entirely offline by `tests/test_merge_gate.py`.
 #
-# `pull_request`, NEVER `pull_request_target` — the latter runs the BASE
-# branch's workflow with a WRITABLE token against untrusted head code, and
-# nothing here needs that: the check reads PR metadata through a read-only
-# API call and needs no secret beyond the ambient, read-scoped token below.
+# `pull_request`, NEVER `pull_request_target` (PDF-118 D2). Nothing here needs
+# a privileged context: the check reads PR metadata through a read-only API
+# call, and the only code the job EXECUTES is `scripts/dco_check.py` taken from
+# the PR's BASE SHA (code already merged to `main`). The PR's own tree is never
+# checked out, so a change to the checker alone cannot grade itself. The PR's
+# commits enter only as data, and the checker prints them inertly.
+#
+# RESIDUAL, stated so nobody has to discover it: under `pull_request` the
+# workflow DEFINITION is the PR's own. A PR that edits this file, or adds a
+# workflow with a job named `dco`, is graded by its own definition. Every
+# required context on this repository is bound to the Actions app rather than
+# to a workflow file, so that property is not specific to `dco`; it is visible
+# in the PR diff, and closing it is an operator settings question.
+#
+# The trigger is narrowed to pull requests INTO `main`: the PR-commits API
+# computes its range against the PR's own base, so a PR into another branch
+# would check only that branch's delta.
 #
 # No `concurrency` group is declared. `ci.yml`'s `cancel-in-progress: true`
 # on pull requests exists so a re-push does not pay for a stale run twice;
@@ -28,6 +41,7 @@ name: DCO
 
 "on":
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -36,29 +50,47 @@ permissions:
 jobs:
   dco:
     name: dco
-    # PDF-60 D7 bound: DERIVATION PENDING. The rule (this file's own D7) needs
-    # five green `dco` JOB runs from a throwaway draft pull request to compute
-    # `3 x p95`, and that measurement needs a push to the live repository —
-    # out of reach for this pass (see this spec's Implementation Log: AC10 is
-    # an open BLOCKER, not a silent fabrication). The floor below is the SAME
-    # 5-minute floor `ci.yml`'s header applies to its seven short jobs, which
-    # this job's own work (one API call, one stdlib script) resembles far more
-    # than it resembles any of `ci.yml`'s longer jobs — a defensible interim
-    # bound, not a derived one. Re-derive per D7 and replace this comment in
-    # the SAME commit once the throwaway PR has run.
+    # PDF-29 bound (PDF-118): p95 7.0s over 52 green runs of the dco JOB (its own conclusion)
+    # 3x p95 = 21s, raised to the 5-minute floor, capped at 30.
+    # The population predates the base-SHA sparse checkout; a single-file
+    # checkout costs no more than the merge-ref one, and the floor sits well
+    # above 3x p95, so the value cannot move.
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: dco-base
+          persist-credentials: false
+          sparse-checkout: scripts/dco_check.py
+          sparse-checkout-cone-mode: false
+      - name: Prove the checker is the base commit's
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git -C dco-base rev-parse HEAD)"
+          if [ "$actual" != "$BASE_SHA" ]; then
+            echo "dco: checker checked out at ${actual}, expected base ${BASE_SHA}" >&2
+            exit 1
+          fi
+          sum="$(sha256sum dco-base/scripts/dco_check.py | cut -d' ' -f1)"
+          echo "dco: checker ${sum} from base ${BASE_SHA} (PR head ${HEAD_SHA})"
       - name: Fetch the pull request's commits
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits" \
+          gh api "repos/${REPO}/pulls/${PR_NUMBER}/commits" \
             --paginate > "${RUNNER_TEMP}/dco-commits.json"
       - name: Run the DCO check
+        env:
+          DECLARED_COUNT: ${{ github.event.pull_request.commits }}
         run: |
-          python3 scripts/dco_check.py \
+          python3 dco-base/scripts/dco_check.py \
             --input "${RUNNER_TEMP}/dco-commits.json" \
-            --declared-count "${{ github.event.pull_request.commits }}"
+            --declared-count "$DECLARED_COUNT"
