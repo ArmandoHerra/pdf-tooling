@@ -24,6 +24,7 @@ import ast
 import contextlib
 import errno
 import inspect
+import multiprocessing
 import operator
 import os
 import re
@@ -62,6 +63,21 @@ def _sleep_forever_ish(_marker: int) -> None:
     time.sleep(30)
 
 
+def _pool_kwargs() -> dict[str, Any]:
+    """The worker bootstrap the product builds (PDF-111: `_pool_options`), over the
+    interpreter's own default start method EXCEPT `forkserver` (the 3.14 default).
+
+    `_worker_initializer` now verifies `getppid()` against the pool's builder, and
+    a forkserver worker's parent is the helper, so it would correctly end itself at
+    start-up. The product pins `spawn` for that reason; these mechanics tests only
+    need workers whose parent is this process.
+    """
+    context = multiprocessing.get_context()
+    if context.get_start_method() == "forkserver":
+        context = multiprocessing.get_context("spawn")
+    return dict(procpool._pool_options(context))
+
+
 # --------------------------------------------------------------------------- #
 # The worker initializer, observed from inside a real worker.
 # --------------------------------------------------------------------------- #
@@ -72,7 +88,7 @@ def test_worker_initializer_installs_the_worker_local_handler_on_all_three_signa
     A group Ctrl-C reaches a worker directly, and ``SIG_DFL`` killed it while it
     held an open writer -- so all three guarded signals report the unwinding handler.
     """
-    with ProcessPoolExecutor(max_workers=1, initializer=procpool._worker_initializer) as executor:
+    with ProcessPoolExecutor(max_workers=1, **_pool_kwargs()) as executor:
         state = executor.submit(_report_signal_state, 0).result(timeout=30)
     for name in ("SIGTERM", "SIGINT", "SIGHUP"):
         assert "_raise_worker_unwind" in state[name], state
@@ -87,7 +103,7 @@ def test_worker_initializer_installs_a_worker_local_sigterm_handler() -> None:
     own handler is `_raise_worker_unwind`, a completely different callable
     from anything this test process could have had.
     """
-    with ProcessPoolExecutor(max_workers=1, initializer=procpool._worker_initializer) as executor:
+    with ProcessPoolExecutor(max_workers=1, **_pool_kwargs()) as executor:
         state = executor.submit(_report_signal_state, 0).result(timeout=30)
     assert "_raise_worker_unwind" in state["SIGTERM"], state
     assert state["SIGTERM"] != repr(signal.SIG_DFL), state
@@ -108,7 +124,7 @@ def test_worker_initializer_called_directly_sets_the_exact_dispositions_describe
     signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
     before = {sig: signal.getsignal(sig) for sig in signals}
     try:
-        procpool._worker_initializer()
+        procpool._worker_initializer(os.getppid())
         for sig in signals:
             assert signal.getsignal(sig) is procpool._raise_worker_unwind
     finally:
@@ -201,7 +217,7 @@ def _assert_no_survivor(processes: Sequence[Any], report: Any) -> None:
 
 
 def test_terminate_pool_ends_and_reaps_a_live_worker() -> None:
-    executor = ProcessPoolExecutor(max_workers=1, initializer=procpool._worker_initializer)
+    executor = ProcessPoolExecutor(max_workers=1, **_pool_kwargs())
     try:
         future = executor.submit(_sleep_forever_ish, 0)
         # Give the worker a moment to actually be scheduled and start
@@ -226,7 +242,7 @@ def test_terminate_pool_is_a_no_op_over_an_empty_pool() -> None:
     """No worker has been spawned yet -- `executor._processes` is empty.
     Must not raise (a `--threads 1` run signalled before its single worker
     is scheduled hits exactly this path)."""
-    executor = ProcessPoolExecutor(max_workers=1, initializer=procpool._worker_initializer)
+    executor = ProcessPoolExecutor(max_workers=1, **_pool_kwargs())
     try:
         report = procpool._terminate_pool(executor)
     finally:

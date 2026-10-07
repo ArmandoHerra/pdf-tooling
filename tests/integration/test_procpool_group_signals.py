@@ -136,8 +136,7 @@ def main():
     for name in ("SIGTERM", "SIGINT", "SIGHUP"):
         signal.signal(getattr(signal, name), lambda s, f: None)
     ex = procpool._GuardedExecutor(
-        max_workers=K, mp_context=procpool._mp_context(),
-        initializer=procpool._worker_initializer,
+        max_workers=K, **procpool._pool_options(procpool._mp_context())
     )
     if MODE == "guarded-executor":
         futs = [ex.submit(park, i) for i in range(K)]
