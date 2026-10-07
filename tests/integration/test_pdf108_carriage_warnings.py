@@ -320,6 +320,10 @@ def argv_for(
         args += ["-O", str(dest / "out.pdf")]
     else:
         args += ["--out-dir", str(dest / "parts")]
+    # PDF-115 D10: a cell here asks what an ALLOWED run does, so an encrypted
+    # operand of a dropping verb carries the opt-in. Nothing else moves.
+    if name in ENCRYPTED and verb in DROPPERS:
+        args.append("--allow-decrypted-output")
     return [*args, *inputs.password_args(name)]
 
 
@@ -577,7 +581,14 @@ def test_ac7_merge_names_the_encrypted_operand_exactly_as_published(
         return str(inputs.files[name]) + (f":{rng}" if rng else "")
 
     out = inputs.root / f"merge-{arm}.pdf"
-    args = [spell(first), spell(second), "-O", str(out), *inputs.password_args("U-both")]
+    args = [
+        spell(first),
+        spell(second),
+        "-O",
+        str(out),
+        *inputs.password_args("U-both"),
+        "--allow-decrypted-output",  # PDF-115 D10
+    ]
     dry, real = (parse(p) for p in dry_and_real("merge", args))
     encrypted = spell(first if first.startswith("U-both") else second)
     plain = str(inputs.files["P-none"])
@@ -620,6 +631,7 @@ def test_ac8_split_warns_once_per_source_however_many_parts(inputs: Inputs) -> N
         "--out-dir",
         str(out_dir),
         *inputs.password_args("U-both"),
+        "--allow-decrypted-output",  # PDF-115 D10
     ]
     dry, real = (parse(p) for p in dry_and_real("split", args))
     label = inputs.label("U-both")
@@ -650,6 +662,7 @@ def test_ac9a_a_failed_batch_item_is_not_named_in_any_warning(inputs: Inputs) ->
         "--out-dir",
         str(out_dir),
         *inputs.password_args("U-both"),
+        "--allow-decrypted-output",  # PDF-115 D10
         "-o",
         "json",
     )
@@ -882,6 +895,7 @@ def test_ac15b_a_dry_run_that_does_not_authenticate_reads_the_secret_zero_times(
         str(inputs.root / "ac15b.pdf"),
         "--password-file",
         str(inputs.user_pw),
+        "--allow-decrypted-output",  # PDF-115 D10
         "-o",
         "json",
     ]
@@ -949,7 +963,7 @@ def test_a_raising_canonical_leaves_the_verbs_own_path_exactly_as_it_was(
         "-o",
         "json",
     ]
-    password = ["--password-file", str(inputs.user_pw)]
+    password = ["--password-file", str(inputs.user_pw), "--allow-decrypted-output"]  # PDF-115 D10
 
     counter = iter(range(100))
 
@@ -1129,6 +1143,7 @@ def test_a_relative_operand_is_named_exactly_as_the_item_publishes_it(inputs: In
         "-O",
         str(out),
         *inputs.password_args("U-both"),
+        "--allow-decrypted-output",  # PDF-115 D10
         "-o",
         "json",
         cwd=inputs.root,

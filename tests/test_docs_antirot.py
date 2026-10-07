@@ -5052,6 +5052,25 @@ def _derive_1_1_linked_image_row() -> None:
     assert "linked images are not loaded" in body, "the linked-image row is stale"
 
 
+def _derive_1_1_decrypted_output_rows() -> None:
+    import re as _re
+
+    from pdf_tooling.errors import DecryptedOutputRefusedError, RefusedError
+    from pdf_tooling.ops.carriage_decl import requires_decrypted_output_opt_in
+
+    body = migration_section_body_1_1()
+    row = next(line for line in body.splitlines() if line.startswith("|") and "`rotate`" in line)
+    listed = row.split("|")[1].split("(", 1)[1].split(")", 1)[0]
+    verbs = _re.findall(r"`([a-z][a-z ]*[a-z])`", listed)
+    assert verbs, "the PDF-115 row names no verb"
+    for verb in verbs:
+        top = verb.split()[0]
+        assert requires_decrypted_output_opt_in(top), f"{verb!r} is not gated any more"
+    assert issubclass(DecryptedOutputRefusedError, RefusedError)
+    assert DecryptedOutputRefusedError.exit_code == 5
+    assert "`--allow-decrypted-output`" in body
+
+
 MIGRATION_ROWS_1_1: tuple[MigrationRow, ...] = (
     MigrationRow(
         spec_id="PDF-112",
@@ -5070,6 +5089,24 @@ MIGRATION_ROWS_1_1: tuple[MigrationRow, ...] = (
         anchor="linked images are not loaded",
         derive=_derive_1_1_linked_image_row,
         note="convert no longer loads linked images; the hardened profile blocks them",
+    ),
+    MigrationRow(
+        spec_id="PDF-115",
+        anchor="a verb that writes its output unencrypted",
+        derive=_derive_1_1_decrypted_output_rows,
+        note="a decrypted output from an encrypted input is refused at exit 5",
+    ),
+    MigrationRow(
+        spec_id="PDF-115",
+        anchor="`--in-place` (including `--no-backup`)",
+        derive=_derive_1_1_decrypted_output_rows,
+        note="--in-place on an encrypted input is refused, input untouched",
+    ),
+    MigrationRow(
+        spec_id="PDF-115",
+        anchor="such a run with an encrypted input and a missing or wrong password",
+        derive=_derive_1_1_decrypted_output_rows,
+        note="exit 5 answers before the in-verb exit codes",
     ),
 )
 

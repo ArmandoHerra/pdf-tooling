@@ -29,6 +29,7 @@ __all__ = [
     "BackupWithoutInPlaceError",
     "ConfirmationDeclinedError",
     "ConfirmationRequiredError",
+    "DecryptedOutputRefusedError",
     "DestinationIsInputError",
     "DestinationUnwritableError",
     "EngineMissingError",
@@ -357,4 +358,16 @@ class DestinationIsInputError(RefusedError):
     inputs*. This class exists because those two gates cannot be widened to
     ask a question they were never designed to answer, and lifts on no flag
     that reaches either of them.
+    """
+
+
+class DecryptedOutputRefusedError(RefusedError):
+    """Exit 5 — a verb that writes its output unencrypted met an encrypted input
+    and --allow-decrypted-output was not given (PDF-115, OR-26/X-1001).
+
+    The ninth :class:`RefusedError` subclass and, counting the base, the tenth
+    class publishing ``kind: "refused"`` (``bf697fd3cd``/B-361). Constructed at
+    exactly one site (``ops.carriage.refuse_decrypted_output``), so a future
+    additive discriminator can map this class to its value without message
+    parsing. ``kind`` and ``exit_code`` are inherited, never overridden.
     """

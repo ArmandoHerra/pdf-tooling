@@ -65,6 +65,7 @@ from pdf_tooling.cli.common import (
     GLOBAL_FLAG_SPELLINGS,
     REFUSED_PASSWORD_FLAGS,
     current_error_format,
+    declare_decrypted_output_opt_in,
     global_options,
     password_flag_refusal,
     root_global_options,
@@ -153,6 +154,10 @@ app.command(name="stamp", help=cmd_stamp.stamp_command.__doc__)(cmd_stamp.stamp_
 # PDF-15 -- the two system-binary verbs.
 app.command(name="ocr", help=cmd_ocr.ocr_command.__doc__)(cmd_ocr.ocr_command)
 app.command(name="convert", help=cmd_office.convert_command.__doc__)(cmd_office.convert_command)
+
+# PDF-115 -- LAST in the registration block: derive `--allow-decrypted-output`
+# from the carriage declaration table for every verb that drops encryption.
+declare_decrypted_output_opt_in(app)
 
 
 def build_rerun_hint(argv: Sequence[str] | None = None) -> str:

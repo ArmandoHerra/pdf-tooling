@@ -29,6 +29,7 @@ from typing import Annotated, Any, Final, get_args, get_type_hints
 import typer
 
 from pdf_tooling.errors import UsageError
+from pdf_tooling.ops.carriage_decl import CARRIAGE, requires_decrypted_output_opt_in
 from pdf_tooling.output import OutputFormat, auto_format
 from pdf_tooling.output.logging import configure_logging
 from pdf_tooling.safety.confirm import BulkContext
@@ -1363,6 +1364,97 @@ def _verb_name(ctx: typer.Context) -> str:
     return " ".join(reversed(parts))
 
 
+#: PDF-115: the parameter name the derived ``--allow-decrypted-output`` flag lands under.
+DECRYPTED_OUTPUT_PARAM: Final[str] = "allow_decrypted_output"
+
+_DECRYPTED_OUTPUT_ANNOTATION: Final[Any] = Annotated[
+    bool,
+    typer.Option(
+        "--allow-decrypted-output",
+        help="Allow writing an unencrypted output from an encrypted input. "
+        "Without it, an encrypted input is refused and nothing is written.",
+    ),
+]
+
+
+def _flatten_operand(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [text for item in value for text in _flatten_operand(item)]
+    return [str(value)]
+
+
+def _operands(ctx: typer.Context, kwargs: Mapping[str, Any]) -> list[str]:
+    """Every input operand of the invoked verb, as typed, in argv order (PDF-115 D4).
+
+    The positional operands (``param_type_name == "argument"``: Typer vendors its
+    Click, so this is tested by attribute, not ``isinstance``), then any
+    secondary source the verb's carriage declaration names (``stamp --from``).
+    """
+    command = getattr(ctx, "command", None)
+    names = [
+        param.name
+        for param in getattr(command, "params", ())
+        if getattr(param, "param_type_name", None) == "argument" and param.name is not None
+    ]
+    declared = CARRIAGE.get(_verb_name(ctx))
+    if declared is not None:
+        names.extend(declared.sources)
+    return [text for name in names for text in _flatten_operand(kwargs.get(name))]
+
+
+def _with_decrypted_output_flag(callback: Callable[..., Any]) -> Callable[..., Any]:
+    signature = inspect.signature(callback)
+    if DECRYPTED_OUTPUT_PARAM in signature.parameters:
+        return callback
+
+    @functools.wraps(callback)
+    def passthrough(**kwargs: Any) -> Any:
+        return callback(**kwargs)
+
+    passthrough.__signature__ = signature.replace(  # type: ignore[attr-defined]
+        parameters=[
+            *signature.parameters.values(),
+            inspect.Parameter(
+                DECRYPTED_OUTPUT_PARAM,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=False,
+                annotation=_DECRYPTED_OUTPUT_ANNOTATION,
+            ),
+        ]
+    )
+    passthrough.__annotations__ = {
+        **getattr(callback, "__annotations__", {}),
+        DECRYPTED_OUTPUT_PARAM: _DECRYPTED_OUTPUT_ANNOTATION,
+    }
+    return passthrough
+
+
+def declare_decrypted_output_opt_in(app: typer.Typer) -> None:
+    """Declare ``--allow-decrypted-output`` on exactly the derived verbs (PDF-115 D3).
+
+    One pass over the registered leaves, recursing into groups, keyed by the
+    spelling the envelope uses (``"meta set"``). The population is
+    ``requires_decrypted_output_opt_in`` -- derived from PDF-108's carriage
+    table, never listed here -- so a future verb that drops encryption inherits
+    the flag. Call it LAST in the registration block. Idempotent.
+    """
+
+    def walk(node: typer.Typer, prefix: str) -> None:
+        for info in node.registered_commands:
+            if info.callback is None or not info.name:
+                continue
+            if requires_decrypted_output_opt_in(f"{prefix}{info.name}"):
+                info.callback = _with_decrypted_output_flag(info.callback)
+        for group in node.registered_groups:
+            name = group.typer_instance.info.name if group.typer_instance is not None else None
+            if group.typer_instance is not None and isinstance(name, str):
+                walk(group.typer_instance, f"{prefix}{name} ")
+
+    walk(app, "")
+
+
 def _verb_handler(
     ctx: typer.Context, values: dict[str, Any], *, consumes: tuple[str, ...], module: str | None
 ) -> None:
@@ -1429,12 +1521,23 @@ def _attach(
         # one amender `emit_result` applies. Imported HERE, not at module level,
         # so `--help` never pays for it; spelled as a module import so the
         # registry's AST walk sees the real edge.
-        from pdf_tooling.ops.carriage import amend, close_ledger, open_ledger
+        from pdf_tooling.ops.carriage import (
+            amend,
+            close_ledger,
+            open_ledger,
+            refuse_decrypted_output,
+        )
         from pdf_tooling.output import install_result_hook, reset_result_hook
 
         ledger_token = open_ledger()
         hook_token = install_result_hook(amend)
         try:
+            # PDF-115 (OR-26/X-1001): the ONE refusal gate. After the ledger and
+            # hook exist, before any verb body, credential-free, and blind to
+            # --dry-run so both tiers raise the identical error. The flag is
+            # popped so the verb function never sees an unexpected keyword.
+            if not kwargs.pop(DECRYPTED_OUTPUT_PARAM, False):
+                refuse_decrypted_output(_verb_name(ctx), _operands(ctx, kwargs))
             return func(**kwargs)
         finally:
             reset_result_hook(hook_token)

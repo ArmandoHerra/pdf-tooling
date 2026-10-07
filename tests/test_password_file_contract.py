@@ -54,6 +54,7 @@ from registry import (  # noqa: E402
 )
 from test_password_leaks import (  # noqa: E402
     _clean_env,
+    _encrypted_argv,
     _EncryptedOperandProxy,
     _strip_password_file_flags,
 )
@@ -273,17 +274,17 @@ def three_arm_probe(corpus: Any, tmp_path_factory: pytest.TempPathFactory) -> di
 
         no_pw_dir = verb_dir / "no-pw"
         no_pw_dir.mkdir()
-        no_pw_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, no_pw_dir))
+        no_pw_argv = _encrypted_argv(verb, proxy, no_pw_dir)
         no_pw = _run_arm(verb, no_pw_argv, password_path=None)
 
         correct_dir = verb_dir / "correct"
         correct_dir.mkdir()
-        correct_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, correct_dir))
+        correct_argv = _encrypted_argv(verb, proxy, correct_dir)
         correct = _run_arm(verb, correct_argv, password_path=str(pw_correct))
 
         wrong_dir = verb_dir / "wrong"
         wrong_dir.mkdir()
-        wrong_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, wrong_dir))
+        wrong_argv = _encrypted_argv(verb, proxy, wrong_dir)
         wrong = _run_arm(verb, wrong_argv, password_path=str(pw_wrong))
 
         return verb, _ThreeArms(verb=verb, no_password=no_pw, correct=correct, wrong=wrong)
@@ -668,7 +669,7 @@ def test_ac12_a_planted_secret_never_appears_in_debug_output(
     proxy = _EncryptedOperandProxy(corpus.path("encrypted_aes256"))
     out_dir = tmp_path / "out"
     out_dir.mkdir(exist_ok=True)
-    argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, out_dir))
+    argv = _encrypted_argv(verb, proxy, out_dir)
 
     _exit_code, combined = _debug_sweep(verb, argv, password_path=str(pw_path))
 
@@ -975,7 +976,7 @@ def pdf52_dry_wrong_probe(
 
         dry_dir = verb_dir / "dry"
         dry_dir.mkdir()
-        dry_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, dry_dir))
+        dry_argv = _encrypted_argv(verb, proxy, dry_dir)
         dry = run_cli(
             verb,
             *dry_argv,
@@ -993,7 +994,7 @@ def pdf52_dry_wrong_probe(
 
         real_dir = verb_dir / "real"
         real_dir.mkdir()
-        real_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, real_dir))
+        real_argv = _encrypted_argv(verb, proxy, real_dir)
         real = run_cli(
             verb, *real_argv, "--password-file", str(pw_wrong), "-o", "json", env=_clean_env()
         )
@@ -1125,7 +1126,7 @@ def test_pdf52_a4_the_boundary_arms_are_ruled_not_discovered(
         # `permissions` included.
         ii_dir = verb_dir / "ii"
         ii_dir.mkdir()
-        argv = _strip_password_file_flags(INVOCATIONS[verb].build(enc_proxy, ii_dir))
+        argv = _encrypted_argv(verb, enc_proxy, ii_dir)
         result = run_cli(verb, *argv, "--dry-run", "-o", "json", env=_clean_env())
         detail = json.loads(result.stdout)["items"][0]["detail"]
         if verb != "permissions":
@@ -1146,7 +1147,7 @@ def test_pdf52_a4_the_boundary_arms_are_ruled_not_discovered(
         pw_correct = verb_dir / "pw-correct.txt"
         pw_correct.write_text(ENCRYPTED_PASSWORD, encoding="utf-8")
         pw_correct.chmod(0o600)
-        argv = _strip_password_file_flags(INVOCATIONS[verb].build(enc_proxy, iii_dir))
+        argv = _encrypted_argv(verb, enc_proxy, iii_dir)
         result = run_cli(
             verb, *argv, "--password-file", str(pw_correct), "-o", "json", env=_clean_env()
         )
@@ -1175,7 +1176,7 @@ def test_pdf52_a5_the_disclosure_is_present_under_every_derived_output_state(
     pw_wrong = tmp_path / "pw-wrong.txt"
     pw_wrong.write_text(_PDF52_WRONG_PASSWORD, encoding="utf-8")
     pw_wrong.chmod(0o600)
-    argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, tmp_path))
+    argv = _encrypted_argv(verb, proxy, tmp_path)
     tail = [*argv, "--password-file", str(pw_wrong), "--dry-run"]
     if shape is not None:
         tail += ["-o", shape.value]
@@ -1278,7 +1279,7 @@ def pdf52_verbose_log_probe(
 
         correct_dir = verb_dir / "correct"
         correct_dir.mkdir()
-        correct_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, correct_dir))
+        correct_argv = _encrypted_argv(verb, proxy, correct_dir)
         correct = run_cli(
             verb,
             *correct_argv,
@@ -1292,7 +1293,7 @@ def pdf52_verbose_log_probe(
 
         wrong_dir = verb_dir / "wrong"
         wrong_dir.mkdir()
-        wrong_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, wrong_dir))
+        wrong_argv = _encrypted_argv(verb, proxy, wrong_dir)
         wrong = run_cli(
             verb,
             *wrong_argv,
@@ -1393,7 +1394,7 @@ def test_pdf52_b4_the_record_is_the_same_under_a_stderr_pty(corpus: Any, tmp_pat
     pw_correct = tmp_path / "pw-correct.txt"
     pw_correct.write_text(ENCRYPTED_PASSWORD, encoding="utf-8")
     pw_correct.chmod(0o600)
-    argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, tmp_path))
+    argv = _encrypted_argv(verb, proxy, tmp_path)
     result = run_cli_with_pty(
         verb,
         *argv,

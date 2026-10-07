@@ -20,6 +20,15 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-115] Refuse to write a decrypted output from an encrypted input unless --allow-decrypted-output — 2026-10-06
+
+- **The default is now the safe one (OR-26, X-1001):** the thirteen verbs that write an unencrypted output (`rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`) refuse an encrypted input before anything is read for a password or written. The run exits `5` (`kind: "refused"`) with a message naming every encrypted input; no output, `.bak` or temp file is made, a mixed batch is refused whole, `--in-place` leaves the input byte-identical, and `--dry-run` predicts the identical envelope.
+- **Opt-in:** `--allow-decrypted-output` restores the 1.0.1 run exactly, and PDF-108's warning still fires under it.
+- **Derived, not listed:** the flag and the refusal both come from PDF-108's carriage declaration table (`encryption is DROPS`; an undeclared verb is gated), so a future verb that drops encryption inherits both. `encrypt` and `decrypt` are exempt.
+- **`stamp --from <encrypted.pdf>` is gated like an encrypted operand (X-1014):** the declaration gained a one-field `sources` entry naming secondary input options.
+- **Precedence shift:** the refusal answers before the verb body, so an encrypted input without the flag exits `5` where it used to exit `6`, `4`, `3` or `2`; with the flag every one answers as before.
+- **Surface:** one new error class `DecryptedOutputRefusedError` (a `RefusedError`; exit `5`, kind unchanged), no new exit code, envelope key or `schema_version` move. The declaration data moved to the stdlib-only `ops/carriage_decl.py` so `--help` does not load `ops.carriage`.
+
 ## [PDF-114] Close PDF-82 AC13 and PDF-86 AC2 — 2026-10-06
 
 - **PDF-82 AC13, the census arm is genuinely under one second:** `tests/registry.py` memoizes the two per-module `ast` readers on `(reader, path, st_mtime_ns, st_size)`, so one `engine_blind_verbs()` derivation goes from 859 uncached parses to 137 and the ratchet arm's setup from a 1.51 s median to 0.16 s (3.13, 5 reps, loadavg 10 -> 5). Two standing arms pin it: `test_the_census_costs_under_one_second_of_cpu` (CPU time of the cold `engine_blind_verbs()` derivation alone, minimum of up to 3 cold reps, the budget is AC13's own one second; the per-item census reduction is recorded in the measurement block, not asserted -- `X-1018`) and `test_the_derivation_parses_each_module_at_most_once_per_reader` (a load-immune count, plus an mtime-staleness check). The measurement block sits above them.

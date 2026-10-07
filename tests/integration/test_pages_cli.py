@@ -492,6 +492,7 @@ def test_ac23_an_encrypted_input_surfaces_exit_6_without_a_traceback(
         "1",
         "-O",
         str(tmp_path / "o.pdf"),
+        "--allow-decrypted-output",  # PDF-115 D10
         cwd=tmp_path,
     )
     assert result.returncode == 6

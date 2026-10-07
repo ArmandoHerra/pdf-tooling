@@ -269,6 +269,7 @@ def test_ac29_from_auth_refusal_names_the_flag_and_echoes_no_password(
         str(locked),
         "-O",
         str(tmp_path / "out.pdf"),
+        "--allow-decrypted-output",  # PDF-115 D10 / X-1014(a)
         *shape,
         cwd=tmp_path,
     )

@@ -404,15 +404,21 @@ class Cell:
         return dict(self.payload["items"][0])
 
 
+#: PDF-115 D10: every cell here asks what an ALLOWED `meta set` does to a shape,
+#: encrypted ones included, so each carries the opt-in (accepted and inert on a
+#: plain shape). Nothing else about the cells moves.
+_OPT_IN: Final[str] = "--allow-decrypted-output"
+
+
 def _args(cell: str, out: Path) -> list[str]:
     if cell in FIELDS:
-        return [FIELDS[cell][0], NEW, "-O", str(out)]
+        return [FIELDS[cell][0], NEW, "-O", str(out), _OPT_IN]
     if cell == "clear_producer":
-        return ["--clear-producer", "-O", str(out)]
+        return ["--clear-producer", "-O", str(out), _OPT_IN]
     if cell == "clear_all":
-        return ["--clear-all", "-O", str(out)]
+        return ["--clear-all", "-O", str(out), _OPT_IN]
     assert cell == "in_place", cell
-    return ["--title", NEW, "--in-place"]
+    return ["--title", NEW, "--in-place", _OPT_IN]
 
 
 def _envelope(result: Any) -> dict[str, Any]:
