@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-110] Clear the two high npm advisories that red the `website` check — 2026-10-06
+
+- **Two packages refreshed, lock only:** `sharp` 0.35.4 -> 0.35.5 (GHSA-wq5f-xc86-pv6w) and `source-map-js` 1.2.1 -> 1.2.2 (GHSA-68fv-2mgg-jv7q), via `npm update sharp source-map-js --package-lock-only` with npm 11. `website/package.json` is unchanged and no override or audit suppression was added.
+- **28 lock entries moved, nothing else:** `source-map-js`, `sharp`, and sharp's 26 `@img/sharp-*` / `@img/sharp-libvips-*` platform optional packages.
+- **Result:** `make website-audit` exits 0 (`found 0 vulnerabilities`), so the required `website` check is green again for every PR.
+- **Not folded in:** the scheduled audit cadence (`B-431`) stays queued for cycle 7.
+
 ## [PDF-109] Move CI and the supported-macOS floor to 15, and lift the pikepdf hold — 2026-10-04
 
 - **The ruling (`OR-27`, `X-986`):** pikepdf 10.14.0 and later publish macOS wheels only as `macosx_15_0_arm64`, so the `macos-14` CI legs fell back to an sdist build that fails (run `37235305338`). The CI matrix is now `[ubuntu-latest, macos-15]`, replacing the `a3a0238` hold at pikepdf `10.13.0.post1` rather than pinning `<10.14`.
