@@ -1305,6 +1305,12 @@ def _unresolvable_in_place_argv(verb: str, corpus: Any, tmp_path: Path) -> list[
             skip_next = True
             continue
         stripped.append("-y" if arg == "--no-backup" else arg)
+    # PDF-115 D10: this pin is about the ORDER of the filesystem tier and the
+    # password tier, so the run must reach them: a verb declaring the opt-in carries it.
+    from pdf_tooling.ops.carriage_decl import requires_decrypted_output_opt_in
+
+    if requires_decrypted_output_opt_in(verb):
+        stripped.append("--allow-decrypted-output")
     return stripped
 
 

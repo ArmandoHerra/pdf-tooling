@@ -974,7 +974,7 @@ def test_af38735166_ocr_predicts_the_occupied_output_refusal_not_the_auth_one(
     occupied = tmp_path / "occ.pdf"
     occupied.write_bytes(b"already here")
 
-    args = [str(source), "-O", str(occupied), "--skip-text-pages"]
+    args = [str(source), "-O", str(occupied), "--skip-text-pages", "--allow-decrypted-output"]
     env = _no_password_env()
     dry = run_cli("ocr", "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
     real = run_cli("ocr", *args, "-o", "json", env=env, cwd=tmp_path)
@@ -1004,7 +1004,7 @@ def test_af38735166_ocr_predicts_the_occupied_sidecar_refusal_not_the_auth_one(
     shutil.copy(corpus.path("encrypted_aes256"), source)
     (tmp_path / "locked.pdf.bak").write_bytes(b"an older backup")
 
-    args = [str(source), "--in-place", "--skip-text-pages"]
+    args = [str(source), "--in-place", "--skip-text-pages", "--allow-decrypted-output"]
     env = _no_password_env()
     dry = run_cli("ocr", "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
     real = run_cli("ocr", *args, "-o", "json", env=env, cwd=tmp_path)
@@ -1030,7 +1030,13 @@ def test_ocr_still_reports_the_auth_refusal_when_the_plan_is_clean(corpus, tmp_p
     source = tmp_path / "locked.pdf"
     shutil.copy(corpus.path("encrypted_aes256"), source)
 
-    args = [str(source), "-O", str(tmp_path / "fresh.pdf"), "--skip-text-pages"]
+    args = [
+        str(source),
+        "-O",
+        str(tmp_path / "fresh.pdf"),
+        "--skip-text-pages",
+        "--allow-decrypted-output",
+    ]
     env = _no_password_env()
     dry = run_cli("ocr", "--dry-run", *args, "-o", "json", env=env, cwd=tmp_path)
     real = run_cli("ocr", *args, "-o", "json", env=env, cwd=tmp_path)

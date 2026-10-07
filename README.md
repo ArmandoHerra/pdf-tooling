@@ -70,6 +70,9 @@ A `1.0.1` invocation or script that relied on any of the following observes a di
 | `rasterize` or `ocr` on a page whose bitmap is larger than `178,956,970` pixels allocated it (several GB for a hostile page box) or died on a raw `MemoryError` at exit `1`; `--dry-run` predicted `0` | the whole run is refused at exit `5` before anything is written, naming the page, its pixel size, the budget and the largest `--dpi` that fits; `--dry-run` predicts the same `5`. This includes `ocr --dpi 1200` on `A3` or larger pages, which is now refused | lower `--dpi` (or `--width`) to the value the message names; for `ocr --dpi 1200` on `A3` or larger pages, pass a lower `--dpi`. There is no override |
 | `rasterize --dpi` accepted any positive value, including `nan` and `inf`, and `--width` any positive integer | `--dpi` above `2400` or not finite, and `--width` above `32768`, exit `2` | pass a value inside the range |
 | `convert` loaded images a document links to (a URL or a local file) and rendered them into the PDF | linked images are not loaded, and the PDF shows LibreOffice's placeholder; images stored inside the document are unaffected | embed the images in the document before converting |
+| a verb that writes its output unencrypted (`rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`) wrote a plaintext output from an encrypted input at exit `0`, with only a warning — an owner-only input with no password at all, and an encrypted `stamp --from` source | the run is refused at exit `5` before anything is written, naming every encrypted input; a batch with any encrypted input is refused whole, and `--dry-run` predicts it | pass `--allow-decrypted-output` where a decrypted output is intended; the output, warning and exit code are then exactly 1.0.1's |
+| `--in-place` (including `--no-backup`) on an encrypted input replaced the ciphertext with plaintext | refused at exit `5`; the input is left byte-identical and no `.bak` is made | as above |
+| such a run with an encrypted input and a missing or wrong password, a missing sibling input, a malformed page range or another in-verb usage error exited `6`, `4`, `3` or `2` | exits `5` first; the other codes answer once `--allow-decrypted-output` is given | scripts that branch on `6` for an encrypted input of these verbs add the flag |
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
@@ -206,6 +209,7 @@ Uniform across every verb.
 - Every write is write-to-temp-on-the-target-filesystem, `fsync`, then an atomic rename.
 - An output keeps the permission bits of the file it replaces, and a destination that did not exist is created at `0666 & ~umask` — what a shell redirect would have produced. The `.bak` sidecar keeps the original's bits too, so a backup is never more permissive than the file it backs up.
 - Inputs are never mutated unless you pass `--in-place`, which writes a `.bak` sidecar first. `--no-backup` suppresses the sidecar and requires `--in-place` — on its own it is a usage error.
+- An encrypted input is never written out unencrypted by default: every verb except `encrypt` and `decrypt` refuses it unless `--allow-decrypted-output` is given (see What a write does not carry).
 - A password is never accepted as a command-line value. `--password-file` takes a path or `-`, because `argv` is world-readable in `/proc` and lands in shell history.
 
 ## Compression ceiling
@@ -268,9 +272,11 @@ A verb that rebuilds or rewrites a document does not carry everything its input 
 
 Written unencrypted from an encrypted input: `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`.
 
+Each of those verbs refuses an encrypted input by default: the run exits with the REFUSED code, names every encrypted input, and writes nothing — no output, no `.bak`, no temporary file — and `--dry-run` predicts the same refusal. `--allow-decrypted-output` permits the unencrypted output, and the warning still says so.
+
 Rebuilt without the input's /Info or XMP packet: `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`.
 
-The /Info of such an output holds only the engine's producer entry. `encrypt` and `decrypt` change encryption by design and carry both /Info and XMP. `compress`, `repair`, `linearize` and `meta set` carry /Info and XMP. An owner-only input needs no password for any of this. Every such drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. A password-protected input's metadata is not checked without the password, and the warning says so. `--in-place` on an encrypted input replaces the ciphertext, and the `.bak` keeps it unless `--no-backup` is given. Whether any of this should change is an open decision.
+The /Info of such an output holds only the engine's producer entry. `encrypt` and `decrypt` change encryption by design and carry both /Info and XMP. `compress`, `repair`, `linearize` and `meta set` carry /Info and XMP. With `--allow-decrypted-output`, an owner-only input needs no password for any of this. Every such drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. A password-protected input's metadata is not checked without the password, and the warning says so. Without `--allow-decrypted-output`, `--in-place` on an encrypted input leaves it untouched; with it, the ciphertext is replaced, and the `.bak` keeps it unless `--no-backup` is given.
 
 ### `--password-file` is global: honoured or refused, never silently ignored
 

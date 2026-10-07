@@ -1368,6 +1368,23 @@ def _strip_password_file_flags(argv: list[str]) -> list[str]:
     return out
 
 
+def _encrypted_argv(verb: str, proxy: Any, directory: Path) -> list[str]:
+    """The verb's registered argv over an ENCRYPTED operand, password flags stripped.
+
+    PDF-115 D10: these probes ask what an ALLOWED run does with a password (is it
+    honoured, is it leaked), so a verb that declares ``--allow-decrypted-output``
+    carries it -- the refusal otherwise answers before the password tier they
+    exist to observe. Nothing else about the argv moves. Whether a verb declares
+    the flag is read from the carriage declaration, not listed here.
+    """
+    from pdf_tooling.ops.carriage_decl import requires_decrypted_output_opt_in
+
+    argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, directory))
+    if requires_decrypted_output_opt_in(verb):
+        argv.append("--allow-decrypted-output")
+    return argv
+
+
 @dataclass(frozen=True)
 class _WitnessObservation:
     verb: str
@@ -1440,12 +1457,12 @@ def witness_partition(
 
         no_pw_dir = verb_dir / "no-pw"
         no_pw_dir.mkdir()
-        no_pw_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, no_pw_dir))
+        no_pw_argv = _encrypted_argv(verb, proxy, no_pw_dir)
         no_pw_result = run_cli(verb, *no_pw_argv, "-o", "json", env=env)
 
         correct_dir = verb_dir / "correct"
         correct_dir.mkdir()
-        correct_argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, correct_dir))
+        correct_argv = _encrypted_argv(verb, proxy, correct_dir)
         correct_result = run_cli(
             verb, *correct_argv, "--password-file", str(pw_correct), "-o", "json", env=env
         )
@@ -2009,7 +2026,7 @@ def test_pdf52_c5_the_planted_secret_never_reaches_stdout_stderr_or_the_payload(
         # value: the password file, the per-verb directory, the sandbox
         # root, and the encrypted operand the proxy hands every verb.
         scrub_paths = (pw_path, verb_dir, root, operand)
-        argv = _strip_password_file_flags(INVOCATIONS[verb].build(proxy, verb_dir))
+        argv = _encrypted_argv(verb, proxy, verb_dir)
         base = [*argv, "--password-file", str(pw_path), "-vv"]
         verb_tokens = verb.split()
 

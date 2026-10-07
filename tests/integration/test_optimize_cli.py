@@ -143,7 +143,13 @@ def test_linearize_with_no_destination_exits_2(corpus) -> None:
 
 def test_encrypted_input_exits_6_naming_decrypt(corpus, tmp_path: Path) -> None:
     source = corpus.path("encrypted_aes256")
-    result = run_cli("compress", str(source), "-O", str(tmp_path / "x.pdf"))
+    result = run_cli(
+        "compress",
+        str(source),
+        "-O",
+        str(tmp_path / "x.pdf"),
+        "--allow-decrypted-output",  # PDF-115 D10
+    )
     assert result.returncode == 6
     assert "decrypt" in (result.stdout + result.stderr)
 
