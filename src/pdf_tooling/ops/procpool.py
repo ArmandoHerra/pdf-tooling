@@ -27,11 +27,15 @@ called synchronously from ``submit()`` on the CALLING thread (this product's
 own main thread) — confirmed by reading
 ``concurrent.futures.process.ProcessPoolExecutor.submit`` in the interpreter
 this product runs under. That fact underwrites two separate design choices
-below: PR_SET_PDEATHSIG is safe to arm at worker start (see
-:func:`_worker_initializer`), and ``executor._processes`` — a private
-``{pid: Process}`` mapping with no public equivalent — is genuinely the only
-way to reach the worker PIDs at all, which is what :func:`_terminate_pool`
-uses.
+below: PR_SET_PDEATHSIG is armed at worker start and then VERIFIED against the
+parent pid the pool passes in (see :func:`_worker_initializer`) -- prctl(2) says
+*"If the parent thread and all ancestor subreapers have already terminated by
+the time of the PR_SET_PDEATHSIG operation, then no parent-death signal is sent
+to the caller"*, so a worker still bootstrapping when its parent is SIGKILLed
+would otherwise arm the guard against its new reaper and run on (PDF-111) --
+and ``executor._processes`` — a private ``{pid: Process}`` mapping with no
+public equivalent — is genuinely the only way to reach the worker PIDs at all,
+which is what :func:`_terminate_pool` uses.
 
 **A second stdlib fact that shapes the worker-side handler.**
 ``concurrent.futures.process._process_worker`` wraps every submitted call in
@@ -129,7 +133,7 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from contextlib import contextmanager
-from typing import Final, ParamSpec, TypeVar
+from typing import Final, ParamSpec, TypedDict, TypeVar
 
 __all__ = ["guarded_process_pool"]
 
@@ -173,10 +177,14 @@ __all__ = ["guarded_process_pool"]
 #: ``PR_SET_PDEATHSIG``'s "the thread that created it" reasoning hold. That
 #: is a property of ``concurrent.futures.process``, not of the context, so it
 #: is unchanged by the pin -- confirmed by reading the interpreter this
-#: product runs under. Separately: PDEATHSIG is cleared across ``execve``,
-#: and `spawn` does exec -- but the guard is armed INSIDE
-#: :func:`_worker_initializer`, i.e. AFTER the exec, so the question does not
-#: arise. Both facts are stated because both are the kind a reader will
+#: product runs under. Separately: PDEATHSIG is preserved across a normal
+#: ``execve`` (prctl(2); only set-uid, set-gid and capability binaries clear
+#: it), but `spawn` offers no pre-exec hook to arm it in, so the guard is armed
+#: INSIDE :func:`_worker_initializer`, after the interpreter has bootstrapped.
+#: That leaves a window -- exec, unpickle, `__mp_main__` re-import, coverage
+#: start-up -- in which the parent can die first, and the kernel then delivers
+#: no signal at all; the ``getppid()`` recheck in the initializer is what covers
+#: it (PDF-111). Both facts are stated because both are the kind a reader will
 #: otherwise re-derive at the next incident.
 #:
 #: PRIVATE. ``__all__`` does not grow: this is a defect fix, not a new
@@ -449,9 +457,13 @@ class _GuardedExecutor(ProcessPoolExecutor):
         return super().submit(_run_task, fn, *args, **kwargs)
 
 
-def _worker_initializer() -> None:
+def _worker_initializer(parent_pid: int) -> None:
     """The pool's ``initializer=`` — runs first, inside every worker, before
     it processes a single work item (design considerations (b), (c), (h)).
+
+    *parent_pid* is the pid of the process that built the pool (see
+    :func:`_pool_options`); it is REQUIRED so a construction site that forgets
+    it fails loudly at worker start rather than silently skipping the recheck.
 
     An initializer that raises breaks the WHOLE pool: `_process_worker`
     (stdlib) logs the exception and returns without doing any work at all,
@@ -499,9 +511,30 @@ def _worker_initializer() -> None:
     # every worker while the main thread was still very much alive.
     # Linux-only (`prctl` is a Linux syscall) -- macOS gets no coverage
     # here, stated rather than silently absent.
+    #
+    # THE WINDOW (PDF-111). prctl(2): "If the parent thread and all ancestor
+    # subreapers have already terminated by the time of the PR_SET_PDEATHSIG
+    # operation, then no parent-death signal is sent to the caller." Under
+    # `spawn` this initializer runs only after a cold bootstrap (exec, unpickle,
+    # `__mp_main__` re-import, coverage start-up), and a parent SIGKILLed inside
+    # that window leaves a worker that arms the guard against its new reaper,
+    # then reads a queued chunk and renders it (the queue's both ends were handed
+    # to it, so it never sees EOF). So the guard is armed FIRST and `getppid()`
+    # is read AFTER: a death before the arm is visible in the read, and a death
+    # after the arm is the kernel's to deliver. Reading first would leave a gap
+    # between the check and the arm.
     if sys.platform.startswith("linux"):
         with contextlib.suppress(Exception):
             _set_pdeathsig_sigkill()
+    if os.getppid() != parent_pid:
+        # Die BY the signal the guard would have delivered: no work item is
+        # read, no atexit runs, `_process_worker` logs no spurious "Exception in
+        # initializer". A reparented worker's `getppid()` is its reaper, which
+        # existed before it, so pid reuse cannot make this pass.
+        # (No coverage pragma: a real worker dies here and flushes nothing, but
+        # `test_the_initializer_arms_before_it_verifies` runs this branch in a
+        # measured subprocess with `os.kill` replaced by a recorder.)
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 def _set_pdeathsig_sigkill() -> None:
@@ -745,6 +778,27 @@ def _terminate_pool(
     return _TeardownReport(tuple(outcomes))
 
 
+class _PoolOptions(TypedDict):
+    mp_context: multiprocessing.context.BaseContext
+    initializer: Callable[[int], None]
+    initargs: tuple[int]
+
+
+def _pool_options(context: multiprocessing.context.BaseContext) -> _PoolOptions:
+    """The ONE source of the worker bootstrap (PDF-111).
+
+    Every construction of a render pool -- the product's and the tests' raw
+    executors -- takes these keyword arguments, so a test's driver cannot drift
+    from what :func:`guarded_process_pool` builds. ``os.getpid()`` is read at
+    pool construction, in the process whose main thread spawns the workers.
+    """
+    return {
+        "mp_context": context,
+        "initializer": _worker_initializer,
+        "initargs": (os.getpid(),),
+    }
+
+
 @contextmanager
 def guarded_process_pool(max_workers: int) -> Iterator[ProcessPoolExecutor]:
     """A ``ProcessPoolExecutor`` whose workers do not outlive a signal to the
@@ -773,11 +827,7 @@ def guarded_process_pool(max_workers: int) -> Iterator[ProcessPoolExecutor]:
     signals guarded and others not, would be a worse, silently inconsistent
     state than none at all).
     """
-    executor = _GuardedExecutor(
-        max_workers=max_workers,
-        mp_context=_mp_context(),
-        initializer=_worker_initializer,
-    )
+    executor = _GuardedExecutor(max_workers=max_workers, **_pool_options(_mp_context()))
     previous: dict[int, object] = {}
     installed = False
 

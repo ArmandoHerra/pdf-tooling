@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-111] Make the start-method survivor arm deterministic, or prove the product defect it hides — 2026-10-07
+
+- **A product race, fixed:** `_worker_initializer` armed `PR_SET_PDEATHSIG` and never checked whether the parent was already dead, and prctl(2) sends no signal in that case, so a `spawn` worker still bootstrapping when the CLI was SIGKILLed rendered a queued chunk after the parent's death and blocked forever. It now arms, THEN verifies `getppid()` against the pid the pool builds it with, and ends itself by SIGKILL on a mismatch. `_pool_options` is the one source of the worker bootstrap, so the tests' raw executor cannot drift from `guarded_process_pool`.
+- **The growth half was the oracle's:** the arm sampled the directory before the in-flight `open(O_CREAT)` of an already-killed worker completed. The late-output oracle now admits exactly that kernel-semantics class (empty names, at most one per worker) and nothing else; a late page with payload reds at any count. No grace, timeout, settle or workload constant moved.
+- **Controls and harness:** a deterministic orphan plant (workers held inside the bootstrap window until the parent is dead), a planted survivor and a planted late write through the real driver, and `scripts/stress_start_method_arm.py`, a pinned-CPU load harness that must red the pre-fix tree before its green counts.
+- **Diagnosis of all 13 ledger occurrences of `7b6f1aac03`:** SURVIVORS 9, GROWTH 3, unrecoverable 1.
+
 ## [PDF-119] Instrument-integrity pass: in-place raises red, helper reads credit their caller, the runner-image rationale is true — 2026-10-07
 
 - **Landed ratification records are immutable (git is the oracle):** `tests/ratchet.py` reads each governed ledger (read-seam, docs-residue, engine-gating and the new register) at `HEAD` and at every first-parent commit through a restricted AST evaluator and requires the earlier records to be a prefix of the later ones, by value. An in-place `+1` on a landed record or a reworded reason now reds naming the ledger, record and key; a fifth `*_LEDGER` cannot be born ungoverned. The history arm skips visibly on a shallow clone.
