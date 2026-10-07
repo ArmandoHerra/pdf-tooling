@@ -43,6 +43,8 @@ if str(SCRIPTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from measure_gate import RECORD_FIELDS, validate_record  # noqa: E402
 
+from ceiling_register import ceiling  # noqa: E402
+
 CI_WORKFLOW: Final[Path] = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 MAKEFILE: Final[Path] = REPO_ROOT / "Makefile"
 PYPROJECT: Final[Path] = REPO_ROOT / "pyproject.toml"
@@ -55,7 +57,7 @@ PERF_DIR: Final[Path] = REPO_ROOT / "perf"
 TREND_FILE: Final[Path] = PERF_DIR / "gate-timings.jsonl"
 
 #: `timeout-minutes` may never exceed this. Design §7.
-TIMEOUT_CEILING: Final = 30
+TIMEOUT_CEILING: Final = ceiling("test_gate_budget.py::TIMEOUT_CEILING")
 
 #: The thirteen jobs, re-derived from the mapping rather than asserted from
 #: memory. PDF-34 D4/X-472 coordinate 1: `docs-gate` moved this 10 -> 11,
@@ -1810,12 +1812,24 @@ def ceiling_block(text: str, name: str) -> tuple[int, str]:
     lines = text.splitlines()
     for index, line in enumerate(lines):
         match = re.match(rf"^{name}\s*(?::\s*[\w\[\], ]+\s*)?=\s*([\d_]+)\s*$", line)
-        if not match:
-            continue
+        if match:
+            value = int(match.group(1).replace("_", ""))
+        else:
+            # PDF-119 D2: the value lives in the register; the binding is a lookup,
+            # on one line or wrapped over three.
+            joined = " ".join(part.strip() for part in lines[index : index + 3])
+            lookup = re.match(
+                rf'^{name}\s*(?::\s*[\w\[\], ]+\s*)?=\s*ceiling\(\s*"([^"]+)"\s*\)', joined
+            )
+            if not lookup:
+                continue
+            registered = ceiling(lookup.group(1))
+            assert isinstance(registered, int), f"{lookup.group(1)} is not a scalar ceiling"
+            value = registered
         start = index
         while start > 0 and lines[start - 1].startswith("#"):
             start -= 1
-        return int(match.group(1).replace("_", "")), "\n".join(lines[start:index])
+        return value, "\n".join(lines[start:index])
     raise AssertionError(f"{name} is not defined in {IMPORT_BOUNDARIES.name}")
 
 

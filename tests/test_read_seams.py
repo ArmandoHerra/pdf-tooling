@@ -51,7 +51,9 @@ from typing import Final, NamedTuple
 import pytest
 from PIL import Image
 
+import ratchet
 import seams
+from ceiling_register import ceiling
 from test_cli_contract import _skip_as_root
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
@@ -433,6 +435,52 @@ READ_SEAM_RESIDUE_LEDGER: Final[tuple[_ReadSeamRatification, ...]] = (
             "Every other key is carried byte-identical from the previous record."
         ),
     ),
+    _ReadSeamRatification(
+        date="2026-10-07",
+        spec="PDF-119",
+        direction="down",
+        ceilings=MappingProxyType(
+            {
+                "pdf_tooling/adapters/pdfplumber_text.py": 1,
+                "pdf_tooling/adapters/pikepdf_structure.py": 10,
+                "pdf_tooling/adapters/pypdf_structure.py": 10,
+                "pdf_tooling/adapters/soffice_office.py": 1,
+                "pdf_tooling/adapters/tesseract_ocr.py": 2,
+                "pdf_tooling/cli/cmd_create.py": 2,
+                "pdf_tooling/cli/common.py": 1,
+                "pdf_tooling/cli/password.py": 1,
+                "pdf_tooling/ops/compose.py": 1,
+                "pdf_tooling/ops/crypto.py": 4,
+                "pdf_tooling/ops/document_password.py": 3,
+                "pdf_tooling/ops/metadata.py": 1,
+                "pdf_tooling/ops/office.py": 1,
+                "pdf_tooling/ops/optimize.py": 2,
+                "pdf_tooling/ops/procpool.py": 2,
+                "pdf_tooling/safety/_faults.py": 1,
+                "pdf_tooling/safety/atomic.py": 4,
+            }
+        ),
+        reason=(
+            "PDF-119 D4. Helper-attributed reads are now credited to their caller "
+            "(B-401, retiring X-978's class for DRIVEN callers): seams._Observer._frames "
+            "credits an open to the innermost first-party frame AND, while that frame is "
+            "a declared read helper (safety/paths.py::read_source_bytes, derived by AST), "
+            "to the nearest src/ caller, and ac5 computes the residue from "
+            "observed_credited. MEASURED, key by key, before -> after: "
+            "pdf_tooling/ops/carriage.py 1 -> 0 (key REMOVED: carriage.py:224 record() is "
+            "driven by compress/PDF-delete), pdf_tooling/ops/compose.py 2 -> 1 "
+            "(compose.py:494, driven by compose/JPEG), pdf_tooling/ops/optimize.py 3 -> 2 "
+            "(optimize.py:252 _compress_one, driven by compress/PDF-delete). Every other "
+            "key is carried byte-identical. The read_source_bytes callers that STAY in the "
+            "residue are genuinely undriven, because no cell drives their verb: "
+            "crypto.py:296/383/509 (encrypt, decrypt, perms), "
+            "document_password.py:186/219 (password refusal), metadata.py:275 (meta set), "
+            "optimize.py:594/700 (repair, linearize). Widening the drive to reach them is "
+            "refused by ac5's own docstring and is HAND-UP 2 of PDF-119. The 14 in-memory "
+            "parses the static detector over-counts (X-981's class) are NOT reclassified "
+            "here: the mirror half of B-401 is carried by no spec."
+        ),
+    ),
 )
 
 #: The LIVE ceiling: the newest record's mapping, and nothing else. No
@@ -456,11 +504,11 @@ RESIDUE_CEILING: Final[Mapping[str, int]] = READ_SEAM_RESIDUE_LEDGER[-1].ceiling
 #: and must stay auditable, NOT because a ceiling may be widened to clear a red:
 #: the two figures are named, and the growth is exactly the two calls the diff
 #: adds. Raising this for a seam that CAN raise would be a different act.
-METADATA_POPULATION_CEILING: Final = 75
+METADATA_POPULATION_CEILING: Final = ceiling("test_read_seams.py::METADATA_POPULATION_CEILING")
 
 #: `ops/` calls into an engine whose port signature hands it a path (D5's rule,
 #: enumerated). Frozen so a new unbelted one is a red on the day it is written.
-BOUNDARY_SITE_CEILING: Final = 12
+BOUNDARY_SITE_CEILING: Final = ceiling("test_read_seams.py::BOUNDARY_SITE_CEILING")
 
 #: The static walk's two word lists. Frozen with an asserted size, because **a
 #: vocabulary that can be widened quietly is how blindness (a) survived three
@@ -991,6 +1039,18 @@ def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow
     **Escalation, not tuning.** If a future engineer finds itself widening the
     drive in order to shrink this number, that is the moment to stop and escalate
     the list to the PM. The ratchet ships; the number stays visible at its size.
+
+    **HELPER-ATTRIBUTED READS ARE CREDITED (PDF-119 D4).** The observer credits an
+    open to the innermost first-party frame AND, while that frame is a declared
+    read helper (`read_source_bytes`), to the nearest `src/` caller. The residue
+    is therefore computed from `observed_credited`: a `read_source_bytes` caller
+    still in it is GENUINELY undriven (no cell drives its verb), not hidden behind
+    the helper. The eight that remain are named in the `down` record's reason.
+
+    **EXACT per key (PDF-119 D3).** The residue count is deterministic, so a fall
+    is a red until a `down` record writes it down: slack is the headroom a later
+    unrecorded rise would spend. A module in the residue needs a key; a key needs
+    a measured count; a key at 0 is removed, never kept.
     """
     _skip_as_root()
     _skip_if_a_cell_never_drove(sweeps)
@@ -998,10 +1058,11 @@ def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow
     observed: list[str] = []
     for sweep in sweeps.values():
         _assert_installed(sweep)
-        observed.extend(sweep.observed_first_party)
+        observed.extend(sweep.observed_credited)
 
     remaining = seams.residue(static, sorted(set(observed)))
     counts = collections.Counter(site.module for site in remaining)
+    ratchet.report("read_seam_residue", dict(sorted(counts.items())))
 
     grew = {
         module: (count, RESIDUE_CEILING.get(module, 0))
@@ -1018,15 +1079,95 @@ def test_ac5_the_undriven_residue_is_counted_against_a_ceiling_that_may_not_grow
         f"a module joined the residue with no ceiling entry: "
         f"{sorted(set(counts) - set(RESIDUE_CEILING))}"
     )
+    slack = {
+        module: (counts.get(module, 0), ceiling)
+        for module, ceiling in RESIDUE_CEILING.items()
+        if counts.get(module, 0) != ceiling
+    }
+    assert slack == {}, (
+        f"slack: the undriven residue fell below its frozen ceiling {{module: (now, ceiling)}}: "
+        f"{slack}. Append a `down` record to READ_SEAM_RESIDUE_LEDGER setting each key to its "
+        f"measured count and REMOVING a key that reached 0 (the headroom is what a later "
+        f"unrecorded rise would spend)"
+    )
+    assert all(ceiling > 0 for ceiling in RESIDUE_CEILING.values()), (
+        f"a residue key is kept at 0: {[m for m, c in RESIDUE_CEILING.items() if c <= 0]}; "
+        f"remove it in a `down` record"
+    )
     assert read_seam_ratification_complaints(READ_SEAM_RESIDUE_LEDGER) == [], (
         "the read-seam ratification ledger does not verify. PDF-70 replaced the frozen "
         "`sum(...) == 44` literal with a PER-KEY walk, which is what this guard's own "
         "comment always claimed to be: a frozen TOTAL catches NET movement and is "
         "structurally blind to COMPENSATING movement, so a shrink in one module COULD "
         "silently pay for a growth in another whenever the shrinking module had slack. "
-        "Lowering a ceiling is now ORDINARY -- append a record with direction='down' "
-        "and a reason, no ruling needed. RAISING one still needs everything X-715 "
+        "Lowering a ceiling is ORDINARY -- append a record with direction='down' "
+        "and a reason, no ruling needed (and, since PDF-119, REQUIRED: a fall is a red "
+        "until it is recorded). RAISING one still needs everything X-715 "
         "required; raising it to reach green is anti-gaming -- drive the seam or FILE it"
+    )
+
+
+def _call_lines_in(path: Path, function: str, callee: str) -> list[int]:
+    """Line numbers of every ``<callee>(...)`` call inside *function* of *path*, by AST."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function:
+            return sorted(
+                inner.lineno
+                for inner in ast.walk(node)
+                if isinstance(inner, ast.Call)
+                and (
+                    (isinstance(inner.func, ast.Name) and inner.func.id == callee)
+                    or (isinstance(inner.func, ast.Attribute) and inner.func.attr == callee)
+                )
+            )
+    raise AssertionError(f"{function} is not defined in {path}")
+
+
+def test_the_read_helper_set_is_derived_and_contains_read_source_bytes() -> None:
+    """PDF-119 D4/AC8 -- the declared read helpers are DERIVED by AST (a function
+    defined under `src/` whose name is in `READ_FUNCS`), non-empty, and contain the
+    one known pair, so the attribution cannot lapse into attributing nothing."""
+    helpers = seams.declared_read_helpers(SRC_ROOT)
+    assert helpers, "no declared read helper was derived, so no read is credited to a caller"
+    assert ("pdf_tooling/safety/paths.py", "read_source_bytes") in helpers, sorted(helpers)
+    assert all(name in seams.READ_FUNCS for _, name in helpers), sorted(helpers)
+
+
+def test_a_helper_read_credits_its_nearest_src_caller(sweeps: dict[str, seams.Sweep]) -> None:
+    """PDF-119 D4/AC8 -- a `read_source_bytes` read is credited to the helper's own
+    body AND to the `src/` frame that called it.
+
+    The caller is located by AST (`ops/optimize.py::_compress_one`'s call), never by
+    a hard-coded line, and the `compress/PDF-delete` cell drives it. RED: restore
+    `_Observer._frames` to innermost-only -> the caller key is absent from
+    `observed_credited` and ac5's residue grows by the driven callers.
+    """
+    _skip_as_root()
+    sweep = sweeps["compress/PDF-delete"]
+    _assert_installed(sweep)
+    (call_line,) = _call_lines_in(
+        SRC_ROOT / "pdf_tooling" / "ops" / "optimize.py", "_compress_one", "read_source_bytes"
+    )
+    (helper_line,) = _call_lines_in(
+        SRC_ROOT / "pdf_tooling" / "safety" / "paths.py", "read_source_bytes", "read_bytes"
+    )
+    caller_key = f"pdf_tooling/ops/optimize.py:{call_line}"
+    helper_key = f"pdf_tooling/safety/paths.py:{helper_line}"
+    credited = set(sweep.observed_credited)
+    assert caller_key in credited, (
+        f"the read_source_bytes caller {caller_key} is not credited; credited: {sorted(credited)}"
+    )
+    assert helper_key in credited, (
+        f"the helper's own body line {helper_key} is no longer credited; credited: "
+        f"{sorted(credited)}"
+    )
+    assert helper_key in sweep.observed_first_party, (
+        "`first_party` must keep meaning the INNERMOST product frame (the population "
+        "ledger keys on it)"
+    )
+    assert caller_key not in sweep.observed_first_party, (
+        "the caller leaked into `first_party`; only `credited` may carry it"
     )
 
 
@@ -1609,11 +1750,17 @@ def test_ac11_every_ops_to_engine_path_handoff_is_enumerated_and_bounded() -> No
     actually reaches produces a coded failure rather than a traceback.
     """
     sites = seams.engine_boundary_sites(SRC_ROOT)
+    ratchet.report("test_read_seams.py::BOUNDARY_SITE_CEILING", len(sites))
     assert len(sites) <= BOUNDARY_SITE_CEILING, (
         f"the ops->engine path-handoff population grew to {len(sites)} (ceiling "
         f"{BOUNDARY_SITE_CEILING}); new sites: {[s.key for s in sites]}. When `ops/` hands an "
         f"operand path across an engine boundary, that read failure is OWNED -- by the "
         f"adapter, or by the `ops/` caller that supplied the path. Belt it or declare it"
+    )
+    assert len(sites) == BOUNDARY_SITE_CEILING, (
+        f"slack: the ops->engine path-handoff population fell to {len(sites)}; append a "
+        f"`down` record setting test_read_seams.py::BOUNDARY_SITE_CEILING to {len(sites)} in "
+        f"tests/ceiling_register.py (the ceiling is {BOUNDARY_SITE_CEILING})"
     )
     assert sites, "the enumerator found nothing, so this arm is vacuous"
 
@@ -1770,10 +1917,16 @@ def test_ac14_the_metadata_population_is_scoped_published_and_frozen() -> None:
     ceiling -> red.
     """
     scoped = seams.metadata_sites(SRC_ROOT)
+    ratchet.report("test_read_seams.py::METADATA_POPULATION_CEILING", len(scoped))
     assert len(scoped) <= METADATA_POPULATION_CEILING, (
         f"the scoped metadata population grew to {len(scoped)} (ceiling "
         f"{METADATA_POPULATION_CEILING}). Every metadata seam that can see an operand is either "
         f"belted or counted; a new one is neither until someone says which"
+    )
+    assert len(scoped) == METADATA_POPULATION_CEILING, (
+        f"slack: the scoped metadata population fell to {len(scoped)}; append a `down` "
+        f"record setting test_read_seams.py::METADATA_POPULATION_CEILING to {len(scoped)} "
+        f"in tests/ceiling_register.py (the ceiling is {METADATA_POPULATION_CEILING})"
     )
     assert scoped, "the metadata enumerator found nothing, so this arm is vacuous"
     assert any(site.module.endswith("ops/optimize.py") for site in scoped), (
