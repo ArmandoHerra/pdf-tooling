@@ -4987,6 +4987,143 @@ def test_the_vacuous_rendering_extractor_fails_if_the_heading_is_deleted() -> No
 
 
 # --------------------------------------------------------------------------- #
+# PDF-112 -- `## Upgrading to 1.1`, and the `## Render budget` derivation.
+#
+# THE EXTENSION POINT FOR THE 1.1 CYCLE: `MIGRATION_ROWS_1_1` below is the
+# registry PDF-115 and PDF-116 APPEND ROWS TO. They do not create new sections.
+# The heading names `1.1`, not `1.1.0`, and nothing compares it with the
+# package version (the section text is true before and after the release; the
+# operator's bump PR re-stamps the provenance line only, X-1009).
+# --------------------------------------------------------------------------- #
+
+MIGRATION_HEADING_1_1 = "## Upgrading to 1.1"
+RENDER_BUDGET_HEADING = "## Render budget"
+
+
+def _section_body_after(text: str, heading: str) -> str:
+    assert text.count(heading) == 1, f"README carries {heading!r} {text.count(heading)} time(s)"
+    return text.split(heading, 1)[1].split("\n## ", 1)[0]
+
+
+def migration_section_body_1_1() -> str:
+    return _section_body_after(read("README.md"), MIGRATION_HEADING_1_1)
+
+
+def _derive_1_1_budget_row() -> None:
+    from pdf_tooling.errors import RenderBudgetError
+    from pdf_tooling.ports import raster as raster_port
+
+    body = migration_section_body_1_1()
+    quoted = f"`{raster_port.PIXEL_BUDGET:,}`"
+    assert quoted in body, f"the 1.1 section does not quote the budget {quoted}"
+    pixels = raster_port.page_pixels(14400.0, 14400.0, dpi=150.0, width_px=None)
+    with pytest.raises(RenderBudgetError) as caught:
+        raster_port.enforce_render_budget(
+            pixels, page_number=1, path="huge.pdf", dpi=150.0, width_px=None
+        )
+    assert "the largest --dpi that fits" in str(caught.value)
+
+
+def _derive_1_1_ceiling_row() -> None:
+    from pdf_tooling.cli import cmd_rasterize
+    from pdf_tooling.errors import UsageError
+    from pdf_tooling.ports import raster as raster_port
+
+    assert raster_port.DPI_CEILING == 2400
+    assert raster_port.WIDTH_CEILING == 32768
+    body = migration_section_body_1_1()
+    assert f"above `{raster_port.DPI_CEILING:g}`" in body, "the quoted dpi ceiling is stale"
+    assert f"above `{raster_port.WIDTH_CEILING}`" in body, "the quoted width ceiling is stale"
+    # The CLI really rejects the three values the row promises exit 2 for.
+    for dpi, width in ((2400.0001, None), (float("nan"), None), (None, 32769)):
+        with pytest.raises(UsageError):
+            cmd_rasterize._validate_render_flags(dpi, width)
+
+
+MIGRATION_ROWS_1_1: tuple[MigrationRow, ...] = (
+    MigrationRow(
+        spec_id="PDF-112",
+        anchor="the largest `--dpi` that fits",
+        derive=_derive_1_1_budget_row,
+        note="the pixel budget: refused at exit 5 instead of allocated or MemoryError",
+    ),
+    MigrationRow(
+        spec_id="PDF-112",
+        anchor="`--dpi` above `2400`",
+        derive=_derive_1_1_ceiling_row,
+        note="the static --dpi/--width ceilings exit 2",
+    ),
+)
+
+
+def test_every_1_1_migration_row_is_re_derivable_from_the_tree() -> None:
+    assert MIGRATION_ROWS_1_1, "the registry is empty; every check below would pass vacuously"
+    body = migration_section_body_1_1()
+    changelog_module = _tests_module("test_changelog_history")
+    for row in MIGRATION_ROWS_1_1:
+        count = body.count(row.anchor)
+        assert count == 1, f"{row.spec_id}: anchor {row.anchor!r} occurs {count} time(s)"
+        assert changelog_module.entries_for(row.spec_id), f"{row.spec_id} has no changelog entry"
+        row.derive()
+
+
+def test_the_1_1_migration_row_derivations_can_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RED: move a constant and the derivation names the stale README figure."""
+    from pdf_tooling.ports import raster as raster_port
+
+    monkeypatch.setattr(raster_port, "PIXEL_BUDGET", raster_port.PIXEL_BUDGET + 1)
+    with pytest.raises(AssertionError, match="does not quote the budget"):
+        _derive_1_1_budget_row()
+    monkeypatch.undo()
+    monkeypatch.setattr(raster_port, "DPI_CEILING", 2401.0)
+    with pytest.raises(AssertionError):
+        _derive_1_1_ceiling_row()
+
+
+def test_the_1_1_section_exists_ordered_and_commit_anchored() -> None:
+    text = read("README.md")
+    assert text.count(MIGRATION_HEADING_1_1) == 1
+    assert (
+        text.index("## Getting Started")
+        < text.index(MIGRATION_HEADING_1_1)
+        < text.index(MIGRATION_HEADING)
+    ), "## Upgrading to 1.1 must sit directly above ## Upgrading to 1.0.0"
+    body = migration_section_body_1_1().rstrip()
+    assert PROVENANCE_PATTERN.search(body), "the 1.1 section does not end with a provenance line"
+    assert MIGRATION_BOUNDING_SENTENCE_ANCHOR in body
+
+
+def test_the_1_1_section_carries_no_unmasked_cardinal() -> None:
+    body = migration_section_body_1_1()
+    masked = _blank(body, code_spans(body))
+    for pattern in (*STRUCTURED_REFERENCE, EXIT_CODE):
+        masked = _blank(masked, [match.span() for match in pattern.finditer(masked)])
+    residue = [match.group(0) for match in CANDIDATE.finditer(masked)]
+    assert residue == [], f"the 1.1 section carries an unmasked cardinal: {residue}"
+
+
+def test_the_1_1_section_states_the_ocr_dpi_1200_refusal() -> None:
+    body = migration_section_body_1_1()
+    assert "`ocr --dpi 1200`" in body
+    assert "lower `--dpi`" in body
+
+
+def test_the_render_budget_section_derives_its_figures_from_the_constants() -> None:
+    """The three figures in `## Render budget` are read from `ports.raster`."""
+    from pdf_tooling.ports import raster as raster_port
+
+    text = read("README.md")
+    body = _section_body_after(text, RENDER_BUDGET_HEADING)
+    assert text.index("## Compression ceiling") < text.index(RENDER_BUDGET_HEADING)
+    for figure in (
+        f"{raster_port.PIXEL_BUDGET:,}",
+        f"{raster_port.DPI_CEILING:g}",
+        str(raster_port.WIDTH_CEILING),
+    ):
+        assert f"`{figure}`" in body, f"README `## Render budget` does not carry `{figure}`"
+
+
+# --------------------------------------------------------------------------- #
 # PDF-79 / OR-21 — `-o table` is NOT public API, recorded where a user reads it
 #
 # `tests/golden/envelope_keys.json` freezes `json`, `ndjson_line` and

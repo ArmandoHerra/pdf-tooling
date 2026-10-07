@@ -108,8 +108,8 @@ VERBS: Final[tuple[str, ...]] = ("encrypt", "decrypt", "permissions")
 #:   pypdf demands a plain ``str``, exactly like pikepdf already does.
 #: * ``ops/raster.py`` -- `rasterize`'s per-page render crosses a REAL
 #:   ``ProcessPoolExecutor`` boundary (module docstring), and a ``Secret``
-#:   refuses to pickle by design; the plaintext is revealed exactly once per
-#:   source, in the main process, immediately before building the picklable
+#:   refuses to pickle by design; the plaintext is revealed in the main process
+#:   once to measure the page boxes (PDF-112) and once to build the picklable
 #:   work-item tuple, and travels no further than that.
 #: * ``ops/ocr.py`` -- `ocr`'s own per-page render calls the SAME
 #:   ``RasterEngine.render_page`` (shared with `rasterize`, so its

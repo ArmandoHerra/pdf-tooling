@@ -61,6 +61,19 @@ uv run pdftooling --help
 
 `uv sync` installs the runtime stack *and* the development tooling, so there is no separate bootstrap step.
 
+## Upgrading to 1.1
+
+A `1.0.1` invocation or script that relied on any of the following observes a different exit code or message at `1.1`. These changes are on `main` and ship in the first `1.1` release.
+
+| In 1.0.1 | In 1.1 | What to change |
+|---|---|---|
+| `rasterize` or `ocr` on a page whose bitmap is larger than `178,956,970` pixels allocated it (several GB for a hostile page box) or died on a raw `MemoryError` at exit `1`; `--dry-run` predicted `0` | the whole run is refused at exit `5` before anything is written, naming the page, its pixel size, the budget and the largest `--dpi` that fits; `--dry-run` predicts the same `5`. This includes `ocr --dpi 1200` on `A3` or larger pages, which is now refused | lower `--dpi` (or `--width`) to the value the message names; for `ocr --dpi 1200` on `A3` or larger pages, pass a lower `--dpi`. There is no override |
+| `rasterize --dpi` accepted any positive value, including `nan` and `inf`, and `--width` any positive integer | `--dpi` above `2400` or not finite, and `--width` above `32768`, exit `2` | pass a value inside the range |
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+
+Re-derived at `9809a7f` on `2026-10-06`.
+
 ## Upgrading to 1.0.0
 
 A `0.3.1` invocation, script or import that relied on any of the following stops working, or observes a different shape, at `1.0.0`. Beyond this table, the sole remaining movement in this file's contract is the `-o table` row under `## Output contract`, which no longer describes an ANSI-styling behaviour the renderer never had.
@@ -197,6 +210,14 @@ Uniform across every verb.
 ## Compression ceiling
 
 Structure-level compression plus optional image downsampling is the ceiling of a permissive stack: Ghostscript is AGPL-3.0+ and deliberately excluded, so `compress` builds on `pikepdf`/libqpdf object streams and an opt-in Pillow image pass instead. `--images downsample`'s resample threshold is computed against the page's own width in inches (the page box), never an image's placement rectangle, which under-downsamples a small image on a large page — a stated, conservative limitation.
+
+## Render budget
+
+No page of any PDF may make `rasterize` or `ocr` allocate a bitmap above `178,956,970` pixels (width times height). The budget is per page and is compared on the bitmap the renderer allocates, after the page's own crop box and `/Rotate` are applied; the renderer does not apply `/UserUnit`, so neither does the budget. A page over the budget refuses the whole run at exit `5` before anything is written, and `--dry-run` predicts the same refusal. The message names the page, its pixel size, the budget and the largest whole `--dpi` that fits (and the largest `--width`, under `--width`).
+
+`rasterize --dpi` above `2400` (or not finite) and `--width` above `32768` exit `2`. `ocr` inherits the area budget and keeps its own `--dpi` range. Under `ocr --skip-text-pages`, a page that is not rendered is not measured.
+
+The recourse is a lower `--dpi` or `--width`. There is no override.
 
 ## Encryption, passwords and permissions
 

@@ -77,7 +77,7 @@ from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, Pas
 from pdf_tooling.ops.engine_disclosure import disclose_engine_blindness
 from pdf_tooling.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_tooling.ports.ocr import OcrEngine, require_ocr
-from pdf_tooling.ports.raster import require_raster
+from pdf_tooling.ports.raster import enforce_render_budget, require_raster
 from pdf_tooling.ports.structure import StructureEngine, require_structure
 from pdf_tooling.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
 from pdf_tooling.safety.confirm import BulkContext
@@ -302,7 +302,34 @@ def ocr_run(
     def _select_one(source: Path) -> tuple[PageInfo, ...]:
         secret = resolver.for_source(source)
         secret_by_source[source] = secret
-        return _selected_pages(structure_engine, source, pages_spec, password=secret)
+        selected = _selected_pages(structure_engine, source, pages_spec, password=secret)
+        # PDF-112 / X-1002: budget exactly the pages the real loop will render
+        # (`_page_needs_engine`), in both tiers, after the filesystem tier and
+        # before the OCR engine is demanded -- so an over-budget page exits 5
+        # ahead of a missing tesseract (3). Run-scoped: not an item-scoped error.
+        to_render = [
+            page.number
+            for page in selected
+            if _page_needs_engine(page, skip_text_pages=skip_text_pages)
+        ]
+        if to_render:
+            measured = require_raster().measure_pages(
+                str(source),
+                to_render,
+                dpi=float(dpi),
+                width_px=None,
+                password=secret.reveal() if secret is not None else None,
+            )
+            for number, pixels in zip(to_render, measured, strict=True):
+                enforce_render_budget(
+                    pixels,
+                    page_number=number,
+                    path=str(source),
+                    dpi=float(dpi),
+                    width_px=None,
+                    dpi_floor=float(DPI_RANGE[0]),
+                )
+        return selected
 
     # `not plan.refused` keeps the FILESYSTEM tier's precedence, matching what
     # the real run does -- `ops/office.py`'s own guard, applied to the one
@@ -388,8 +415,9 @@ def ocr_run(
         bytes_before = item.source.stat().st_size
         pages = pages_by_source[item.source]
         secret = secret_by_source[item.source]
-        # PDF-37: revealed HERE, in this process, exactly once per
-        # source -- `render_page` needs a plain string (see
+        # PDF-37: revealed HERE, in this process, once to render (and once in
+        # `_select_one`, to measure -- PDF-112) per source -- `render_page`
+        # needs a plain string (see
         # `ops/raster.py`'s `_WorkItem` docstring for why), and OCR's
         # own per-page loop never crosses a process boundary.
         plaintext_password = secret.reveal() if secret is not None else None

@@ -13,6 +13,7 @@ one.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Final
@@ -31,6 +32,7 @@ from pdf_tooling.ops.batch import preflight_operands
 from pdf_tooling.ops.pagerange import GRAMMAR_HELP
 from pdf_tooling.ops.raster import rasterize_document
 from pdf_tooling.output import emit_result
+from pdf_tooling.ports.raster import DPI_CEILING, PIXEL_BUDGET, WIDTH_CEILING
 
 __all__ = ["RasterFormat", "rasterize_command"]
 
@@ -76,6 +78,13 @@ bitstream has no single-channel pixel mode, so --grayscale --format webp
 writes grey-valued RGB (rendered without colour information, three equal
 channels) rather than one channel.
 
+A render is bounded. --dpi accepts at most {DPI_CEILING:g} and --width at most
+{WIDTH_CEILING} (larger values exit 2). Independently, no page may render above
+{PIXEL_BUDGET:,} pixels (width x height of the bitmap, after the page's own
+crop box and /Rotate); a page over that budget refuses the whole run with
+exit 5 before anything is written, and the message names the largest --dpi
+that fits. There is no override: lower --dpi or --width.
+
 --out-dir is the destination directory (created if absent, unless
 --dry-run); defaults to '.' when omitted. --name templates each output
 filename with {{stem}}, {{page}}, {{page:04}}, {{index}} and {{ext}}
@@ -100,6 +109,16 @@ workers running: send SIGTERM instead.
 """
 
 
+def _validate_render_flags(dpi: float | None, width: int | None) -> None:
+    """Usage (exit 2) is decided before any document is opened (PDF-112 D6)."""
+    if dpi is not None and width is not None:
+        raise UsageError("--dpi and --width are mutually exclusive")
+    if width is not None and not (1 <= width <= WIDTH_CEILING):
+        raise UsageError(f"--width must be between 1 and {WIDTH_CEILING}")
+    if dpi is not None and not (math.isfinite(dpi) and 0 < dpi <= DPI_CEILING):
+        raise UsageError(f"--dpi must be greater than 0 and at most {DPI_CEILING:g}")
+
+
 @global_options(consumes=("--out-dir", "--name"))
 def rasterize_command(
     ctx: typer.Context,
@@ -113,13 +132,20 @@ def rasterize_command(
     ] = None,
     dpi: Annotated[
         float | None,
-        typer.Option("--dpi", help="Render scale in dots per inch.", show_default=False),
+        typer.Option(
+            "--dpi",
+            help=f"Render scale in dots per inch (at most {DPI_CEILING:g}).",
+            show_default=False,
+        ),
     ] = None,
     width: Annotated[
         int | None,
         typer.Option(
             "--width",
-            help="Target pixel width; height follows the page's aspect ratio.",
+            help=(
+                f"Target pixel width (at most {WIDTH_CEILING}); "
+                "height follows the page's aspect ratio."
+            ),
             show_default=False,
         ),
     ] = None,
@@ -164,12 +190,7 @@ def rasterize_command(
     # depth, the same posture `AtomicWriter`'s own no-clobber re-check takes.
     preflight_operands(sources)
 
-    if dpi is not None and width is not None:
-        raise UsageError("--dpi and --width are mutually exclusive")
-    if width is not None and width < 1:
-        raise UsageError("--width must be 1 or greater")
-    if dpi is not None and dpi <= 0:
-        raise UsageError("--dpi must be greater than 0")
+    _validate_render_flags(dpi, width)
     if quality is not None:
         if image_format.value in _LOSSLESS_FORMATS:
             raise UsageError(f"--quality has no effect with --format {image_format.value}")

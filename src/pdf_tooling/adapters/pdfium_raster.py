@@ -87,7 +87,12 @@ from typing import TYPE_CHECKING, Any, Final
 
 from pdf_tooling.adapters import AdapterProbe, package_probe
 from pdf_tooling.errors import AuthError, FailureError
-from pdf_tooling.ports.raster import RenderedPage
+from pdf_tooling.ports.raster import (
+    PagePixels,
+    RenderedPage,
+    enforce_render_budget,
+    page_pixels,
+)
 from pdf_tooling.ports.structure import PASSWORD_HINT
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -100,8 +105,6 @@ _DISTRIBUTION: Final[str] = "pypdfium2"
 _MODULE: Final[str] = "pypdfium2"
 
 _CAPABILITIES: Final[frozenset[str]] = frozenset({"render", "page-size", "raster"})
-
-_POINTS_PER_INCH: Final[float] = 72.0
 
 #: Opaque white, no transparency — Design §D6: a page is paper, and no format
 #: this verb writes carries an alpha channel.
@@ -162,20 +165,7 @@ class PdfiumRasterAdapter:
         """
         import pypdfium2 as pdfium  # type: ignore[import-untyped]
 
-        try:
-            document = pdfium.PdfDocument(path, password=password)
-        except pdfium.PdfiumError as error:
-            if "password" not in str(error).lower():
-                raise FailureError(f"{path}: could not be opened: {error}", path=path) from error
-            if password is None:
-                raise AuthError(
-                    f"a password is required to rasterize this document; {PASSWORD_HINT}",
-                    path=path,
-                ) from error
-            raise AuthError(
-                f"the supplied password did not unlock this document; {PASSWORD_HINT}",
-                path=path,
-            ) from error
+        document = _open_document(path, password)
         try:
             try:
                 page = document.get_page(page_number - 1)
@@ -185,7 +175,13 @@ class PdfiumRasterAdapter:
                 ) from error
             try:
                 image, dpi_effective = _render(
-                    page, dpi=dpi, width_px=width_px, grayscale=grayscale
+                    document,
+                    page,
+                    page_number,
+                    path=path,
+                    dpi=dpi,
+                    width_px=width_px,
+                    grayscale=grayscale,
                 )
             except pdfium.PdfiumError as error:
                 raise FailureError(
@@ -204,9 +200,60 @@ class PdfiumRasterAdapter:
             dpi_effective=dpi_effective,
         )
 
+    def measure_pages(
+        self,
+        path: str,
+        page_numbers: list[int] | tuple[int, ...],
+        *,
+        dpi: float | None,
+        width_px: int | None,
+        password: str | None = None,
+    ) -> tuple[PagePixels, ...]:
+        """Size each page's bitmap for planning (PDF-112): the displayed box is
+        read by index (no page load, no content parse) and fed to the same
+        :func:`~pdf_tooling.ports.raster.page_pixels` the chokepoint uses."""
+        import pypdfium2 as pdfium
 
-def _displayed_size(page: Any) -> tuple[float, float]:
-    """The page's own ``(width_pt, height_pt)`` as it will be DISPLAYED — i.e.
+        document = _open_document(path, password)
+        try:
+            return tuple(
+                page_pixels(*_displayed_size(document, number - 1), dpi=dpi, width_px=width_px)
+                for number in page_numbers
+            )
+        except pdfium.PdfiumError as error:
+            raise FailureError(
+                f"{path}: page size could not be read: {error}", path=path
+            ) from error
+        finally:
+            document.close()
+
+
+def _open_document(path: str, password: str | None) -> Any:
+    """The one ``pdfium.PdfDocument`` call site in this module, and its error
+    mapping. ``render_page`` and ``measure_pages`` both open through here."""
+    import pypdfium2 as pdfium
+
+    try:
+        return pdfium.PdfDocument(path, password=password)
+    except pdfium.PdfiumError as error:
+        if "password" not in str(error).lower():
+            raise FailureError(f"{path}: could not be opened: {error}", path=path) from error
+        if password is None:
+            raise AuthError(
+                f"a password is required to rasterize this document; {PASSWORD_HINT}",
+                path=path,
+            ) from error
+        raise AuthError(
+            f"the supplied password did not unlock this document; {PASSWORD_HINT}",
+            path=path,
+        ) from error
+
+
+def _displayed_size(document: Any, index: int) -> tuple[float, float]:
+    """Read by index (``PdfDocument.get_page_size``: the same dimension code as
+    ``PdfPage.get_size()`` with no page load or content parse; PDF-112 E3/E4).
+
+    The page's own ``(width_pt, height_pt)`` as it will be DISPLAYED — i.e.
     already swapped relative to the ``MediaBox`` when ``/Rotate`` is 90 or 270
     (Design §D6, AC8).
 
@@ -221,45 +268,30 @@ def _displayed_size(page: Any) -> tuple[float, float]:
     view from that pair — the two conventions are complementary, not equal,
     and the earlier docstring's claim that they agreed was the defect stated
     in prose."""
-    width, height = page.get_size()
+    width, height = document.get_page_size(index)
     return float(width), float(height)
 
 
-def _target_dimensions(
-    displayed_width: float,
-    displayed_height: float,
+def _render(
+    document: Any,
+    page: Any,
+    page_number: int,
     *,
+    path: str,
     dpi: float | None,
     width_px: int | None,
-) -> tuple[int, int, float]:
-    """``(target_width_px, target_height_px, dpi_effective)`` — the exact,
-    round()-based pixel size Design §D3 promises, computed independently of
-    whatever pdfium's own ceil()-based bitmap size turns out to be."""
-    if width_px is not None:
-        target_width = width_px
-        target_height = max(1, round(width_px * displayed_height / displayed_width))
-        dpi_effective = width_px / displayed_width * _POINTS_PER_INCH
-        return target_width, target_height, dpi_effective
-
-    if dpi is None:  # pragma: no cover - caller guarantees exactly one of dpi/width_px is set
-        raise ValueError("render_page requires exactly one of dpi or width_px")
-    target_width = max(1, round(displayed_width * dpi / _POINTS_PER_INCH))
-    target_height = max(1, round(displayed_height * dpi / _POINTS_PER_INCH))
-    return target_width, target_height, dpi
-
-
-def _render(
-    page: Any, *, dpi: float | None, width_px: int | None, grayscale: bool
+    grayscale: bool,
 ) -> tuple[Image, float]:
-    displayed_width, displayed_height = _displayed_size(page)
-    target_width, target_height, dpi_effective = _target_dimensions(
-        displayed_width, displayed_height, dpi=dpi, width_px=width_px
+    # PDF-112: size, enforce the budget, and only THEN let pdfium allocate.
+    # Nothing between these three steps allocates a bitmap.
+    pixels = page_pixels(*_displayed_size(document, page_number - 1), dpi=dpi, width_px=width_px)
+    enforce_render_budget(pixels, page_number=page_number, path=path, dpi=dpi, width_px=width_px)
+    target_width, target_height, dpi_effective = (
+        pixels.target_width,
+        pixels.target_height,
+        pixels.dpi_effective,
     )
-    # The scale fed to pdfium: for DPI mode this is dpi/72 exactly (matching
-    # what the module docstring's example measures); for width mode it is
-    # sized so pdfium's own ceil() lands at or above target_width, which the
-    # crop below then trims to exactly target_width.
-    scale = dpi_effective / _POINTS_PER_INCH
+    scale = pixels.scale
 
     # NO `rotation=` argument. pdfium has already applied the page's own
     # `/Rotate`; passing it again is B-094. See the module docstring.

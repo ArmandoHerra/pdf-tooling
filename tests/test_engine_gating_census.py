@@ -366,6 +366,10 @@ _PDF_89_RATIFICATION: Final[_GatingRatification] = _GatingRatification(
 )
 
 
+_PDF_96_CEILINGS: Final[Mapping[str, int]] = MappingProxyType(
+    {**_PDF_89_RATIFICATION.ceilings, "tests/test_website_diagrams.py": 1}
+)
+
 ENGINE_GATING_LEDGER: Final[tuple[_GatingRatification, ...]] = (
     _PDF_82_GENESIS,
     _PDF_84_RATIFICATION,
@@ -403,6 +407,32 @@ ENGINE_GATING_LEDGER: Final[tuple[_GatingRatification, ...]] = (
             "port module or a second spawn site operate on a tmp_path COPY of the "
             "package and never name a verb, so they are outside the detector by "
             "construction rather than by exemption."
+        ),
+    ),
+    _GatingRatification(
+        date="2026-10-07",
+        spec="PDF-112",
+        direction="up",
+        ruling="X-1016",
+        ceilings=MappingProxyType(
+            {
+                **_PDF_96_CEILINGS,
+                "tests/integration/test_pdf112_render_budget.py": 4,
+            }
+        ),
+        reason=(
+            "X-1016: PDF-112 bounds the render with a per-page pixel budget, and the "
+            "refusal (exit 5) must outrank the missing-engine tier (exit 3) for `ocr`. "
+            "Four arms in tests/integration/test_pdf112_render_budget.py drive `ocr` "
+            "engine-blind by purpose: "
+            "test_ac2_ocr_refuses_the_same_page_before_allocation_and_before_the_engine, "
+            "test_ac3_ocr_dry_run_predicts_the_same_refusal_byte_for_byte, "
+            "test_ac4_ocr_batch_is_refused_whole_and_writes_nothing, and "
+            "test_ac9_skip_text_pages_does_not_budget_an_unrendered_page. "
+            "They prove exit 5 comes before 3, a proof that exists "
+            'only on a leg where tesseract is absent; a `requires("tesseract")` marker '
+            "would mis-declare them and DELETE that proof under engines-hidden. "
+            "The key enters at 4 and no other key moves."
         ),
     ),
 )

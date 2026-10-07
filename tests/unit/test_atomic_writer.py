@@ -402,6 +402,7 @@ D8_TABLE = (
     (errors.ConfirmationRequiredError, REFUSED, "refused"),
     (errors.ConfirmationDeclinedError, REFUSED, "refused"),
     (errors.DestinationIsInputError, REFUSED, "refused"),
+    (errors.RenderBudgetError, REFUSED, "refused"),
     (errors.BackupWithoutInPlaceError, USAGE, "usage"),
     (errors.DestinationUnwritableError, FAILURE, "failure"),
     (errors.SourceUnreadableError, FAILURE, "failure"),
