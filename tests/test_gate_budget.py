@@ -57,7 +57,7 @@ TREND_FILE: Final[Path] = PERF_DIR / "gate-timings.jsonl"
 #: `timeout-minutes` may never exceed this. Design §7.
 TIMEOUT_CEILING: Final = 30
 
-#: The twelve jobs, re-derived from the mapping rather than asserted from
+#: The thirteen jobs, re-derived from the mapping rather than asserted from
 #: memory. PDF-34 D4/X-472 coordinate 1: `docs-gate` moved this 10 -> 11,
 #: consumed at `test_ci_yml_parses_to_exactly_twelve_jobs` (renamed
 #: accordingly) and at `test_every_timeout_is_preceded_by_its_derivation`
@@ -66,8 +66,11 @@ TIMEOUT_CEILING: Final = 30
 #: commit (X-473), not deferred to a follow-up. PDF-91 moves it 11 -> 12 the
 #: same way: `website` lands with its own p95-derived bound and derivation
 #: comment in this same commit, and the reader below is renamed again
-#: (`test_ci_yml_parses_to_exactly_twelve_jobs`).
-EXPECTED_JOB_COUNT: Final = 12
+#: (`test_ci_yml_parses_to_exactly_twelve_jobs`). PDF-117 moves it 12 -> 13 the
+#: same way: `startup-latency` lands with its own derived bound and derivation
+#: comment in this same commit, and the reader is renamed
+#: (`test_ci_yml_parses_to_exactly_thirteen_jobs`).
+EXPECTED_JOB_COUNT: Final = 13
 
 
 # --------------------------------------------------------------------------- #
@@ -270,7 +273,7 @@ def test_the_shell_string_test_is_not_mistaken_for_a_worker_count() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_ci_yml_parses_to_exactly_twelve_jobs() -> None:
+def test_ci_yml_parses_to_exactly_thirteen_jobs() -> None:
     jobs = ci_jobs()
     assert len(jobs) == EXPECTED_JOB_COUNT, sorted(jobs)
 
@@ -789,7 +792,8 @@ def test_the_load_immune_companion_exists_and_cannot_abstain() -> None:
     abstention is honest rather than a quiet retreat.
 
     Under `-n auto` the wall-clock startup test SKIPS on every worker, so it
-    does not run in CI at all. That is only tolerable because a control that
+    does not run on any `test` or engine leg; it runs, serially, in exactly one
+    advisory job, `startup-latency` (PDF-117). That is only tolerable because a control that
     CANNOT abstain replaced it. Nobody gets to `fix` a flake by teaching the
     replacement to skip too -- by ANY mechanism, which is the correction this
     guard carries after an independent verifier walked through the first
@@ -2061,4 +2065,141 @@ def test_a_ceiling_whose_block_loses_a_field_reddens(tmp_path: Path, stripped: s
     assert [token for token in required if token not in damaged], (
         f"stripping every line mentioning {stripped!r} left a block the guard still accepts; "
         "the guard is not reading what it claims to read"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-117 D3 -- scripts/startup_gate.py: never trust a skip, never retry a red.
+#
+# The wrapper is driven against SYNTHESIZED JUnit receipts with the pytest
+# subprocess and the sleep injected, so every arm runs in milliseconds. What
+# each arm protects: a load-skip that exits 0 (E5: bare `pytest -n 0` is green
+# with `1 skipped` on a regression), a red that is retried until green, and a
+# misconfiguration that is waited on as though it were load.
+# --------------------------------------------------------------------------- #
+
+import startup_gate  # noqa: E402
+
+_NODE_NAME: Final = "test_help_stays_within_the_startup_budget"
+
+
+def _receipt(body: str, name: str = _NODE_NAME) -> str:
+    return (
+        '<?xml version="1.0"?><testsuites><testsuite name="pytest" tests="1">'
+        f'<testcase classname="tests.test_cli_spine" name="{name}" time="1.0">{body}</testcase>'
+        "</testsuite></testsuites>"
+    )
+
+
+_PASSED: Final = _receipt(
+    "<system-out>noise\nSTARTUP-READING fastest_ms=150.0 budget_ms=375.0 loadavg=0.10\n"
+    "</system-out>"
+)
+_FAILED: Final = _receipt(
+    '<failure message="AssertionError: fastest --help was 878 ms of 375.0 ms">x</failure>'
+)
+_LOAD_SKIP: Final = _receipt(
+    '<skipped type="pytest.skip" message="host not quiet: loadavg(1m) 14.93 against the 1.00 '
+    'ceiling (4 cpus).">s</skipped>'
+)
+_XDIST_SKIP: Final = _receipt(
+    '<skipped type="pytest.skip" message="parallel session: this is xdist worker gw0 of 4.">s'
+    "</skipped>"
+)
+
+
+class _Driver:
+    """Feeds receipts in order and counts invocations, sleeps and output."""
+
+    def __init__(self, *receipts: str | None) -> None:
+        self.receipts = list(receipts)
+        self.runs = 0
+        self.sleeps: list[float] = []
+        self.lines: list[str] = []
+
+    def run(self) -> str | None:
+        self.runs += 1
+        return self.receipts[min(self.runs, len(self.receipts)) - 1]
+
+    def go(self) -> int:
+        return startup_gate.gate(
+            run=self.run, sleep=self.sleeps.append, emit=self.lines.append, loadavg=lambda: 9.0
+        )
+
+
+def test_startup_gate_pass_exits_zero_and_prints_the_reading() -> None:
+    driver = _Driver(_PASSED)
+    assert driver.go() == 0
+    assert driver.lines[0] == "startup-latency: MEASURED"
+    assert driver.lines[1].startswith("STARTUP-READING fastest_ms=150.0")
+    assert driver.runs == 1
+
+
+def test_startup_gate_failure_exits_one_after_exactly_one_invocation() -> None:
+    driver = _Driver(_FAILED, _PASSED)
+    assert driver.go() == 1
+    assert driver.runs == 1, "a red is a verdict and must never be retried"
+    assert driver.sleeps == []
+    assert driver.lines[0].startswith("startup-latency: BUDGET EXCEEDED")
+    assert "fastest --help was 878 ms of 375.0 ms" in driver.lines[0]
+
+
+def test_startup_gate_load_skip_seven_times_is_abstained_not_green() -> None:
+    driver = _Driver(_LOAD_SKIP)
+    assert driver.go() == 1
+    assert driver.runs == startup_gate.MAX_ATTEMPTS == 7
+    assert len(driver.sleeps) == 6
+    assert all(slept == startup_gate.SETTLE_SECONDS for slept in driver.sleeps)
+    assert driver.lines[-1].startswith("startup-latency: ABSTAINED -- not measured:")
+    waits = [line for line in driver.lines if "waiting for a quiet host" in line]
+    assert len(waits) == 6 and "attempt 1/7" in waits[0] and "loadavg 9.00" in waits[0]
+
+
+def test_startup_gate_load_skip_then_pass_exits_zero() -> None:
+    driver = _Driver(_LOAD_SKIP, _LOAD_SKIP, _PASSED)
+    assert driver.go() == 0
+    assert driver.runs == 3
+    assert "startup-latency: MEASURED" in driver.lines
+
+
+def test_startup_gate_xdist_skip_is_misconfiguration_after_one_invocation() -> None:
+    driver = _Driver(_XDIST_SKIP, _PASSED)
+    assert driver.go() == 1
+    assert driver.runs == 1
+    assert driver.lines[0].startswith("startup-latency: ABSTAINED -- misconfigured:")
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    [None, "<not xml", _receipt("", name="test_something_else"), "<testsuites/>"],
+    ids=["no-file", "unparseable", "wrong-node", "empty"],
+)
+def test_startup_gate_zero_matching_testcases_is_not_collected(receipt: str | None) -> None:
+    driver = _Driver(receipt)
+    assert driver.go() == 1
+    assert driver.runs == 1
+    assert driver.lines[0].startswith("startup-latency: NOT COLLECTED")
+
+
+def test_startup_gate_load_prefix_opens_the_load_branch_of_the_abstention() -> None:
+    """The contract between two files: the wrapper waits only on a skip whose reason
+    opens with `LOAD_ABSTENTION_PREFIX`, so the test's load branch must open with it."""
+    tree = ast.parse(CLI_SPINE.read_text())
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "startup_gate_abstention_reason"
+    )
+    openers = [
+        node.values[0].value
+        for node in ast.walk(function)
+        if isinstance(node, ast.JoinedStr)
+        and node.values
+        and isinstance(node.values[0], ast.Constant)
+        and isinstance(node.values[0].value, str)
+    ]
+    assert any(opener.startswith(startup_gate.LOAD_ABSTENTION_PREFIX) for opener in openers), (
+        f"no reason in startup_gate_abstention_reason() opens with "
+        f"{startup_gate.LOAD_ABSTENTION_PREFIX!r}; the wrapper would read the load skip as "
+        f"misconfiguration. Openers found: {openers!r}"
     )

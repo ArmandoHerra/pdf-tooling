@@ -202,21 +202,23 @@ def load_manifest() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_independent_scan_finds_twelve_jobs_nineteen_legs_twenty_two_gating_steps() -> None:
+def test_the_independent_scan_finds_thirteen_jobs_twenty_legs_twenty_three_gating_steps() -> None:
     """PDF-91: `website` is a new single-leg job with one gating step
     (`make website`), re-derived at implementation HEAD -- 11/18/20 -> 12/19/21.
     PDF-34 D4 made the previous move, `docs-gate`'s: 10/17/19 -> 11/18/20.
-    PDF-104: one gating step inside website, 12/19/21 -> 12/19/22."""
+    PDF-104: one gating step inside website, 12/19/21 -> 12/19/22.
+    PDF-117: `startup-latency`, one single-leg job with one gating step
+    (`make startup-gate`), 12/19/22 -> 13/20/23."""
     names, leg_count, gating_counts = independent_derive_from_ci()
-    assert len(names) == 12, names
-    assert leg_count == 19, leg_count
-    assert sum(gating_counts.values()) == 22, gating_counts
+    assert len(names) == 13, names
+    assert leg_count == 20, leg_count
+    assert sum(gating_counts.values()) == 23, gating_counts
 
 
 def test_manifest_parses_with_tomllib_and_declares_schema_version_1() -> None:
     manifest = load_manifest()
     assert manifest["schema_version"] == 1
-    assert len(manifest["check"]) == 22
+    assert len(manifest["check"]) == 23
 
 
 _AUDIT_RECIPE: Final[str] = "cd website && npm audit --audit-level=high"
@@ -631,6 +633,7 @@ _PDF02_EXPECTED_JOBS: Final[tuple[str, ...]] = (
     "license-gate",
     "build",
     "website",
+    "startup-latency",
 )
 
 
@@ -1345,7 +1348,7 @@ def test_pdf59_ac5_pdf02_expected_jobs_is_unmoved_by_this_spec() -> None:
     name is a correction belonging to whichever spec next authorises a move
     here, not a silent side effect of this one.
     """
-    assert len(_PDF02_EXPECTED_JOBS) == 12, _PDF02_EXPECTED_JOBS
+    assert len(_PDF02_EXPECTED_JOBS) == 13, _PDF02_EXPECTED_JOBS
     assert _PDF02_EXPECTED_JOBS == (
         "lint",
         "typecheck",
@@ -1359,6 +1362,7 @@ def test_pdf59_ac5_pdf02_expected_jobs_is_unmoved_by_this_spec() -> None:
         "license-gate",
         "build",
         "website",
+        "startup-latency",
     )
 
 
@@ -1416,3 +1420,148 @@ def test_pdf59_ac6_proof_an_unknown_installed_version_skips_rather_than_passes()
 
 def test_pdf59_ac6_proof_a_matching_version_passes() -> None:
     assert version_tie_verdict("0.3.1", "0.3.1") == "match"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-117 D6 -- the advisory-job exclusion and its POLARITY, pinned statically.
+#
+# `startup-latency` is advisory (X-1003): `release.yml` and `deploy-website.yml`
+# both call ci.yml wholesale, so an unguarded 13th job would let an advisory red
+# block a PyPI publish AND a Pages publish. The guard is one `workflow_call`
+# input, default true, tested `!= true`. GitHub coerces null AND false to 0, so
+# the opposite polarity (`run_advisory_jobs`, tested `!= false`) is false on
+# every push and PR: the job would silently never run, which is the class this
+# spec exists to end. Text scans only (this module must not import PyYAML); each
+# arm is a pure function of text so its RED is drivable on a mutated copy.
+# --------------------------------------------------------------------------- #
+
+_ADVISORY_JOB: Final[str] = "startup-latency"
+_ADVISORY_INPUT: Final[str] = "skip_advisory_jobs"
+_ADVISORY_IF: Final[str] = "if: ${{ inputs.skip_advisory_jobs != true }}"
+
+
+def _code_lines(lines: list[str]) -> list[str]:
+    return [line for line in lines if not line.strip().startswith("#")]
+
+
+def _workflow_call_block(ci_text: str) -> list[str]:
+    lines = ci_text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line == "  workflow_call:"), None)
+    if start is None:
+        return []
+    block: list[str] = []
+    for line in lines[start + 1 :]:
+        if line and not line.startswith("    "):
+            break
+        block.append(line)
+    return _code_lines(block)
+
+
+def advisory_input_problems(ci_text: str) -> list[str]:
+    """Arm 1: the input exists, is boolean, and defaults to true."""
+    block = _workflow_call_block(ci_text)
+    joined = "\n".join(block)
+    problems: list[str] = []
+    if not re.search(rf"^      {_ADVISORY_INPUT}:\s*$", joined, re.MULTILINE):
+        return [f"on.workflow_call.inputs.{_ADVISORY_INPUT} is not declared"]
+    if not re.search(r"^        type: boolean\s*$", joined, re.MULTILINE):
+        problems.append(f"{_ADVISORY_INPUT} is not `type: boolean`")
+    if not re.search(r"^        default: true\s*$", joined, re.MULTILINE):
+        problems.append(f"{_ADVISORY_INPUT} does not `default: true`")
+    return problems
+
+
+def advisory_job_problems(ci_text: str) -> list[str]:
+    """Arms 2, 5 and 6: the job's shape, exact `if:`, no escape hatch, no -n."""
+    names, blocks = _job_blocks(ci_text)
+    if _ADVISORY_JOB not in names:
+        return [f"job {_ADVISORY_JOB} does not exist"]
+    block = _code_lines(blocks[_ADVISORY_JOB])
+    problems: list[str] = []
+    if names[-1] != _ADVISORY_JOB:
+        problems.append(f"{_ADVISORY_JOB} is not LAST in file order (last: {names[-1]})")
+    if not any(re.match(r"^    runs-on: ubuntu-latest\s*$", line) for line in block):
+        problems.append(f"{_ADVISORY_JOB} does not run on `ubuntu-latest`")
+    if any(re.match(r"^    strategy:", line) for line in block):
+        problems.append(f"{_ADVISORY_JOB} declares a strategy/matrix; it is one serial leg")
+    ifs = [line.strip() for line in block if re.match(r"^    if:", line)]
+    if ifs != [_ADVISORY_IF]:
+        problems.append(f"{_ADVISORY_JOB} `if:` is {ifs!r}, expected exactly [{_ADVISORY_IF!r}]")
+    if any(re.match(r"^\s*continue-on-error:", line) for line in block):
+        problems.append(f"{_ADVISORY_JOB} sets continue-on-error")
+    gating = [_extract_run_and_name(chunk)[0] for chunk in _step_chunks(block) if _is_gating(chunk)]
+    if gating != ["make startup-gate"]:
+        problems.append(
+            f"{_ADVISORY_JOB} gating run steps are {gating!r}, not ['make startup-gate']"
+        )
+    text = "\n".join(block)
+    if re.search(r"PYTEST_XDIST|(?<![\w-])-n\s", text):
+        problems.append(f"{_ADVISORY_JOB} sets xdist env or a `-n` flag of its own")
+    return problems
+
+
+def advisory_set_problems(ci_text: str) -> list[str]:
+    """Arm 3: no job but `startup-latency` reads the input."""
+    names, blocks = _job_blocks(ci_text)
+    return [
+        f"job {name} reads {_ADVISORY_INPUT}"
+        for name in names
+        if name != _ADVISORY_JOB and _ADVISORY_INPUT in "\n".join(_code_lines(blocks[name]))
+    ]
+
+
+def advisory_caller_problems(workflows: dict[str, str]) -> list[str]:
+    """Arm 4: no caller of ci.yml passes `skip_advisory_jobs: false`."""
+    problems: list[str] = []
+    for name, text in sorted(workflows.items()):
+        if "uses: ./.github/workflows/ci.yml" not in text:
+            continue
+        code = "\n".join(_code_lines(text.splitlines()))
+        if re.search(rf"{_ADVISORY_INPUT}[\"']?\s*:\s*[\"']?false", code, re.IGNORECASE):
+            problems.append(f"{name} passes {_ADVISORY_INPUT}: false to ci.yml")
+    return problems
+
+
+def _caller_workflows() -> dict[str, str]:
+    return {path.name: path.read_text() for path in sorted(CI_WORKFLOW.parent.glob("*.yml"))}
+
+
+def test_advisory_input_is_a_boolean_that_defaults_to_true() -> None:
+    assert advisory_input_problems(CI_WORKFLOW.read_text()) == []
+
+
+def test_advisory_job_is_last_ubuntu_only_serial_and_guarded_by_the_exact_if() -> None:
+    assert advisory_job_problems(CI_WORKFLOW.read_text()) == []
+
+
+def test_advisory_set_is_exactly_startup_latency() -> None:
+    assert advisory_set_problems(CI_WORKFLOW.read_text()) == []
+
+
+def test_advisory_no_caller_of_ci_yml_opts_the_job_back_in() -> None:
+    assert advisory_caller_problems(_caller_workflows()) == []
+    assert {"release.yml", "deploy-website.yml"} <= set(_caller_workflows())
+
+
+def test_advisory_arms_detect_each_mutation_they_exist_for() -> None:
+    """The REDs, in-process: each mutation of the real text trips its own arm."""
+    text = CI_WORKFLOW.read_text()
+    assert advisory_input_problems(text.replace("default: true", "default: false", 1))
+    inverted = text.replace(_ADVISORY_INPUT, "run_advisory_jobs").replace("!= true", "!= false")
+    assert any("`if:`" in p for p in advisory_job_problems(inverted))
+    lint_if = text.replace(
+        "  lint:\n    name: lint\n", f"  lint:\n    name: lint\n    {_ADVISORY_IF}\n"
+    )
+    assert advisory_set_problems(lint_if) == ["job lint reads skip_advisory_jobs"]
+    flagged = {
+        "release.yml": (
+            "gate:\n  uses: ./.github/workflows/ci.yml\n  with:\n    skip_advisory_jobs: false\n"
+        )
+    }
+    assert advisory_caller_problems(flagged) == [
+        "release.yml passes skip_advisory_jobs: false to ci.yml"
+    ]
+    coe = text.replace(
+        f"    {_ADVISORY_IF}\n", f"    {_ADVISORY_IF}\n    continue-on-error: true\n"
+    )
+    assert any("continue-on-error" in p for p in advisory_job_problems(coe))

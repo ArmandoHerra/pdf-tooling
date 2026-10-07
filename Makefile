@@ -41,7 +41,7 @@ endif
 .PHONY: help build install run doctor test test-e2e cover fmt fmt-check lint \
         typecheck vulncheck sast secret-scan licenses samples-scratch samples-check \
         samples-gate engines-gate engines-hidden licenses-check artifacts-check \
-        gate-timing docs-gate website website-audit shim-reap ci clean verify
+        gate-timing startup-gate docs-gate website website-audit shim-reap ci clean verify
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -303,6 +303,9 @@ GATE_TIMING_ARGS ?= --target ci --cache-state warm
 
 gate-timing: ## Measure a gate target under the PDF-29 protocol; appends one record to perf/gate-timings.jsonl
 	$(UV_RUN) python scripts/measure_gate.py $(GATE_TIMING_ARGS) --baseline
+
+startup-gate: ## Run the --help wall-clock budget serially, as the advisory `startup-latency` CI job does (PDF-117). NOT a prereq of `ci`
+	$(UV_RUN) python scripts/startup_gate.py
 
 licenses-check: ## Reproduce the license-gate CI job's freshness diffs locally (needs-clean-tree)
 	$(MAKE) licenses

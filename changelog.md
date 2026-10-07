@@ -20,6 +20,17 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-117] Gate `--help` wall-clock latency in one dedicated, advisory CI job — 2026-10-07
+
+- **New advisory job `startup-latency`** (last in `ci.yml`, ubuntu only, serial): runs `make startup-gate`, a wrapper (`scripts/startup_gate.py`) around `tests/test_cli_spine.py::test_help_stays_within_the_startup_budget`. The test abstains under xdist, so until now it ran nowhere in CI; a `--help` regression that adds no import (the `57156e22c0` class) passed every arm the product ran.
+- **The wrapper never trusts a skip.** A load abstention (`host not quiet:`) is waited out for at most 7 attempts 20 s apart and then exits 1 `ABSTAINED -- not measured`; any other skip, a missing testcase or a failure exits 1 at once and is never retried. Bare `pytest -n 0` exits 0 with `1 skipped` on a loaded host.
+- **Advisory by construction, not by `continue-on-error`.** One new `workflow_call` input `skip_advisory_jobs` (boolean, default `true`) with `if: ${{ inputs.skip_advisory_jobs != true }}` skips the job when `release.yml` or `deploy-website.yml` call `ci.yml` as their gate, so an advisory red cannot block a PyPI or Pages publish. Neither caller is edited. Branch protection is untouched (the 20 required contexts are unchanged).
+- **`STARTUP_BUDGET_MS` re-derived on the runner:** 325.0 -> 375.0. Fastest-of-5, 20 trials x 15 fresh `ubuntu-latest` VMs (N 300), pooled p95 183.459 ms, 2 x p95 rounded up to 25 ms; pooled max 187.6 ms is 0.50 of the budget. Still one constant; its block carries the measurement and the sensitivity band. Supersedes the PDF-29 workstation derivation.
+- **Timeout** 5 min (floor): p95 42.2 s over 15 green job instances, 3 x = 2.1 min.
+- **Structural inventories move by one member:** `ci.yml` jobs 12 -> 13, check legs 19 -> 20, gating steps 22 -> 23 (`gate-parity.toml`, `_PDF02_EXPECTED_JOBS`, `EXPECTED_JOB_COUNT`; `test_ci_yml_parses_to_exactly_thirteen_jobs` renamed).
+- **Four pinned inventories re-pointed, each for a stated reason:** the changelog-head pin in `tests/test_website_diagrams.py` (PDF-110 -> PDF-117, the arm's own docstring says the next entry re-pins it), `MAKEFILE_TARGETS` (+`startup-gate`), the bare-spelling carrier count for `tests/test_cli_spine.py` (3 -> 2, the replaced evidence block carried one citation), and `tests/test_merge_gate.py`'s CONTRIBUTING reconciliation, which now excludes the advisory job: CONTRIBUTING lists what is required, and `startup-latency` is not.
+- **Prose made true:** five "does not run in CI" sentences now name the one advisory job, and Section 6's declared blind spots gain entry 7, post-import runtime latency on the `--help` path, which only this job holds.
+
 ## [PDF-115] Refuse to write a decrypted output from an encrypted input unless --allow-decrypted-output — 2026-10-06
 
 - **The default is now the safe one (OR-26, X-1001):** the thirteen verbs that write an unencrypted output (`rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`) refuse an encrypted input before anything is read for a password or written. The run exits `5` (`kind: "refused"`) with a message naming every encrypted input; no output, `.bak` or temp file is made, a mixed batch is refused whole, `--in-place` leaves the input byte-identical, and `--dry-run` predicts the identical envelope.
