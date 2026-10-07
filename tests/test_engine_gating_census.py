@@ -79,27 +79,30 @@ from __future__ import annotations
 import ast
 import collections
 import importlib.util
+import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final, NamedTuple
 
 import pytest
 
+import registry
 from registry import engine_blind_verbs
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 
 #: `registry.engine_blind_verbs()`, memoized PER PROCESS.
 #:
-#: The derivation is an `ast` walk of the import graph under `src/` and is NOT
-#: memoized at its source: measured at ~2.0 s per call, and this module has four
-#: callers. The walk is pure over a source tree pytest is not editing mid-run, so
-#: caching it here changes no answer and keeps this instrument's cost to one walk
-#: per worker instead of four. (`tests/test_cli_contract.py:97` already pays one
-#: at module import on every worker; a cache at the source would make this free,
-#: and is FILED rather than taken here — `registry.py` is not this item's file.)
+#: The derivation is an `ast` walk of the import graph under `src/`. `PDF-114` D1
+#: caches the per-file parses AT THE SOURCE (`registry._PARSE_MEMO`, keyed on
+#: path + mtime + size), which is what took one cold derivation from ~1.4 s to
+#: ~0.2 s. The WHOLE-TREE answer is deliberately not cached there (a directory
+#: answer keyed on file content is the wrong staleness surface), so this module
+#: keeps its own per-process memo of it: the walk is pure over a source tree
+#: pytest is not editing mid-run, and one warm call is still cheaper than four.
 _MEMOIZED_VERBS: list[tuple[str, ...]] = []
 
 
@@ -706,15 +709,179 @@ class Census(NamedTuple):
         return collections.Counter(member.arm.module for member in self.ungated)
 
 
-@pytest.fixture(scope="session")
-def census(request: pytest.FixtureRequest) -> Census:
-    """The run's own collected items, censused once per worker."""
-    verbs = engine_blind_verb_population()
-    collected = arms(request.session.items)
+def build_census(
+    items: Iterable[pytest.Item], derive_verbs: Callable[[], tuple[str, ...]]
+) -> Census:
+    """The census, built from *items* and whatever *derive_verbs* returns.
+
+    The session fixture passes the per-process memo. (`PDF-114` D2 first had the
+    CPU-cost arm call this with the uncached derivation too; `X-1018` narrowed
+    that arm to the cold derivation alone, so this reduction is not asserted.)
+    """
+    verbs = derive_verbs()
+    collected = arms(items)
     return Census(
         verbs=verbs,
         collected_ids=frozenset(arm.nodeid for arm in collected),
         members=population(collected, verbs),
+    )
+
+
+@pytest.fixture(scope="session")
+def census(request: pytest.FixtureRequest) -> Census:
+    """The run's own collected items, censused once per worker."""
+    return build_census(request.session.items, engine_blind_verb_population)
+
+
+# --------------------------------------------------------------------------- #
+# The cost of the census (PDF-82 AC13, closed by PDF-114 D1-D3).
+# --------------------------------------------------------------------------- #
+
+#: MEASUREMENT BLOCK (PDF-114 D3) -- figures, not bounds. The only asserted
+#: bounds are the two arms below. Base `9809a7f`; HOST the 32-core dev workstation
+#: (Linux 7.0), SHARED with other sessions, so every loadavg is stated and wall
+#: figures are inflated by it; pinned with `taskset -c 19` where noted.
+#:
+#: Ratchet arm SETUP, 5 reps, `-n 0`, `-p no:randomly`, paired with
+#: `tests/test_cli_contract.py` (an import-time `engine_blind_verbs()` caller):
+#:   INTERPRETER 3.13.15, BEFORE D1 (base `9809a7f`): 1.48 / 1.48 / 1.54 / 1.51 /
+#:     1.51 s, MEDIAN 1.51 s, loadavg 10.1 -> 6.2 (the 1.42 s the spec measured
+#:     at loadavg 0.85 reproduces within 6 %).
+#:   INTERPRETER 3.13.15, AFTER D1: 0.16 / 0.16 / 0.16 / 0.16 / 0.16 s, MEDIAN
+#:     0.16 s, loadavg 5.7 -> 4.7 (the spec's prototype figure was 0.24 s at
+#:     loadavg 4.4-5.4; this one is lower because the paired caller has already
+#:     filled the per-file memo, which is the point of caching at the source).
+#:   The same arm with NO import-time caller (the census file alone, so the first
+#:     derivation in the process is this arm's), 3.13.15: 0.74 / 0.51 / 0.46 s,
+#:     MEDIAN 0.51 s at loadavg 55 -- wall, and inflated by that load.
+#:   INTERPRETER 3.12.3 (paired, 3 reps, loadavg 42-53): 1.58 / 0.56 / 0.54 s,
+#:     median 0.56 s.  INTERPRETER 3.11.15 (paired, 3 reps, loadavg 6-39): 0.71 /
+#:     0.76 / 0.73 s, median 0.73 s.  INTERPRETER 3.14: NOT AVAILABLE on this host.
+#:
+#: One derivation, `registry.engine_blind_verbs()`, `time.process_time()` and
+#: `perf_counter()` MEDIAN of 5, memo cleared before each cold call, 137 uncached
+#: parses cold and 0 warm, pinned to core 19, loadavg 11.8-12.6:
+#:   3.13.15: cold CPU 0.278 s / wall 0.278 s;  warm CPU 0.112 s / wall 0.112 s.
+#:   3.12.3:  cold CPU 0.318 s / wall 0.318 s;  warm CPU 0.133 s / wall 0.133 s.
+#:   3.11.15: cold CPU 0.266 s / wall 0.266 s;  warm CPU 0.088 s / wall 0.088 s.
+#:
+#: A FULL session (`pytest --collect-only tests`, 6292 items, 161 population
+#: members, 3.13.15, loadavg 105 -- the host was saturated, so these are
+#: inflated: one derivation measured 0.63 s CPU there against 0.28 s quiet, x2.2):
+#:   `build_census(session.items, engine_blind_verbs)` cold memo AND cold
+#:   `_LEXICAL`: 1.955 s CPU; the same call again (lexical walk warm): 1.229 s.
+#:   Scaled by that x2.2 -- an ESTIMATE, not a measurement -- about 0.9 s and
+#:   0.55 s on a quiet host. So the whole once-per-worker setup is under one
+#:   second only narrowly in a full session.
+#:
+#: X-1018 (2026-10-07): the per-item reduction (`build_census` over
+#:   `session.items`, 6292 items / 161 members / 137 parse misses) is RECORDED
+#:   HERE AND NO LONGER ASSERTED. The arm used to charge it and measured 1.160 s
+#:   CPU in a full 32-worker `make ci` at loadavg 77-94 (green 3/3 alone): the
+#:   reduction scales with suite size and `process_time` inflates on a saturated
+#:   SMT host. The arm now charges only the cold derivation (the cost AC13's
+#:   ledger row `292f62035c` names) as the minimum of up to 3 cold reps; its own
+#:   figures on the final tree are in the line below.
+#:   ARM, final tree, 3.13.15, cold CPU x5 (min is what is asserted): loadavg 93:
+#:   0.633 / 0.636 / 0.708 / 0.583 / 0.538 s; with 32 extra busy loops, loadavg
+#:   113: 0.656 / 0.656 / 0.634 / 0.671 / 0.688 s; 137 parse misses cold. No
+#:   quiet-host figure: the host did not drop below loadavg 77 during this work.
+#:
+#:   BEFORE D1 the cold call cost 1.4 s with 859 parses, and a second call cost
+#:   the same again (nothing was cached). A warm call is NOT the spec's 0.026 s:
+#:   the parse is cached, the `_dotted_to_path` filesystem probes and the
+#:   `_reaches_any` walk are not, and they are about 0.1 s here.
+
+#: PDF-82 AC13's own figure, unchanged: "under one second".
+CENSUS_CPU_BUDGET_SECONDS: Final[float] = 1.0
+
+
+_CPU_ARM_MAX_REPS: Final[int] = 3
+
+
+def test_the_census_costs_under_one_second_of_cpu() -> None:
+    """PDF-82 AC13: the cold engine-blind derivation costs < 1 s of CPU.
+
+    WHAT IS CHARGED (`X-1017` / `X-1018`): only the cold derivation,
+    `registry.clear_parse_memo()` then `engine_blind_verbs()` called directly
+    (`_MEMOIZED_VERBS` is bypassed). That is the cost AC13's ledger row
+    (`292f62035c`) names: "`registry.engine_blind_verbs()` is uncached (`B-350`)".
+    The per-collected-item reduction in `build_census` scales with suite size and
+    is RECORDED in the measurement block above, not asserted here.
+
+    HOW IT IS MEASURED: the minimum of up to `_CPU_ARM_MAX_REPS` cold reps, each
+    preceded by `clear_parse_memo()` (the memo is the only per-call cache the
+    derivation has, so every rep pays exactly what rep 1 pays), stopping at the
+    first rep under budget. Contention only ever ADDS CPU seconds (shared caches,
+    SMT siblings, frequency), so the minimum is the least-contaminated estimate of
+    the intrinsic cost: the `timeit` convention, not a retry. CPU time and not
+    wall, so a wall-clock absolute (the `B-214` / `B-305` trap) is not the gate.
+    The deterministic primary gate is the parse-count arm below.
+
+    RED: revert `registry`'s per-path memo (`if key in _PARSE_MEMO:` ->
+    `if False and key in _PARSE_MEMO:`) -> every rep is ~1.4 s -> red naming every
+    rep. (A `time.sleep` plant cannot red this, and should not: sleeping is not cost.)
+    """
+    reps: list[float] = []
+    misses = 0
+    for _ in range(_CPU_ARM_MAX_REPS):
+        registry.clear_parse_memo()
+        started = time.process_time()
+        engine_blind_verbs()
+        reps.append(time.process_time() - started)
+        misses = registry.uncached_parse_count()
+        if reps[-1] < CENSUS_CPU_BUDGET_SECONDS:
+            break
+    assert min(reps) < CENSUS_CPU_BUDGET_SECONDS, (
+        f"the cold engine-blind derivation cost {', '.join(f'{r:.3f}' for r in reps)} s "
+        f"of CPU over {len(reps)} cold rep(s) (minimum {min(reps):.3f} s) against a budget "
+        f"of {CENSUS_CPU_BUDGET_SECONDS:.1f} s (PDF-82 AC13); parse-memo misses in the "
+        f"last cold rep: {misses}; loadavg {os.getloadavg()}"
+    )
+
+
+def test_the_derivation_parses_each_module_at_most_once_per_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The load-immune structural pin behind the CPU arm (PDF-114 D2).
+
+    Two readers parse a module, so at most `2 * N` misses for `N` modules, and a
+    second derivation adds none. Counts are exact and carry no clock.
+
+    RED: revert the memo -> the first call alone performs 664 + 195 parses and
+    the second adds as many again. RED (staleness): drop `st_mtime_ns` from the
+    key -> the touched-copy check below sees no miss.
+    """
+    modules = len(list(registry.SRC.rglob("*.py")))
+    registry.clear_parse_memo()
+    first = engine_blind_verbs()
+    after_first = registry.uncached_parse_count()
+    second = engine_blind_verbs()
+    after_second = registry.uncached_parse_count()
+    assert first == second
+    assert after_first <= 2 * modules, (
+        f"one cold derivation performed {after_first} uncached parses over {modules} module(s); "
+        f"the bound is one per module per reader ({2 * modules})"
+    )
+    assert after_second == after_first, (
+        f"a second derivation performed {after_second - after_first} further uncached parse(s); "
+        f"the memo must answer every one"
+    )
+
+    # Staleness: an edited file in a tree that SRC points at must miss, not answer stale.
+    module = tmp_path / "pkg_mod.py"
+    module.write_text("from pdf_tooling.cli import common\n")
+    monkeypatch.setattr(registry, "SRC", tmp_path)
+    registry.clear_parse_memo()
+    registry._pdf_tooling_module_imports(module)
+    registry._pdf_tooling_module_imports(module)
+    assert registry.uncached_parse_count() == 1, "an unchanged file must parse exactly once"
+    stat = module.stat()
+    os.utime(module, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    registry._pdf_tooling_module_imports(module)
+    assert registry.uncached_parse_count() == 2, (
+        "a file whose mtime moved was answered from the memo: the key does not carry "
+        "st_mtime_ns, so an edited module would be read stale"
     )
 
 

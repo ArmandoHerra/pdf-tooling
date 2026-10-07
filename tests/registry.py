@@ -91,7 +91,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, TypeVar
 
 import typer
 
@@ -308,8 +308,56 @@ def _dotted_to_path(dotted: str) -> Path | None:
     return None
 
 
+#: PDF-114 D1: the per-path parse memo behind the two per-module readers.
+#:
+#: Key `(reader name, str(path), st_mtime_ns, st_size)` -> the reader's parse-only
+#: result. The path and the file's identity are in the key because
+#: `tests/unit/test_registry.py` points `SRC` at tmp trees and copy-and-plant
+#: tests write edited copies; a key on the reader alone would answer stale. Only
+#: the pure `ast` read is cached: the `_dotted_to_path` filter in
+#: `_pdf_tooling_module_imports` consults the live `SRC` on every call.
+_PARSE_MEMO: dict[tuple[str, str, int, int], object] = {}
+_PARSE_MISSES: list[int] = [0]
+_PARSE_LOCK = threading.Lock()
+
+
+def clear_parse_memo() -> None:
+    """Forget every memoized parse and zero :func:`uncached_parse_count`."""
+    with _PARSE_LOCK:
+        _PARSE_MEMO.clear()
+        _PARSE_MISSES[0] = 0
+
+
+def uncached_parse_count() -> int:
+    """How many per-module parses missed the memo since the last clear."""
+    return _PARSE_MISSES[0]
+
+
+_T = TypeVar("_T")
+
+
+def _memoized_parse(reader: str, path: Path, compute: Callable[[Path], _T]) -> _T:
+    stat = path.stat()
+    key = (reader, str(path), stat.st_mtime_ns, stat.st_size)
+    with _PARSE_LOCK:
+        if key in _PARSE_MEMO:
+            return _PARSE_MEMO[key]  # type: ignore[return-value]
+    value = compute(path)
+    with _PARSE_LOCK:
+        _PARSE_MEMO[key] = value
+        _PARSE_MISSES[0] += 1
+    return value
+
+
 def _imports_and_references(path: Path) -> tuple[set[str], bool]:
     """One module's own `pdf_tooling.*` imports, and whether it names *AtomicWriter*."""
+    imported, references_writer = _memoized_parse(
+        "_imports_and_references", path, _parse_imports_and_references
+    )
+    return set(imported), references_writer
+
+
+def _parse_imports_and_references(path: Path) -> tuple[set[str], bool]:
     tree = ast.parse(path.read_text(), filename=str(path))
     imported: set[str] = set()
     references_writer = False
@@ -438,6 +486,15 @@ def _pdf_tooling_module_imports(path: Path) -> set[str]:
     Same `ast`-over-source convention as every other walk in this module; never
     a real import.
     """
+    found = _memoized_parse("_pdf_tooling_module_imports", path, _parse_module_imports)
+    return {
+        dotted
+        for dotted in found
+        if dotted not in _IMPORT_GRAPH_AGGREGATORS and _dotted_to_path(dotted) is not None
+    }
+
+
+def _parse_module_imports(path: Path) -> frozenset[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
     found: set[str] = set()
     for node in ast.walk(tree):
@@ -450,11 +507,7 @@ def _pdf_tooling_module_imports(path: Path) -> set[str]:
             found.update(f"{node.module}.{alias.name}" for alias in node.names)
         elif isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names if alias.name.startswith("pdf_tooling"))
-    return {
-        dotted
-        for dotted in found
-        if dotted not in _IMPORT_GRAPH_AGGREGATORS and _dotted_to_path(dotted) is not None
-    }
+    return frozenset(found)
 
 
 def _reaches_any(entry_module: str, targets: frozenset[str], *, max_hops: int) -> bool:

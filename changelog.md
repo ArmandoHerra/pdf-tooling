@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-114] Close PDF-82 AC13 and PDF-86 AC2 — 2026-10-06
+
+- **PDF-82 AC13, the census arm is genuinely under one second:** `tests/registry.py` memoizes the two per-module `ast` readers on `(reader, path, st_mtime_ns, st_size)`, so one `engine_blind_verbs()` derivation goes from 859 uncached parses to 137 and the ratchet arm's setup from a 1.51 s median to 0.16 s (3.13, 5 reps, loadavg 10 -> 5). Two standing arms pin it: `test_the_census_costs_under_one_second_of_cpu` (CPU time of the cold `engine_blind_verbs()` derivation alone, minimum of up to 3 cold reps, the budget is AC13's own one second; the per-item census reduction is recorded in the measurement block, not asserted -- `X-1018`) and `test_the_derivation_parses_each_module_at_most_once_per_reader` (a load-immune count, plus an mtime-staleness check). The measurement block sits above them.
+- **PDF-86 AC2, the halves reach the `-ra` line:** `startup_cost_lead` puts `numerator x.. / denominator x.. -> the <HALF> carries this red;` at the head of the CALIBRATED red's first line. A real inner pytest in `tests/test_startup_message_short_summary.py` asserts it on the `FAILED` line at 200 columns (non-CI) and under `CI=true`, and records that no message fits below 100 columns for this node id.
+- **Audit rows re-pointed:** `make verify SPEC=PDF-82` AC13 and `make verify SPEC=PDF-86` AC2 are now `locally driven`, each with a driven red; their `PENDING-LEDGER` findings are cleared.
+- **No budget moved, no `src/` change:** every ceiling, ledger and the coverage floor are byte-identical; `STARTUP_COST_RATIO_CEILING_PER_MILLE` stays 26_500.
+
 ## [PDF-120] Harden the LibreOffice adapter: no link updates, no remote loads, an absolute operand — 2026-10-06
 
 - **Linked resources are no longer loaded:** `ScratchDir(seed=...)` (the write chokepoint) pre-seeds the throwaway profile's `user/registrymodifications.xcu` with bytes the adapter supplies via the new `OfficeConverter.scratch_seed()`. `BlockUntrustedRefererLinks=true` is the load-bearing key (measured on LibreOffice 24.2.7: a linked image no longer makes `soffice` contact a URL the document names, and a `file://` link no longer renders a local file into the PDF); four more keys (link updates never, active content off, macros off) are defence in depth with no observable red on that engine.
