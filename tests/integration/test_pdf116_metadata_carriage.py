@@ -780,7 +780,10 @@ def test_ac16_the_upgrading_row_names_the_nine_verbs_and_the_clear_all_recipe() 
 def test_ac17_the_read_seam_record_is_exact() -> None:
     from test_read_seams import READ_SEAM_RESIDUE_LEDGER
 
-    last, previous = READ_SEAM_RESIDUE_LEDGER[-1], READ_SEAM_RESIDUE_LEDGER[-2]
+    # Located by spec, not by position: a later record (PDF-119's `down`) is appended
+    # after PDF-116's, and a landed record is never edited -- so this pins ITS record.
+    at = next(i for i, r in enumerate(READ_SEAM_RESIDUE_LEDGER) if r.spec == "PDF-116")
+    last, previous = READ_SEAM_RESIDUE_LEDGER[at], READ_SEAM_RESIDUE_LEDGER[at - 1]
     assert (last.spec, last.direction) == ("PDF-116", "up")
     assert last.ruling.strip()
     key = "pdf_tooling/adapters/pypdf_structure.py"

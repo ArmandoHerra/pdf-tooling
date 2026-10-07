@@ -49,6 +49,8 @@ from typing import Final
 
 import pytest
 
+import ratchet
+from ceiling_register import ceiling
 from registry import REPO_ROOT
 
 SRC: Final[Path] = REPO_ROOT / "src"
@@ -61,13 +63,12 @@ _PRAGMA: Final[re.Pattern[str]] = re.compile(r"#\s*pragma:\s*no cover(?P<reason>
 
 #: MEASURED at `2d19bcb` and again at this spec's own implementation HEAD, not
 #: inherited: `grep -rc "pragma: no cover" src/ | awk -F: '{s+=$2} END {print s}'`
-#: returns 46. This ceiling may be LOWERED freely by anyone who removes a
-#: pragma. RAISING it is a decision, not a diff: state in the commit body why a
-#: new line cannot be covered, per `PDF-06:236`'s anti-gaming rule extended to
-#: the lever that rule left open. (A test cannot read a commit body -- the
-#: mechanism is the ceiling; the process rule is this comment, and it is the
-#: same shape as the `fail_under` rule it extends.)
-PRAGMA_CEILING: Final[int] = 46
+#: returns 46. PDF-119: the value lives in `tests/ceiling_register.py` and the
+#: arm below is EXACT, so removing a pragma needs a `down` record there (slack is
+#: a red) and RAISING it needs a ruled `up` record: a decision, not a diff. State
+#: in the commit body why a new line cannot be covered, per `PDF-06:236`'s
+#: anti-gaming rule extended to the lever that rule left open.
+PRAGMA_CEILING: Final = ceiling("test_coverage_policy.py::PRAGMA_CEILING")
 
 #: Pragmas that carry no reason. Empty is the goal; each entry is a FINDING
 #: filed against `src/`, never a fix made here -- `PDF-17`'s `src/` budget is
@@ -118,11 +119,18 @@ def unreasoned_pragmas(sites: list[tuple[str, int, str, str]]) -> list[tuple[str
 
 def test_the_pragma_total_has_not_been_raised() -> None:
     sites = pragma_sites(SRC)
+    ratchet.report("test_coverage_policy.py::PRAGMA_CEILING", len(sites))
     assert len(sites) <= PRAGMA_CEILING, (
         f"{len(sites)} `# pragma: no cover` occurrences under src/, above the pinned ceiling "
         f"of {PRAGMA_CEILING}. A pragma excludes lines from measurement exactly as an `omit` "
-        "excludes files, and PDF-06:236's anti-gaming rule forbids the latter. Lowering this "
-        "ceiling is free; raising it is a decision that belongs in the commit body."
+        "excludes files, and PDF-06:236's anti-gaming rule forbids the latter. Raising it is "
+        "a ruled `up` record in tests/ceiling_register.py, and a decision that belongs in "
+        "the commit body."
+    )
+    assert len(sites) == PRAGMA_CEILING, (
+        f"slack: the count fell to {len(sites)}; append a `down` record setting "
+        f"test_coverage_policy.py::PRAGMA_CEILING to {len(sites)} in tests/ceiling_register.py "
+        f"(the ceiling is {PRAGMA_CEILING}; headroom is what a later unrecorded rise spends)"
     )
 
 

@@ -39,6 +39,9 @@ from typing import Final
 
 import pytest
 
+import ratchet
+from ceiling_register import ceiling
+
 TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
@@ -195,7 +198,7 @@ def _enclosing_function_names(tree: ast.AST) -> dict[ast.AST, str]:
 #: old name claimed "MEASURED at landing" beside a value recomputed on every
 #: import, and a constant whose NAME asserts a provenance it does not have is how
 #: this defect stayed invisible for fifteen days and fourteen rises.
-SWEEP_1_CEILING: Final[int] = 79
+SWEEP_1_CEILING: Final = ceiling("test_secret_leak_sweeps.py::SWEEP_1_CEILING")
 
 
 def _sweep_1_failure_message(candidates: tuple[tuple[str, int, str], ...], ceiling: int) -> str:
@@ -215,12 +218,13 @@ def _sweep_1_failure_message(candidates: tuple[tuple[str, int, str], ...], ceili
     return (
         f"{len(candidates)} unexempted operand-pinning assertions in the swept tree, above "
         f"the frozen ceiling of {ceiling} measured at {BASELINES_MEASURED_AT}.\n"
-        "Two responses are sanctioned and no third is. If you REMOVED a pin, lower the "
-        "ceiling -- that is free and needs no ceremony. If you ADDED one, that is a "
-        "recorded decision: say in the commit body why this assertion must pin a "
-        "caller-supplied operand present in captured output (B-073), and raise the ceiling "
-        "in the same commit. Raising it to reach green, with no reason beside it, is "
-        "precisely the act this ceiling exists to prevent.\n"
+        "Two responses are sanctioned and no third is. If you REMOVED a pin, append a "
+        "`down` record to tests/ceiling_register.py setting "
+        "test_secret_leak_sweeps.py::SWEEP_1_CEILING to the new count. If you ADDED one, "
+        "that is a recorded decision: say in the commit body why this assertion must pin a "
+        "caller-supplied operand present in captured output (B-073), and append a ruled "
+        "`up` record in the same commit. Raising it to reach green, with no ruling beside "
+        "it, is precisely the act this ceiling exists to prevent.\n"
         f"Every live candidate, sorted and untruncated ({len(candidates)}):\n  {inventory}"
     )
 
@@ -237,7 +241,13 @@ def test_sweep_1_b073_the_live_count_does_not_exceed_the_frozen_ceiling() -> Non
     against.
     """
     current = _sweep_1_candidates()
+    ratchet.report("test_secret_leak_sweeps.py::SWEEP_1_CEILING", len(current))
     assert len(current) <= SWEEP_1_CEILING, _sweep_1_failure_message(current, SWEEP_1_CEILING)
+    assert len(current) == SWEEP_1_CEILING, (
+        f"slack: the count fell to {len(current)}; append a `down` record setting "
+        f"test_secret_leak_sweeps.py::SWEEP_1_CEILING to {len(current)} in "
+        f"tests/ceiling_register.py (the ceiling is {SWEEP_1_CEILING})"
+    )
 
 
 def test_sweep_1_b073_the_safety_paths_contract_is_exempted_by_convention(tmp_path: Path) -> None:
@@ -354,9 +364,10 @@ def test_sweep_1_b073_planted_pins_raise_the_count_and_every_ONE_is_named(
 def test_sweep_1_b073_removing_a_pin_is_never_punished(tmp_path: Path) -> None:
     """PDF-69 AC2's second direction, SHIPPED. One direction alone proves
     nothing: the arm above shows the ratchet fires, this one shows improvement
-    is not punished. A ratchet that reds when debt is PAID DOWN is not a fix, it
-    is the defect PDF-70 spent a whole item removing from two sibling
-    instruments, newly installed here.
+    is not punished by the COMPARISON. (PDF-119 D3: the live arm is now exact, so a
+    fall is a red until a `down` record writes it down. That asks for a record, not
+    for the debt to be put back; the `<=` here is the unpunished half and the
+    exact arm is the unrecorded-fall half.)
 
     Driven through the same `<=` comparison the live arm makes, against a
     ceiling frozen at the larger tree's count.
@@ -584,16 +595,14 @@ def _identity_key(location: str) -> str:
 #: is to WIRE the symbol or FILE it, never to widen the ceiling to accommodate
 #: it. `_sweep_2_candidates` is byte-unchanged in what it detects; only what its
 #: result is compared against has moved.
-SWEEP_2_GENUINE_CEILING: Final[tuple[str, ...]] = (
-    "src/pdf_tooling/ops/merge.py::BOOKMARK_MODES",
-    "src/pdf_tooling/ops/metadata.py::CLEARABLE_FIELDS",
-    "src/pdf_tooling/ops/metadata.py::SETTABLE_FIELDS",
-)
+SWEEP_2_GENUINE_CEILING: Final = ceiling("test_secret_leak_sweeps.py::SWEEP_2_GENUINE_CEILING")
 
 #: The `to_dict()`-only bucket (D6 item 4), frozen the same way and EMPTY at
 #: `BASELINES_MEASURED_AT`. An empty ceiling under subset is the sharpest form
 #: this instrument takes: any arrival at all reds, and naming it costs nothing.
-SWEEP_2_DEAD_BUT_HONEST_CEILING: Final[tuple[str, ...]] = ()
+SWEEP_2_DEAD_BUT_HONEST_CEILING: Final = ceiling(
+    "test_secret_leak_sweeps.py::SWEEP_2_DEAD_BUT_HONEST_CEILING"
+)
 
 
 def _sweep_2_live(bucket: str) -> tuple[str, ...]:
@@ -626,6 +635,24 @@ def sweep_2_arrivals(
     )
 
 
+#: bucket -> the register binding that freezes it.
+_SWEEP_2_KEYS: Final[dict[str, str]] = {
+    "genuine": "SWEEP_2_GENUINE_CEILING",
+    "dead-but-honest": "SWEEP_2_DEAD_BUT_HONEST_CEILING",
+}
+
+
+def sweep_2_slack(
+    live: Sequence[tuple[str, str]], bucket: str, ceiling: Sequence[str]
+) -> list[str]:
+    """Frozen identities in *ceiling* that are NOT live in *bucket*, sorted
+    (PDF-119 D3). The other half of set EQUALITY: :func:`sweep_2_arrivals` is the
+    rising half, and only both together make an unrecorded fall a red. Pure over
+    its parameters, like its sibling."""
+    present = {_identity_key(location) for location, kind in live if kind == bucket}
+    return sorted(set(ceiling) - present)
+
+
 def test_sweep_2_b074_no_documented_but_unread_symbol_has_arrived() -> None:
     """AC12, repaired by PDF-69 -- fails when a symbol documented as
     behaviour-changing that nothing reads arrives in either bucket.
@@ -636,20 +663,45 @@ def test_sweep_2_b074_no_documented_but_unread_symbol_has_arrived() -> None:
     would have fired on the three findings being FIXED.
     """
     live = _sweep_2_candidates()
-    for bucket, ceiling in (
+    for bucket, frozen in (
         ("genuine", SWEEP_2_GENUINE_CEILING),
         ("dead-but-honest", SWEEP_2_DEAD_BUT_HONEST_CEILING),
     ):
-        arrivals = sweep_2_arrivals(live, bucket, ceiling)
+        ratchet.report(
+            f"test_secret_leak_sweeps.py::{_SWEEP_2_KEYS[bucket]}",
+            sorted({_identity_key(loc) for loc, kind in live if kind == bucket}),
+        )
+        arrivals = sweep_2_arrivals(live, bucket, frozen)
         assert arrivals == [], (
             f"{len(arrivals)} '{bucket}' symbol(s) documented as behaviour-changing that "
             f"nothing reads have arrived since {BASELINES_MEASURED_AT}, each shown with its "
             "LIVE line number:\n  " + "\n  ".join(arrivals) + "\n"
-            f"Frozen identities in this bucket ({len(ceiling)}): {list(ceiling)}.\n"
+            f"Frozen identities in this bucket ({len(frozen)}): {list(frozen)}.\n"
             "B-074's answer is to WIRE the symbol or FILE it to the project-manager; "
             "widening this ceiling to reach green is the act it exists to prevent. "
-            "Removing a key because the symbol is now read is free."
+            "Removing a key because the symbol is now read is a `down` record."
         )
+        slack = sweep_2_slack(live, bucket, frozen)
+        assert slack == [], (
+            f"slack: {len(slack)} frozen '{bucket}' identit(ies) are no longer live: {slack}. "
+            f"Append a `down` record to tests/ceiling_register.py setting "
+            f"test_secret_leak_sweeps.py::{_SWEEP_2_KEYS[bucket]} to the live set "
+            "(a symbol that is now read, or gone, is debt paid; the fall must be recorded)."
+        )
+
+
+def test_sweep_2_slack_is_a_red_and_an_exact_set_is_not() -> None:
+    """PDF-119 D3, both directions, on synthetic populations: a frozen identity that is
+    no longer live is slack; an equal set is not; an arrival is not slack."""
+    live = [("src/a.py:3 ALIVE", "genuine")]
+    assert sweep_2_slack(live, "genuine", ("src/a.py::ALIVE",)) == []
+    assert sweep_2_slack(live, "genuine", ("src/a.py::ALIVE", "src/a.py::GONE")) == [
+        "src/a.py::GONE"
+    ]
+    assert sweep_2_slack(live, "dead-but-honest", ("src/a.py::ALIVE",)) == ["src/a.py::ALIVE"]
+    assert (
+        sweep_2_slack([*live, ("src/a.py:9 NEW", "genuine")], "genuine", ("src/a.py::ALIVE",)) == []
+    )
 
 
 def test_sweep_2_b074_f1_f2_f3_are_found() -> None:
@@ -862,6 +914,22 @@ def _is_literal_display(node: ast.expr | None) -> bool:
     return False
 
 
+def _is_register_lookup(node: ast.expr | None) -> bool:
+    """``ceiling("<key>")`` -- PDF-119 D2. The value is WRITTEN DOWN in the append-only
+    register (`tests/ceiling_register.py`), under immutable records and a ruling
+    for every raise, so it is the committed-literal's successor and not a
+    derivation: a lookup of a constant string key, nothing computed."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "ceiling"
+        and len(node.args) == 1
+        and not node.keywords
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    )
+
+
 def _called_name(func: ast.expr) -> str:
     if isinstance(func, ast.Name):
         return func.id
@@ -903,7 +971,7 @@ def computed_baseline_complaints(
             if not isinstance(target, ast.Name) or target.id not in required:
                 continue
             bound.add(target.id)
-            if not _is_literal_display(node.value):
+            if not (_is_literal_display(node.value) or _is_register_lookup(node.value)):
                 shape = type(node.value).__name__ if node.value is not None else "nothing"
                 complaints.append(
                     f"line {node.lineno}: {target.id} is bound to an `ast.{shape}`, not to a "
@@ -972,6 +1040,23 @@ def test_the_shape_checker_accepts_a_module_that_writes_its_baselines_down() -> 
     everything would pass every red case below and be deleted rather than fixed
     the first time it fired on honest code."""
     assert computed_baseline_complaints(_shape_fixture()) == []
+
+
+def test_the_shape_checker_accepts_a_baseline_written_down_in_the_register() -> None:
+    """PDF-119: the three ceilings moved into `tests/ceiling_register.py`. A constant
+    string key is a lookup of a written-down value; any OTHER call is still a
+    derivation (the arms below), including `ceiling(<non-literal>)`."""
+    lookup = (
+        "from typing import Final\n"
+        f'BASELINES_MEASURED_AT: Final[str] = "{"0" * 40}"\n'
+        'SWEEP_1_CEILING: Final = ceiling("x.py::SWEEP_1_CEILING")\n'
+        'SWEEP_2_GENUINE_CEILING: Final = ceiling("x.py::SWEEP_2_GENUINE_CEILING")\n'
+        "SWEEP_2_DEAD_BUT_HONEST_CEILING: Final = "
+        'ceiling("x.py::SWEEP_2_DEAD_BUT_HONEST_CEILING")\n'
+    )
+    assert computed_baseline_complaints(lookup) == []
+    computed_key = lookup.replace('ceiling("x.py::SWEEP_1_CEILING")', "ceiling(_live_key())")
+    assert "SWEEP_1_CEILING" in " ".join(computed_baseline_complaints(computed_key))
 
 
 def test_the_shape_checker_catches_the_pdf69_defect_under_its_own_name() -> None:

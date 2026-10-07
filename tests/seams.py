@@ -73,6 +73,7 @@ inside the driven child, and it is runnable by a ``qa-sentinel`` re-verifying
 from __future__ import annotations
 
 import ast
+import functools
 import json
 import os
 import subprocess
@@ -100,6 +101,10 @@ ENV_TARGET: Final = "PDF_SEAM_TARGET"
 ENV_LEDGER: Final = "PDF_SEAM_LEDGER"
 ENV_DEPTH: Final = "PDF_SEAM_DEPTH"
 ENV_RACE: Final = "PDF_SEAM_RACE"
+#: PDF-119 D4: the declared read helpers, as a JSON list of ``"<module>::<function>"``
+#: (``pdf_tooling/safety/paths.py::read_source_bytes``). DERIVED by the parent from
+#: :func:`declared_read_helpers` at drive time, never written down here.
+ENV_HELPERS: Final = "PDF_SEAM_HELPERS"
 
 CHANNEL_READ: Final = "read"
 CHANNEL_META: Final = "meta"
@@ -172,18 +177,28 @@ class _Observer:
         "_depth",
         "_race",
         "_counts",
+        "_helpers",
         "_fired",
         "_busy",
         "_harness",
     )
 
-    def __init__(self, target: str, ledger: str, *, depth_text: str, race: str) -> None:
+    def __init__(
+        self,
+        target: str,
+        ledger: str,
+        *,
+        depth_text: str,
+        race: str,
+        helpers: frozenset[tuple[str, str]] = frozenset(),
+    ) -> None:
         # Resolved ONCE, at install time, while no hook is live. Resolving inside
         # a hook would route through the patched `os.stat` and recurse.
         self._resolved = os.path.realpath(target)
         self._targets = frozenset({target, os.path.abspath(target), self._resolved})
         self._depth = int(depth_text) if depth_text.strip() else None
         self._race = race
+        self._helpers = helpers
         self._counts = {CHANNEL_READ: 0, CHANNEL_META: 0}
         self._fired = False
         self._busy = False
@@ -218,30 +233,46 @@ class _Observer:
 
     # -- frames ------------------------------------------------------------- #
 
-    def _frames(self) -> tuple[str, str]:
-        """``(originating frame, first-party frame)`` for the open in flight.
+    def _frames(self) -> tuple[str, str, list[str]]:
+        """``(originating frame, first-party frame, credited frames)`` for the open in flight.
 
         The *originating* frame is the innermost frame outside ``pdf_tooling``
         and outside this harness -- it is what names ``reportlab`` as the opener
         rather than ``ops/compose.py``, and it is the whole of how blindness (a)
         is closed. The *first-party* frame is the innermost ``pdf_tooling/**``
         frame: the seam's own ``file:line``, which the population ledger keys on.
+
+        The *credited* frames (PDF-119 D4) are the first-party frame AND, while the
+        frame being credited is a declared read helper (``read_source_bytes``), the
+        next outer first-party frame -- the code that ASKED for the read -- walked
+        through chained helpers to the first non-helper. Before this, every helper
+        read was credited to the helper's own body line and never to its caller, so
+        driven callers sat in the undriven-residue ceilings as permanent residue
+        (`B-401`, `X-978`). ``first_party`` itself is unchanged in meaning.
         """
         origin = ""
         first_party = ""
+        credited: list[str] = []
+        credited_done = False
         frame = sys._getframe()
         while frame is not None:
             filename = frame.f_code.co_filename
             if filename != self._harness:
                 if _is_product(filename):
+                    shown = _display_path(filename)
+                    site = f"{shown}:{frame.f_lineno}"
                     if not first_party:
-                        first_party = f"{_display_path(filename)}:{frame.f_lineno}"
+                        first_party = site
+                    if not credited_done:
+                        credited.append(site)
+                        if (shown, frame.f_code.co_name) not in self._helpers:
+                            credited_done = True
                 elif not origin:
                     origin = f"{_display_path(filename)}:{frame.f_lineno}"
-                if origin and first_party:
+                if origin and first_party and credited_done:
                     break
             frame = frame.f_back
-        return origin, first_party
+        return origin, first_party, credited
 
     # -- the race ----------------------------------------------------------- #
 
@@ -288,7 +319,7 @@ class _Observer:
                 return
             self._counts[channel] += 1
             ordinal = self._counts[channel]
-            origin, first_party = self._frames()
+            origin, first_party, credited = self._frames()
             fired = self._maybe_fire(channel, ordinal)
             line = json.dumps(
                 {
@@ -296,6 +327,7 @@ class _Observer:
                     "ordinal": ordinal,
                     "origin": origin,
                     "first_party": first_party,
+                    "credited": credited,
                     "flipped": fired,
                 },
                 sort_keys=True,
@@ -350,11 +382,18 @@ def install_observer() -> None:
     ledger = os.environ.get(ENV_LEDGER, "")
     if not target or not ledger:
         return
+    helpers = frozenset(
+        (module, function)
+        for module, _, function in (
+            entry.partition("::") for entry in json.loads(os.environ.get(ENV_HELPERS, "[]"))
+        )
+    )
     _Observer(
         target,
         ledger,
         depth_text=os.environ.get(ENV_DEPTH, ""),
         race=os.environ.get(ENV_RACE, RACE_UNREADABLE),
+        helpers=helpers,
     ).install()
 
 
@@ -388,6 +427,28 @@ class StaticSite:
     @property
     def key(self) -> str:
         return f"{self.module}:{self.line}"
+
+
+@functools.cache
+def declared_read_helpers(src_root: Path) -> frozenset[tuple[str, str]]:
+    """``(module, function)`` for every module-level function DEFINED under *src_root*
+    whose name is in :data:`READ_FUNCS` (PDF-119 D4), found by AST.
+
+    ``module`` is in the shape :func:`_display_path` emits for a first-party frame
+    (``pdf_tooling/safety/paths.py``), so the observer can compare it with a frame
+    directly. A future helper named into ``READ_FUNCS`` inherits attribution with no
+    edit here; an arm asserts the set is non-empty and contains the one known pair.
+    """
+    found: set[tuple[str, str]] = set()
+    for path in sorted(src_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name in READ_FUNCS
+            ):
+                found.add((path.relative_to(src_root).as_posix(), node.name))
+    return frozenset(found)
 
 
 def _enclosing_functions(tree: ast.AST) -> dict[int, str]:
@@ -783,6 +844,12 @@ def drive_cell(
     env[ENV_LEDGER] = str(ledger)
     env[ENV_DEPTH] = "" if depth is None else str(depth)
     env[ENV_RACE] = race
+    env[ENV_HELPERS] = json.dumps(
+        sorted(
+            f"{module}::{function}"
+            for module, function in declared_read_helpers(here.parent.parent / "src")
+        )
+    )
     try:
         completed = subprocess.run(
             [sys.executable, "-c", CHILD_PROGRAM, *argv],
@@ -861,6 +928,20 @@ class Sweep:
                 origin = str(row.get("origin", ""))
                 if origin and origin not in seen:
                     seen.append(origin)
+        return tuple(seen)
+
+    @property
+    def observed_credited(self) -> tuple[str, ...]:
+        """The union over cells of every CREDITED frame: the first-party frame and, for
+        a declared read helper, the nearest caller (PDF-119 D4)."""
+        seen: list[str] = []
+        for cell in (self.control, *self.cells):
+            for row in cell.channel(CHANNEL_READ):
+                credited = row.get("credited", [])
+                sites = credited if isinstance(credited, list) else []
+                for site in map(str, sites):
+                    if site and site not in seen:
+                        seen.append(site)
         return tuple(seen)
 
     @property

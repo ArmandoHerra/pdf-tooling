@@ -108,6 +108,8 @@ from typing import Final, NamedTuple
 
 import pytest
 
+from ceiling_register import ceiling
+
 # --------------------------------------------------------------------------- #
 # Shared machinery. PDF-05 and PDF-06 build their sections on this and add to it
 # rather than starting a second walk.
@@ -2780,7 +2782,7 @@ HELP_IMPORT_ALLOWLIST: Final = frozenset(
 #: into the floor -- this number reads lower than 280. A lower reading can never
 #: produce a false RED, which is the direction that matters for a control that
 #: has to be trustworthy across eight matrix legs.
-HELP_MODULE_CEILING: Final = 320
+HELP_MODULE_CEILING: Final = ceiling("test_import_boundaries.py::HELP_MODULE_CEILING")
 
 
 # --------------------------------------------------------------------------- #
@@ -3118,7 +3120,9 @@ def checked_denominator(partition: ImportPartition) -> int:
 #: project's DEFAULT `-n auto` (not the deliberately-escalated regime above --
 #: E9 Finding 3 measured that a sleep plant's separation DECAYS as load rises,
 #: so direction (a) is graded at the shipped condition, per D7 blind spot 3).
-MODULE_SELF_RATIO_CEILING_PER_MILLE: Final = 470
+MODULE_SELF_RATIO_CEILING_PER_MILLE: Final = ceiling(
+    "test_import_boundaries.py::MODULE_SELF_RATIO_CEILING_PER_MILLE"
+)
 
 #: `pdf_tooling.*` self time, AS A SHARE OF the non-product attributable self
 #: time measured in the SAME census. Replaces `TOTAL_IMPORT_US_CEILING`
@@ -3158,7 +3162,9 @@ MODULE_SELF_RATIO_CEILING_PER_MILLE: Final = 470
 #: 2,000,000 us ceiling (max observed 2,835,898 us) while this ratio's max
 #: over the identical trials was 1.1570, under its 2.600 ceiling throughout --
 #: the AC3 demonstration this constant's own block exists to carry.
-PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE: Final = 2_600
+PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE: Final = ceiling(
+    "test_import_boundaries.py::PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -3334,7 +3340,9 @@ STARTUP_FLOOR_SANITY_FLOOR_US: Final = 1_700
 #: within its own noise. The SEPARATION and the measured SENSITIVITY BOUNDARY
 #: ("reds at f >= X, green at f <= Y") are in this spec's Implementation Log.
 #: THE DOMAIN THIS VALUE IS ASSERTED IN IS DECLARED BELOW: see STARTUP_COST_CALIBRATION.
-STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = 26_500
+STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = ceiling(
+    "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -3385,9 +3393,19 @@ STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = 26_500
 #               not assert is named in the register at the head of this section.
 #   UNDECLARED  neither -> RED, naming the condition and both halves. This is
 #               what closes the CLASS instead of patching one platform: a new
-#               platform, a new interpreter minor or a new runner image arrives
-#               as a red naming its own condition, never as an inherited
-#               assertion and never as a quiet pass.
+#               platform or a new interpreter minor arrives as a red naming its
+#               own condition, never as an inherited assertion and never as a
+#               quiet pass. (PDF-119, correcting this sentence: it used to name
+#               a new runner image as a third arrival, and that was false. A
+#               runner-image roll that keeps `(sys.platform, major.minor)`
+#               INHERITS that key's verdict and is invisible to this
+#               instrument -- PDF-109's `macos-15` legs published RECORD under
+#               `darwin` -- `a8172f6b8a`, run `37264583382`. Making the image a
+#               coordinate is deliberately not done, `X-1006`: it would put
+#               every macOS leg into UNDECLARED. The guard
+#               `test_no_rationale_claims_a_coordinate_the_startup_condition_lacks`
+#               in `tests/test_ratchet_integrity.py` reds if the false claim
+#               returns while this condition still has no image coordinate.)
 #
 # THE PLATFORM IS A REGISTRY KEY AND NEVER A CONDITIONAL. `if platform ==
 # "darwin": skip` encodes a claim ABOUT macOS -- that it is different -- which
@@ -5300,10 +5318,15 @@ def test_the_record_verdict_reds_on_a_hollow_census_rather_than_publishing_zeros
 def test_an_undeclared_condition_reds_naming_the_condition_and_both_halves() -> None:
     """PDF-86 AC3's third verdict, which is the one that closes the CLASS.
 
-    A new platform, a new interpreter minor or a new runner image arrives as a
-    red NAMING ITS OWN CONDITION, never as an inherited assertion and never as a
-    quiet pass. The message has to carry enough for the reader to act: the
-    condition, both halves, and the two sanctioned responses.
+    A new platform or a new interpreter minor arrives as a red NAMING ITS OWN
+    CONDITION, never as an inherited assertion and never as a quiet pass. The
+    message has to carry enough for the reader to act: the condition, both
+    halves, and the two sanctioned responses.
+
+    What this arm does NOT claim (PDF-119, `a8172f6b8a`): a runner-image roll that
+    keeps the same `(sys.platform, major.minor)` inherits that key's verdict and is
+    invisible here -- PDF-109's `macos-15` legs passed under the inherited `darwin`
+    key. The image is deliberately not a coordinate (`X-1006`).
     """
     with pytest.raises(AssertionError) as red:
         assert_startup_cost_in_its_domain(

@@ -37,8 +37,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 import pytest
+
+import ratchet
+from ceiling_register import ceiling
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC = REPO_ROOT / "src" / "pdf_tooling"
@@ -100,8 +104,10 @@ def resolves(pointer: Pointer) -> tuple[bool, bool]:
 #: Pointers that name no `::identifier` and no following `Section <N>`. A reader
 #: cannot check an untargeted pointer, so the set is frozen: a NEW one is a test
 #: failure. It was **36** of 50 at `7afdb1a`; correcting `confirm.py:42` onto
-#: ``tests/test_import_boundaries.py`` Section 4 makes it **35** of 51.
-UNTARGETED_CEILING = 35
+#: ``tests/test_import_boundaries.py`` Section 4 makes it **35** of 51. PDF-119:
+#: the value lives in `tests/ceiling_register.py`, and the arm is EXACT, so a fall
+#: needs a `down` record there and a rise a ruled `up` record.
+UNTARGETED_CEILING: Final = ceiling("test_docstring_pointers.py::UNTARGETED_CEILING")
 
 
 def test_at_least_one_pointer_exists_or_this_module_proves_nothing() -> None:
@@ -138,11 +144,17 @@ def test_the_untargeted_pointer_population_does_not_grow() -> None:
     """Property 3 — the closure rule, applied to pointers."""
     untargeted = [p for p in pointers() if p.target is None]
     listing = "\n  ".join(p.describe() for p in untargeted)
+    ratchet.report("test_docstring_pointers.py::UNTARGETED_CEILING", len(untargeted))
     assert len(untargeted) <= UNTARGETED_CEILING, (
         f"{len(untargeted)} pointers name no checkable target, above the frozen "
         f"ceiling of {UNTARGETED_CEILING} measured at 7afdb1a. A new pointer names "
         f"`::<identifier>` or a `Section <N>`, or it names nothing a reader can "
         f"check:\n  {listing}"
+    )
+    assert len(untargeted) == UNTARGETED_CEILING, (
+        f"slack: the count fell to {len(untargeted)}; append a `down` record setting "
+        f"test_docstring_pointers.py::UNTARGETED_CEILING to {len(untargeted)} in "
+        f"tests/ceiling_register.py (the ceiling is {UNTARGETED_CEILING})"
     )
 
 

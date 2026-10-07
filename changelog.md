@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-119] Instrument-integrity pass: in-place raises red, helper reads credit their caller, the runner-image rationale is true — 2026-10-07
+
+- **Landed ratification records are immutable (git is the oracle):** `tests/ratchet.py` reads each governed ledger (read-seam, docs-residue, engine-gating and the new register) at `HEAD` and at every first-parent commit through a restricted AST evaluator and requires the earlier records to be a prefix of the later ones, by value. An in-place `+1` on a landed record or a reworded reason now reds naming the ledger, record and key; a fifth `*_LEDGER` cannot be born ungoverned. The history arm skips visibly on a shallow clone.
+- **One register for every scalar ceiling:** `tests/ceiling_register.py` holds all 12 census ceilings (derived by name, never listed); each census binding is `ceiling("<path>::<NAME>")`, so there is no literal left to raise, and a raise needs a new ruled `up` record. The exact arms (pragma, untargeted pointers, metadata population, boundary sites, both sweeps and the read-seam residue) now red on slack, naming the `down` record to append. `test_read_seams.py::METADATA_POPULATION_CEILING` was 75 against a measured 54; the register records the measured value.
+- **Helper reads credit their caller:** the read-seam observer credits `read_source_bytes` opens to the helper AND its nearest `src/` caller; one `down` record drops `carriage.py` (removed), `compose.py` 2 -> 1 and `optimize.py` 3 -> 2. The eight undriven callers stay residue.
+- **The runner-image rationale is reworded true, under a self-retiring guard:** `test_import_boundaries.py` no longer claims the instrument detects a new runner image; an image roll that keeps `(sys.platform, major.minor)` inherits the key's verdict. This corrects the same sentence inside `[PDF-109]`'s landed entry, which is not edited. `StartupCondition` is unchanged.
+- **No `src/` change:** no exit code, envelope key, flag or default moves; `schema_version` stays `1`. Re-measure every figure after rebasing with `uv run python tests/ratchet.py remeasure`.
+
 ## [PDF-115] Remediation: the Safety-contract bullet names the verbs that refuse, and opt-in `stamp --from <encrypted>` warns — 2026-10-07
 
 - **The defect (ledger `5956e51669`, low, docs-drift):** README's Safety contract said "every verb except `encrypt` and `decrypt` refuses" an encrypted input. That is false for `text`, `rasterize`, `tables`, `info`, `permissions` and `meta get`, which write no PDF and stay outside the refusal by design (`X-1014`(c)). The bullet now names the 13 verbs that write a PDF from an encrypted input and says a verb that writes no PDF is not gated. No behaviour moves.
