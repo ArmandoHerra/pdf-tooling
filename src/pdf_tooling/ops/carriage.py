@@ -62,6 +62,7 @@ __all__ = [
     "dropped_info",
     "open_ledger",
     "record",
+    "record_sources",
     "refuse_decrypted_output",
     "split_operand",
     "undeclared",
@@ -87,6 +88,9 @@ class _Ledger:
 
     facts: dict[Path, CarriageFacts] = field(default_factory=dict)
     spelled: dict[str, Path] = field(default_factory=dict)
+    #: A declared secondary source (``stamp --from``) as typed, recorded under the
+    #: opt-in so :func:`amend` can name it in W-ENC. It is not an item's ``input``.
+    secondary: list[str] = field(default_factory=list)
 
 
 #: ``None`` outside a CLI invocation, so a direct ``ops`` call records nothing
@@ -144,6 +148,18 @@ def _drops(dimension: Drop, first: bool) -> bool:
     return dimension is Drop.DROPS or (dimension is Drop.FIRST and not first)
 
 
+def encryption_warning(
+    verb: str, label: str, facts: CarriageFacts, *, in_place: bool = False
+) -> tuple[str, ...]:
+    """W-ENC for one source: the one text, shared by positional and secondary sources."""
+    if CARRIAGE.get(verb, _UNDECLARED).encryption is not Drop.DROPS or not facts.encrypted:
+        return ()
+    text = f"{label}: input is encrypted; {verb} writes its output unencrypted"
+    if in_place:
+        text += " (--in-place: the encrypted input is replaced)"
+    return (text,)
+
+
 def carriage_warnings(
     verb: str,
     label: str,
@@ -159,12 +175,7 @@ def carriage_warnings(
     when *first* and as dropped otherwise.
     """
     declared = CARRIAGE.get(verb, _UNDECLARED)
-    out: list[str] = []
-    if declared.encryption is Drop.DROPS and facts.encrypted:
-        text = f"{label}: input is encrypted; {verb} writes its output unencrypted"
-        if in_place:
-            text += " (--in-place: the encrypted input is replaced)"
-        out.append(text)
+    out: list[str] = list(encryption_warning(verb, label, facts, in_place=in_place))
 
     info_dropping = _drops(declared.info, first)
     xmp_dropping = _drops(declared.xmp, first)
@@ -259,6 +270,15 @@ def amend(result: OperationResult) -> OperationResult:
                 first=key == first_key,
             )
         )
+    if any(item.ok is True and item.output is not None for item in result.items):
+        # A declared secondary source (`stamp --from`) is never an item's input,
+        # so it is named here, once, only when the run wrote or would write.
+        for text in ledger.secondary:
+            key = ledger.spelled.get(text)
+            if key is None or key in seen:
+                continue
+            seen.add(key)
+            extra.extend(encryption_warning(result.verb, text, ledger.facts[key]))
     if not extra:
         return result
     return dataclasses.replace(result, warnings=(*result.warnings, *extra))
@@ -267,6 +287,29 @@ def amend(result: OperationResult) -> OperationResult:
 # --------------------------------------------------------------------------- #
 # Refusal: PDF-115's normative half (OR-26 / X-1001).
 # --------------------------------------------------------------------------- #
+
+
+def record_sources(verb: str, sources: Iterable[str]) -> None:
+    """Feed a declared secondary source's encryption fact to W-ENC (opt-in path).
+
+    With ``--allow-decrypted-output`` the refusal gate does not run, so nothing
+    would read ``stamp --from``'s fact and the README's "the warning still says
+    so" would be false for it. This reuses :func:`record` (the one read, first
+    read wins, credential-free) for exactly the operands the gate would have
+    checked, and remembers their spelling for :func:`amend`. No read of its own.
+    """
+    ledger = _LEDGER.get()
+    if ledger is None or not requires_decrypted_output_opt_in(verb):
+        return
+    for text in sources:
+        path_text, _ = split_operand(text)
+        try:
+            classify_operand(path_text)
+        except PdfToolingError:
+            continue
+        record(Path(path_text))
+        if str(Path(path_text)) in ledger.spelled:
+            ledger.secondary.append(str(Path(path_text)))
 
 
 def refuse_decrypted_output(verb: str, operands: Iterable[str]) -> None:

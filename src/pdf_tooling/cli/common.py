@@ -1398,10 +1398,18 @@ def _operands(ctx: typer.Context, kwargs: Mapping[str, Any]) -> list[str]:
         for param in getattr(command, "params", ())
         if getattr(param, "param_type_name", None) == "argument" and param.name is not None
     ]
-    declared = CARRIAGE.get(_verb_name(ctx))
-    if declared is not None:
-        names.extend(declared.sources)
+    names.extend(_source_names(ctx))
     return [text for name in names for text in _flatten_operand(kwargs.get(name))]
+
+
+def _source_names(ctx: typer.Context) -> tuple[str, ...]:
+    declared = CARRIAGE.get(_verb_name(ctx))
+    return () if declared is None else declared.sources
+
+
+def _sources(ctx: typer.Context, kwargs: Mapping[str, Any]) -> list[str]:
+    """Only the declared secondary sources (``stamp --from``), as typed."""
+    return [text for name in _source_names(ctx) for text in _flatten_operand(kwargs.get(name))]
 
 
 def _with_decrypted_output_flag(callback: Callable[..., Any]) -> Callable[..., Any]:
@@ -1525,6 +1533,7 @@ def _attach(
             amend,
             close_ledger,
             open_ledger,
+            record_sources,
             refuse_decrypted_output,
         )
         from pdf_tooling.output import install_result_hook, reset_result_hook
@@ -1538,6 +1547,10 @@ def _attach(
             # popped so the verb function never sees an unexpected keyword.
             if not kwargs.pop(DECRYPTED_OUTPUT_PARAM, False):
                 refuse_decrypted_output(_verb_name(ctx), _operands(ctx, kwargs))
+            else:
+                # Opt-in: the gate is skipped, so the secondary source's fact is
+                # fed to W-ENC here, through the same `record` read.
+                record_sources(_verb_name(ctx), _sources(ctx, kwargs))
             return func(**kwargs)
         finally:
             reset_result_hook(hook_token)

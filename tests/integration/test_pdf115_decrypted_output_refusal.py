@@ -572,6 +572,27 @@ def test_ac10_the_readme_agrees_with_the_derivation() -> None:
     assert named == set(POPULATION)
 
 
+def test_b437_the_safety_contract_bullet_names_exactly_the_verbs_that_refuse() -> None:
+    """5956e51669: the bullet's claim is checked against the population DERIVED from code.
+
+    Reds if the bullet names a verb that does not refuse (an extraction verb,
+    `encrypt`, `decrypt`), omits one that does, or goes back to a blanket
+    "every verb except ..." sentence.
+    """
+    from pdf_tooling.ops.carriage_decl import requires_decrypted_output_opt_in
+
+    text = README.read_text()
+    safety = text.split("## Safety contract", 1)[1].split("\n## ", 1)[0]
+    bullet = next(line for line in safety.splitlines() if "never written out unencrypted" in line)
+    assert "every verb" not in bullet
+    leaves = [v.name for v in discover_verbs() if not v.is_group]
+    derived = {name for name in leaves if requires_decrypted_output_opt_in(name)}
+    refusing_clause = bullet.split("refuse it", 1)[0]
+    assert _backticked(refusing_clause) & set(leaves) == derived
+    not_gated = {name for name in leaves if name not in derived}
+    assert not (_backticked(refusing_clause) & not_gated)
+
+
 def test_ac10_the_upgrading_row_names_exactly_the_derived_verbs() -> None:
     text = README.read_text()
     assert UPGRADING_1_1 in text
@@ -819,6 +840,38 @@ def test_x1014a_an_encrypted_stamp_source_is_refused_and_the_opt_in_allows_it(
     optin = go("stamp", [*common, FLAG], dry=False, cwd=work)
     assert (optin_dry.rc, optin.rc) == (0, 0), optin.stderr[-300:]
     assert (work / "out.pdf").exists()
+
+
+def test_b437_optin_stamp_from_an_encrypted_source_warns_w_enc_naming_it(
+    shapes: Shapes,
+) -> None:
+    """24ecc55c77: the opt-in output is unencrypted AND the warning says so, dry == real."""
+    work = shapes.root / "stamp-from-wenc"
+    work.mkdir()
+    shutil.copy(shapes.files["PLAIN"], work / "PLAIN.pdf")
+    shutil.copy(shapes.files["AES256-UO"], work / "SRC.pdf")
+    common = [
+        "PLAIN.pdf", "--from", "SRC.pdf", "-O", "out.pdf",
+        "--password-file", str(shapes.user_pw),
+    ]  # fmt: skip
+    expected = "SRC.pdf: input is encrypted; stamp writes its output unencrypted"
+    dry = go("stamp", [*common, FLAG], dry=True, cwd=work)
+    real = go("stamp", [*common, FLAG], dry=False, cwd=work)
+    assert (dry.rc, real.rc) == (0, 0), real.stderr[-300:]
+    assert dry.warnings == real.warnings
+    assert real.warnings.count(expected) == 1, real.warnings
+    assert f"warning: {expected}" in real.stderr
+    with pikepdf.open(work / "out.pdf") as written:  # no password
+        assert not written.is_encrypted
+    # A plaintext --from source stays quiet; refusal without the flag is unchanged.
+    shutil.copy(shapes.files["PLAIN"], work / "SRC2.pdf")
+    quiet = go(
+        "stamp", ["PLAIN.pdf", "--from", "SRC2.pdf", "-O", "o2.pdf", FLAG], dry=False, cwd=work
+    )
+    assert quiet.rc == 0 and not any("is encrypted" in w for w in quiet.warnings)
+    refused = go("stamp", [*common, "-f"], dry=False, cwd=work)
+    assert refused.rc == 5
+    assert refused.error["message"] == refusal_message("stamp", ["SRC.pdf"])
 
 
 # --------------------------------------------------------------------------- #
