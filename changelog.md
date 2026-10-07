@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-120] Harden the LibreOffice adapter: no link updates, no remote loads, an absolute operand — 2026-10-06
+
+- **Linked resources are no longer loaded:** `ScratchDir(seed=...)` (the write chokepoint) pre-seeds the throwaway profile's `user/registrymodifications.xcu` with bytes the adapter supplies via the new `OfficeConverter.scratch_seed()`. `BlockUntrustedRefererLinks=true` is the load-bearing key (measured on LibreOffice 24.2.7: a linked image no longer makes `soffice` contact a URL the document names, and a `file://` link no longer renders a local file into the PDF); four more keys (link updates never, active content off, macros off) are defence in depth with no observable red on that engine.
+- **Fails closed:** `convert_to_pdf` raises exit 1 (`refusing to start soffice without its hardened profile`) when the seed is missing, so a future caller cannot silently run with defaults.
+- **Absolute operand, never `--`:** the document is handed to `soffice` as `os.path.abspath(source)`, so `convert ./-dash.odt` works. `--` is not accepted by LibreOffice 24.2.7 (usage text, exit 1), so it is deliberately not used.
+- **Docs:** README `## OCR and Office conversion` gains the hardening sentence and a seven-point "What this does not cover" paragraph. No exit code, flag, envelope key or `schema_version` moves.
+- **Upgrading row:** README `## Upgrading to 1.1` gains the linked-image row (before / after / embed the images in the document), registered in `MIGRATION_ROWS_1_1` with a derivation from `PROFILE_SEED_KEYS`.
+
 ## [PDF-112] Bound the render: a per-page pixel budget at the raster chokepoint, plus --dpi/--width ceilings — 2026-10-06
 
 - **The defect (`B-418`, `B-419`, audit 2026-10-06 Top-5 #1/#2):** a page's bitmap was the document-supplied page box times the scale, with nothing bounding it before pdfium allocated. A 541-byte PDF with a `14400 x 14400` pt box asked for a `30000 x 30000` bitmap at the default 150 dpi and died on a raw `MemoryError` at exit `1` with no envelope, while `--dry-run` predicted `0`. `--dpi nan` was accepted and then died on a `ValueError` traceback.

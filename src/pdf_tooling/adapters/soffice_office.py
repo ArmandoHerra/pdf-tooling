@@ -14,21 +14,25 @@ an office daemon resident.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import zipfile
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 from pdf_tooling.adapters import AdapterProbe, subprocess_util
 from pdf_tooling.errors import FailureError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Mapping
     from pathlib import Path
 
 __all__ = [
     "ADAPTER",
     "BINARY",
     "PROBE_TIMEOUT_S",
+    "PROFILE_SEED_KEYS",
     "SofficeOfficeAdapter",
     "binary_present",
     "ensure_source_loadable",
@@ -51,13 +55,52 @@ _CAPABILITIES: Final[frozenset[str]] = frozenset({"office-convert", "to-pdf"})
 _VERSION_RE: Final[re.Pattern[str]] = re.compile(r"([0-9]+(?:\.[0-9]+)+)")
 
 #: PDF-15 (`convert`), Design §D6 -- the two SUBdirectories `convert_to_pdf`
-#: creates under its caller's `scratch_dir`. LibreOffice creates both itself
-#: on first use (verified empirically against LibreOffice 26.2.5.2: an
-#: absent `-env:UserInstallation` directory AND an absent `--outdir` are
-#: both bootstrapped by soffice without error) -- so neither is pre-created
-#: here, matching `ScratchDir`'s own docstring.
+#: works in under its caller's `scratch_dir`. LibreOffice creates both itself
+#: on first use (an absent `-env:UserInstallation` directory AND an absent
+#: `--outdir` are both bootstrapped by soffice without error), EXCEPT that
+#: PDF-120 pre-seeds ONE file inside the profile: `user/registrymodifications.xcu`.
+#: The caller's `ScratchDir(seed=...)` writes it (the write chokepoint -- this
+#: module never writes it); LibreOffice still creates everything else.
 _PROFILE_SUBDIR: Final[str] = "profile"
 _OUTPUT_SUBDIR: Final[str] = "out"
+
+#: PDF-120 D1 -- where the seed lives, relative to the scratch root.
+_PROFILE_SEED_RELPATH: Final[str] = f"{_PROFILE_SUBDIR}/user/registrymodifications.xcu"
+
+#: PDF-120 D1 -- ``(oor:path, oor:name, value)``. K1 is load-bearing: with it,
+#: no linked graphic (remote or ``file:``) is loaded (measured on LibreOffice
+#: 24.2.7). K2-K5 are defence in depth with no observable red on that engine.
+#: LibreOffice SILENTLY IGNORES an unknown key here, so the schema-presence
+#: test (not belief) is what catches an upstream rename.
+PROFILE_SEED_KEYS: Final[tuple[tuple[str, str, str], ...]] = (
+    (
+        "/org.openoffice.Office.Common/Security/Scripting",
+        "BlockUntrustedRefererLinks",
+        "true",
+    ),
+    ("/org.openoffice.Office.Writer/Content/Update", "Link", "0"),
+    ("/org.openoffice.Office.Calc/Content/Update", "Link", "1"),
+    ("/org.openoffice.Office.Common/Security/Scripting", "DisableActiveContent", "true"),
+    ("/org.openoffice.Office.Common/Security/Scripting", "DisableMacrosExecution", "true"),
+)
+
+
+def _render_seed(keys: tuple[tuple[str, str, str], ...]) -> bytes:
+    items = "\n".join(
+        f'<item oor:path="{path}"><prop oor:name="{name}" oor:op="fuse">'
+        f"<value>{value}</value></prop></item>"
+        for path, name, value in keys
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<oor:items xmlns:oor="http://openoffice.org/2001/registry" '
+        'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+        f"{items}\n</oor:items>\n"
+    ).encode()
+
+
+_PROFILE_SEED_XCU: Final[bytes] = _render_seed(PROFILE_SEED_KEYS)
 
 
 def _parse_version(line: str) -> str | None:
@@ -197,6 +240,12 @@ class SofficeOfficeAdapter:
 
     # -- PDF-15 (`convert`), appended at the end of the class ---------------- #
 
+    def scratch_seed(self) -> Mapping[str, bytes]:
+        """PDF-120 D2 -- the profile files the caller's ``ScratchDir`` must
+        place under its root (relative paths) before ``convert_to_pdf``. A
+        fresh read-only mapping each call, never a mutable module global."""
+        return MappingProxyType({_PROFILE_SEED_RELPATH: _PROFILE_SEED_XCU})
+
     def convert_to_pdf(
         self,
         source: Path,
@@ -209,6 +258,15 @@ class SofficeOfficeAdapter:
         profile_dir = scratch_dir / _PROFILE_SUBDIR
         out_dir = scratch_dir / _OUTPUT_SUBDIR
         convert_to = f"pdf:{filter_name}" if filter_name else "pdf"
+
+        # PDF-120 D3 -- fail closed. Without the seed LibreOffice would run with
+        # its default link behaviour and load whatever the document links to.
+        seed = scratch_dir / _PROFILE_SEED_RELPATH
+        if not seed.is_file():
+            raise FailureError(
+                f"{source}: refusing to start soffice without its hardened profile "
+                f"({seed} is missing)"
+            )
 
         # argv[0] is the module-level constant -- see the note on the same
         # line in `probe()`. Isolated profile per invocation (Design §D6):
@@ -231,7 +289,11 @@ class SofficeOfficeAdapter:
                 convert_to,
                 "--outdir",
                 str(out_dir),
-                str(source),
+                # PDF-120 D4 -- ABSOLUTE, so an operand can never be read as an
+                # option (`./-dash.odt` reaches here as `-dash.odt`). Never
+                # add a `--` element: LibreOffice 24.2.7 has no end-of-options
+                # marker and every conversion then exits 1 with its usage text.
+                os.path.abspath(source),
             ],
             timeout=timeout,
             check=False,

@@ -16,6 +16,7 @@ from pdf_tooling.models import EngineReport
 from pdf_tooling.ports import KIND_SYSTEM_BINARY, Adapter, build_report, require
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Mapping
     from pathlib import Path
 
     from pdf_tooling.adapters import AdapterProbe
@@ -59,19 +60,29 @@ class OfficeConverter(Protocol):
         into ``AtomicWriter`` itself; this method never touches the write
         chokepoint and never chooses a user-visible destination.
 
-        *scratch_dir* holds two isolated subdirectories this call creates
-        under it (a fresh ``-env:UserInstallation`` profile per invocation,
-        and the conversion ``--outdir``) -- LibreOffice creates both itself
-        when they do not exist, so neither is pre-created here.
+        *scratch_dir* holds two isolated subdirectories (a fresh
+        ``-env:UserInstallation`` profile per invocation, and the conversion
+        ``--outdir``). The caller pre-seeds the profile's
+        ``user/registrymodifications.xcu`` by opening the ScratchDir with
+        :meth:`scratch_seed` (PDF-120); this call refuses to start without it.
+        LibreOffice creates everything else in the profile, and ``--outdir``,
+        itself.
 
         Success is **"the expected output PDF exists and is non-empty"**,
         never the return code (D6): LibreOffice frequently exits 0 having
         converted nothing.
 
         Raises:
-            FailureError: Exit 1 -- soffice failed, timed out, or exited 0
-                without producing a non-empty PDF.
+            FailureError: Exit 1 -- the seed is missing, soffice failed or
+                timed out, or it exited 0 without producing a non-empty PDF.
         """
+        ...
+
+    def scratch_seed(self) -> Mapping[str, bytes]:
+        """The files the caller must place in the scratch root before calling
+        :meth:`convert_to_pdf`, as ``{relative POSIX path: bytes}``. The
+        caller writes them through ``ScratchDir(seed=...)`` (the write
+        chokepoint); the adapter only supplies the bytes."""
         ...
 
 

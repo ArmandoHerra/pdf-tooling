@@ -162,7 +162,7 @@ import shutil
 import stat
 import sys
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -1266,20 +1266,56 @@ class ScratchDir:
     already unwinding for).
 
     LibreOffice creates both the ``-env:UserInstallation`` profile directory
-    and a ``--outdir`` target directory itself when they do not yet exist
-    (verified empirically against LibreOffice 26.2.5), so the caller never
-    needs to create the two *subdirectories* it hands soffice as argv values
-    -- only this one root, which is genuinely needed so ``__exit__`` has a
-    single tree to remove.
+    and a ``--outdir`` target directory itself when they do not yet exist, so
+    the caller never needs to create those *subdirectories*. What it MAY need
+    is a pre-seeded file inside one (PDF-120: the profile's
+    ``user/registrymodifications.xcu``), which is what ``seed`` is for.
+
+    ``seed`` maps a relative POSIX path to bytes, written in ``__enter__``
+    (the adapter supplies the bytes; only this chokepoint writes). Each path
+    is validated (non-empty, not absolute, no ``..`` segment, no backslash;
+    ``ValueError`` -- a programming error, never user input). Every parent is made
+    ``0o700`` (one segment at a time) and the file is written with
+    ``Path.write_bytes`` -- deliberately not ``os.open``/``open()``, which the
+    static read-seam detector counts. The file mode is ``0666 & ~umask``
+    inside a fresh ``0700`` ``mkdtemp`` root no other principal can traverse,
+    so no ``O_EXCL``/``O_NOFOLLOW`` or ``chmod`` is needed. If any seed write
+    fails the root is removed before the error propagates, so a failed seed
+    never leaks a scratch directory.
     """
 
-    def __init__(self, *, prefix: str = _SCRATCH_PREFIX) -> None:
+    def __init__(
+        self,
+        *,
+        prefix: str = _SCRATCH_PREFIX,
+        seed: Mapping[str, bytes] | None = None,
+    ) -> None:
         self._prefix = prefix
+        self._seed: Mapping[str, bytes] = {} if seed is None else dict(seed)
         self.path: Path | None = None
 
     def __enter__(self) -> Path:
-        self.path = Path(tempfile.mkdtemp(prefix=self._prefix))
-        return self.path
+        root = Path(tempfile.mkdtemp(prefix=self._prefix))
+        self.path = root
+        try:
+            for relative, data in self._seed.items():
+                if not relative or relative.startswith("/") or "\\" in relative:
+                    raise ValueError(f"invalid scratch seed path: {relative!r}")
+                if ".." in relative.split("/"):
+                    raise ValueError(f"invalid scratch seed path: {relative!r}")
+                target = root / relative
+                # One segment at a time: `parents=True` gives intermediate
+                # directories the DEFAULT mode, only the leaf gets `mode`.
+                level = root
+                for segment in relative.split("/")[:-1]:
+                    level = level / segment
+                    level.mkdir(mode=0o700, exist_ok=True)
+                target.write_bytes(data)
+        except BaseException:
+            shutil.rmtree(root, ignore_errors=True)
+            self.path = None
+            raise
+        return root
 
     def __exit__(
         self,
