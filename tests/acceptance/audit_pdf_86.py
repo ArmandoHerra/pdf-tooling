@@ -111,31 +111,37 @@ AUDIT: Final[tuple[ACAudit, ...]] = (
             "verbatim, then the new one, and confirms the new figures survive "
             "`--tb=line` and the `-ra` short summary."
         ),
-        covering=(),
+        covering=(
+            "tests/test_startup_message_short_summary.py::test_the_startup_cost_halves_survive_a_200_column_terminal",
+            "tests/test_startup_message_short_summary.py::test_the_startup_cost_halves_survive_a_ci_log",
+        ),
         red=(
-            "COMMAND: COMMAND-RED: uv run pytest tests/test_import_boundaries.py -k "
-            "total_startup_import_cost -q -n 0 --tb=line -ra | plant: "
-            "tests/test_import_boundaries.py:3268 "
-            "`STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = 26_500` -> `5_000` (scratch "
-            "worktree, base 119f47e, CPython 3.13.15 = cell (linux, 3.13)) | saw: `E "
-            "AssertionError: 5 of 5 readings exceeded the 5.000 total-startup-cost "
-            "ratio ceiling in CALIBRATED condition (linux, 3.13) (readings: [10.8541, "
-            "11.0148, 10.9896, 12.3819, 11.4342]; ...). numerator median 84759 us = "
-            "x0.637 of this condition's recorded 132973 us (over 266 rows); denominator "
-            "median 7526 us = x0.714 of its recorded 10536 us (over 39 rows); ratio "
-            "median 11.0148 against the 5.000 ceiling -- the DENOMINATOR carries this "
-            "red (x0.71 against x0.64).` Unplanted: `1 passed`. The `--tb=line` half "
-            "HOLDS: the figures are on the one `E` line. The `-ra` HALF DOES NOT, at "
-            "width: the `FAILED "
-            "...::test_total_startup_import_cost_stays_under_its_ceiling` summary line "
-            "carries NO message at COLUMNS=80 (also under `-n 2`), and at COLUMNS=400 "
-            "it is cut inside the numerator (`... numerator median 82341 us = x0.619 of "
-            "this condition's recorded 1329...`) so the denominator never reaches it. "
-            "Reverted with `git show HEAD:tests/test_import_boundaries.py > "
-            "tests/test_import_boundaries.py`; `git diff --exit-code` returned 0."
+            "Closed by PDF-114 D4/D5 (base 9809a7f, private worktree). Before: with "
+            "tests/test_import_boundaries.py:3324 `STARTUP_COST_RATIO_CEILING_PER_MILLE` "
+            "26_500 -> 5_000 and `env -u CI -u BUILD_NUMBER COLUMNS=200 uv run pytest -n "
+            "0 -q --tb=line -ra tests/test_import_boundaries.py -k "
+            "total_startup_import_cost`, the `-ra` line read `FAILED "
+            "tests/test_import_boundaries.py::"
+            "test_total_startup_import_cost_stays_under_its_ceiling "
+            "- AssertionError: 5 of 5 readings exceeded the 26.500 total-startup-cost "
+            "ratio ceiling in CALIBRATED co...` (no half). After D4 the same plant "
+            "reads `... - AssertionError: numerator x0.676 / denominator x0.695 -> the "
+            "DENOMINATOR carries this red; 5 of 5 re...`. Control: "
+            'tests/test_import_boundaries.py:3790 `return f"{lead}{head} {body} ..."` '
+            '-> `return f"{head} {lead}{body} ..."` (the lead behind the header) -> '
+            "`pytest -n 0 tests/test_startup_message_short_summary.py` -> 3 failed, 2 "
+            "passed: `AssertionError: numerator factor missing from -ra line:` for "
+            "the 200-column arm, the CI-log arm still passing; `uv run python "
+            "scripts/verify_spec.py PDF-86` printed `AC2 | ... | 1/2 passed (1 failed)` "
+            "and `runner exit: 1`. The `-ra` half is graded at a CI log and a "
+            "200-column non-CI terminal; below 100 columns pytest prints no message for "
+            "this node id at all (recorded by "
+            "`test_the_node_id_leaves_no_room_below_100_columns`). Reverted from a saved "
+            "copy (the new code is not at HEAD); `git diff --exit-code` against it "
+            "returned 0."
         ),
         red_kind=RedKind.PLANTED_DEFECT,
-        finding="PENDING-LEDGER: pdf-86-ac2-halves-do-not-reach-the-ra-summary-at-80-columns",
+        finding=None,
     ),
     ACAudit(
         ac="AC3",

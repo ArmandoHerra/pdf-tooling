@@ -3677,6 +3677,23 @@ STARTUP_COST_REMEDIATION: Final[str] = (
 )
 
 
+def startup_cost_lead(factor_numerator: float, factor_denominator: float) -> str:
+    """The head of a CALIBRATED red's first line (PDF-114 D4): both factors and the verdict.
+
+    pytest's `-ra` short summary keeps ONLY the first line of a message and trims
+    it to the terminal width, so in a non-CI terminal the halves used to sit
+    behind a ~230-character readings header and never reached the `FAILED` line.
+    The carrier predicate is the one the body's `carries` clause uses; it is
+    spelled once here for the lead and pinned equal to the body by
+    `tests/test_startup_message_short_summary.py`.
+    """
+    carrier = "NUMERATOR" if factor_numerator >= 1 / factor_denominator else "DENOMINATOR"
+    return (
+        f"numerator x{factor_numerator:.3f} / denominator x{factor_denominator:.3f} "
+        f"-> the {carrier} carries this red; "
+    )
+
+
 def startup_cost_observation(
     verdict: str,
     condition: StartupCondition,
@@ -3716,6 +3733,7 @@ def startup_cost_observation(
     numerator = statistics.median(readings.numerators)
     denominator = statistics.median(readings.denominators)
     reference = calibrated.get(condition)
+    lead = ""
 
     raw = (
         f"numerator median {numerator:.0f} us over {attributable} rows, "
@@ -3746,6 +3764,7 @@ def startup_cost_observation(
     else:
         factor_numerator = numerator / reference.numerator_median_us
         factor_denominator = denominator / reference.denominator_median_us
+        lead = startup_cost_lead(factor_numerator, factor_denominator)
         carries = (
             f"the NUMERATOR carries this red (x{factor_numerator:.2f} against "
             f"x{factor_denominator:.2f})"
@@ -3768,7 +3787,7 @@ def startup_cost_observation(
             f"total-startup-cost ratio ceiling in CALIBRATED condition {condition} "
             f"(readings: {[round(value, 4) for value in readings.ratios]}; over: {over})."
         )
-        return f"{head} {body} {STARTUP_COST_REMEDIATION}"
+        return f"{lead}{head} {body} {STARTUP_COST_REMEDIATION}"
     if verdict == STARTUP_RECORD:
         declaration = STARTUP_COST_UNCALIBRATED.get(condition, _NO_HOST_FOR_THIS_PLATFORM)
         return (

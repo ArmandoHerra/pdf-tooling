@@ -454,6 +454,8 @@ AUDIT: Final[tuple[ACAudit, ...]] = (
             "tests/test_engine_gating_census.py::test_an_empty_ledger_is_refused",
             "tests/test_engine_gating_census.py::test_a_downward_ratification_is_accepted_with_no_ruling",
             "tests/test_engine_gating_census.py::test_an_unruled_raise_is_refused_naming_the_key_and_both_values",
+            "tests/test_engine_gating_census.py::test_the_census_costs_under_one_second_of_cpu",
+            "tests/test_engine_gating_census.py::test_the_derivation_parses_each_module_at_most_once_per_reader",
             "tests/test_read_seams.py::test_convert_zip_claim_branch_and_the_oserror_catch_reachability",
             "tests/test_derived_dimensions.py::test_the_value_shape_axis_still_changes_the_products_answer[convert-out-dir]",
         ),
@@ -466,17 +468,33 @@ AUDIT: Final[tuple[ACAudit, ...]] = (
             "collected item(s), so the population is empty and the ratchet above is "
             "vacuous` (tests/test_engine_gating_census.py:753, "
             "`test_the_walk_is_not_vacuous`). No-new-prerequisite half: see AC25 (a "
-            "planted `ci:` prerequisite reds). COST half: `--durations` on the census "
-            "file alone showed 1.27 s of setup for a 12-item selection on this host at "
-            "load 4, which is NOT a whole-suite measurement, and no test asserts the "
-            "under-one-second bound. Reverted with `git show "
+            "planted `ci:` prerequisite reds). Reverted with `git show "
             "HEAD:tests/test_engine_gating_census.py > "
             "tests/test_engine_gating_census.py`; `git diff --exit-code` returned 0. "
             "Every mutation in this row was made in a private detached scratch worktree "
-            "at base 119f47e, never in the shared worktree."
+            "at base 119f47e, never in the shared worktree. COST half, closed by PDF-114 "
+            "(base 9809a7f, private worktree): the arm's setup was 1.51 s median "
+            "(5 reps, loadavg 10 -> 6), so the bound was unasserted. Plant 1: "
+            "tests/registry.py:343 `if key in _PARSE_MEMO:` -> `if False and key in "
+            "_PARSE_MEMO:` (the per-path parse memo never answers). `pytest -n 0 "
+            'tests/test_engine_gating_census.py -k "one_second or at_most_once"` -> 2 '
+            "failed: `AssertionError: the cold engine-blind derivation cost 2.657, 3.307, "
+            "2.843 s of CPU over 3 cold rep(s) (minimum 2.657 s) against a budget of "
+            "1.0 s (PDF-82 AC13)` (also red under 32 busy loops) and `AssertionError: one cold "
+            "derivation performed 859 uncached parses over 86 module(s); the bound is "
+            "one per module per reader (172)`; `uv run python scripts/verify_spec.py "
+            "PDF-82` printed `AC13 | locally driven | 14/16 passed (2 failed)` and "
+            "`runner exit: 1`. Plant 2 (X-1018 narrowed the arm to the cold derivation, minimum "
+            "of up to 3 cold reps, so work inside `build_census` no longer reds it; the "
+            "per-item reduction is recorded in the measurement block, not asserted): the "
+            "arm's own plant is the memo revert above. "
+            "Plant 3: tests/registry.py:341 "
+            "`st_mtime_ns` -> `0` in the memo key -> `AssertionError: a file whose "
+            "mtime moved was answered from the memo`. Each reverted from a saved copy "
+            "(the new arms are not at HEAD); `git diff --exit-code` against it returned 0."
         ),
         red_kind=RedKind.PLANTED_DEFECT,
-        finding="PENDING-LEDGER: pdf-82-ac13-census-cost-under-one-second-is-unasserted",
+        finding=None,
     ),
     ACAudit(
         ac="AC14",
