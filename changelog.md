@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-116] Carry the input's /Info and XMP through the page-rebuild verbs — 2026-10-07
+
+- **The nine page-rebuild verbs keep the document's title, author and XMP (B-390, ledger `f4d02eab86`):** `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp` and `ocr` used to write `/Info == {/Producer: pypdf}` and no XMP packet. The output now carries the source's `/Info` (an exact clone, so `/Trapped /False` stays a name) and XMP packet unchanged.
+- **One seam, not nine edits:** `PypdfStructureWriter` carries the `/Info` and XMP of the first document whose pages it appends (its donor) at `write()`. `merge` therefore carries its first input's, and every `split` part carries the document's. The `stamp --from` layer buffer opts out (`new_writer(carry_metadata=False)`).
+- **`/EncryptMetadata false` is read through pikepdf, once per document (17add7b3e9):** pypdf's bytes are wrong on that shape, so the packet comes from PDF-107's helper over the handle the document already holds; a failed read fails closed with nothing written.
+- **Warnings follow the carriage:** W-META and W-META-UNCHECKED no longer fire for the rebuild verbs, including password-protected inputs (an authenticated write carries). They still fire for `merge`'s later inputs (new `Drop.FIRST`) and for any undeclared verb. W-ENC and `--allow-decrypted-output` are unchanged. `REBUILD_PRODUCER` is retired.
+- **Visible change, no surface move:** a script that relied on a page operation stripping metadata now gets it carried (`meta set --clear-all` strips it). No exit code, envelope key, flag or `schema_version` moves. Read-seam residue `pypdf_structure.py` 9 -> 10 under X-1013 (structurally unobservable held-handle read).
+
 ## [PDF-117] Gate `--help` wall-clock latency in one dedicated, advisory CI job — 2026-10-07
 
 - **New advisory job `startup-latency`** (last in `ci.yml`, ubuntu only, serial): runs `make startup-gate`, a wrapper (`scripts/startup_gate.py`) around `tests/test_cli_spine.py::test_help_stays_within_the_startup_budget`. The test abstains under xdist, so until now it ran nowhere in CI; a `--help` regression that adds no import (the `57156e22c0` class) passed every arm the product ran.

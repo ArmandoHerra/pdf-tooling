@@ -33,6 +33,8 @@ each output filename with {{stem}}, {{page}}, {{page:03}}, {{index}},
 '{{stem}}-{{page:03}}.{{ext}}' for --each-page, '{{stem}}-{{index:03}}.{{ext}}'
 for the other three modes.
 
+Every part carries the input's /Info and XMP metadata unchanged.
+
 --every N          consecutive N-page chunks; the final chunk may be shorter.
 --ranges SPEC       repeatable; the comma separates parts, not a union --
                     'split book.pdf --ranges 1-12,13-40,41-' writes three
