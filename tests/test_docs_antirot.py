@@ -5071,6 +5071,29 @@ def _derive_1_1_decrypted_output_rows() -> None:
     assert "`--allow-decrypted-output`" in body
 
 
+def _derive_1_1_metadata_carriage_row() -> None:
+    import dataclasses
+
+    from pdf_tooling.ops import carriage_decl
+
+    body = migration_section_body_1_1()
+    row = next(
+        line
+        for line in body.splitlines()
+        if line.startswith("|") and "meta set --clear-all" in line
+    )
+    named = set(re.findall(r"`([a-z]+)`", row.split("|")[1]))
+    derived = {
+        verb
+        for verb, decl in carriage_decl.CARRIAGE.items()
+        if dataclasses.replace(decl, sources=()) in (carriage_decl._REBUILD, carriage_decl._MERGE)
+    }
+    assert derived, "no verb is declared as a page-rebuild verb any more"
+    assert named == derived, (
+        f"the PDF-116 row names {sorted(named)}; the carriage table declares {sorted(derived)}"
+    )
+
+
 MIGRATION_ROWS_1_1: tuple[MigrationRow, ...] = (
     MigrationRow(
         spec_id="PDF-112",
@@ -5107,6 +5130,12 @@ MIGRATION_ROWS_1_1: tuple[MigrationRow, ...] = (
         anchor="such a run with an encrypted input and a missing or wrong password",
         derive=_derive_1_1_decrypted_output_rows,
         note="exit 5 answers before the in-verb exit codes",
+    ),
+    MigrationRow(
+        spec_id="PDF-116",
+        anchor="the output carries the input's /Info and XMP packet unchanged",
+        derive=_derive_1_1_metadata_carriage_row,
+        note="the page-rebuild verbs carry /Info and XMP instead of replacing them",
     ),
 )
 

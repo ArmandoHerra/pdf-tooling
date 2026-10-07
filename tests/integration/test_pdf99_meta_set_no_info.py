@@ -295,6 +295,12 @@ METADATA_ACCESS_CENSUS: Final[Mapping[tuple[str, str, str], tuple[int, str]]] = 
         1,
         "`info`: try/except plus a `None` check",
     ),
+    ("adapters/pypdf_structure.py", "_carry_donor_metadata", "writer._info"): (
+        2,
+        "PDF-116 D3: carries the donor's /Info into a page-rebuild output (the exact clone, and "
+        "the `None` clear for a donor with no usable /Info -- the `None` arm is driven by the "
+        "`none` and `no-info` cells of test_pdf116_metadata_carriage)",
+    ),
 }
 
 

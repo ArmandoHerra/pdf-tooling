@@ -40,6 +40,9 @@ an input contributes all of its pages, in order. -O/--output is required;
 --out-dir is exit 2 (merge produces exactly one file). One or more inputs
 are accepted; a listed path may repeat, contributing its pages again.
 
+The output carries the first input's /Info and XMP metadata; the other inputs'
+are left out, and the run names each one in a warning.
+
 {GRAMMAR_HELP}
 
 THE COLON PROBLEM

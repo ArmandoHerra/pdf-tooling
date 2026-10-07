@@ -30,6 +30,8 @@ class Drop(StrEnum):
 
     DROPS = "drops"
     CARRIES = "carries"
+    FIRST = "first"
+    """Carried from the first source of the run only (``merge``)."""
     PURPOSE = "purpose"
     """Changing it is the verb's whole job (``encrypt``/``decrypt``)."""
     NA = "n/a"
@@ -51,9 +53,17 @@ class Carriage:
 
 _REBUILD: Final[Carriage] = Carriage(
     Drop.DROPS,
+    Drop.CARRIES,
+    Drop.CARRIES,
+    "rebuilds the document page by page; /Info and XMP are carried from the source, "
+    "encryption is not",
+)
+_MERGE: Final[Carriage] = Carriage(
     Drop.DROPS,
-    Drop.DROPS,
-    "rebuilds the document page by page through the page-rebuild engine",
+    Drop.FIRST,
+    Drop.FIRST,
+    "rebuilds the document page by page; the first input's /Info and XMP are carried, "
+    "the other inputs' are not, and encryption is not",
 )
 _REWRITE: Final[Carriage] = Carriage(
     Drop.DROPS,
@@ -83,12 +93,12 @@ _NO_PDF_OUTPUT: Final[str] = "no PDF output"
 #: ``test_derived_writers_agree`` that the verbs writing a PDF from a PDF are
 #: exactly the non-N/A rows.
 CARRIAGE: Final[dict[str, Carriage]] = {
-    # REBUILD: encryption, /Info and XMP all dropped.
+    # REBUILD: encryption dropped, /Info and XMP carried (merge: the first input's only).
     "rotate": _REBUILD,
     "extract": _REBUILD,
     "delete": _REBUILD,
     "reorder": _REBUILD,
-    "merge": _REBUILD,
+    "merge": _MERGE,
     "split": _REBUILD,
     "watermark": _REBUILD,
     "stamp": dataclasses.replace(_REBUILD, sources=("from_",)),

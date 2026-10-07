@@ -73,6 +73,7 @@ A `1.0.1` invocation or script that relied on any of the following observes a di
 | a verb that writes its output unencrypted (`rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`) wrote a plaintext output from an encrypted input at exit `0`, with only a warning — an owner-only input with no password at all, and an encrypted `stamp --from` source | the run is refused at exit `5` before anything is written, naming every encrypted input; a batch with any encrypted input is refused whole, and `--dry-run` predicts it | pass `--allow-decrypted-output` where a decrypted output is intended; the output, warning and exit code are then exactly 1.0.1's |
 | `--in-place` (including `--no-backup`) on an encrypted input replaced the ciphertext with plaintext | refused at exit `5`; the input is left byte-identical and no `.bak` is made | as above |
 | such a run with an encrypted input and a missing or wrong password, a missing sibling input, a malformed page range or another in-verb usage error exited `6`, `4`, `3` or `2` | exits `5` first; the other codes answer once `--allow-decrypted-output` is given | scripts that branch on `6` for an encrypted input of these verbs add the flag |
+| `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp` and `ocr` wrote an output whose /Info held only `/Producer: pypdf` and no XMP packet, and warned that the input's were not carried | the output carries the input's /Info and XMP packet unchanged (`merge`: the first input's; `split`: into every part); the warning is gone except for `merge`'s other inputs | to publish a document without its metadata, run `pdftooling meta set --clear-all` on the output; do not rely on a page operation to strip it |
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
@@ -274,9 +275,11 @@ Written unencrypted from an encrypted input: `rotate`, `extract`, `delete`, `reo
 
 Each of those verbs refuses an encrypted input by default: the run exits with the REFUSED code, names every encrypted input, and writes nothing — no output, no `.bak`, no temporary file — and `--dry-run` predicts the same refusal. `--allow-decrypted-output` permits the unencrypted output, and the warning still says so.
 
-Rebuilt without the input's /Info or XMP packet: `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`.
+Carry the input's /Info and XMP packet unchanged: `rotate`, `extract`, `delete`, `reorder`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`, `encrypt`, `decrypt`.
 
-The /Info of such an output holds only the engine's producer entry. `encrypt` and `decrypt` change encryption by design and carry both /Info and XMP. `compress`, `repair`, `linearize` and `meta set` carry /Info and XMP. With `--allow-decrypted-output`, an owner-only input needs no password for any of this. Every such drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. A password-protected input's metadata is not checked without the password, and the warning says so. Without `--allow-decrypted-output`, `--in-place` on an encrypted input leaves it untouched; with it, the ciphertext is replaced, and the `.bak` keeps it unless `--no-backup` is given.
+`merge` carries the first input's /Info and XMP packet; each other input whose metadata is not carried is named in a warning, and a later input that needs a password is reported as not checked. `split` carries them into every part. Nothing in them is rewritten: the producer entry, the dates and the XMP packet are the input's. To write an output without them, run `meta set --clear-all` on it.
+
+`encrypt` and `decrypt` change encryption by design. With `--allow-decrypted-output`, an owner-only input needs no password for any of this. Every drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. Without `--allow-decrypted-output`, `--in-place` on an encrypted input leaves it untouched; with it, the ciphertext is replaced, and the `.bak` keeps it unless `--no-backup` is given.
 
 ### `--password-file` is global: honoured or refused, never silently ignored
 

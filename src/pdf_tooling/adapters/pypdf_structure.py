@@ -521,9 +521,9 @@ class PypdfStructureAdapter:
         """
         return PypdfOpenDocument(path, password=password)
 
-    def new_writer(self) -> PypdfStructureWriter:
+    def new_writer(self, *, carry_metadata: bool = True) -> PypdfStructureWriter:
         """D10's write half — see :class:`PypdfStructureWriter`."""
-        return PypdfStructureWriter()
+        return PypdfStructureWriter(carry_metadata=carry_metadata)
 
     def compress(self, data: bytes) -> CompressOutcome:
         """PDF-12 explicit refusal (D-12.1) — this adapter never performs the
@@ -917,6 +917,10 @@ class PypdfOpenDocument:
         self._password = password
         self._handle: BinaryIO | None = None
         self._reader: PdfReader | None = None
+        # PDF-116 D5: whether pypdf's construction-time empty-password attempt
+        # unlocked an encrypted file, and the per-document true-XMP-packet cache.
+        self._unlocked_by_empty = False
+        self._xmp_cache: tuple[bytes | None] | None = None
 
     def __enter__(self) -> PypdfOpenDocument:
         from pypdf import PdfReader
@@ -950,6 +954,9 @@ class PypdfOpenDocument:
             # --pages`) instead of leaking an unhandled traceback past whichever
             # property happened to touch `.pages` first.
             len(reader.pages)
+            # PDF-116 D5: pypdf auto-tries the empty password at construction, so
+            # an encrypted file that got here was unlocked by it.
+            self._unlocked_by_empty = bool(reader.is_encrypted)
         except FileNotDecryptedError as error:
             try:
                 _unlock_with_password(
@@ -987,6 +994,43 @@ class PypdfOpenDocument:
         if self._reader is None:
             raise RuntimeError("PypdfOpenDocument is only valid inside its own with-block")
         return self._reader
+
+    def _true_xmp_packet(self) -> bytes | None:
+        """PDF-116 D5: the catalogue's XMP packet as stored, read at most once.
+
+        ``None`` when ``/Metadata`` is absent or not a stream. On
+        ``/EncryptMetadata false`` pypdf's bytes are wrong (ledger
+        ``17add7b3e9``), so they come from PDF-107's pikepdf helper over the
+        bytes behind the handle this object already holds (no second open).
+        """
+        if self._xmp_cache is not None:
+            return self._xmp_cache[0]
+        from pypdf.generic import StreamObject
+
+        reader = self._open_reader
+        packet: bytes | None
+        catalogue: Any = reader.trailer["/Root"].get_object()
+        stream: Any = catalogue.get("/Metadata")
+        stream = None if stream is None else stream.get_object()
+        if not isinstance(stream, StreamObject):
+            packet = None
+        elif _encrypt_metadata_is_false(reader):
+            handle = self._handle
+            if handle is None:
+                raise RuntimeError("PypdfOpenDocument is only valid inside its own with-block")
+            position = handle.tell()
+            handle.seek(0)
+            try:
+                data = handle.read()
+            finally:
+                handle.seek(position)
+            packet = _true_metadata_packet(
+                data, None if self._unlocked_by_empty else self._password
+            )
+        else:
+            packet = bytes(stream.get_data())
+        self._xmp_cache = (packet,)
+        return packet
 
     @property
     def page_count(self) -> int:
@@ -1033,13 +1077,17 @@ class PypdfStructureWriter:
     ``AtomicWriter`` already opened.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, carry_metadata: bool = True) -> None:
         from pypdf import PdfWriter
 
         self._writer = PdfWriter()
+        self._carry_metadata = carry_metadata
+        self._donor: PypdfOpenDocument | None = None
 
     def append_pages(self, document: PypdfOpenDocument, page_numbers: Sequence[int]) -> None:
         reader = document._open_reader  # same adapter's own internal pair
+        if self._donor is None:
+            self._donor = document  # PDF-116 D2: the first document appended donates
         for number in page_numbers:
             self._writer.add_page(reader.pages[number - 1])
 
@@ -1054,7 +1102,38 @@ class PypdfStructureWriter:
             self._writer.add_outline_item(title, destination - 1)
 
     def write(self, stream: IO[bytes]) -> None:
+        if self._carry_metadata and self._donor is not None:
+            self._carry_donor_metadata(self._donor)
         self._writer.write(stream)
+
+    def _carry_donor_metadata(self, donor: PypdfOpenDocument) -> None:
+        """PDF-116 D3: carry the donor's ``/Info`` and XMP packet, verbatim.
+
+        ``/Info`` is an exact clone (``add_metadata`` stringifies names such as
+        ``/Trapped /False``); an absent or dangling ``/Info`` leaves the output
+        with none. The packet is installed as a fresh ``/Metadata`` stream, unparsed.
+        """
+        from pypdf.generic import (
+            DecodedStreamObject,
+            DictionaryObject,
+            NameObject,
+        )
+
+        reader = donor._open_reader
+        packet = donor._true_xmp_packet()
+        writer = self._writer
+        info = reader.trailer.get("/Info")
+        info = None if info is None else info.get_object()
+        if isinstance(info, DictionaryObject):
+            writer._info = info.clone(writer)  # noqa: SLF001 -- PDF-116 D3 exact clone
+        else:
+            writer._info = None  # noqa: SLF001 -- PDF-116 D3: no /Info the source never had
+        if packet is not None:
+            stream = DecodedStreamObject()
+            stream.set_data(packet)
+            stream[NameObject("/Type")] = NameObject("/Metadata")
+            stream[NameObject("/Subtype")] = NameObject("/XML")
+            writer._root_object[NameObject("/Metadata")] = writer._add_object(stream)  # noqa: SLF001
 
     # -- PDF-08 (`rotate`), appended at the end of the class body ----------- #
 

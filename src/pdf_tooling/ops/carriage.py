@@ -2,8 +2,9 @@
 
 A PDF-writing verb that rebuilds or rewrites its operand does not always
 carry everything the operand held. Thirteen verbs write a **plaintext**
-output from an encrypted input; nine of them also replace the document's
-``/Info`` with the engine's own producer entry and drop its XMP packet. This
+output from an encrypted input. Since PDF-116 the nine page-rebuild verbs carry
+the document's ``/Info`` and XMP packet (``merge``: the first input's only), so
+what is still dropped is encryption and ``merge``'s later inputs' metadata. This
 module is the DESCRIPTIVE half only: every such write says what it dropped,
 in the existing ``warnings`` array and on stderr, and ``--dry-run`` says the
 same thing word for word. Whether the product should carry or refuse is a
@@ -36,7 +37,6 @@ from collections.abc import Iterable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
 
 from pdf_tooling.errors import DecryptedOutputRefusedError, PdfToolingError
 from pdf_tooling.models import OperationResult
@@ -54,7 +54,6 @@ from pdf_tooling.safety.paths import canonical, classify_operand, read_source_by
 
 __all__ = [
     "CARRIAGE",
-    "REBUILD_PRODUCER",
     "Carriage",
     "Drop",
     "amend",
@@ -69,14 +68,6 @@ __all__ = [
 ]
 
 _LOG = logging.getLogger(__name__)
-
-#: The ``/Producer`` the page-rebuild engine writes into every output's
-#: ``/Info`` (pypdf's ``PdfWriter`` default). A source whose ``/Info`` is only
-#: this pair comes out identical, so it is not a drop. Pinned by a test that
-#: asserts every REBUILD output's ``/Info`` is exactly this, so it cannot
-#: drift silently.
-REBUILD_PRODUCER: Final[str] = "pypdf"
-
 
 # --------------------------------------------------------------------------- #
 # Facts: the run-scoped ledger.
@@ -144,26 +135,28 @@ def record(source: Path) -> None:
 
 
 def dropped_info(facts: CarriageFacts) -> bool:
-    """Whether a rebuild would lose real ``/Info`` content from *facts*.
+    """Whether a source holds any ``/Info`` content a dropping write would lose."""
+    return bool(facts.info_keys)
 
-    The engine's own ``/Producer`` is discounted: a source whose ``/Info`` is
-    exactly the pair the rebuild writes back is not losing anything.
-    """
-    if facts.info_keys is None:
-        return False
-    keys = set(facts.info_keys)
-    if facts.producer == REBUILD_PRODUCER:
-        keys.discard("/Producer")
-    return bool(keys)
+
+def _drops(dimension: Drop, first: bool) -> bool:
+    """``DROPS``, or ``FIRST`` for a source that is not the run's first (PDF-116 D6)."""
+    return dimension is Drop.DROPS or (dimension is Drop.FIRST and not first)
 
 
 def carriage_warnings(
-    verb: str, label: str, facts: CarriageFacts, *, in_place: bool = False
+    verb: str,
+    label: str,
+    facts: CarriageFacts,
+    *,
+    in_place: bool = False,
+    first: bool = True,
 ) -> tuple[str, ...]:
     """The warnings for one source of one *verb*, in D2's exact (tense-neutral) text.
 
     *label* is the operand exactly as the item publishes it. W-ENC comes
-    before W-META; at most one of each.
+    before W-META; at most one of each. A ``FIRST`` dimension counts as carried
+    when *first* and as dropped otherwise.
     """
     declared = CARRIAGE.get(verb, _UNDECLARED)
     out: list[str] = []
@@ -173,8 +166,8 @@ def carriage_warnings(
             text += " (--in-place: the encrypted input is replaced)"
         out.append(text)
 
-    info_dropping = declared.info is Drop.DROPS
-    xmp_dropping = declared.xmp is Drop.DROPS
+    info_dropping = _drops(declared.info, first)
+    xmp_dropping = _drops(declared.xmp, first)
     if not (info_dropping or xmp_dropping):
         return tuple(out)
     if not facts.readable:
@@ -246,6 +239,9 @@ def amend(result: OperationResult) -> OperationResult:
         return result
     seen: set[Path] = set()
     extra: list[str] = []
+    # `merge` publishes one item per argv input, in order (all ok or none), so
+    # the first item's source is the donor whose metadata was carried.
+    first_key = _source_key(ledger, result.items[0].input) if result.items else None
     for item in result.items:
         output = item.output
         if item.ok is not True or output is None:
@@ -256,7 +252,11 @@ def amend(result: OperationResult) -> OperationResult:
         seen.add(key)
         extra.extend(
             carriage_warnings(
-                result.verb, item.input, ledger.facts[key], in_place=output == item.input
+                result.verb,
+                item.input,
+                ledger.facts[key],
+                in_place=output == item.input,
+                first=key == first_key,
             )
         )
     if not extra:

@@ -351,7 +351,8 @@ def _extract_stamp_layer(
                     f"({from_page_count}): {from_path}",
                     path=str(from_path),
                 )
-            writer = engine.new_writer()
+            # PDF-116 D2: a layer buffer, never an output; it must not donate or read XMP.
+            writer = engine.new_writer(carry_metadata=False)
             writer.append_pages(from_document, [from_page])
             buffer = io.BytesIO()
             writer.write(buffer)

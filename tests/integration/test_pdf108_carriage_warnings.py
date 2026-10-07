@@ -48,7 +48,7 @@ if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
 
 from dryreal import dry_and_real  # noqa: E402
 from pdf_tooling.ops import carriage  # noqa: E402
-from pdf_tooling.ops.carriage import CARRIAGE, REBUILD_PRODUCER, Drop  # noqa: E402
+from pdf_tooling.ops.carriage import CARRIAGE, Drop  # noqa: E402
 from pdf_tooling.ports.structure import CarriageFacts, StructureEngine  # noqa: E402
 from registry import (  # noqa: E402
     INVOCATIONS,
@@ -161,11 +161,9 @@ def expected_for(verb: str, name: str, label: str, *, in_place: bool = False) ->
     out: list[str] = []
     if verb in DROPPERS and name in ENCRYPTED:
         out.append(w_enc(label, verb, in_place=in_place))
-    if verb in REBUILD:
-        if name in USER_PROTECTED:
-            out.append(w_unchecked(label, verb))
-        elif name in PARTS:
-            out.append(w_meta(label, verb, PARTS[name]))
+    # PDF-116: the page-rebuild verbs carry the source's /Info and XMP (an
+    # authenticated write carries too), so a single source never earns a W-META
+    # or W-META-UNCHECKED; only `merge`'s later inputs do (test_pdf116_*).
     return out
 
 
@@ -401,7 +399,9 @@ def test_ac2_w_meta_names_exactly_the_parts_the_input_holds(vi: int, matrix: Mat
         cell = check_cell(verb, name, matrix)
         label = matrix.inputs.label(name)
         for run in (cell.dry, cell.real):
-            assert w_meta(label, verb, PARTS[name]) in run.warnings
+            # PDF-116: inverted -- carried, so nothing is named as dropped.
+            assert w_meta(label, verb, PARTS[name]) not in run.warnings
+            assert all("does not carry" not in w for w in run.warnings)
 
 
 # --------------------------------------------------------------------------- #
@@ -418,7 +418,9 @@ def test_ac3_a_password_protected_input_is_reported_unchecked_not_absent(
         cell = check_cell(verb, name, matrix)
         label = matrix.inputs.label(name)
         for run in (cell.dry, cell.real):
-            assert w_unchecked(label, verb) in run.warnings
+            # PDF-116: inverted -- an authenticated rebuild carries, so it is not "unchecked".
+            assert w_unchecked(label, verb) not in run.warnings
+            assert all("not checked" not in w for w in run.warnings)
 
 
 @pytest.mark.parametrize("vi", range(len(REWRITE)), ids=_ids(REWRITE))
@@ -545,9 +547,8 @@ def test_ac6_in_place_reports_the_encrypted_pre_image(vi: int, inputs: Inputs) -
     args = argv_for(verb, "U-both", inputs, target, in_place=True)
     dry, real = (parse(p) for p in dry_and_real(verb, args))
     label = str(target)
+    # PDF-116: the authenticated rebuild carries /Info and XMP, so only W-ENC remains.
     expected = [w_enc(label, verb, in_place=True)]
-    if verb in REBUILD:
-        expected.append(w_unchecked(label, verb))
     assert dry.rc == 0 and real.rc == 0, (dry.stderr[-300:], real.stderr[-300:])
     assert dry.warnings == expected
     assert real.warnings == expected
@@ -595,9 +596,12 @@ def test_ac7_merge_names_the_encrypted_operand_exactly_as_published(
     for run in (dry, real):
         assert run.rc == 0, run.stderr[-400:]
         assert run.warnings.count(w_enc(encrypted, "merge")) == 1
-        assert run.warnings.count(w_unchecked(encrypted, "merge")) == 1
+        # PDF-116: the FIRST operand is the donor (authenticated, so carried);
+        # a later encrypted operand is not carried and is reported unchecked.
+        later = 0 if first.startswith("U-both") else 1
+        assert run.warnings.count(w_unchecked(encrypted, "merge")) == later
         assert all(plain not in w for w in run.warnings)
-        assert len(run.warnings) == 2
+        assert len(run.warnings) == 1 + later
     assert dry.warnings == real.warnings
 
 
@@ -638,7 +642,7 @@ def test_ac8_split_warns_once_per_source_however_many_parts(inputs: Inputs) -> N
     for run in (dry, real):
         assert run.rc == 0
         assert len(run.env["items"]) > 1
-        assert run.warnings == [w_enc(label, "split"), w_unchecked(label, "split")]
+        assert run.warnings == [w_enc(label, "split")]  # PDF-116: carried into every part
     assert dry.warnings == real.warnings
 
 
@@ -718,7 +722,8 @@ def test_ac10_the_verbs_own_warnings_precede_the_carriage_warning(
     )
     assert got.rc == 0
     expected_own = [w.replace(str(plain), str(bearing)) for w in own.warnings]
-    assert got.warnings == [*expected_own, w_meta(str(bearing), "watermark", "document /Info")]
+    # PDF-116: the /Info is carried, so the verb's own warnings are all there is.
+    assert got.warnings == expected_own
 
 
 # --------------------------------------------------------------------------- #
@@ -742,9 +747,9 @@ def test_ac11_table_mode_puts_the_warning_on_stderr_only(inputs: Inputs) -> None
     )
     assert proc.returncode == 0
     assert "warning" not in proc.stdout.lower()
-    assert proc.stderr.splitlines() == [
-        f"warning: {w_meta(inputs.label('P-both'), 'rotate', BOTH)}"
-    ]
+    # PDF-116: carried, so rotate over P-both says nothing; the stdout/stderr split
+    # is still pinned by the encrypted arm (test_ac1_*) and by the empty stderr here.
+    assert proc.stderr.splitlines() == []
 
 
 # --------------------------------------------------------------------------- #
@@ -833,7 +838,7 @@ def test_derived_writers_agree(inputs: Inputs, corpus: Any) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# AC14 -- REBUILD's /Info is the pinned engine default
+# AC14 -- (inverted by PDF-116) a REBUILD output carries the source's /Info and XMP
 # --------------------------------------------------------------------------- #
 
 
@@ -841,16 +846,21 @@ def test_derived_writers_agree(inputs: Inputs, corpus: Any) -> None:
 def test_ac14_every_rebuild_output_carries_exactly_the_engine_default_info(
     vi: int, matrix: Matrix
 ) -> None:
+    """PDF-116 inverted this: it pinned ``/Info == {/Producer}`` (the engine
+    default) at ``9809a7f``. The name is kept so no test function disappears
+    (PDF-116 AC13); the pin now says the output carries the SOURCE's, unchanged."""
     cell = matrix.cell(REBUILD[vi], "P-both")
     assert cell.real.rc == 0
     outputs = sorted(cell.dest.rglob("*.pdf"))
     assert outputs
+    with pikepdf.Pdf.open(matrix.inputs.files["P-both"]) as source:
+        want_info = {str(k): v.unparse() for k, v in source.docinfo.items()}
+        want_xmp = bytes(source.Root.Metadata.read_bytes())
     for path in outputs:
         with pikepdf.Pdf.open(path) as pdf:
-            info = pdf.trailer["/Info"] if "/Info" in pdf.trailer else {}
-            assert {str(k) for k in info.keys()} == {"/Producer"}, path
-            assert str(info["/Producer"]) == REBUILD_PRODUCER
-            assert "/Metadata" not in pdf.Root
+            got_info = {str(k): v.unparse() for k, v in pdf.docinfo.items()}
+            assert got_info == want_info, path
+            assert bytes(pdf.Root.Metadata.read_bytes()) == want_xmp, path
 
 
 # --------------------------------------------------------------------------- #
@@ -1094,26 +1104,32 @@ def test_ac19_readme_states_what_a_write_does_not_carry() -> None:
     text = (REPO_ROOT / "README.md").read_text()
     assert "### What a write does not carry" in text
     unencrypted = _sentence_led_by(text, "Written unencrypted from an encrypted input:")
-    rebuilt = _sentence_led_by(text, "Rebuilt without the input's /Info or XMP packet:")
+    carried = _sentence_led_by(text, "Carry the input's /Info and XMP packet unchanged:")
     assert set(_backticked(unencrypted)) == set(REBUILD) | set(REWRITE)
-    assert set(_backticked(rebuilt)) == set(REBUILD)
+    # PDF-116 D8: `merge` carries only the FIRST input's, so it is not in the parsed sentence.
+    assert set(_backticked(carried)) == (set(REBUILD) - {"merge"}) | set(REWRITE) | set(CRYPTO)
     # Compare with the declaration table, not only with this module's literals.
     assert set(_backticked(unencrypted)) == {
         n for n, row in CARRIAGE.items() if row.encryption is Drop.DROPS
     }
-    assert set(_backticked(rebuilt)) == {n for n, row in CARRIAGE.items() if row.info is Drop.DROPS}
+    assert set(_backticked(carried)) == {
+        n for n, row in CARRIAGE.items() if row.info is Drop.CARRIES and row.xmp is Drop.CARRIES
+    }
     assert "the output it writes is not encrypted" in text
 
 
 # --------------------------------------------------------------------------- #
-# The REBUILD constant is the engine's real default (pinned by AC14); and the
-# declaration classes in this module are the table's.
+# PDF-116: REBUILD carries /Info and XMP (merge: the first input's), so the declared
+# classes in this module are the table's.
 # --------------------------------------------------------------------------- #
 
 
 def test_the_declared_classes_in_this_module_are_the_tables() -> None:
     table: dict[str, Callable[[carriage.Carriage], bool]] = {
-        "rebuild": lambda c: (c.encryption, c.info, c.xmp) == (Drop.DROPS,) * 3,
+        "rebuild": lambda c: (
+            (c.encryption, c.info, c.xmp) == (Drop.DROPS, Drop.CARRIES, Drop.CARRIES)
+        ),
+        "merge": lambda c: (c.encryption, c.info, c.xmp) == (Drop.DROPS, Drop.FIRST, Drop.FIRST),
         "rewrite": lambda c: (
             (c.encryption, c.info, c.xmp) == (Drop.DROPS, Drop.CARRIES, Drop.CARRIES)
         ),
@@ -1121,7 +1137,12 @@ def test_the_declared_classes_in_this_module_are_the_tables() -> None:
             (c.encryption, c.info, c.xmp) == (Drop.PURPOSE, Drop.CARRIES, Drop.CARRIES)
         ),
     }
-    for verbs, kind in ((REBUILD, "rebuild"), (REWRITE, "rewrite"), (CRYPTO, "crypto")):
+    for verbs, kind in (
+        (tuple(v for v in REBUILD if v != "merge"), "rebuild"),
+        (("merge",), "merge"),
+        (REWRITE, "rewrite"),
+        (CRYPTO, "crypto"),
+    ):
         for verb in verbs:
             assert table[kind](CARRIAGE[verb]), (verb, kind)
 
@@ -1150,7 +1171,7 @@ def test_a_relative_operand_is_named_exactly_as_the_item_publishes_it(inputs: In
     )
     run = parse(proc)
     assert run.rc == 0, run.stderr[-400:]
-    assert run.warnings == [w_enc("U-both.pdf", "rotate"), w_unchecked("U-both.pdf", "rotate")]
+    assert run.warnings == [w_enc("U-both.pdf", "rotate")]  # PDF-116: carried
 
 
 def test_an_item_published_under_another_spelling_still_finds_its_source(inputs: Inputs) -> None:

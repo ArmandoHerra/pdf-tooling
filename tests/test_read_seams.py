@@ -381,6 +381,58 @@ READ_SEAM_RESIDUE_LEDGER: Final[tuple[_ReadSeamRatification, ...]] = (
             "Every other key is carried byte-identical from the previous record."
         ),
     ),
+    _ReadSeamRatification(
+        date="2026-10-07",
+        spec="PDF-116",
+        direction="up",
+        ruling="X-1013",
+        ceilings=MappingProxyType(
+            {
+                "pdf_tooling/adapters/pdfplumber_text.py": 1,
+                "pdf_tooling/adapters/pikepdf_structure.py": 10,
+                #: X-1013 -- STRUCTURALLY-UNOBSERVABLE: `handle.read()` in
+                #: `PypdfOpenDocument._true_xmp_packet` (pypdf_structure.py:1024) reads the
+                #: file descriptor `__enter__` already opened, so it emits no `open` audit
+                #: event and the sweep can never credit it. Increment exactly 1 (9 -> 10).
+                #: PDF-119 expects this site to stay residue (not a helper frame).
+                "pdf_tooling/adapters/pypdf_structure.py": 10,
+                "pdf_tooling/adapters/soffice_office.py": 1,
+                "pdf_tooling/adapters/tesseract_ocr.py": 2,
+                "pdf_tooling/cli/cmd_create.py": 2,
+                "pdf_tooling/cli/common.py": 1,
+                "pdf_tooling/cli/password.py": 1,
+                "pdf_tooling/ops/carriage.py": 1,
+                "pdf_tooling/ops/compose.py": 2,
+                "pdf_tooling/ops/crypto.py": 4,
+                "pdf_tooling/ops/document_password.py": 3,
+                "pdf_tooling/ops/metadata.py": 1,
+                "pdf_tooling/ops/office.py": 1,
+                "pdf_tooling/ops/optimize.py": 3,
+                "pdf_tooling/ops/procpool.py": 2,
+                "pdf_tooling/safety/_faults.py": 1,
+                "pdf_tooling/safety/atomic.py": 4,
+            }
+        ),
+        reason=(
+            "X-1013. pdf_tooling/adapters/pypdf_structure.py gains 1 undriven read seam, "
+            "the measured increment (9 -> 10): `data = handle.read()` in "
+            "PypdfOpenDocument._true_xmp_packet (pypdf_structure.py:1024), which PDF-116 "
+            "D5 needs to hand PDF-107's pikepdf helper the document bytes for an "
+            "/EncryptMetadata false donor. "
+            "CLASS: structurally-unobservable, NOT helper-attributed. The read is on the "
+            "file descriptor PypdfOpenDocument.__enter__ already opened, so it emits no "
+            "`open` audit event (measured: 0 events under sys.addaudithook) and the sweep "
+            "can never credit it to any frame; a read_source_bytes call would have been "
+            "the helper-attributed class, and D5 rejects it as a second open of the "
+            "source (the X-980 TOCTOU class). "
+            "CONTROL: AC8's in-process spy proves the site executes on the "
+            "/EncryptMetadata false cells; the audit-hook probe proves it opens nothing. "
+            "CONDITION: no observable sibling is bought out; the increment is exactly "
+            "this one site. PDF-119's B-401 helper-credit repair will not absorb it (not a "
+            "helper frame) and should expect it to stay in the residue. "
+            "Every other key is carried byte-identical from the previous record."
+        ),
+    ),
 )
 
 #: The LIVE ceiling: the newest record's mapping, and nothing else. No

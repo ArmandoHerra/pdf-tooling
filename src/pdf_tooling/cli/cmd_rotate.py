@@ -69,8 +69,8 @@ is normalized into 0/90/180/270, so a page at 270 rotated by 90 becomes 0
 
 Within each page, rotate changes only the /Rotate entry: page boxes are not
 touched, and pages you do not select are left exactly as they were. The
-document is rebuilt around those pages, so the input's /Info and XMP metadata
-are not carried to the output, and an encrypted input is refused unless
+document is rebuilt around those pages, and the input's /Info and XMP metadata
+are carried to the output unchanged. An encrypted input is refused unless
 --allow-decrypted-output is given, in which case it is written unencrypted and
 the run says so in its warnings.
 

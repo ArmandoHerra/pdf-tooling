@@ -104,6 +104,11 @@ class StructureWriter(Protocol):
     :meth:`write` is handed the stream ``AtomicWriter`` opened, never a path,
     so pypdf's own path-taking convenience can never bypass the chokepoint
     from inside a call an AST walk cannot see.
+
+    PDF-116 carriage contract: a writer made with ``carry_metadata=True`` writes
+    the document ``/Info`` and XMP packet of the first document passed to
+    :meth:`append_pages` (its donor) into the output, unchanged. :meth:`write`
+    must be called while that donor document is still open.
     """
 
     def append_pages(self, document: OpenStructureDocument, page_numbers: Sequence[int]) -> None:
@@ -597,8 +602,16 @@ class StructureEngine(Protocol):
         """
         ...
 
-    def new_writer(self) -> StructureWriter:
-        """A fresh, empty :class:`StructureWriter` for one output."""
+    def new_writer(self, *, carry_metadata: bool = True) -> StructureWriter:
+        """A fresh, empty :class:`StructureWriter` for one output.
+
+        PDF-116: with ``carry_metadata`` (the default) the writer carries the
+        document ``/Info`` and XMP packet, unchanged, of the FIRST document
+        passed to ``append_pages`` (its donor) into the output at ``write()``;
+        a donor with no ``/Info`` yields an output with none. ``write()`` must
+        be called while the donor document is still open. Pass ``False`` only
+        for a buffer that never becomes an output (``stamp --from``'s layer).
+        """
         ...
 
     def compress(self, data: bytes, *, password: Secret | None = None) -> CompressOutcome:
