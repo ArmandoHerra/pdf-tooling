@@ -5040,6 +5040,18 @@ def _derive_1_1_ceiling_row() -> None:
             cmd_rasterize._validate_render_flags(dpi, width)
 
 
+def _derive_1_1_linked_image_row() -> None:
+    from pdf_tooling.adapters.soffice_office import PROFILE_SEED_KEYS
+
+    assert (
+        "/org.openoffice.Office.Common/Security/Scripting",
+        "BlockUntrustedRefererLinks",
+        "true",
+    ) in PROFILE_SEED_KEYS, "the hardened profile no longer blocks linked graphics"
+    body = migration_section_body_1_1()
+    assert "linked images are not loaded" in body, "the linked-image row is stale"
+
+
 MIGRATION_ROWS_1_1: tuple[MigrationRow, ...] = (
     MigrationRow(
         spec_id="PDF-112",
@@ -5052,6 +5064,12 @@ MIGRATION_ROWS_1_1: tuple[MigrationRow, ...] = (
         anchor="`--dpi` above `2400`",
         derive=_derive_1_1_ceiling_row,
         note="the static --dpi/--width ceilings exit 2",
+    ),
+    MigrationRow(
+        spec_id="PDF-120",
+        anchor="linked images are not loaded",
+        derive=_derive_1_1_linked_image_row,
+        note="convert no longer loads linked images; the hardened profile blocks them",
     ),
 )
 

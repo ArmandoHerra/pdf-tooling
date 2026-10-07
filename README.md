@@ -69,6 +69,7 @@ A `1.0.1` invocation or script that relied on any of the following observes a di
 |---|---|---|
 | `rasterize` or `ocr` on a page whose bitmap is larger than `178,956,970` pixels allocated it (several GB for a hostile page box) or died on a raw `MemoryError` at exit `1`; `--dry-run` predicted `0` | the whole run is refused at exit `5` before anything is written, naming the page, its pixel size, the budget and the largest `--dpi` that fits; `--dry-run` predicts the same `5`. This includes `ocr --dpi 1200` on `A3` or larger pages, which is now refused | lower `--dpi` (or `--width`) to the value the message names; for `ocr --dpi 1200` on `A3` or larger pages, pass a lower `--dpi`. There is no override |
 | `rasterize --dpi` accepted any positive value, including `nan` and `inf`, and `--width` any positive integer | `--dpi` above `2400` or not finite, and `--width` above `32768`, exit `2` | pass a value inside the range |
+| `convert` loaded images a document links to (a URL or a local file) and rendered them into the PDF | linked images are not loaded, and the PDF shows LibreOffice's placeholder; images stored inside the document are unaffected | embed the images in the document before converting |
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
@@ -283,7 +284,17 @@ The /Info of such an output holds only the engine's producer entry. `encrypt` an
 
 `ocr` drives the **tesseract** binary. For every selected page it renders the page, recognises a text-only layer, and overlays that layer on the **original** page object — the page's own image is never re-rendered, and a byte-level check proves the image stream is identical before and after. `--skip-text-pages` leaves a page that already has extractable text untouched (no render, no OCR call). This build ships whatever tessdata language packs the host has installed; `--lang` is validated against exactly that list (`pdftooling doctor`), and a pack that is not installed exits 3 with an install hint naming it. No accuracy or confidence claim is made anywhere in this tool — `ocr` is described here by its engine, not by a quality promise.
 
-`convert` drives headless **LibreOffice** (`soffice`) to turn an office document into a PDF. Each invocation gets its own isolated LibreOffice profile directory and converts into a private scratch location first — LibreOffice never writes to the destination directly, and the destination is only touched through this tool's one write chokepoint. An exit 0 from `soffice` having produced no output file is treated as a failure here, not a success, because that is a real and well-known LibreOffice failure mode. `--timeout` bounds one conversion; on expiry the whole process group is killed, so no `soffice.bin` daemon is left running.
+`convert` drives headless **LibreOffice** (`soffice`) to turn an office document into a PDF. Each invocation gets its own isolated LibreOffice profile directory and converts into a private scratch location first — LibreOffice never writes to the destination directly, and the destination is only touched through this tool's one write chokepoint. An exit 0 from `soffice` having produced no output file is treated as a failure here, not a success, because that is a real and well-known LibreOffice failure mode. `--timeout` bounds one conversion; on expiry the whole process group is killed, so no `soffice.bin` daemon is left running. Each throwaway profile is pre-seeded so that LibreOffice loads no linked image, remote or local, never updates links on load, runs no macros and disables OLE/DDE active content, and the document is handed over by absolute path.
+
+**What this does not cover.** The hardening above is verified against a narrow engine and document scope, and nothing here claims more:
+
+1. LibreOffice still **parses** the untrusted document in-process. A parser defect in LibreOffice is not mitigated here, and the conversion runs with the caller's network access and filesystem permissions. For untrusted input, run `convert` without network (for example in a container with no network, or under `unshare -n`).
+2. Only Writer documents (ODT and DOCX) are proven by a test. Spreadsheet and presentation vectors such as `WEBSERVICE()` and external references rely on the seeded settings without a test.
+3. The macro and active-content settings are seeded but not exercised by a test.
+4. Fonts come from the host: a document cannot fetch a font, but output appearance depends on the installed fonts, and fonts embedded in the document are still parsed.
+5. Hyperlinks remain clickable links in the PDF. They are not followed during conversion.
+6. The `soffice` child inherits the caller's environment (tracked as `B-427`).
+7. The settings were verified against LibreOffice 24.2.7.
 
 ## Development
 

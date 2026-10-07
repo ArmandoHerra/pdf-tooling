@@ -268,7 +268,7 @@ def convert_run(
         ensure_office_source_loadable(item.source)
         started = time.monotonic()
         bytes_before = item.source.stat().st_size
-        with ScratchDir() as scratch_root:
+        with ScratchDir(seed=engine.scratch_seed()) as scratch_root:
             produced = engine.convert_to_pdf(
                 item.source,
                 scratch_dir=scratch_root,
