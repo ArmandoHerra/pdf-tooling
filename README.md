@@ -210,7 +210,7 @@ Uniform across every verb.
 - Every write is write-to-temp-on-the-target-filesystem, `fsync`, then an atomic rename.
 - An output keeps the permission bits of the file it replaces, and a destination that did not exist is created at `0666 & ~umask` — what a shell redirect would have produced. The `.bak` sidecar keeps the original's bits too, so a backup is never more permissive than the file it backs up.
 - Inputs are never mutated unless you pass `--in-place`, which writes a `.bak` sidecar first. `--no-backup` suppresses the sidecar and requires `--in-place` — on its own it is a usage error.
-- An encrypted input is never written out unencrypted by default: every verb except `encrypt` and `decrypt` refuses it unless `--allow-decrypted-output` is given (see What a write does not carry).
+- An encrypted input is never written out unencrypted by default: the verbs that write a PDF from it — `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set` — refuse it unless `--allow-decrypted-output` is given (see What a write does not carry). A verb that writes no PDF (an extraction or report verb) is not gated, and `encrypt` and `decrypt` change encryption by design.
 - A password is never accepted as a command-line value. `--password-file` takes a path or `-`, because `argv` is world-readable in `/proc` and lands in shell history.
 
 ## Compression ceiling

@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-115] Remediation: the Safety-contract bullet names the verbs that refuse, and opt-in `stamp --from <encrypted>` warns — 2026-10-07
+
+- **The defect (ledger `5956e51669`, low, docs-drift):** README's Safety contract said "every verb except `encrypt` and `decrypt` refuses" an encrypted input. That is false for `text`, `rasterize`, `tables`, `info`, `permissions` and `meta get`, which write no PDF and stay outside the refusal by design (`X-1014`(c)). The bullet now names the 13 verbs that write a PDF from an encrypted input and says a verb that writes no PDF is not gated. No behaviour moves.
+- **The defect (ledger `24ecc55c77`, low):** under `--allow-decrypted-output`, `stamp PLAIN.pdf --from <encrypted>` wrote an unencrypted output with no W-ENC warning, although README says "the warning still says so". The opt-in skips the refusal gate, so nothing read the `--from` source's encryption fact. The opt-in path now feeds the verb's declared `Carriage.sources` through the same `record()` read the gate uses, and `amend` names each such source once in the shared W-ENC text. Dry run and real run carry identical warnings. Refusal (exit 5 naming the source) and the opt-in exit code are unchanged.
+- **Tests:** `test_b437_the_safety_contract_bullet_names_exactly_the_verbs_that_refuse` checks the bullet against the population derived from `requires_decrypted_output_opt_in` (it reds on a blanket sentence, an omitted verb, or a named non-refusing verb); `test_b437_optin_stamp_from_an_encrypted_source_warns_w_enc_naming_it` reds when the source feed is removed.
+- **No surface move:** no new read site (read-seam figures unchanged), no exit code, envelope key or flag, `schema_version` stays 1.
+
 ## [PDF-116] Carry the input's /Info and XMP through the page-rebuild verbs — 2026-10-07
 
 - **The nine page-rebuild verbs keep the document's title, author and XMP (B-390, ledger `f4d02eab86`):** `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp` and `ocr` used to write `/Info == {/Producer: pypdf}` and no XMP packet. The output now carries the source's `/Info` (an exact clone, so `/Trapped /False` stays a name) and XMP packet unchanged.
