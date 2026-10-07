@@ -35,6 +35,7 @@ const t = pick(Astro.url, {
   installEnd: '.',
   installComment: '# Install (published on PyPI)',
   installOr: '# or: pip install pdf-tooling',
+  platform: 'Linux and macOS. macOS 15 or later on Apple silicon; Intel Macs are not supported.',
   terminalLabel:
     'A captured pdftooling merge --dry-run session, followed by the ls that shows nothing was written',
   caption: HERO_CAPTION,
@@ -59,6 +60,7 @@ const t = pick(Astro.url, {
   installEnd: '.',
   installComment: '# Instalaci\u00f3n (publicado en PyPI)',
   installOr: '# o bien: pip install pdf-tooling',
+  platform: 'Linux y macOS. macOS 15 o posterior en Apple silicon; las Mac con Intel no son compatibles.',
   terminalLabel:
     'Sesi\u00f3n capturada de pdftooling merge --dry-run, seguida del ls que muestra que no se escribi\u00f3 nada',
   caption:
@@ -133,6 +135,7 @@ ${t.installOr}`;
         class="code-inline-tight text-sm">pdftooling</code>{t.installEnd}
     </p>
     <div tabindex="0" class="u-selectall mt-2 overflow-x-auto rounded-md border border-line-soft bg-surface-950 p-3 font-mono text-xs leading-relaxed text-surface-100 shadow-well sm:p-4"><pre><code>{install}</code></pre></div>
+    <p class="mt-2 max-w-xl text-sm text-surface-400">{t.platform}</p>
 
     <div class="mt-4 sm:mt-8">
       <Terminal

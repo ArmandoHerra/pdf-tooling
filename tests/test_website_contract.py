@@ -1298,6 +1298,25 @@ def _leading_comment_block_end(text: str) -> int:
     return offset
 
 
+def test_pdf113_the_hero_states_the_derived_platform_in_both_locales() -> None:
+    """PDF-113 D6. The hero's EN and ES platform sentences are the OR-33 ruling
+    with the macOS floor derived from the lock's pikepdf wheel tags, so the
+    words cannot drift from README or from the wheels."""
+    import sys
+
+    tests_dir = str(Path(__file__).resolve().parent)
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
+    from test_docs_antirot import platform_sentence
+
+    text = HERO_ASTRO.read_text()
+    for lang in ("en", "es"):
+        sentence = platform_sentence(lang)
+        assert text.count(sentence) == 1, (
+            f"Hero.astro must carry the derived {lang} platform sentence exactly once: {sentence!r}"
+        )
+
+
 def test_pdf95_ac20_no_version_number_is_typed_in_the_fold_or_the_closing_band() -> None:
     """AC20. Zero matches for `v?\\d+\\.\\d+\\.\\d+` in `Hero.astro`,
     `ClosingCta.astro`, `Terminal.astro` and `hero-transcript.ts` OUTSIDE the
