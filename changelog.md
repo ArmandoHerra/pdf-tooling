@@ -20,6 +20,15 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-112] Bound the render: a per-page pixel budget at the raster chokepoint, plus --dpi/--width ceilings — 2026-10-06
+
+- **The defect (`B-418`, `B-419`, audit 2026-10-06 Top-5 #1/#2):** a page's bitmap was the document-supplied page box times the scale, with nothing bounding it before pdfium allocated. A 541-byte PDF with a `14400 x 14400` pt box asked for a `30000 x 30000` bitmap at the default 150 dpi and died on a raw `MemoryError` at exit `1` with no envelope, while `--dry-run` predicted `0`. `--dpi nan` was accepted and then died on a `ValueError` traceback.
+- **One budget, one function (`X-1002`):** `ports.raster.page_pixels()` sizes a page from the displayed box pdfium allocates from (crop box and `/Rotate` applied, `/UserUnit` not), and `enforce_render_budget()` refuses a page whose `ceil`-based allocation exceeds `178,956,970` px. The adapter calls both before `page.render()`; the planners of `rasterize` and `ocr` call them in both tiers (`ocr` only on the pages it renders). The new `RenderBudgetError` is a `RefusedError`: exit `5`, run-scoped, naming the page, its size, the budget and the largest `--dpi` (and `--width`) that fits. There is no override.
+- **Ceilings:** `rasterize --dpi` above `2400` or not finite, and `--width` above `32768`, exit `2`. `--help` and README (`## Render budget`, `## Upgrading to 1.1`) state the figures. No exit code, envelope key or `schema_version` moved.
+- **Behaviour change:** `ocr` now exits `5` before a missing OCR engine exits `3` when a page is over budget; `ocr --dpi 1200` on `A3` or larger pages is refused.
+- **Tests:** `tests/integration/test_pdf112_render_budget.py` with module-local fixtures; a `## Upgrading to 1.1` guard set and registry in `tests/test_docs_antirot.py`; `test_b094_displayed_size_agrees_with_pdfiums_own_unrotated_render` follows `_displayed_size`'s new `(document, index)` signature.
+- **Engine-gating census ratified, not raised (`X-1016`):** the four `ocr` arms in `test_pdf112_render_budget.py` are engine-blind by purpose (they prove exit `5` answers before exit `3` on a leg where the engine is absent), so a `requires("tesseract")` marker would delete the proof. One `up` record moves that key `0 -> 4`; no other key moves.
+
 ## [PDF-110] Clear the two high npm advisories that red the `website` check — 2026-10-06
 
 - **Two packages refreshed, lock only:** `sharp` 0.35.4 -> 0.35.5 (GHSA-wq5f-xc86-pv6w) and `source-map-js` 1.2.1 -> 1.2.2 (GHSA-68fv-2mgg-jv7q), via `npm update sharp source-map-js --package-lock-only` with npm 11. `website/package.json` is unchanged and no override or audit suppression was added.

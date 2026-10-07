@@ -73,7 +73,7 @@ from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, Pas
 from pdf_tooling.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_tooling.ops.procpool import guarded_process_pool
 from pdf_tooling.ports import BROKEN_INSTALL_HINT
-from pdf_tooling.ports.raster import require_raster
+from pdf_tooling.ports.raster import enforce_render_budget, require_raster
 from pdf_tooling.ports.structure import require_structure
 from pdf_tooling.safety.atomic import AtomicWriter, plan_output_set
 from pdf_tooling.safety.confirm import BulkContext
@@ -108,8 +108,9 @@ _WEBP_METHOD: Final[int] = 6
 #: PDF-37's ``password`` slot is the REVEALED plaintext (``str | None``),
 #: never a :class:`~pdf_tooling.secret.Secret` -- a ``Secret`` refuses to
 #: pickle by design (its own ``__reduce__``), and this tuple crosses a real
-#: ``ProcessPoolExecutor`` boundary. Revealed exactly once per source, in
-#: THIS process, only after `read_encryption` has confirmed the source is
+#: ``ProcessPoolExecutor`` boundary. Revealed in THIS process twice per
+#: source -- once to measure the page boxes (PDF-112) and once to build these
+#: work items -- only after `read_encryption` has confirmed the source is
 #: actually encrypted (`ops/document_password.PasswordResolver`) -- so a
 #: plain document never pays this cost and the plaintext is never bound to a
 #: name that outlives the tuple it travels in.
@@ -351,7 +352,23 @@ def rasterize_document(
     def _plan_one(source: Path) -> list[int]:
         secret = resolver.for_source(source)
         secret_by_source[source] = secret
-        return list(_plan_pages(source, pages_spec, password=secret))
+        pages = list(_plan_pages(source, pages_spec, password=secret))
+        # PDF-112 / X-1002: size every planned page from the box pdfium will
+        # allocate from, and refuse the whole run (exit 5, run-scoped: this
+        # error is not item-scoped) before anything is written. Identical
+        # under --dry-run, so the preview predicts the same refusal.
+        measured = require_raster(capability="render").measure_pages(
+            str(source),
+            pages,
+            dpi=dpi,
+            width_px=width_px,
+            password=secret.reveal() if secret is not None else None,
+        )
+        for page_number, pixels in zip(pages, measured, strict=True):
+            enforce_render_budget(
+                pixels, page_number=page_number, path=str(source), dpi=dpi, width_px=width_px
+            )
+        return pages
 
     try:
         for source in sources:
@@ -471,8 +488,9 @@ def _rasterize_planned(
     # writes nothing. It raised already if refused (the
     # `except PdfToolingError: ... raise` inside plan_output_set, since
     # policy.dry_run is False here), so plan.refusal is always None below.
-    # PDF-37: revealed HERE, in the main process, exactly once per source --
-    # never inside a worker, and never kept around longer than building this
+    # PDF-37: revealed HERE, in the main process, once to build the work items
+    # (and once earlier, in `_plan_one`, to measure -- PDF-112) -- never
+    # inside a worker, and never kept around longer than building this
     # one picklable tuple (see `_WorkItem`'s own docstring for why a `Secret`
     # itself cannot make this trip).
     work: list[_WorkItem] = [

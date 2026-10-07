@@ -725,7 +725,9 @@ def test_b094_displayed_size_agrees_with_pdfiums_own_unrotated_render(
                     engine_size = bitmap.to_pil().size
                 finally:
                     bitmap.close()
-                assert _displayed_size(page) == _DISPLAYED_PT_AFTER_ROTATE[rotation], rotation
+                assert _displayed_size(document, 0) == (_DISPLAYED_PT_AFTER_ROTATE[rotation]), (
+                    rotation
+                )
                 assert engine_size == _DISPLAYED_PT_AFTER_ROTATE[rotation], rotation
             finally:
                 page.close()

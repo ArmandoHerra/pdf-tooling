@@ -39,6 +39,7 @@ __all__ = [
     "PageRangeError",
     "PdfToolingError",
     "RefusedError",
+    "RenderBudgetError",
     "SourceUnreadableError",
     "TargetExistsError",
     "UsageError",
@@ -302,6 +303,12 @@ class OutputCollisionError(RefusedError):
     Detected across the whole planned output set before the first write, so a
     200-file batch refuses at item 0 rather than at item 137.
     """
+
+
+class RenderBudgetError(RefusedError):
+    """PDF-112 / X-1002 -- a page's bitmap would exceed PIXEL_BUDGET. The eighth
+    subclass of RefusedError and the ninth producer of exit 5 / kind "refused"
+    (`bf697fd3cd`). Additive: does not override `kind` (B-361's row to take)."""
 
 
 class BackupExistsError(RefusedError):
