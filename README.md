@@ -61,6 +61,18 @@ uv run pdftooling --help
 
 `uv sync` installs the runtime stack *and* the development tooling, so there is no separate bootstrap step.
 
+## Upgrading to 1.2
+
+A `1.1.x` invocation or script that relied on any of the following observes a different exit code or message at `1.2`. These changes are on `main` and ship in the first `1.2` release.
+
+| In 1.1 | In 1.2 | What to change |
+|---|---|---|
+| `meta set --clear-all --in-place` exited `0` and kept a `.bak` sidecar holding the original /Info and XMP packet, with no warning; `-y` changed nothing | refused at exit `5` before anything is written (no output, no `.bak`; the input is byte-identical); `--dry-run` predicts the same `5` | pass `--no-backup` to keep no copy, or `-y` to keep the `.bak` knowingly — the run then warns, naming it. `meta set --in-place` without `--clear-all` is unchanged |
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+
+Re-derived at `1ad80f0` on `2026-10-08`.
+
 ## Upgrading to 1.1
 
 A `1.0.1` invocation or script that relied on any of the following observes a different exit code or message at `1.1`. These changes shipped in `1.1.0` on 2026-10-07.
@@ -246,7 +258,7 @@ Run `chmod 600` on any password file. The tool warns when one is readable by gro
 
 No secure erasure is claimed, anywhere. A resolved password is held in a buffer that is zeroed after use, but Python may already have copied it while decoding the file, and swap and core dumps are outside a process's control. The same goes for the `.bak` sidecar and for temporary files: they are deleted, not shredded.
 
-`encrypt --in-place` needs one more word from you, and it is the one place where the safety default and the security default point in opposite directions. The `.bak` sidecar is a copy of the **original**, so an in-place encryption would leave plaintext sitting next to the ciphertext, silently. So it refuses (exit 5) unless you pass `--no-backup` (keep no plaintext copy) or `-y` (keep it, knowingly).
+`encrypt --in-place` and `meta set --clear-all --in-place` each need one more word from you: they are the two places where the safety default and the security default point in opposite directions. The `.bak` sidecar is a copy of the **original**, so an in-place encryption would leave plaintext sitting next to the ciphertext, and an in-place `--clear-all` would leave every metadata field it removed sitting next to the cleaned file — silently. So both refuse (exit 5) unless you pass `--no-backup` (keep no copy) or `-y` (keep it, knowingly; the run then warns, naming the `.bak`).
 
 ### The permission vocabularies
 

@@ -29,12 +29,17 @@ import typer
 
 from pdf_tooling.cli.common import get_config, global_options, operand_argument
 from pdf_tooling.cli.password import ENV_PASSWORD, plan_password
+from pdf_tooling.errors import PdfToolingError, RefusedError
 from pdf_tooling.ops.metadata import meta_set_run
 from pdf_tooling.output import emit_result
 from pdf_tooling.safety.confirm import require_confirmation
 from pdf_tooling.safety.paths import classify_operand
 
-__all__ = ["meta_set_command"]
+__all__ = [
+    "CLEARED_BACKUP_REFUSAL",
+    "cleared_metadata_backup_refusal",
+    "meta_set_command",
+]
 
 VERB = "meta set"
 
@@ -74,8 +79,40 @@ With no field flag and no clear flag, this command exits 2 -- there is
 nothing to set.
 
 DESTINATIONS. -O writes the tagged document to a new file; --in-place
-overwrites the input, with a .bak sidecar first. One of the two is required.
+overwrites the input, with a .bak sidecar of the ORIGINAL first. One of the
+two is required. With --clear-all that sidecar still holds every field the
+run removed, so --clear-all --in-place additionally requires either
+--no-backup (do not keep it) or -y (keep it, knowingly; the run warns and
+names it).
 """
+
+CLEARED_BACKUP_REFUSAL = (
+    "`meta set --clear-all --in-place` would keep the cleared metadata in <name>.bak; "
+    "pass --no-backup to keep no copy, or -y to keep it knowingly"
+)
+
+
+def cleared_metadata_backup_refusal(
+    *, in_place: bool, clear_all: bool, backup: bool, assume_yes: bool
+) -> RefusedError | None:
+    """PDF-127 (OR-44) -- ``--clear-all --in-place`` must not keep the cleared
+    metadata beside the file without the operator saying so.
+
+    PDF-04's sidecar is a copy of the *original*, so ``--clear-all
+    --in-place`` leaves every removed /Info and XMP field sitting in the
+    ``.bak``, silently. It refuses unless the operator names the outcome:
+    ``--no-backup`` (keep no copy) or ``-y`` (keep it, knowingly).
+
+    Sibling of ``cmd_encrypt.py::plaintext_backup_refusal``, deliberately not
+    shared with it: each verb keeps its own vocabulary and remedies.
+
+    Returned rather than raised, so ``--dry-run`` predicts the refusal instead
+    of promising a write that cannot happen (X-67). It has no TTY branch: it
+    refuses on a terminal too and never prompts.
+    """
+    if in_place and clear_all and backup and not assume_yes:
+        return RefusedError(CLEARED_BACKUP_REFUSAL)
+    return None
 
 
 def _reject_missing_sources(sources: list[Path]) -> None:
@@ -153,6 +190,13 @@ def meta_set_command(
     if creator is not None:
         sets["creator"] = creator
 
+    refusal: PdfToolingError | None = cleared_metadata_backup_refusal(
+        in_place=config.in_place,
+        clear_all=clear_all,
+        backup=config.safety.backup,
+        assume_yes=config.assume_yes,
+    )
+
     if config.in_place:
         # Local import: `cli.main` imports this module at load time.
         from pdf_tooling.cli.main import build_rerun_hint
@@ -173,6 +217,7 @@ def meta_set_command(
         in_place=config.in_place,
         policy=config.safety,
         password=password,
+        pre_refusal=refusal,
     )
     emit_result(result, config.output_format)
     raise typer.Exit(result.exit_code)

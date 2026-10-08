@@ -37,7 +37,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
 
-from pdf_tooling.errors import UsageError
+from pdf_tooling.errors import PdfToolingError, UsageError
 from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, MetadataReport, OperationResult
 from pdf_tooling.ops.document_password import (
@@ -48,12 +48,13 @@ from pdf_tooling.ops.document_password import (
     predict_password_refusal,
 )
 from pdf_tooling.ports.structure import MetadataFacts, require_structure
-from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.atomic import AtomicWriter, PlannedOutputs, plan_filesystem
 from pdf_tooling.safety.paths import classify_operand, read_source_bytes
 from pdf_tooling.safety.policy import SafetyPolicy
 
 __all__ = [
     "CLEARABLE_FIELDS",
+    "CLEARED_BACKUP_WARNING_SUFFIX",
     "SETTABLE_FIELDS",
     "VERB_META_GET",
     "VERB_META_SET",
@@ -200,6 +201,12 @@ def meta_get_run(
 # --------------------------------------------------------------------------- #
 
 
+CLEARED_BACKUP_WARNING_SUFFIX: Final = (
+    "still holds the original /Info and XMP that --clear-all removed; "
+    "delete it if you do not want it"
+)
+
+
 def meta_set_run(
     source: Path,
     *,
@@ -210,6 +217,7 @@ def meta_set_run(
     in_place: bool,
     policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
+    pre_refusal: PdfToolingError | None = None,
 ) -> OperationResult:
     """`meta set` -- write both halves (D2.2), creating no XMP packet, preserving
     the original PdfObject type of every untouched `/Info` key (D2.3, inside
@@ -231,15 +239,35 @@ def meta_set_run(
     if target is None:
         raise UsageError(f"{VERB_META_SET} requires -O/--output or --in-place")
 
-    plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
+    # PDF-127: tier 1, ahead of `plan_filesystem` (which itself raises the
+    # sidecar-exists refusal), exactly as `ops/crypto.py::_plan` orders it.
+    # The real arm raises it before the source is read or anything is opened;
+    # the dry arm predicts it in `encrypt`'s dry-item shape (D4) through the
+    # same single item below, so no second `stat` seam is added.
+    if pre_refusal is not None and not policy.dry_run:
+        raise pre_refusal
+
+    def plan_outputs() -> PlannedOutputs:
+        return plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
 
     if policy.dry_run:
-        refusal = plan.refusal
-        if refusal is None:
-            refusal = predict_password_refusal(source, password=password, verb=VERB_META_SET)
-        detail = plan.detail()
-        if refusal is not None and plan.refusal is None:
-            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+        if pre_refusal is not None:
+            refusal: PdfToolingError | None = pre_refusal
+            detail: dict[str, object] = {
+                "would_exit": pre_refusal.exit_code,
+                "planned_refusal": type(pre_refusal).__name__,
+                "would_refuse": pre_refusal.to_dict(),
+            }
+            would_exit = pre_refusal.exit_code
+        else:
+            plan = plan_outputs()
+            refusal = plan.refusal
+            if refusal is None:
+                refusal = predict_password_refusal(source, password=password, verb=VERB_META_SET)
+            detail = plan.detail()
+            if refusal is not None and plan.refusal is None:
+                detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
+            would_exit = plan.would_exit
         # PDF-52 (`d01c9d52fb`): the pair rides along on every arm of this dry
         # tier -- including the two just above, where a filesystem or password
         # refusal is already predicted (D2's boundary arm ii). A dry run never
@@ -249,7 +277,7 @@ def meta_set_run(
             input=str(source),
             output=str(target),
             ok=refusal is None,
-            exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+            exit_code=(refusal.exit_code if refusal is not None else would_exit),
             message=(f"planned: {VERB_META_SET}" if refusal is None else refusal.message),
             bytes_before=source.stat().st_size,
             bytes_after=None,
@@ -264,6 +292,8 @@ def meta_set_run(
             warnings=(),
             duration_ms=0,
         )
+
+    plan_outputs()  # the real arm's filesystem tier: raises its refusal
 
     started = time.monotonic()
     bytes_before = source.stat().st_size
@@ -286,6 +316,9 @@ def meta_set_run(
     with AtomicWriter(target, policy=policy, kind="pdf") as writer:
         writer.stream.write(outcome.output)
 
+    # Read AFTER the with-block: `AtomicWriter.__exit__` -> `_commit()` is what
+    # populates `backup_path` (same reason as `ops/crypto.py`).
+    backup_path = writer.backup_path
     bytes_after = writer.bytes_written
     duration_ms = int((time.monotonic() - started) * 1000)
     # PDF-107: a packet this write could not rewrite safely is preserved
@@ -300,6 +333,9 @@ def meta_set_run(
         )
     else:
         message = "ok" if outcome.wrote_xmp or clear_all else "ok (no XMP packet; /Info only)"
+    if clear_all and backup_path is not None:
+        # PDF-127 (`-y`): the operator consented to keep the sidecar; say so.
+        warnings = (*warnings, f"{backup_path} {CLEARED_BACKUP_WARNING_SUFFIX}")
     item = ItemResult(
         input=str(source),
         output=str(target),
