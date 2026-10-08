@@ -324,7 +324,7 @@ A supplied password is checked even when the document would open without one: an
 
 ## Upgrading to 1.2
 
-A `1.1.x` invocation or script that relied on any of the following observes a different exit code or message at `1.2`. These changes are on `main` and ship in the first `1.2` release.
+A `1.1.x` invocation or script that relied on any of the following observes a different exit code or message at `1.2`. These changes shipped in `1.2.0` on 2026-10-08.
 
 | In 1.1 | In 1.2 | What to change |
 |---|---|---|
