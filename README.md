@@ -279,6 +279,8 @@ Carry the input's /Info and XMP packet unchanged: `rotate`, `extract`, `delete`,
 
 `merge` carries the first input's /Info and XMP packet; each other input whose metadata is not carried is named in a warning, and a later input that needs a password is reported as not checked. `split` carries them into every part. Nothing in them is rewritten: the producer entry, the dates and the XMP packet are the input's. To write an output without them, run `meta set --clear-all` on it.
 
+`meta set --clear-all` empties the document-level /Info dictionary and removes the document-level XMP packet from the file: the output keeps no copy of either, referenced or not, and is written as a single revision. It leaves page-level XMP, /PieceInfo, annotation authors, embedded-file metadata and the trailer /ID in place, and `meta get` reports those. Before 1.1.1, `--clear-all` unlinked the packet but left a copy of it in the file as an unreferenced object, which `meta get` and most tools do not show; a file cleared by an earlier version still holds that copy.
+
 `encrypt` and `decrypt` change encryption by design. With `--allow-decrypted-output`, an owner-only input needs no password for any of this. Every drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. Without `--allow-decrypted-output`, `--in-place` on an encrypted input leaves it untouched; with it, the ciphertext is replaced, and the `.bak` keeps it unless `--no-backup` is given.
 
 ### `--password-file` is global: honoured or refused, never silently ignored
