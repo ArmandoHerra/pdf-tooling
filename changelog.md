@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-124] Point PyPI metadata at the site, the issue tracker and job-shaped keywords — 2026-10-08
+
+- **`[project.urls]` now carries five well-known labels in order:** `Homepage` is the website (the repository already declares it as its homepage; PyPI was the one surface that disagreed), then `Documentation`, `Repository`, `Changelog` and `Issues`. `Repository` and `Changelog` are unchanged. This takes effect on PyPI at `1.1.1`, the next publish; nothing changes on the already-published `1.1.0` page.
+- **`Documentation` points at the README (`#readme`), not the site:** the site is a landing page plus a licensing page rather than a reference, and its own footer already defines documentation as the README, so one definition of "the docs" holds across the site and PyPI.
+- **`keywords` grows from 6 to 22 job-shaped terms** (`compress`, `encrypt`, `decrypt`, `watermark`, `office-to-pdf`, `extract-text`, and so on), each backed by a live CLI verb; none teaches metadata stripping, and engine names are deliberately absent.
+- **Guards:** new `tests/test_pypi_metadata.py` pins the declaration against the live verb tree and the website config; `scripts/assert_artifacts.py` now also checks that the BUILT wheel and sdist carry exactly the declared `Project-URL` set and `Keywords`. No runtime dependency, CLI surface, exit code or envelope key moves; classifiers and `version` are untouched.
+
 ## [PDF-123] Add SECURITY.md, issue forms, a PR template and a code of conduct — 2026-10-08
 
 - **`SECURITY.md`:** reports go through GitHub private vulnerability reporting; the latest minor release line is the supported one, and no response time is promised.

@@ -22,6 +22,13 @@ non-vacuity rules, each closing a way this could pass while being wrong:
   * the two CANONICAL scripts are asserted PRESENT before the two deprecated
     ones are asserted ABSENT, in the same arm -- an absence-only check passes
     against an empty `[console_scripts]` section too.
+
+PDF-124 D4. Nothing read `[project.urls]` or `keywords` before, and the
+publish-time `twine check` validates the FORM of the metadata, not its CONTENT,
+so a build that dropped the project links or the keywords would still publish.
+The built wheel's `METADATA` and the sdist's `PKG-INFO` must carry exactly the
+`Project-URL` set (in declaration order) and the `Keywords` that `pyproject.toml`
+declares. A missing header is a failure, never a pass.
 """
 
 from __future__ import annotations
@@ -30,7 +37,10 @@ import configparser
 import glob
 import sys
 import tarfile
+import tomllib
 import zipfile
+from email.parser import HeaderParser
+from pathlib import Path
 
 REQUIRED = ("LICENSE", "NOTICE", "THIRD_PARTY_LICENSES")
 
@@ -44,6 +54,58 @@ EXPECTED_CONSOLE_SCRIPTS = {
 #: suffix (the sdist's top-level directory name is the version-qualified
 #: distribution name, not fixed across builds).
 REMOVED_SDIST_MEMBER_SUFFIX = "src/pdf_tooling/cli/deprecated.py"
+
+#: PDF-124 D4. Anchored on this file, never on the CWD.
+PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+
+
+def check_metadata(label: str, headers_text: str) -> list[str]:
+    """PDF-124 D4. Compare one artifact's core-metadata headers to `pyproject.toml`."""
+    with PYPROJECT.open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    declared_urls = list(project["urls"].items())
+    declared_keywords = sorted(project["keywords"])
+    headers = HeaderParser().parsestr(headers_text)
+    problems: list[str] = []
+
+    got_urls: list[tuple[str, str]] = []
+    for raw in headers.get_all("Project-URL") or []:
+        name, _, url = raw.partition(", ")
+        got_urls.append((name, url))
+    if not got_urls:
+        problems.append(f"{label}: no Project-URL headers at all")
+    got_by_name = dict(got_urls)
+    for name, url in declared_urls:
+        if name not in got_by_name:
+            problems.append(f"{label}: Project-URL {name!r} missing")
+        elif got_by_name[name] != url:
+            problems.append(
+                f"{label}: Project-URL {name!r} differs: got {got_by_name[name]!r}, "
+                f"declared {url!r}"
+            )
+    declared_names = {name for name, _ in declared_urls}
+    for name, _ in got_urls:
+        if name not in declared_names:
+            problems.append(f"{label}: Project-URL {name!r} unexpected")
+    if not problems and got_urls != declared_urls:
+        problems.append(
+            f"{label}: Project-URL order differs: got {[n for n, _ in got_urls]}, "
+            f"declared {[n for n, _ in declared_urls]}"
+        )
+
+    keywords_header = headers.get("Keywords")
+    if keywords_header is None:
+        problems.append(f"{label}: Keywords header missing")
+    else:
+        got_keywords = keywords_header.split(",")
+        if sorted(got_keywords) != declared_keywords or len(got_keywords) != len(declared_keywords):
+            missing_kw = sorted(set(declared_keywords) - set(got_keywords))
+            extra_kw = sorted(set(got_keywords) - set(declared_keywords))
+            problems.append(
+                f"{label}: Keywords differ: missing {missing_kw}, unexpected {extra_kw}, "
+                f"got {len(got_keywords)} of {len(declared_keywords)}"
+            )
+    return problems
 
 
 def main() -> int:
@@ -79,8 +141,17 @@ def main() -> int:
         entry_points_text = (
             zf.read(entry_points_member).decode("utf-8") if entry_points_member else ""
         )
+        metadata_member = next(
+            (name for name in wheel_names if name.endswith(".dist-info/METADATA")), None
+        )
+        wheel_metadata = zf.read(metadata_member).decode("utf-8") if metadata_member else None
     with tarfile.open(sdist_path) as tf:
         sdist_names = tf.getnames()
+        pkg_info_member = next(
+            (n for n in sdist_names if n.count("/") == 1 and n.endswith("/PKG-INFO")), None
+        )
+        pkg_info_file = tf.extractfile(pkg_info_member) if pkg_info_member else None
+        sdist_metadata = pkg_info_file.read().decode("utf-8") if pkg_info_file else None
 
     missing: list[str] = []
     for name in REQUIRED:
@@ -116,6 +187,16 @@ def main() -> int:
                 f"key(s) {extra}; the deprecated console scripts must be absent"
             )
 
+    # PDF-124 D4 -- the project links and keywords, read from BOTH archives.
+    for label, path, text in (
+        ("wheel", wheel_path, wheel_metadata),
+        ("sdist", sdist_path, sdist_metadata),
+    ):
+        if text is None:
+            missing.append(f"{label} {path}: no METADATA / PKG-INFO found")
+        else:
+            missing.extend(check_metadata(f"{label} {path}", text))
+
     # AC3 -- the sdist no longer carries the removed shim module.
     if any(name.endswith(REMOVED_SDIST_MEMBER_SUFFIX) for name in sdist_names):
         missing.append(f"sdist {sdist_path} still carries {REMOVED_SDIST_MEMBER_SUFFIX}")
@@ -126,13 +207,20 @@ def main() -> int:
             print(f"  - {line}", file=sys.stderr)
         print("\nRemedy: add the file to [project] license-files and/or the", file=sys.stderr)
         print("[tool.hatch.build.targets.sdist] include list in pyproject.toml,", file=sys.stderr)
-        print("or fix [project.scripts] if a console-script check failed above.", file=sys.stderr)
+        print(
+            "or fix [project.scripts] if a console-script check failed above, or rebuild",
+            file=sys.stderr,
+        )
+        print(
+            "(`make clean && make build`) if a Project-URL/Keywords check failed.", file=sys.stderr
+        )
         return 1
 
     print(f"both artifacts carry {', '.join(REQUIRED)}")
     print(f"  wheel: {wheel_path}")
     print(f"  sdist: {sdist_path}")
     print(f"  console_scripts: {sorted(EXPECTED_CONSOLE_SCRIPTS)}")
+    print("  metadata: Project-URL set and Keywords match pyproject.toml in both")
     return 0
 
 

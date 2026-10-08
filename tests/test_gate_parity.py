@@ -1020,7 +1020,7 @@ def test_pdf59_ac1_the_maturity_classifier_is_5_production_stable() -> None:
     _SELF = "tests/test_gate_parity.py"
     # THE POPULATION this census counts: occurrences of the phrase in the SOURCE
     # TEXT of the three scanned sources, minus this module. Exactly one survives
-    # -- the classifier declaration at `pyproject.toml:16` -- and that one is what
+    # -- the classifier declaration at `pyproject.toml:22` -- and that one is what
     # the assertions below grade.
     #
     # COMPILED BYTECODE IS EXCLUDED, and it is not a hit that was rounded away:
