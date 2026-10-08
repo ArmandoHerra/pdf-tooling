@@ -65,7 +65,10 @@ input inside it. It does NOT touch page-level XMP /Metadata, /PieceInfo
 fields, embedded-file metadata, or the trailer /ID -- 'meta get' REPORTS
 these residual surfaces under "Not cleared by --clear-all" / the JSON
 payload's residual_surfaces, so what --clear-all cannot remove is visible
-rather than merely disclaimed.
+rather than merely disclaimed. It also reports, under "Held but not
+reachable", metadata an input still holds that no reader follows
+(unreferenced objects and earlier revisions); the file --clear-all writes
+holds neither.
 
 With no field flag and no clear flag, this command exits 2 -- there is
 nothing to set.

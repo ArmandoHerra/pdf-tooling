@@ -59,6 +59,15 @@ one is "right" and never emits a merged, single answer.
 parsing loses custom namespaces, so an operator auditing what they are about
 to share may need the packet itself, not just the parsed fields.
 
+RESIDUE NO VIEWER SHOWS. residual_surfaces also counts metadata the file still
+holds that no reader follows: unreferenced_metadata is the number of metadata
+streams and /Info-style dictionaries nothing references (an unlinked or freed
+packet), and prior_revisions is the number of earlier revisions an incremental
+save kept (a stripping tool that appends an update leaves the old values in the
+file). A linearized file's two cross-reference sections are one revision. These
+are counts; this command never removes anything. Rewriting the file, for
+example with 'meta set --clear-all', drops both.
+
 REPORTS, NEVER WRITES: this verb writes no files, so -O/--output,
 --out-dir, --name, --in-place, -f/--force and -y/--yes each exit 2.
 """
@@ -80,10 +89,10 @@ def _table_block(title: str, lines: list[str]) -> list[str]:
 
 
 def _render_table(payload: dict[str, Any]) -> str:
-    """Design D2.1's four-block table: Document Info, XMP, Disagreements,
-    Not cleared by --clear-all. An empty block prints `(none)` rather than
-    omitting the heading, so an empty section is never ambiguous with a
-    missing feature."""
+    """Design D2.1's five-block table: Document Info, XMP, Disagreements,
+    Not cleared by --clear-all, Held but not reachable (PDF-126). An empty
+    block prints `(none)` rather than omitting the heading, so an empty
+    section is never ambiguous with a missing feature."""
     info = payload.get("info") or {}
     xmp = payload.get("xmp")
     disagreements = payload.get("disagreements") or []
@@ -104,11 +113,17 @@ def _render_table(payload: dict[str, Any]) -> str:
             ],
         )
     )
+    unreachable = ("unreferenced_metadata", "prior_revisions")
     lines.extend(
         _table_block(
-            "Not cleared by --clear-all", [f"{key}: {value}" for key, value in residual.items()]
+            "Not cleared by --clear-all",
+            [f"{key}: {value}" for key, value in residual.items() if key not in unreachable],
         )
     )
+    # PDF-126: always both lines, even at 0 -- an empty block is never
+    # ambiguous with a missing feature.
+    lines.append("Held but not reachable")
+    lines.extend(f"  {key}: {residual.get(key, 0)}" for key in unreachable)
     return "\n".join(lines)
 
 

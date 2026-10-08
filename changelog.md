@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-126] Make `meta get` report unreferenced metadata objects and prior revisions in `residual_surfaces` — 2026-10-08
+
+- **Two new integer sub-keys under `residual_surfaces` (`c8661d9f85`):** `unreferenced_metadata` counts `/Type /Metadata` streams and `/Info`-shaped dictionaries the newest revision's trailer does not reach (a freed or unlinked packet included), and `prior_revisions` counts earlier revisions an incremental save kept, so a file stripped by a tool that appends an update (the `exiftool -all=` shape) no longer reads as clean.
+- **Additive, `schema_version` stays 1:** the six existing sub-keys keep their order and meaning, the two new ones follow `trailer_id`; the envelope key register is unchanged and no exit code moves. `-o table` prints a separate "Held but not reachable" block (both lines, even at 0), and `meta get --help` and `meta set --help` describe it.
+- **A linearized file is one revision:** its first-page and main cross-reference sections are paired, not counted twice; a broken or cyclic `/Prev` chain fails high rather than reading clean.
+- **Reports, never clears:** nothing is removed or decoded; the walk reads the bytes pypdf already holds, so no new file is opened.
+
 ## [PDF-124] Point PyPI metadata at the site, the issue tracker and job-shaped keywords — 2026-10-08
 
 - **`[project.urls]` now carries five well-known labels in order:** `Homepage` is the website (the repository already declares it as its homepage; PyPI was the one surface that disagreed), then `Documentation`, `Repository`, `Changelog` and `Issues`. `Repository` and `Changelog` are unchanged. This takes effect on PyPI at `1.1.1`, the next publish; nothing changes on the already-published `1.1.0` page.

@@ -23,6 +23,7 @@ plan names for `compress`.
 from __future__ import annotations
 
 import io
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, BinaryIO, Final
@@ -318,6 +319,7 @@ def _residual_surfaces(reader: PdfReader) -> dict[str, object]:
             if names_array is not None:
                 embedded_files = len(names_array.get_object()) // 2
     trailer_id = "/ID" in reader.trailer
+    chain = _xref_chain(reader)
     return {
         "page_xmp_pages": page_xmp_pages,
         "doc_piece_info": doc_piece_info,
@@ -325,7 +327,175 @@ def _residual_surfaces(reader: PdfReader) -> dict[str, object]:
         "annotation_authors": annotation_authors,
         "embedded_files": embedded_files,
         "trailer_id": trailer_id,
+        # PDF-126: residue no viewer follows -- counts, never contents.
+        "unreferenced_metadata": _unreferenced_metadata(reader, chain),
+        "prior_revisions": chain.prior_revisions,
     }
+
+
+# --------------------------------------------------------------------------- #
+# PDF-126 -- residue no viewer follows: unreferenced metadata + prior revisions
+# --------------------------------------------------------------------------- #
+# Everything below parses `reader.stream` -- the BytesIO pypdf already filled --
+# so it opens no file (read-seam class: in-memory-parse). pypdf's private
+# attributes (`stream`, `xref`, `xref_objStm`) are touched ONLY in this block.
+
+_XREF_WINDOW: Final = 2048
+_MAX_SECTIONS: Final = 1024
+_STARTXREF_RE: Final = re.compile(rb"startxref\s+(\d+)")
+_OBJ_HEADER_RE: Final = re.compile(rb"\s*\d+\s+\d+\s+obj\s*")
+_INFO_SHAPED_KEYS: Final = ("/Title", "/Author", "/Subject", "/Keywords", "/Creator", "/Producer")
+_ROOT_KEYS: Final = ("/Root", "/Info", "/Encrypt")
+
+
+class _XrefChain:
+    """The newest-first cross-reference sections of a file (D2)."""
+
+    __slots__ = ("complete", "prior_revisions", "trailers")
+
+    def __init__(self, trailers: list[Any], complete: bool, prior_revisions: int) -> None:
+        self.trailers = trailers
+        self.complete = complete
+        self.prior_revisions = prior_revisions
+
+
+def _dict_at(data: bytes, offset: int, reader: PdfReader, *, skip_header: bool) -> Any:
+    from pypdf.generic import DictionaryObject  # noqa: PLC0415 - lazy engine import
+
+    if skip_header:
+        match = _OBJ_HEADER_RE.match(data, offset)
+        if match is None:
+            raise ValueError("no object header")
+        offset = match.end()
+    while offset < len(data) and data[offset : offset + 1].isspace():
+        offset += 1
+    return DictionaryObject.read_from_stream(io.BytesIO(data[offset:]), reader)
+
+
+def _linearization_end(data: bytes, reader: PdfReader) -> int | None:
+    """D3: `/E` of a leading `/Linearized` dict, 0 if unusable, else None."""
+    try:
+        first = _OBJ_HEADER_RE.search(data, 0, 1024)
+        if first is None:
+            return None
+        head = _dict_at(data, first.start(), reader, skip_header=True)
+        if "/Linearized" not in head:
+            return None
+        end = head.get("/E")
+        return int(end) if isinstance(end, int) else 0
+    except Exception:
+        return None
+
+
+def _xref_chain(reader: PdfReader) -> _XrefChain:
+    """D2: walk the `/Prev` chain by hand on the in-memory stream. Never
+    raises; any guard trip marks the chain incomplete and the revision count
+    fails HIGH via the `startxref` keyword count."""
+    getvalue = getattr(reader.stream, "getvalue", None)
+    if getvalue is None:
+        return _XrefChain([], False, 0)
+    data: bytes = getvalue()
+    trailers: list[Any] = []
+    offsets: list[int] = []
+    complete = True
+    try:
+        found = _STARTXREF_RE.findall(data[-_XREF_WINDOW:])
+        if not found:
+            raise ValueError("no startxref")
+        offset: int | None = int(found[-1])
+        seen: set[int] = set()
+        while offset is not None:
+            if offset in seen or not 0 <= offset < len(data) or len(offsets) >= _MAX_SECTIONS:
+                complete = False
+                break
+            seen.add(offset)
+            if data.startswith(b"xref", offset):
+                marker = data.find(b"trailer", offset)
+                if marker < 0:
+                    raise ValueError("no trailer")
+                trailer = _dict_at(data, marker + len(b"trailer"), reader, skip_header=False)
+            else:
+                trailer = _dict_at(data, offset, reader, skip_header=True)
+            trailers.append(trailer)
+            offsets.append(offset)
+            prev = trailer.get("/Prev")
+            offset = int(prev) if isinstance(prev, int) else None
+    except Exception:
+        complete = False
+    end = _linearization_end(data, reader)
+    paired = end is not None and len(offsets) >= 2 and any(o < end for o in offsets)
+    pair = 1 if paired else 0
+    count = max(0, len(offsets) - 1 - pair)
+    if not complete:
+        count = max(count, data.count(b"startxref") - 1 - pair, 0)
+    chain = _XrefChain(trailers, complete, count)
+    if paired and complete and len(trailers) == 2 and offsets[0] < (end or 0):
+        # The newest revision IS the linearized pair: roots come from both.
+        chain.trailers = trailers
+    else:
+        chain.trailers = trailers[:1]
+    return chain
+
+
+def _is_metadata_residue(obj: Any) -> bool:
+    from pypdf.generic import DictionaryObject, StreamObject  # noqa: PLC0415
+
+    if isinstance(obj, StreamObject):
+        return obj.get("/Type") == "/Metadata"
+    if isinstance(obj, DictionaryObject):
+        return "/Type" not in obj and any(key in obj for key in _INFO_SHAPED_KEYS)
+    return False
+
+
+def _resolve(reader: PdfReader, ref: Any) -> Any:
+    """Best-effort resolve: an unreadable object is skipped, never fatal (D4)."""
+    try:
+        return reader.get_object(ref)
+    except Exception:
+        return None
+
+
+def _unreferenced_metadata(reader: PdfReader, chain: _XrefChain) -> int:
+    """D4: count metadata-shaped objects the file lists (freed ones included)
+    that the NEWEST revision's trailer does not reach."""
+    from pypdf.generic import (  # noqa: PLC0415 - lazy engine import
+        ArrayObject,
+        DictionaryObject,
+        IndirectObject,
+    )
+
+    if chain.complete and chain.trailers:
+        roots: list[Any] = []
+        for trailer in chain.trailers:
+            roots.extend(trailer.raw_get(key) for key in _ROOT_KEYS if key in trailer)
+    else:
+        roots = [reader.trailer.raw_get(key) for key in _ROOT_KEYS if key in reader.trailer]
+    reachable: set[int] = set()
+    pending: list[Any] = list(roots)
+    while pending:
+        item = pending.pop()
+        if isinstance(item, IndirectObject):
+            if item.idnum in reachable:
+                continue
+            reachable.add(item.idnum)
+            item = _resolve(reader, item)
+        if isinstance(item, DictionaryObject):
+            pending.extend(item.values())
+        elif isinstance(item, ArrayObject):
+            pending.extend(item)
+    population: dict[int, int] = {}
+    for gen, entries in reader.xref.items():
+        for num in entries:
+            population.setdefault(num, gen)
+    for num, (_stm, _idx) in reader.xref_objStm.items():
+        population.setdefault(num, 0)
+    count = 0
+    for num, gen in population.items():
+        if num in reachable:
+            continue
+        if _is_metadata_residue(_resolve(reader, IndirectObject(num, gen, reader))):
+            count += 1
+    return count
 
 
 def _unlock_with_password(
