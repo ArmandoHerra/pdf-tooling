@@ -4,42 +4,19 @@ An Apache-2.0 PDF toolkit CLI in Python. One safe command-line tool (`pdftooling
 
 Safety is first-class: a global `--dry-run`, no-clobber by default, atomic write-to-temp-then-rename, and inputs that are never mutated unless you ask for `--in-place`.
 
-**Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-tooling/specs/SPEC-INDEX.md`; history in `changelog.md`.
-
 - **Website:** https://armandoherra.github.io/pdf-tooling/ — the public landing page (source in `website/`).
 
-## Naming
-
-The names below are this project's contract. They differ deliberately, and a reader
-citing any of them should cite the table rather than the prose around it.
-
-| Kind | Name |
-|---|---|
-| PyPI distribution | `pdf-tooling` |
-| Repository | `pdf-tooling` |
-| Import package | `pdf_tooling` |
-| Console script | `pdftooling` |
-| Aliases | `pdf-tooling` |
-
-**Why the names differ.** The PyPI distribution is `pdf-tooling` because `pdf-toolkit`
-sits too close to names already on PyPI, and the distribution called `pdftoolkit` there
-is an unrelated GPL-3.0 project that is not this software. The repository followed the
-distribution; the import package and the console script followed it in turn, once the
-deprecated aliases below made moving a published surface safe.
-
-**The deprecated console scripts.** `pdftoolkit` and `pdf-toolkit` were migration
-aliases for `pdftooling`/`pdf-tooling` — same behaviour, same exit codes — each
-printing one line on stderr naming the replacement. Both are removed at `v1.0.0`.
-
-**Release history, so the install lines above can be read against it.** `v0.1.0` was
-git-install-only and was never published to PyPI under either name; `v0.1.1` is the
-first published release, as `pdf-tooling`; `v0.2.0` is the first published under the
-renamed repository; `v0.3.0` is the first release to ship the renamed `pdftooling`
-console script and the `pdf_tooling` import package. The old `pdf_toolkit` import
-package was renamed away entirely at that release, not kept as an alias. `pdftoolkit`
-and `pdf-toolkit` shipped as deprecated console-script aliases from that same release.
-
 ## Getting Started
+
+To try it without installing anything permanently, run it through [`uv`](https://docs.astral.sh/uv/):
+
+```bash
+uvx pdf-tooling --help
+```
+
+![pdf-tooling merging, compressing and previewing a batch](https://raw.githubusercontent.com/ArmandoHerra/pdf-tooling/main/docs/demo/pdf-tooling.gif)
+
+To keep it:
 
 ```bash
 uv tool install pdf-tooling
@@ -61,57 +38,51 @@ uv run pdftooling --help
 
 `uv sync` installs the runtime stack *and* the development tooling, so there is no separate bootstrap step.
 
-## Upgrading to 1.2
+## Recipes
 
-A `1.1.x` invocation or script that relied on any of the following observes a different exit code or message at `1.2`. These changes are on `main` and ship in the first `1.2` release.
+Each recipe runs as written once its input files exist. Under `uvx`, write `uvx pdf-tooling` where a recipe says `pdftooling`.
 
-| In 1.1 | In 1.2 | What to change |
-|---|---|---|
-| `meta set --clear-all --in-place` exited `0` and kept a `.bak` sidecar holding the original /Info and XMP packet, with no warning; `-y` changed nothing | refused at exit `5` before anything is written (no output, no `.bak`; the input is byte-identical); `--dry-run` predicts the same `5` | pass `--no-backup` to keep no copy, or `-y` to keep the `.bak` knowingly — the run then warns, naming it. `meta set --in-place` without `--clear-all` is unchanged |
-| a multi-input run (`compress`, `delete`, `extract`, `reorder`, `rotate`, `ocr`, `text`, `tables`, `rasterize`) in which an input failed on its password exited `6` | it exits `1`, like any other failing input; the input's row still carries `exit_code` `6`. A single-input run still exits `6` | read `items[].exit_code` to tell a password failure from another failure; do not branch on the run's `6` for a batch |
-| an owner-only encrypted input with a `--password-file` that does not open it exited `0` on `rotate`, `delete`, `extract`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `meta set` (under `--allow-decrypted-output`), `info` and `meta get`, and `6` on the others | it exits `6` on every verb; in a batch, that input's row fails with `6` and the run exits `1` | supply the owner password, or run owner-only inputs without `--password-file` |
-| in a multi-input `text` or `tables` run, an owner-only input with a non-matching password ended the whole run with the error envelope | the input is reported as a failed row and the other inputs are processed | read the per-item rows |
+### Merge
 
-`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+```bash
+pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+```
 
-Re-derived at `a99db64` on `2026-10-08`.
+The output is a new file: an existing `book.pdf` is never overwritten unless you pass `-f`.
 
-## Upgrading to 1.1
+### Compress
 
-A `1.0.1` invocation or script that relied on any of the following observes a different exit code or message at `1.1`. These changes shipped in `1.1.0` on 2026-10-07.
+```bash
+pdftooling compress book.pdf -O book-small.pdf
+```
 
-| In 1.0.1 | In 1.1 | What to change |
-|---|---|---|
-| `rasterize` or `ocr` on a page whose bitmap is larger than `178,956,970` pixels allocated it (several GB for a hostile page box) or died on a raw `MemoryError` at exit `1`; `--dry-run` predicted `0` | the whole run is refused at exit `5` before anything is written, naming the page, its pixel size, the budget and the largest `--dpi` that fits; `--dry-run` predicts the same `5`. This includes `ocr --dpi 1200` on `A3` or larger pages, which is now refused | lower `--dpi` (or `--width`) to the value the message names; for `ocr --dpi 1200` on `A3` or larger pages, pass a lower `--dpi`. There is no override |
-| `rasterize --dpi` accepted any positive value, including `nan` and `inf`, and `--width` any positive integer | `--dpi` above `2400` or not finite, and `--width` above `32768`, exit `2` | pass a value inside the range |
-| `convert` loaded images a document links to (a URL or a local file) and rendered them into the PDF | linked images are not loaded, and the PDF shows LibreOffice's placeholder; images stored inside the document are unaffected | embed the images in the document before converting |
-| a verb that writes its output unencrypted (`rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`) wrote a plaintext output from an encrypted input at exit `0`, with only a warning — an owner-only input with no password at all, and an encrypted `stamp --from` source | the run is refused at exit `5` before anything is written, naming every encrypted input; a batch with any encrypted input is refused whole, and `--dry-run` predicts it | pass `--allow-decrypted-output` where a decrypted output is intended; the exit code is then 1.0.1's, and the output carries the input's /Info and XMP (see the metadata row) with a W-ENC warning naming each encrypted input, a `stamp --from` source included |
-| `--in-place` (including `--no-backup`) on an encrypted input replaced the ciphertext with plaintext | refused at exit `5`; the input is left byte-identical and no `.bak` is made | as above |
-| such a run with an encrypted input and a missing or wrong password, a missing sibling input, a malformed page range or another in-verb usage error exited `6`, `4`, `3` or `2` | exits `5` first; the other codes answer once `--allow-decrypted-output` is given | scripts that branch on `6` for an encrypted input of these verbs add the flag |
-| `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp` and `ocr` wrote an output whose /Info held only `/Producer: pypdf` and no XMP packet, and warned that the input's were not carried | the output carries the input's /Info and XMP packet unchanged (`merge`: the first input's; `split`: into every part); the warning is gone except for `merge`'s other inputs | to publish a document without its metadata, run `pdftooling meta set --clear-all` on the output; do not rely on a page operation to strip it |
+The default pass is structural. `--images downsample` adds an opt-in, lossy image pass; see **Compression ceiling** below for what to expect.
 
-`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+### OCR
 
-Re-derived at `14d839a` on `2026-10-07`.
+```bash
+pdftooling ocr scan.pdf -O scan-searchable.pdf
+```
 
-## Upgrading to 1.0.0
+`ocr` needs the `tesseract` binary, and `pdftooling doctor` says whether it resolved. No accuracy is claimed for the result.
 
-A `0.3.1` invocation, script or import that relied on any of the following stops working, or observes a different shape, at `1.0.0`. Beyond this table, the sole remaining movement in this file's contract is the `-o table` row under `## Output contract`, which no longer describes an ANSI-styling behaviour the renderer never had.
+### Encrypt, and open it again, with password files
 
-| In 0.3.1 | In 1.0.0 | What to change |
-|---|---|---|
-| the deprecated `pdftoolkit` console script (and its hyphenated sibling) | removed — the shell reports command not found | use `pdftooling` or `pdf-tooling` |
-| `PDF_TOOLKIT_PASSWORD` / `PDF_TOOLKIT_OWNER_PASSWORD` | `PDF_TOOLING_PASSWORD` / `PDF_TOOLING_OWNER_PASSWORD` | rename the variable anywhere a script or CI job sets it — an unrecognised name is not an error, so the password is silently unread and the run exits `6` |
-| `PdfToolkitError` as the public base exception | `PdfToolingError` | update any `except`/`import` naming the old class |
-| `info` on a nonexistent input nested the failure inside `documents[0].error` | the same input returns a top-level `error` key and no `documents` key | read `error` at the top level; the exit code stays `4` |
-| `convert --dry-run` over a batch containing an item the real run fails on predicted a clean batch | the preview now predicts the real run's own exit code and per-item `ok` | do not trust a `--dry-run` result captured before the upgrade |
-| `--no-color`, and the `NO_COLOR` environment variable it honoured | removed — the flag is not declared, so passing it is an unknown-flag usage error that exits `2` carrying the usual envelope, and `NO_COLOR` is read nowhere | drop both from any script, alias or CI job. Neither ever changed a byte of output: this tool emits no ANSI styling at all, deliberately |
-| `-O` or `--out-dir` naming a destination that was also an input of the same run overwrote that input under `-f`, at exit `0` with `"ok": true` and no `.bak` sidecar | the run is refused at exit `5`, naming the destination and the input it collides with; no flag reaches it | point the destination somewhere that is not an input. A script that relied on the old behaviour was destroying its input irreversibly |
-| every file written landed at mode `0600`, whatever the destination's prior mode and whatever the umask | an overwrite preserves the destination's existing permission bits, and a newly created file gets `0666 & ~umask` | set `umask` where a specific mode matters. Files this tool writes are no longer forced private |
+```bash
+chmod 600 owner.txt user.txt
+pdftooling encrypt book.pdf --owner-password-file owner.txt --user-password-file user.txt -O book-locked.pdf
+pdftooling decrypt book-locked.pdf --password-file user.txt -O book-open.pdf
+```
 
-`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+Put each password on a line of its own file with an editor or a secrets manager, or pass `-` to read it from standard input. Never `echo` or `printf` a password into a file: that puts it in your shell history. Passwords are never accepted as flag values. `encrypt` takes the `--owner-password-file` and `--user-password-file` pair; `decrypt` takes `--password-file`.
 
-Re-derived at `d3fca0c` on `2026-09-15`.
+### Preview, then script against it
+
+```bash
+pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -> \(.output) ok=\(.ok)"'
+```
+
+A dry run writes nothing and reports the exit code the real run would return.
 
 ## What exists today
 
@@ -146,6 +117,29 @@ uv run pdftooling --version            # tool, Python and engine versions on one
 `uv run pdftooling --help` is the authoritative list of what is actually available at any moment — if a verb is not printed there, it does not exist yet.
 
 **Page selection across verbs.** `split` always operates on the whole document and takes no `--pages`; to act on a subset of pages, use `extract` (keep a subset), `delete` (remove pages) or `reorder` (permute), each of which accepts `--pages`.
+
+## When to use something else
+
+Cells are read from each project's own README or documentation. "Not listed" means the feature does not appear in that source, not that it cannot be done.
+
+| Tool | License | Built in | OCR | Office → PDF | Encryption | Windows | Pick it when |
+|---|---|---|---|---|---|---|---|
+| pdf-tooling | `Apache-2.0` | Python | yes (`tesseract`) | yes (LibreOffice) | yes | no; Linux and macOS on Apple silicon | you want the common chores behind a single CLI with a public JSON and exit-code contract, a global `--dry-run`, and nothing AGPL, GPL or LGPL on the call graph |
+| qpdf | `Apache-2.0` | C++ | no; it does not render PDFs or extract text | not listed | yes | yes (release assets) | you need linearization, encryption, splitting, merging or inspection from a native binary or a C++ library. pdf-tooling reaches the qpdf library through `pikepdf` |
+| pdfcpu | `Apache-2.0` | Go | not listed | not listed | yes | yes (release assets) | you need Windows binaries, a Go library, or commands pdf-tooling does not have: `bookmarks`, `attachments`, `portfolio`, `form`, `signatures`, `nup` and `booklet` |
+| pdfly | `BSD-3-Clause` | Python, on pypdf | not listed | not listed | not listed | not stated; pure Python | you want a small pure-Python CLI that can `sign` a PDF and verify it with `check-sign`, or lay pages out with `booklet` |
+| OCRmyPDF | `MPL-2.0` | Python | yes; adding a text layer is its purpose | not listed | not listed | yes (native Windows install documented) | OCR is the whole job and you need `--deskew`, `--rotate-pages`, PDF/A output via `--output-type pdfa` or `--jobs` for multi-core runs; pdf-tooling's `ocr` offers `--lang`, `--dpi`, `--psm`, `--pages` and `--skip-text-pages` |
+
+Sources:
+
+- qpdf: <https://github.com/qpdf/qpdf> (README, license and release assets).
+- pdfcpu: <https://github.com/pdfcpu/pdfcpu> (README feature and command lists, license and release assets).
+- pdfly: <https://github.com/py-pdf/pdfly> (README command list and license; `pyproject.toml` dependencies) and <https://pdfly.readthedocs.io>.
+- OCRmyPDF: <https://github.com/ocrmypdf/OCRmyPDF> (README features and options, license) and <https://ocrmypdf.readthedocs.io/en/latest/installation.html> (native Windows install).
+- pikepdf: <https://github.com/pikepdf/pikepdf> (README: based on qpdf).
+- pdf-tooling: this README, `pdftooling ocr --help` and `pdftooling doctor`.
+
+Checked on `2026-10-08`.
 
 ## Output contract
 
@@ -328,7 +322,92 @@ A supplied password is checked even when the document would open without one: an
 6. The `soffice` child inherits the caller's environment (tracked as `B-427`).
 7. The settings were verified against LibreOffice 24.2.7.
 
+## Upgrading to 1.2
+
+A `1.1.x` invocation or script that relied on any of the following observes a different exit code or message at `1.2`. These changes are on `main` and ship in the first `1.2` release.
+
+| In 1.1 | In 1.2 | What to change |
+|---|---|---|
+| `meta set --clear-all --in-place` exited `0` and kept a `.bak` sidecar holding the original /Info and XMP packet, with no warning; `-y` changed nothing | refused at exit `5` before anything is written (no output, no `.bak`; the input is byte-identical); `--dry-run` predicts the same `5` | pass `--no-backup` to keep no copy, or `-y` to keep the `.bak` knowingly — the run then warns, naming it. `meta set --in-place` without `--clear-all` is unchanged |
+| a multi-input run (`compress`, `delete`, `extract`, `reorder`, `rotate`, `ocr`, `text`, `tables`, `rasterize`) in which an input failed on its password exited `6` | it exits `1`, like any other failing input; the input's row still carries `exit_code` `6`. A single-input run still exits `6` | read `items[].exit_code` to tell a password failure from another failure; do not branch on the run's `6` for a batch |
+| an owner-only encrypted input with a `--password-file` that does not open it exited `0` on `rotate`, `delete`, `extract`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `meta set` (under `--allow-decrypted-output`), `info` and `meta get`, and `6` on the others | it exits `6` on every verb; in a batch, that input's row fails with `6` and the run exits `1` | supply the owner password, or run owner-only inputs without `--password-file` |
+| in a multi-input `text` or `tables` run, an owner-only input with a non-matching password ended the whole run with the error envelope | the input is reported as a failed row and the other inputs are processed | read the per-item rows |
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+
+Re-derived at `a99db64` on `2026-10-08`.
+
+## Upgrading to 1.1
+
+A `1.0.1` invocation or script that relied on any of the following observes a different exit code or message at `1.1`. These changes shipped in `1.1.0` on 2026-10-07.
+
+| In 1.0.1 | In 1.1 | What to change |
+|---|---|---|
+| `rasterize` or `ocr` on a page whose bitmap is larger than `178,956,970` pixels allocated it (several GB for a hostile page box) or died on a raw `MemoryError` at exit `1`; `--dry-run` predicted `0` | the whole run is refused at exit `5` before anything is written, naming the page, its pixel size, the budget and the largest `--dpi` that fits; `--dry-run` predicts the same `5`. This includes `ocr --dpi 1200` on `A3` or larger pages, which is now refused | lower `--dpi` (or `--width`) to the value the message names; for `ocr --dpi 1200` on `A3` or larger pages, pass a lower `--dpi`. There is no override |
+| `rasterize --dpi` accepted any positive value, including `nan` and `inf`, and `--width` any positive integer | `--dpi` above `2400` or not finite, and `--width` above `32768`, exit `2` | pass a value inside the range |
+| `convert` loaded images a document links to (a URL or a local file) and rendered them into the PDF | linked images are not loaded, and the PDF shows LibreOffice's placeholder; images stored inside the document are unaffected | embed the images in the document before converting |
+| a verb that writes its output unencrypted (`rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `ocr`, `compress`, `repair`, `linearize`, `meta set`) wrote a plaintext output from an encrypted input at exit `0`, with only a warning — an owner-only input with no password at all, and an encrypted `stamp --from` source | the run is refused at exit `5` before anything is written, naming every encrypted input; a batch with any encrypted input is refused whole, and `--dry-run` predicts it | pass `--allow-decrypted-output` where a decrypted output is intended; the exit code is then 1.0.1's, and the output carries the input's /Info and XMP (see the metadata row) with a W-ENC warning naming each encrypted input, a `stamp --from` source included |
+| `--in-place` (including `--no-backup`) on an encrypted input replaced the ciphertext with plaintext | refused at exit `5`; the input is left byte-identical and no `.bak` is made | as above |
+| such a run with an encrypted input and a missing or wrong password, a missing sibling input, a malformed page range or another in-verb usage error exited `6`, `4`, `3` or `2` | exits `5` first; the other codes answer once `--allow-decrypted-output` is given | scripts that branch on `6` for an encrypted input of these verbs add the flag |
+| `rotate`, `extract`, `delete`, `reorder`, `merge`, `split`, `watermark`, `stamp` and `ocr` wrote an output whose /Info held only `/Producer: pypdf` and no XMP packet, and warned that the input's were not carried | the output carries the input's /Info and XMP packet unchanged (`merge`: the first input's; `split`: into every part); the warning is gone except for `merge`'s other inputs | to publish a document without its metadata, run `pdftooling meta set --clear-all` on the output; do not rely on a page operation to strip it |
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+
+Re-derived at `14d839a` on `2026-10-07`.
+
+## Upgrading to 1.0.0
+
+A `0.3.1` invocation, script or import that relied on any of the following stops working, or observes a different shape, at `1.0.0`. Beyond this table, the sole remaining movement in this file's contract is the `-o table` row under `## Output contract`, which no longer describes an ANSI-styling behaviour the renderer never had.
+
+| In 0.3.1 | In 1.0.0 | What to change |
+|---|---|---|
+| the deprecated `pdftoolkit` console script (and its hyphenated sibling) | removed — the shell reports command not found | use `pdftooling` or `pdf-tooling` |
+| `PDF_TOOLKIT_PASSWORD` / `PDF_TOOLKIT_OWNER_PASSWORD` | `PDF_TOOLING_PASSWORD` / `PDF_TOOLING_OWNER_PASSWORD` | rename the variable anywhere a script or CI job sets it — an unrecognised name is not an error, so the password is silently unread and the run exits `6` |
+| `PdfToolkitError` as the public base exception | `PdfToolingError` | update any `except`/`import` naming the old class |
+| `info` on a nonexistent input nested the failure inside `documents[0].error` | the same input returns a top-level `error` key and no `documents` key | read `error` at the top level; the exit code stays `4` |
+| `convert --dry-run` over a batch containing an item the real run fails on predicted a clean batch | the preview now predicts the real run's own exit code and per-item `ok` | do not trust a `--dry-run` result captured before the upgrade |
+| `--no-color`, and the `NO_COLOR` environment variable it honoured | removed — the flag is not declared, so passing it is an unknown-flag usage error that exits `2` carrying the usual envelope, and `NO_COLOR` is read nowhere | drop both from any script, alias or CI job. Neither ever changed a byte of output: this tool emits no ANSI styling at all, deliberately |
+| `-O` or `--out-dir` naming a destination that was also an input of the same run overwrote that input under `-f`, at exit `0` with `"ok": true` and no `.bak` sidecar | the run is refused at exit `5`, naming the destination and the input it collides with; no flag reaches it | point the destination somewhere that is not an input. A script that relied on the old behaviour was destroying its input irreversibly |
+| every file written landed at mode `0600`, whatever the destination's prior mode and whatever the umask | an overwrite preserves the destination's existing permission bits, and a newly created file gets `0666 & ~umask` | set `umask` where a specific mode matters. Files this tool writes are no longer forced private |
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+
+Re-derived at `d3fca0c` on `2026-09-15`.
+
+## Naming
+
+The names below are this project's contract. They differ deliberately, and a reader
+citing any of them should cite the table rather than the prose around it.
+
+| Kind | Name |
+|---|---|
+| PyPI distribution | `pdf-tooling` |
+| Repository | `pdf-tooling` |
+| Import package | `pdf_tooling` |
+| Console script | `pdftooling` |
+| Aliases | `pdf-tooling` |
+
+**Why the names differ.** The PyPI distribution is `pdf-tooling` because `pdf-toolkit`
+sits too close to names already on PyPI, and the distribution called `pdftoolkit` there
+is an unrelated GPL-3.0 project that is not this software. The repository followed the
+distribution; the import package and the console script followed it in turn, once the
+deprecated aliases below made moving a published surface safe.
+
+**The deprecated console scripts.** `pdftoolkit` and `pdf-toolkit` were migration
+aliases for `pdftooling`/`pdf-tooling` — same behaviour, same exit codes — each
+printing one line on stderr naming the replacement. Both are removed at `v1.0.0`.
+
+**Release history, so the install lines above can be read against it.** `v0.1.0` was
+git-install-only and was never published to PyPI under either name; `v0.1.1` is the
+first published release, as `pdf-tooling`; `v0.2.0` is the first published under the
+renamed repository; `v0.3.0` is the first release to ship the renamed `pdftooling`
+console script and the `pdf_tooling` import package. The old `pdf_toolkit` import
+package was renamed away entirely at that release, not kept as an alias. `pdftoolkit`
+and `pdf-toolkit` shipped as deprecated console-script aliases from that same release.
+
 ## Development
+
+**Current phase:** Phase 1 (v1) complete — per-spec status lives in `ai_plans/pdf-tooling/specs/SPEC-INDEX.md`; history in `changelog.md`.
 
 ```bash
 make test      # run the test suite
@@ -356,16 +435,17 @@ that names the verb, the flags, the input and what you expected is enough to act
 `pdftooling doctor` output helps whenever an engine is involved. Every fix that ships is
 recorded in `changelog.md`, written by the commit that made it.
 
-Open defects and planned work are recorded, per finding, in the maintainer's planning tree:
+Security reports go through the private channel described in [`SECURITY.md`](https://github.com/ArmandoHerra/pdf-tooling/blob/main/SECURITY.md), not a public issue.
 
-- `ai_plans/pdf-tooling/BACKLOG.md` — the groomed intake list.
-- `ai_plans/pdf-tooling/qa/FINDINGS-LEDGER.md` — every finding a QA sweep has raised, with its state and its evidence.
+### Known limitations
 
-**Those artifacts live in the maintainer's planning repository and are not part of this distribution.** They are not shipped in the sdist or the wheel and are not present in a clone of this repository; the paths above are where they live for anyone reading this source tree beside it.
-
-When this pointer was last written, the most recent sweep carrying a readable verdict was `2026-10-04_140214`, taken at commit `119f47e`; `make docs-gate` re-checks that claim against the commit that wrote it, so a newer sweep dates this pointer without making it false. This section names a sweep and a commit and never a tally — a count is wrong the day after it is written, and the ledger's own header could not hold one still for two days. Read the ledger for what is open right now.
-
-If a sweep ever records nothing open, this section still stands and reads *no open findings are recorded as of sweep `<id>` (`<sha>`)*. It is not deleted: a momentarily vacuous pointer is still the affordance, and deleting it silently removes the only place a user is told where the defects are.
+- **Platforms:** there is no Windows build, and macOS support is Apple silicon only; see **Getting Started**.
+- **Compression:** it is structural plus an opt-in image pass, not a rewrite of the page content; see **Compression ceiling**.
+- **`ocr` and `convert`:** they depend on system binaries that `pdftooling doctor` reports on; see **OCR and Office conversion**.
+- **`convert`:** it parses the untrusted document in-process, so run it without network for input you do not trust; see **OCR and Office conversion**.
+- **Permission bits:** they are advisory, and a reader that can display a page can extract it; see **Encryption, passwords and permissions**.
+- **Oversized pages:** a page whose bitmap would exceed the render budget is refused, not shrunk; see **Render budget**.
+- **Page operations:** they carry the input's metadata unless told otherwise; see **What a write does not carry** under **Output contract**.
 
 ## License
 

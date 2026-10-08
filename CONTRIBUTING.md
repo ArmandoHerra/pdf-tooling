@@ -112,3 +112,16 @@ The `test` entry above reports a check per matrix leg — a Python version cross
 ## Tests
 
 See `TESTING.md` for how each suite is run and what a legitimate skip looks like. The short version: a test that cannot run because an engine or a corpus is missing must **skip visibly, with a reason** — never pass silently, and never be deleted so the suite turns green.
+
+## Where open findings are tracked
+
+Open defects and planned work are recorded, per finding, in the maintainer's planning tree:
+
+- `ai_plans/pdf-tooling/BACKLOG.md` — the groomed intake list.
+- `ai_plans/pdf-tooling/qa/FINDINGS-LEDGER.md` — every finding a QA sweep has raised, with its state and its evidence.
+
+**Those artifacts live in the maintainer's planning repository and are not part of this distribution.** They are not shipped in the sdist or the wheel and are not present in a clone of this repository; the paths above are where they live for anyone reading this source tree beside it.
+
+When this pointer was last written, the most recent sweep carrying a readable verdict was `2026-10-07_165246_security-clear-all-remanence`, taken at commit `e2a980e`; `make docs-gate` re-checks that claim against the commit that wrote it, so a newer sweep dates this pointer without making it false. This section names a sweep and a commit and never a tally — a count is wrong the day after it is written, and the ledger's own header could not be kept true between sweeps. Read the ledger for what is open right now.
+
+If a sweep ever records nothing open, this section still stands and reads *no open findings are recorded as of sweep `<id>` (`<sha>`)*. It is not deleted: a momentarily vacuous pointer is still the affordance, and deleting it silently removes the only place a contributor is told where the defects are.
