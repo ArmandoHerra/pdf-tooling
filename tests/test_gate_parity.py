@@ -294,6 +294,87 @@ def test_pdf104_scratch_text_reds_the_audit_gate() -> None:
         assert any(needle in p for p in problems), (label, problems)
 
 
+_VULNCHECK_RECIPE: Final[tuple[str, str, str]] = (
+    'd=$$(mktemp -d) && trap \'rm -f "$$d/pylock.toml"; rmdir "$$d"\' EXIT && \\',
+    "uv export --locked --format pylock.toml --all-extras --all-groups --no-emit-project"
+    ' --quiet -o "$$d/pylock.toml" && \\',
+    '$(UV_RUN) pip-audit --locked "$$d"',
+)
+
+
+def pdf122_vulncheck_gate_problems(ci_text: str, makefile_text: str) -> list[str]:
+    """PDF-122: pure check that `vulncheck` audits the whole lock. `[]` iff
+    (a) the `vulncheck` job (read with this module's own job/step helpers) has
+    exactly one step running `make vulncheck`, with no `continue-on-error` and
+    no `if`, and
+    (b) the three Makefile lines after `vulncheck:` equal `_VULNCHECK_RECIPE`,
+    each behind a tab."""
+    problems: list[str] = []
+    _names, blocks = _job_blocks(ci_text)
+    hits = [
+        chunk
+        for chunk in _step_chunks(blocks.get("vulncheck", []))
+        if _extract_run_and_name(chunk)[0] == "make vulncheck"
+    ]
+    if len(hits) != 1:
+        problems.append(f"vulncheck job has {len(hits)} `make vulncheck` steps, want exactly 1")
+    for chunk in hits:
+        if any(re.match(r"^\s*(- )?continue-on-error:", line) for line in chunk):
+            problems.append("the `make vulncheck` step carries continue-on-error")
+        if any(re.match(r"^\s*(- )?if:", line) for line in chunk):
+            problems.append("the `make vulncheck` step carries an `if` condition")
+    lines = makefile_text.splitlines()
+    want = ["\t" + line for line in _VULNCHECK_RECIPE]
+    found: list[str] | None = None
+    for i, line in enumerate(lines):
+        if line.startswith("vulncheck:"):
+            found = lines[i + 1 : i + 1 + len(want)]
+            break
+    if found is None:
+        problems.append("Makefile has no `vulncheck` target")
+    elif found != want:
+        problems.append(f"vulncheck recipe is {found!r}, want {want!r}")
+    return problems
+
+
+def test_pdf122_the_vulncheck_job_audits_every_extra_and_group() -> None:
+    found = pdf122_vulncheck_gate_problems(CI_WORKFLOW.read_text(), MAKEFILE_PATH.read_text())
+    assert not found, found
+
+
+def test_pdf122_scratch_text_reds_the_vulncheck_gate() -> None:
+    """PDF-60 HC-4 pattern: mutate IN-MEMORY text, never the tracked file."""
+    ci, mk = CI_WORKFLOW.read_text(), MAKEFILE_PATH.read_text()
+    step = "      - run: make vulncheck\n"
+    full = "\n".join("\t" + line for line in _VULNCHECK_RECIPE)
+    assert step in ci and full in mk
+    line2 = "\t" + _VULNCHECK_RECIPE[1]
+    line3 = "\t" + _VULNCHECK_RECIPE[2]
+    piped_line2 = (
+        "\tuv export --locked --format pylock.toml --all-extras --all-groups"
+        " --no-emit-project --quiet | $(UV_RUN) pip-audit -r /dev/stdin"
+    )
+    mutations = {
+        "extras dropped": (ci, mk.replace(" --all-extras", "", 1), "recipe"),
+        "groups dropped": (ci, mk.replace(" --all-groups", "", 1), "recipe"),
+        "frozen": (ci, mk.replace("--locked --format", "--frozen --format", 1), "recipe"),
+        "piped": (ci, mk.replace(line2, piped_line2, 1).replace(line3, "", 1), "recipe"),
+        "|| true": (ci, mk.replace(line3, line3 + " || true", 1), "recipe"),
+        "reverted": (ci, mk.replace(full, "\t$(UV_RUN) pip-audit", 1), "recipe"),
+        "step deleted": (ci.replace(step, "", 1), mk, "0 `make vulncheck` steps"),
+        "continue-on-error": (
+            ci.replace(step, step + "        continue-on-error: true\n", 1),
+            mk,
+            "continue-on-error",
+        ),
+    }
+    for label, (ci_text, mk_text, needle) in mutations.items():
+        assert (ci_text, mk_text) != (ci, mk), label
+        problems = pdf122_vulncheck_gate_problems(ci_text, mk_text)
+        assert problems, label
+        assert any(needle in p for p in problems), (label, problems)
+
+
 def test_gate_parity_check_subcommand_agrees_with_the_independent_scan() -> None:
     """The THIRD-from-independence angle: run the real CLI as a subprocess
     (never imported) and confirm its printed figures match this file's own
