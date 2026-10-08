@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-123] Add SECURITY.md, issue forms, a PR template and a code of conduct — 2026-10-08
+
+- **`SECURITY.md`:** reports go through GitHub private vulnerability reporting; the latest minor release line is the supported one, and no response time is promised.
+- **Issue forms:** bug and feature request forms with blank issues turned off; the bug form asks for a description of the input and never the document itself, and the chooser links the private security channel.
+- **`.github/pull_request_template.md`:** echoes the DCO (`git commit -s`, no CLA) and links the `CONTRIBUTING.md` sections rather than copying its check list.
+- **`CODE_OF_CONDUCT.md`:** Contributor Covenant 2.1 (CC BY 4.0), with the enforcement contact filled in. `tests/test_community_health_files.py` pins all of the above.
+- **Deliberately silent:** `SECURITY.md` says nothing about `--clear-all` until the corrected behaviour is released. Repository files only; nothing ships in the sdist or the wheel.
+
 ## [PDF-121] Make meta set --clear-all drop the XMP packet from the file, and prove nothing it removed is recoverable — 2026-10-08
 
 - **`meta set --clear-all` now removes the document-level XMP packet from the file (`350c89b83c`, critical):** before 1.1.1, `--clear-all` unlinked the packet from the catalogue but left a copy of it in the file as an unreferenced `/Type /Metadata` stream, byte-identical to the input's, which `meta get` and most tools do not show; the run still exited `0` with `ok` and no warning, and a file cleared by an earlier version still holds that copy. Both pypdf write seams in `adapters/pypdf_structure.py` now drop every object the trailer does not reach before they serialise (`_drop_unreachable`, two call sites, no parsing of any stream), so the output keeps no copy of the packet, referenced or not, and is a single revision.

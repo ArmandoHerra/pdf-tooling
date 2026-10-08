@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a behaviour pdftooling does not have yet.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The job you are trying to do
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The behaviour you want
+    validations:
+      required: true
+  - type: input
+    id: verbs
+    attributes:
+      label: Affected verbs
+      description: The verb or verbs this touches, if any.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: I have read [what a change must not do](https://github.com/ArmandoHerra/pdf-tooling/blob/main/CONTRIBUTING.md#what-a-change-must-not-do).
+          required: true

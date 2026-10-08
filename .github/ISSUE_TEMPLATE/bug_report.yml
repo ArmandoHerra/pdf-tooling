@@ -1,0 +1,68 @@
+name: Bug report
+description: Something pdftooling did that it should not have, or failed to do.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not attach the PDF or any real document.** Describe it instead.
+
+        **Never paste** `info` or `meta get` output: it can contain the document's private metadata.
+
+        Security issues go to the private channel, not here:
+        https://github.com/ArmandoHerra/pdf-tooling/security/advisories/new
+  - type: input
+    id: verb
+    attributes:
+      label: Verb
+      description: The verb you ran, for example `merge`.
+    validations:
+      required: true
+  - type: textarea
+    id: flags
+    attributes:
+      label: Command line
+      description: The full command line, with paths and passwords replaced.
+    validations:
+      required: true
+  - type: textarea
+    id: input-description
+    attributes:
+      label: Description of the input
+      description: Describe the input by shape only - page count, size, encrypted or not, which application produced it, and anything unusual. No content and no metadata values.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include the exit code and the `-o json` envelope, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: Output of `pdftooling version -o json`
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `pdftooling doctor -o json`
+      render: json
+    validations:
+      required: true
+  - type: checkboxes
+    id: no-document
+    attributes:
+      label: Privacy
+      options:
+        - label: I have not attached or pasted the document or its metadata.
+          required: true
