@@ -158,7 +158,10 @@ def doctor_command(
         bool,
         typer.Option(
             "--strict",
-            help="Exit 3 if any port is unavailable, and list stray toolkit temp files.",
+            help=(
+                "Exit 3 if any port is unavailable, and list stray toolkit temp files "
+                "under the current directory."
+            ),
         ),
     ] = False,
 ) -> None:

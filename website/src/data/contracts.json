@@ -105,7 +105,7 @@
         "detail": "Atomic. The only place the two tracks touch."
       }
     ],
-    "failure": "Anything fails at steps ① through ⑤: the temp file is deleted, your file is untouched, and the process exits with a non-zero code.",
+    "failure": "Anything fails at steps ① through ⑤: the temp file is deleted, your file is untouched, and the process exits with a non-zero code. A hard kill (SIGKILL) cannot be handled: it can leave the hidden temp file behind, and your file is still untouched.",
     "crossingLabel": "your file changes here"
   }
 }
