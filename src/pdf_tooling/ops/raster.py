@@ -480,6 +480,7 @@ def _rasterize_planned(
             items=ledger.assemble(list(items)),
             warnings=(),
             duration_ms=0,
+            batch=ledger.is_batch,
         )
 
     # Real run: plan_output_set already created --out-dir (chokepoint-confined,
@@ -545,4 +546,5 @@ def _rasterize_planned(
         items=ledger.assemble(rendered_items),
         warnings=(),
         duration_ms=0,
+        batch=ledger.is_batch,
     )

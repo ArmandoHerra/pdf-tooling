@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-128] Make a mixed --out-dir batch with an AUTH failure exit 1, and give one answer per (input, password) across verbs — 2026-10-08
+
+- **A batch exits `1` (`OR-43`, `c197515a2e`, `B-433`):** a multi-input run in which an input failed on its password exited `6` (the highest item code), against README `## Output contract`, which says the run exits `1`. `OperationResult` now carries a non-serialized `batch` field set from `BatchLedger.is_batch`, and an item-scoped failure (`1` or `6`) collapses to `1` in a batch; the row keeps `exit_code` `6`, a single-input run keeps `6`, and a dry preview's run-scoped per-row `5`/`4` are not collapsed.
+- **One answer for an owner-only input and a non-matching `--password-file` (`1b66e96260`):** `rotate`, `delete`, `extract`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `meta set`, `info` and `meta get` exited `0` (pypdf tries the empty user password first and stops); the others exited `6`. `PasswordResolver.for_source` now checks the supplied secret against an owner-only document, so every verb exits `6`. No dry path gains a secret read, and the wrong-password dry carve-out is unchanged.
+- **Release `1.2.0`:** README `## Upgrading to 1.2` names both changes; the exit-code table, envelope key sets and `schema_version` `1` are unchanged. The `PDF-115` opt-in batch expectations that encoded `X-1021`'s accepted `compress` deviation now pin the ruled behaviour.
+
 ## [PDF-127] Refuse `meta set --clear-all --in-place` unless `--no-backup` or `-y` — 2026-10-08
 
 - **`meta set --clear-all --in-place` is refused by default (exit 5):** before, it exited `0` with `ok` and no warning while leaving `<name>.bak` beside the cleaned file, holding the complete original /Info and XMP. Now the run is refused with the plain `refused` envelope before anything is read or written (no output, no `.bak`, no temp; the input stays byte-identical), and `--dry-run` predicts the same `5` in `encrypt`'s dry-item shape (`planned_refusal: "RefusedError"`). The gate is computed once per invocation, ahead of the sidecar-exists and password tiers, and never prompts on a TTY.

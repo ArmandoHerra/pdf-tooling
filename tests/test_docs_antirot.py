@@ -5243,6 +5243,15 @@ def test_the_1_1_section_carries_no_unmasked_cardinal() -> None:
     assert residue == [], f"the 1.1 section carries an unmasked cardinal: {residue}"
 
 
+def test_the_1_2_section_carries_no_unmasked_cardinal() -> None:
+    body = migration_section_body_1_2()
+    masked = _blank(body, code_spans(body))
+    for pattern in (*STRUCTURED_REFERENCE, EXIT_CODE):
+        masked = _blank(masked, [match.span() for match in pattern.finditer(masked)])
+    residue = [match.group(0) for match in CANDIDATE.finditer(masked)]
+    assert residue == [], f"the 1.2 section carries an unmasked cardinal: {residue}"
+
+
 def test_the_1_1_section_states_the_ocr_dpi_1200_refusal() -> None:
     body = migration_section_body_1_1()
     assert "`ocr --dpi 1200`" in body

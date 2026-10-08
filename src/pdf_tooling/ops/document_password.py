@@ -34,6 +34,14 @@ Both route through :func:`~pdf_tooling.ports.structure.require_encryption`'s
 document encrypted" without needing a password at all (D8's resolvability
 tier: decidable from existence alone). No cryptography, no new adapter and
 no new capability are introduced here; this module is orchestration only.
+
+PDF-128 adds one check to :meth:`PasswordResolver.for_source` and nothing to
+:func:`predict_password_refusal`: when a password is supplied for an owner-only
+document (which opens on the empty user password), the same ``read_encryption``
+capability is asked, in memory over the bytes already read, whether the supplied
+secret opens it. A secret that does not is an ``AuthError`` on every verb. A
+dry run that does not open the document still predicts ``0`` with
+``password_verified: false`` (the X-89 carve-out); no secret is read there.
 """
 
 from __future__ import annotations
@@ -163,6 +171,13 @@ class PasswordResolver:
     :class:`~pdf_tooling.secret.Secret` is read from its file / environment
     variable / prompt at most ONCE, the first time any source actually
     needs it, and reused for every source after that.
+
+    PDF-128 (OR-43): a supplied password is also CHECKED for an owner-only
+    document, which opens without one. A secret that is neither the user nor the
+    owner password raises :class:`~pdf_tooling.errors.AuthError` (exit 6) here,
+    for every verb that calls :meth:`for_source`, rather than being silently
+    ignored by the verbs that read through an empty-password-first ladder. The
+    user-password case is unchanged: the engine adapters verify that secret.
     """
 
     def __init__(self, password: PasswordSource) -> None:
@@ -183,11 +198,23 @@ class PasswordResolver:
         record_carriage(source)
         if self._password.read is None:
             return None
-        facts = require_encryption().read_encryption(read_source_bytes(source), None)
+        data = read_source_bytes(source)
+        facts = require_encryption().read_encryption(data, None)
         if not facts.encrypted:
             return None
         if self._secret is None:
             self._secret = self._password.resolve()
+        if facts.unlocked and not require_encryption().read_encryption(data, self._secret).unlocked:
+            # PDF-128 (OR-43): an owner-only document opens on the empty user
+            # password, and the pypdf-backed verbs stop there -- so a supplied
+            # secret that opens nothing was silently ignored. The engine-backed
+            # verbs already fail it; this is the one place that makes every verb
+            # give the same answer. `data` is the bytes read above (in-memory
+            # parse, no second file read).
+            raise AuthError(
+                f"the supplied password did not unlock this document; {PASSWORD_HINT}",
+                path=str(source),
+            )
         return self._secret
 
     def clear(self) -> None:

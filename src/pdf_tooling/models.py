@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
+from pdf_tooling.cli.exit_codes import AUTH, FAILURE, OK
 from pdf_tooling.safety.policy import SafetyPolicy
 
 __all__ = [
@@ -222,8 +223,10 @@ class OperationPlan:
 class ItemResult:
     """One unit of work inside a run.
 
-    ``exit_code`` is per-item; the run's code is the highest severity across
-    items.
+    ``exit_code`` is per-item. The run's code is the highest severity across
+    items, except that in a multi-input run (:attr:`OperationResult.batch`) an
+    item-scoped failure (``1`` or ``6``) collapses to ``1`` -- the row keeps its
+    own code, and which input failed how is in ``items[].exit_code``.
     """
 
     input: str
@@ -275,6 +278,12 @@ class ItemResult:
         return payload
 
 
+#: The item-scoped failure codes (``ops/batch.py`` ``ITEM_SCOPED_ERRORS``:
+#: ``FailureError``, ``AuthError``). In a multi-input run each collapses to
+#: ``FAILURE`` at the run level; the row keeps its own code (PDF-128, OR-43).
+_ITEM_SCOPED_CODES: Final[frozenset[int]] = frozenset({FAILURE, AUTH})
+
+
 @dataclass(frozen=True, slots=True)
 class OperationResult:
     """The payload every verb returns and every renderer consumes."""
@@ -286,11 +295,28 @@ class OperationResult:
     warnings: tuple[str, ...]
     duration_ms: int
 
+    batch: bool = False
+    """Set from ``BatchLedger.is_batch`` -- the one batch predicate. Not
+    serialized: :meth:`to_dict` is unchanged. Declared last, with a default, so
+    every existing construction stays valid."""
+
     @property
     def exit_code(self) -> int:
-        """0 when every item is ok, otherwise the highest item code."""
+        """0 when every item is ok, otherwise the highest item code.
+
+        In a multi-input run (:attr:`batch`) an item-scoped failure code
+        (:data:`_ITEM_SCOPED_CODES`) collapses to ``1``, "something in this run
+        failed" (README ``## Output contract``); each row keeps its own
+        ``exit_code``. Every other failing code (a dry preview's per-row ``5``
+        or ``4``) keeps its value, so ``dry == real`` holds for run-scoped
+        failures. A single-input run keeps its item's own code.
+        """
         codes = [item.exit_code for item in self.items if not item.ok]
-        return max(codes) if codes else 0
+        if not codes:
+            return OK
+        if self.batch:
+            codes = [FAILURE if code in _ITEM_SCOPED_CODES else code for code in codes]
+        return max(codes)
 
     def to_dict(self) -> dict[str, object]:
         return {
