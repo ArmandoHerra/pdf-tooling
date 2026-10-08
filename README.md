@@ -63,7 +63,7 @@ uv run pdftooling --help
 
 ## Upgrading to 1.1
 
-A `1.0.1` invocation or script that relied on any of the following observes a different exit code or message at `1.1`. These changes are on `main` and ship in the first `1.1` release.
+A `1.0.1` invocation or script that relied on any of the following observes a different exit code or message at `1.1`. These changes shipped in `1.1.0` on 2026-10-07.
 
 | In 1.0.1 | In 1.1 | What to change |
 |---|---|---|
