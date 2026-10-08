@@ -11,7 +11,13 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES"]
 authors = [{ name = "Armando Herra" }]
-keywords = ["pdf", "cli", "merge", "split", "ocr", "rasterize"]
+keywords = [
+  "pdf", "cli",
+  "merge", "split", "ocr", "rasterize",
+  "compress", "encrypt", "decrypt", "watermark", "stamp", "rotate", "linearize", "repair",
+  "metadata", "extract-text", "extract-tables",
+  "pdf-to-image", "image-to-pdf", "text-to-pdf", "office-to-pdf", "docx-to-pdf",
+]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
@@ -71,9 +77,11 @@ pdftooling  = "pdf_tooling.cli.main:main"
 pdf-tooling = "pdf_tooling.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/ArmandoHerra/pdf-tooling"
+Homepage = "https://armandoherra.github.io/pdf-tooling/"
+Documentation = "https://github.com/ArmandoHerra/pdf-tooling#readme"
 Repository = "https://github.com/ArmandoHerra/pdf-tooling"
 Changelog = "https://github.com/ArmandoHerra/pdf-tooling/blob/main/changelog.md"
+Issues = "https://github.com/ArmandoHerra/pdf-tooling/issues"
 
 [dependency-groups]
 dev = [
