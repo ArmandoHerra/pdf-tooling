@@ -68,10 +68,13 @@ A `1.1.x` invocation or script that relied on any of the following observes a di
 | In 1.1 | In 1.2 | What to change |
 |---|---|---|
 | `meta set --clear-all --in-place` exited `0` and kept a `.bak` sidecar holding the original /Info and XMP packet, with no warning; `-y` changed nothing | refused at exit `5` before anything is written (no output, no `.bak`; the input is byte-identical); `--dry-run` predicts the same `5` | pass `--no-backup` to keep no copy, or `-y` to keep the `.bak` knowingly — the run then warns, naming it. `meta set --in-place` without `--clear-all` is unchanged |
+| a multi-input run (`compress`, `delete`, `extract`, `reorder`, `rotate`, `ocr`, `text`, `tables`, `rasterize`) in which an input failed on its password exited `6` | it exits `1`, like any other failing input; the input's row still carries `exit_code` `6`. A single-input run still exits `6` | read `items[].exit_code` to tell a password failure from another failure; do not branch on the run's `6` for a batch |
+| an owner-only encrypted input with a `--password-file` that does not open it exited `0` on `rotate`, `delete`, `extract`, `reorder`, `merge`, `split`, `watermark`, `stamp`, `meta set` (under `--allow-decrypted-output`), `info` and `meta get`, and `6` on the others | it exits `6` on every verb; in a batch, that input's row fails with `6` and the run exits `1` | supply the owner password, or run owner-only inputs without `--password-file` |
+| in a multi-input `text` or `tables` run, an owner-only input with a non-matching password ended the whole run with the error envelope | the input is reported as a failed row and the other inputs are processed | read the per-item rows |
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
-Re-derived at `1ad80f0` on `2026-10-08`.
+Re-derived at `a99db64` on `2026-10-08`.
 
 ## Upgrading to 1.1
 
@@ -179,6 +182,8 @@ Every `-o json` envelope also carries `exit_code`, `warnings` and `duration_ms`,
 ### A batch reports every input, and never denies a file it wrote
 
 A multi-input run writing into `--out-dir` records **every input by name, in command-line order**, in the payload's collection — the inputs that succeeded and the input that failed alike. A failing input is recorded, the run continues, and the run exits `1` at the end; each row carries its own `ok`, `exit_code` and `message`. A row that succeeded names its artifact in `output`, and that path is on disk.
+
+That includes an input that failed because of its password: its row carries `exit_code` `6`, and the run still exits `1`. A `--dry-run` that does not test a supplied password (see Exit codes) predicts such a row as planned.
 
 **This is a behaviour change on a failure path, inside the pre-`1.0.0` window.** A multi-input `--out-dir` failure used to emit the error envelope — `{"schema_version": 1, "error": {…, "path": null}}`, with no collection at all — in place of the operation envelope, so the input that succeeded went unreported and the input that failed went unnamed even while its sibling's artifact sat on disk. A script that parsed such a failure by reading `payload["error"]` now finds `payload["items"]` instead. **`schema_version` stays `1`**: no key is renamed, removed, retyped or repurposed, and the error envelope itself is unchanged.
 
@@ -293,11 +298,14 @@ Carry the input's /Info and XMP packet unchanged: `rotate`, `extract`, `delete`,
 
 `meta set --clear-all` empties the document-level /Info dictionary and removes the document-level XMP packet from the file: the output keeps no copy of either, referenced or not, and is written as a single revision. It leaves page-level XMP, /PieceInfo, annotation authors, embedded-file metadata and the trailer /ID in place, and `meta get` reports those. Before 1.1.1, `--clear-all` unlinked the packet but left a copy of it in the file as an unreferenced object, which `meta get` and most tools do not show; a file cleared by an earlier version still holds that copy.
 
-`encrypt` and `decrypt` change encryption by design. With `--allow-decrypted-output`, an owner-only input needs no password for any of this. Every drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. Without `--allow-decrypted-output`, `--in-place` on an encrypted input leaves it untouched; with it, the ciphertext is replaced, and the `.bak` keeps it unless `--no-backup` is given.
+
+`encrypt` and `decrypt` change encryption by design. With `--allow-decrypted-output`, an owner-only input needs no password for any of this; a password that is supplied must open it. Every drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. Without `--allow-decrypted-output`, `--in-place` on an encrypted input leaves it untouched; with it, the ciphertext is replaced, and the `.bak` keeps it unless `--no-backup` is given.
 
 ### `--password-file` is global: honoured or refused, never silently ignored
 
-`--password-file` (and its resolution siblings — the `PDF_TOOLING_PASSWORD` environment variable and the interactive prompt) is declared on **every** verb, because any of them may meet a password-protected input — including the report-only ones. A verb that can open an encrypted document uses the resolved password there to read it (the output it writes is not encrypted; see What a write does not carry), on the SAME first-hit-wins chain `encrypt`/`decrypt` already document above; a verb that structurally cannot use one (it takes no document operand, or it already declares its own dedicated password flag) refuses it up front, at exit **2**, naming the flag rather than accepting it and doing nothing — the same "declared but silently inert" shape this tool refuses for every other global flag (see the safety contract above). There is no hand-maintained list of which verbs fall into which group here: run the verb's own `--help` to see the flag declared, or try it — a verb that cannot honour it says so immediately, before any document is opened.
+`--password-file` (and its resolution siblings — the `PDF_TOOLING_PASSWORD` environment variable and the interactive prompt) is declared on **every** verb, because any of them may meet a password-protected input — including the report-only ones. A verb that can open an encrypted document uses the resolved password there to read it (the output it writes is not encrypted; see What a write does not carry), on the SAME first-hit-wins chain `encrypt`/`decrypt` already document above; a verb that structurally cannot use a password (it takes no document operand, or it already declares its own dedicated password flag) refuses it up front, at exit **2**, naming the flag rather than accepting it and doing nothing — the same "declared but silently inert" shape this tool refuses for every other global flag (see the safety contract above). There is no hand-maintained list of which verbs fall into which group here: run the verb's own `--help` to see the flag declared, or try it — a verb that cannot honour it says so immediately, before any document is opened.
+
+A supplied password is checked even when the document would open without one: an owner-only document that the supplied password does not open is an authentication failure on every verb, exactly as a wrong user password is.
 
 `decrypt` round-trips the **page tree** byte for byte: the decoded content streams, the page dictionaries and every embedded image's raw bytes come back identical. The whole file does not, and nothing here claims it does — `/ID`, `/Encrypt`, the trailer, the cross-reference table and object numbering all legitimately change on any resave.
 

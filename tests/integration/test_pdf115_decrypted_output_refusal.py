@@ -91,14 +91,19 @@ IN_PLACE: Final[tuple[str, ...]] = (
     "meta set",
 )
 BATCH: Final[tuple[str, ...]] = ("rotate", "extract", "delete", "reorder", "compress", "ocr")
-#: Observed on the UNMODIFIED tree at 9809a7f (2026-10-06): under the opt-in, the
-#: spec's expectation of "rc 0, four outputs" holds for every batch verb EXCEPT
-#: `compress`, whose unlock step rejects the owner-only `RC4-O` input when the
-#: batch's one `--password-file` (the user password of `AES256-UO`) is supplied:
-#: rc 6 for that item, the other three written. Pre-existing and independent of
-#: this gate (the flag only skips it); the opt-in is "today's run", so this pins today.
-OPTIN_BATCH_RC: Final[dict[str, int]] = {"compress": 6}
-OPTIN_BATCH_UNOPENED: Final[dict[str, tuple[str, ...]]] = {"compress": ("RC4-O.pdf",)}
+#: PDF-128 (OR-43, X-1044): under the opt-in, the mixed batch's owner-only `RC4-O`
+#: input is NOT opened by the one `--password-file` supplied for `AES256-UO` (the
+#: user password of a different file). That supplied password is checked against an
+#: owner-only document on every verb, so the `RC4-O` row fails with `exit_code` 6, its
+#: siblings are written, and the batch run exits `1` ("something in this run failed"),
+#: for every batch verb. Before PDF-128 only `compress` did this (and exited `6`, the
+#: deviation X-1021 accepted as pre-existing); the other verbs ignored the password
+#: and exited `0` with four outputs. `compress`'s dry run still predicts `0` -- its
+#: preview does not open the document (the X-89 carve-out); the verbs whose preview
+#: opens it predict the same `1`.
+OPTIN_BATCH_RC: Final[dict[str, int]] = dict.fromkeys(BATCH, 1)
+OPTIN_BATCH_UNOPENED: Final[dict[str, tuple[str, ...]]] = dict.fromkeys(BATCH, ("RC4-O.pdf",))
+OPTIN_BATCH_DRY_RC: Final[dict[str, int]] = dict.fromkeys(BATCH, 1) | {"compress": 0}
 
 #: shape -> (user password or None, ``Encryption`` kwargs)
 SHAPES: Final[dict[str, dict[str, Any]]] = {
@@ -434,15 +439,12 @@ def test_ac6_a_mixed_batch_is_refused_whole_and_names_every_encrypted_input(
     assert not (work / "d").exists() or listing(work / "d") == []
     assert {name: sha(work / name) for name in names} == pre
     optin_dry = go(verb, [*base, FLAG], dry=True, cwd=work)
-    assert optin_dry.rc == 0, optin_dry.stderr[-300:]
+    assert optin_dry.rc == OPTIN_BATCH_DRY_RC[verb], optin_dry.stderr[-300:]
     assert not (work / "d").exists() or listing(work / "d") == []
     optin = go(verb, [*base, FLAG], dry=False, cwd=work)
-    expected_rc = OPTIN_BATCH_RC.get(verb, 0)
-    assert optin.rc == expected_rc, optin.stderr[-300:]
+    assert optin.rc == OPTIN_BATCH_RC[verb], optin.stderr[-300:]
     written = sorted(p.name for p in (work / "d").glob("*.pdf"))
-    assert written == sorted(n for n in names if n not in OPTIN_BATCH_UNOPENED.get(verb, ())), (
-        written
-    )
+    assert written == sorted(n for n in names if n not in OPTIN_BATCH_UNOPENED[verb]), written
 
 
 # --------------------------------------------------------------------------- #

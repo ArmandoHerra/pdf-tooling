@@ -401,6 +401,7 @@ def ocr_run(
             items=disclose_engine_blindness(ledger.assemble(items)),
             warnings=(),
             duration_ms=0,
+            batch=ledger.is_batch,
         )
 
     raster_engine = require_raster()
@@ -517,4 +518,5 @@ def ocr_run(
         items=ledger.assemble(written),
         warnings=tuple(warnings),
         duration_ms=0,
+        batch=ledger.is_batch,
     )

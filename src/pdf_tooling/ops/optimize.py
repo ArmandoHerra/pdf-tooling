@@ -387,6 +387,7 @@ def compress_run(
             items=ledger.assemble([item for item in predicted if item is not None]),
             warnings=(),
             duration_ms=0,
+            batch=ledger.is_batch,
         )
 
     resolver = PasswordResolver(password)
@@ -500,6 +501,7 @@ def _compress_write_all(
         items=ledger.assemble(written),
         warnings=tuple(warnings),
         duration_ms=0,
+        batch=ledger.is_batch,
     )
 
 

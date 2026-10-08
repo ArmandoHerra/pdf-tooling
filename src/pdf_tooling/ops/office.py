@@ -257,6 +257,7 @@ def convert_run(
             ),
             warnings=(),
             duration_ms=0,
+            batch=ledger.is_batch,
         )
 
     engine = require_office()
@@ -309,4 +310,5 @@ def convert_run(
         items=ledger.assemble(written),
         warnings=(),
         duration_ms=0,
+        batch=ledger.is_batch,
     )

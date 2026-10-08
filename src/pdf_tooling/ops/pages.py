@@ -604,6 +604,7 @@ def _run_with_resolver(
             ),
             warnings=(),
             duration_ms=0,
+            batch=ledger.is_batch,
         )
 
     # Tier 2 -- the filesystem.
@@ -641,6 +642,7 @@ def _run_with_resolver(
             ),
             warnings=(),
             duration_ms=0,
+            batch=ledger.is_batch,
         )
 
     def _write_one(item: _Target, page_plan: _PagePlan) -> ItemResult:
@@ -690,6 +692,7 @@ def _run_with_resolver(
         items=ledger.assemble(written),
         warnings=(),
         duration_ms=0,
+        batch=ledger.is_batch,
     )
 
 
