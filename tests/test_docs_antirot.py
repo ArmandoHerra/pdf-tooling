@@ -5035,6 +5035,7 @@ def test_the_vacuous_rendering_extractor_fails_if_the_heading_is_deleted() -> No
 # --------------------------------------------------------------------------- #
 
 MIGRATION_HEADING_1_1 = "## Upgrading to 1.1"
+MIGRATION_HEADING_1_2 = "## Upgrading to 1.2"
 RENDER_BUDGET_HEADING = "## Render budget"
 
 
@@ -5045,6 +5046,10 @@ def _section_body_after(text: str, heading: str) -> str:
 
 def migration_section_body_1_1() -> str:
     return _section_body_after(read("README.md"), MIGRATION_HEADING_1_1)
+
+
+def migration_section_body_1_2() -> str:
+    return _section_body_after(read("README.md"), MIGRATION_HEADING_1_2)
 
 
 def _derive_1_1_budget_row() -> None:
@@ -5212,6 +5217,20 @@ def test_the_1_1_section_exists_ordered_and_commit_anchored() -> None:
     ), "## Upgrading to 1.1 must sit directly above ## Upgrading to 1.0.0"
     body = migration_section_body_1_1().rstrip()
     assert PROVENANCE_PATTERN.search(body), "the 1.1 section does not end with a provenance line"
+    assert MIGRATION_BOUNDING_SENTENCE_ANCHOR in body
+
+
+def test_the_1_2_section_exists_ordered_and_commit_anchored() -> None:
+    text = read("README.md")
+    assert text.count(MIGRATION_HEADING_1_2) == 1
+    assert (
+        text.index("## Getting Started")
+        < text.index(MIGRATION_HEADING_1_2)
+        < text.index(MIGRATION_HEADING_1_1)
+        < text.index(MIGRATION_HEADING)
+    ), "## Upgrading to 1.2 must sit directly above ## Upgrading to 1.1"
+    body = migration_section_body_1_2().rstrip()
+    assert PROVENANCE_PATTERN.search(body), "the 1.2 section does not end with a provenance line"
     assert MIGRATION_BOUNDING_SENTENCE_ANCHOR in body
 
 

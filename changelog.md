@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-127] Refuse `meta set --clear-all --in-place` unless `--no-backup` or `-y` — 2026-10-08
+
+- **`meta set --clear-all --in-place` is refused by default (exit 5):** before, it exited `0` with `ok` and no warning while leaving `<name>.bak` beside the cleaned file, holding the complete original /Info and XMP. Now the run is refused with the plain `refused` envelope before anything is read or written (no output, no `.bak`, no temp; the input stays byte-identical), and `--dry-run` predicts the same `5` in `encrypt`'s dry-item shape (`planned_refusal: "RefusedError"`). The gate is computed once per invocation, ahead of the sidecar-exists and password tiers, and never prompts on a TTY.
+- **`--no-backup` vs `-y`, as in `encrypt`:** `--no-backup` keeps no copy. `-y` keeps the `.bak` knowingly: the run proceeds and carries one warning naming the `.bak` as still holding what `--clear-all` removed. `--no-backup` wins when both are given.
+- **Unchanged:** `meta set --in-place` without `--clear-all` (including `--clear-producer`), `--clear-all -O`, and `encrypt`. No exit code, envelope key or `schema_version` moves.
+- **Docs:** README `## Upgrading to 1.2` carries the row; the `encrypt --in-place` paragraph under `## Encryption, passwords and permissions` now names the two places; `meta set --help` states the rule.
+- Release `1.2.0`. Ledger `3ce318e517`, backlog `B-454`, ruling `OR-44`.
+
 ## [PDF-126] Make `meta get` report unreferenced metadata objects and prior revisions in `residual_surfaces` — 2026-10-08
 
 - **Two new integer sub-keys under `residual_surfaces` (`c8661d9f85`):** `unreferenced_metadata` counts `/Type /Metadata` streams and `/Info`-shaped dictionaries the newest revision's trailer does not reach (a freed or unlinked packet included), and `prior_revisions` counts earlier revisions an incremental save kept, so a file stripped by a tool that appends an update (the `exiftool -all=` shape) no longer reads as clean.
