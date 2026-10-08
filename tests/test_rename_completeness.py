@@ -446,7 +446,10 @@ BARE_REMAINDER: Final[dict[str, int]] = {
     # the old no-separator spelling once (the hyphenated sibling is
     # described by shape, never spelled, to stay out of `test_brand_
     # surfaces.py`'s frozen class E -- Scope > Out).
-    "README.md": 4,
+    # PDF-129 D4 -- 4 -> 5. The Safety contract's SIGKILL-residue bullet names
+    # the on-disk temp prefix once (its dot-prefix spelling contains the bare
+    # no-separator substring), the same mention FROZEN_RESIDUE_COUNT counts.
+    "README.md": 5,
     "pyproject.toml": 0,
     "src/pdf_tooling/__init__.py": 1,
     "src/pdf_tooling/cli/main.py": 1,
@@ -581,7 +584,10 @@ FROZEN_ENV_COUNT: Final[int] = 20
 #: once, in the same README section, for the same reason as `FROZEN_ENV_
 #: COUNT` above.
 FROZEN_CLASS_COUNT: Final[int] = 5
-FROZEN_RESIDUE_COUNT: Final[int] = 30  # the dot-prefix (29) + its scratch sibling (1)
+#: PDF-129 D4 -- 30 -> 31. README.md's Safety contract names the on-disk prefix once,
+#: so a user can recognize SIGKILL residue (E9); a note that cannot name the file
+#: cannot tell anyone what to look for.
+FROZEN_RESIDUE_COUNT: Final[int] = 31  # the dot-prefix (30) + its scratch sibling (1)
 FROZEN_NOUN_COUNT: Final[int] = 5  # 2 + 2 + 1, the three common-noun spellings summed
 CHANGELOG_ENV_FLOOR: Final[int] = 14
 CHANGELOG_CLASS_FLOOR: Final[int] = 8

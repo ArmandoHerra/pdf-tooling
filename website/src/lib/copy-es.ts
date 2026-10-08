@@ -175,7 +175,7 @@ export const STATIONS_ES: readonly { name: string; detail: string }[] = [
 
 export const ATOMIC_ES = {
   failure:
-    'Si algo falla en los pasos ① a ⑤: el temporal se elimina, tu archivo queda intacto y el proceso termina con un código distinto de cero.',
+    'Si algo falla en los pasos ① a ⑤: el temporal se elimina, tu archivo queda intacto y el proceso termina con un código distinto de cero. Una terminación forzada (SIGKILL) no se puede atender: puede dejar el temporal oculto, y tu archivo sigue intacto.',
   crossingLabel: 'aquí cambia tu archivo',
 } as const;
 

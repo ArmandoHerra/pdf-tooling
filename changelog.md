@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-129] Say what a SIGKILLed run leaves behind, and prove a live run's temp is never swept — 2026-10-08
+
+- Documented, not reaped: a SIGKILL (or OOM kill) mid-write can leave hidden `0600` temp files beside the destination, and pdftooling still never deletes them. The temp name carries no liveness signal and `PLAN.md` §12 R-07 ("report, never sweep") is decided; the reaper question is handed up to the operator.
+- README `## Safety contract` gains one bullet saying what a hard kill leaves, that it is never deleted, how `doctor --strict` lists it, and when deleting it is safe.
+- The website's atomic-write failure sentence (EN and ES) no longer implies a kill deletes the temp, and `doctor --strict --help` now names its search root (the current directory).
+- A new integration module pins the behaviour: a SIGKILLed writer's temp survives the next write, a LIVE writer's temp survives a concurrent write, and a planted reaper without a liveness check turns both red.
+- `FROZEN_RESIDUE_COUNT` moves 30 to 31 (the README now names the temp prefix once); no `src/` behaviour, exit code or envelope key changed.
+
 ## [PDF-128] Make a mixed --out-dir batch with an AUTH failure exit 1, and give one answer per (input, password) across verbs — 2026-10-08
 
 - **A batch exits `1` (`OR-43`, `c197515a2e`, `B-433`):** a multi-input run in which an input failed on its password exited `6` (the highest item code), against README `## Output contract`, which says the run exits `1`. `OperationResult` now carries a non-serialized `batch` field set from `BatchLedger.is_batch`, and an item-scoped failure (`1` or `6`) collapses to `1` in a batch; the row keeps `exit_code` `6`, a single-input run keeps `6`, and a dry preview's run-scoped per-row `5`/`4` are not collapsed.
