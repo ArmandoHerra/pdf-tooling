@@ -28,8 +28,8 @@
 //                         `pdftooling merge` of repeated `path:range`
 //                         operands on that single page to reach the target
 //                         page counts -- never hand-built. jul.pdf 12 pages
-//                         / 10,543 bytes, aug.pdf 9 pages / 8,138 bytes,
-//                         sep.pdf 11 pages / 9,742 bytes. Built and merged
+//                         / 10,253 bytes, aug.pdf 9 pages / 7,848 bytes,
+//                         sep.pdf 11 pages / 9,452 bytes. Built and merged
 //                         in a `mktemp -d` outside every repository.
 //   Invocation CAPTURED:  `pdftooling merge jul.pdf aug.pdf sep.pdf -O
 //                         q3.pdf --dry-run -o table  </dev/null  >A.txt`
@@ -78,9 +78,9 @@ export const HERO_TRANSCRIPT_SESSION: readonly TerminalSessionLine[] = [
   { kind: 'command', text: 'pdftooling merge jul.pdf aug.pdf sep.pdf -O q3.pdf --dry-run' },
   { kind: 'output', text: 'input    output  exit code  message            bytes before  duration ms' },
   { kind: 'output', text: '-------  ------  ---------  -----------------  ------------  -----------' },
-  { kind: 'output', text: 'jul.pdf  q3.pdf  0          12 pages selected  10543         0' },
-  { kind: 'output', text: 'aug.pdf  q3.pdf  0          9 pages selected   8138          0' },
-  { kind: 'output', text: 'sep.pdf  q3.pdf  0          11 pages selected  9742          0' },
+  { kind: 'output', text: 'jul.pdf  q3.pdf  0          12 pages selected  10253         0' },
+  { kind: 'output', text: 'aug.pdf  q3.pdf  0          9 pages selected   7848          0' },
+  { kind: 'output', text: 'sep.pdf  q3.pdf  0          11 pages selected  9452          0' },
   { kind: 'blank', text: '' },
   { kind: 'command', text: 'ls q3.pdf' },
   { kind: 'output', text: "ls: cannot access 'q3.pdf': No such file or directory" },

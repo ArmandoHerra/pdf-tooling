@@ -57,8 +57,10 @@ says so in its message and a warning.
 empty string.
 
 --clear-all's SCOPE (read this before trusting it for privacy). --clear-all
-empties the DOCUMENT-LEVEL /Info dictionary and deletes the DOCUMENT-LEVEL
-XMP packet. It does NOT touch page-level XMP /Metadata, /PieceInfo
+empties the DOCUMENT-LEVEL /Info dictionary and removes the DOCUMENT-LEVEL
+XMP packet from the file: the output keeps no copy of either, referenced or
+not, and is written as a single revision, with no earlier revision of the
+input inside it. It does NOT touch page-level XMP /Metadata, /PieceInfo
 (document- or page-level application-private data), annotation author (/T)
 fields, embedded-file metadata, or the trailer /ID -- 'meta get' REPORTS
 these residual surfaces under "Not cleared by --clear-all" / the JSON

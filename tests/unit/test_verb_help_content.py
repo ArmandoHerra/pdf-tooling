@@ -221,6 +221,19 @@ def test_ac7_meta_set_help_names_clear_all_and_its_uncleared_surfaces() -> None:
     assert "annotation" in lowered
 
 
+def test_pdf121_meta_set_help_states_the_packet_leaves_the_file() -> None:
+    """PDF-121 D5: `--clear-all`'s SCOPE paragraph says what is true after the fix --
+    the packet is REMOVED from the file (no unreferenced copy, one revision) -- and
+    names no remedy for files written by an earlier version."""
+    text = _collapsed("meta set")
+    assert "removes the DOCUMENT-LEVEL XMP packet from the file" in text
+    assert "no earlier revision" in text
+    assert "deletes the DOCUMENT-LEVEL XMP packet" not in text
+    lowered = text.lower()
+    assert "linearize" not in lowered
+    assert "compress" not in lowered
+
+
 def test_watermark_and_stamp_help_state_the_overlay_default() -> None:
     for verb in ("watermark", "stamp"):
         text = _collapsed(verb)

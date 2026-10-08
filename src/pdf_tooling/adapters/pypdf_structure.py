@@ -368,6 +368,51 @@ def _unlock_with_password(
         raise AuthError(message_wrong_password, path=path)
 
 
+def _drop_unreachable(writer: Any) -> None:
+    """Null every object of ``writer`` that the trailer does not reach (PDF-121).
+
+    ``PdfWriter.write`` serialises every non-``None`` entry of ``writer._objects``,
+    reachable or not. ``PdfWriter(clone_from=reader)`` clones the catalogue graph,
+    so a ``/Metadata`` stream the caller later unlinks (``meta set --clear-all``,
+    ledger ``350c89b83c``) is still written, byte for byte, as an orphan; and
+    ``_carry_donor_metadata``'s ``/Info`` clone is registered as a new object that
+    pypdf's ``_info`` setter then copies from, leaving the clone behind (ledger
+    ``23659a085e``). One sweep at the serialiser closes both.
+
+    Roots are ``/Root``, ``/Info``, the trailer ``/ID`` and ``/Encrypt``. The walk
+    is iterative, follows only references that belong to ``writer`` (a reference
+    into a reader is cloned in by pypdf's own write pass, so it is reachable by
+    construction), and reads no stream data -- a malformed packet cannot make it
+    raise. Dropped ids become free xref entries; object numbers do not shift.
+
+    FAIL-CLOSED: the pypdf privates are read directly, with no default and no
+    ``except``. A pypdf that renames one raises ``AttributeError`` at the first
+    write instead of silently skipping the sweep (``tests/unit/
+    test_pdf121_drop_unreachable.py`` pins this).
+    """
+    from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
+
+    objects = writer._objects  # noqa: SLF001
+    roots = [writer._root_object, writer._info_obj, writer._ID, writer._encrypt_entry]  # noqa: SLF001
+    pinned = {id(root) for root in roots if root is not None}
+    stack = [root for root in roots if root is not None]
+    keep: set[int] = set()
+    while stack:
+        node = stack.pop()
+        if isinstance(node, IndirectObject):
+            if node.pdf is not writer or node.idnum in keep:
+                continue
+            keep.add(node.idnum)
+            stack.append(objects[node.idnum - 1] if 0 < node.idnum <= len(objects) else None)
+        elif isinstance(node, DictionaryObject):
+            stack.extend(node.values())
+        elif isinstance(node, ArrayObject):
+            stack.extend(node)
+    for index, obj in enumerate(objects):
+        if obj is not None and index + 1 not in keep and id(obj) not in pinned:
+            objects[index] = None
+
+
 class PypdfStructureAdapter:
     """The pypdf-backed ``StructureEngine``."""
 
@@ -808,6 +853,7 @@ class PypdfStructureAdapter:
             if packet_out is not None:
                 writer.xmp_metadata = packet_out
 
+        _drop_unreachable(writer)
         out_buffer = io.BytesIO()
         writer.write(out_buffer)
         return MetadataWriteOutcome(
@@ -1104,6 +1150,7 @@ class PypdfStructureWriter:
     def write(self, stream: IO[bytes]) -> None:
         if self._carry_metadata and self._donor is not None:
             self._carry_donor_metadata(self._donor)
+        _drop_unreachable(self._writer)
         self._writer.write(stream)
 
     def _carry_donor_metadata(self, donor: PypdfOpenDocument) -> None:
