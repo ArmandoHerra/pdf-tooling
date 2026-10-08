@@ -1428,14 +1428,14 @@ SOURCE_ANCHORS: Final[tuple[tuple[str, Path, str], ...]] = (
     ),
     (
         "where defects live",
-        README_MD,
+        CONTRIBUTING_MD,
         "Open defects and planned work are recorded, per finding, in the maintainer's "
         "planning tree",
     ),
-    ("not distributed", README_MD, "are not part of this distribution"),
+    ("not distributed", CONTRIBUTING_MD, "are not part of this distribution"),
     (
         "not in sdist",
-        README_MD,
+        CONTRIBUTING_MD,
         "They are not shipped in the sdist or the wheel and are not present in a clone",
     ),
     ("phase", README_MD, "Phase 1 (v1) complete"),

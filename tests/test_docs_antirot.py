@@ -1820,6 +1820,30 @@ DOCS_RESIDUE_LEDGER: Final[tuple[_DocsRatification, ...]] = (
             "naming the offending lines if it were."
         ),
     ),
+    _DocsRatification(
+        date="2026-10-08",
+        spec="PDF-130",
+        direction="down",
+        ceilings=MappingProxyType(
+            {
+                "README.md": 27,
+                "CLAUDE.md": 7,
+                "CONTRIBUTING.md": 6,
+                "TESTING.md": 127,
+            }
+        ),
+        reason=(
+            "README.md 29 -> 27, by relocation. The maintainer-facing planning-tree "
+            "pointer left the README's `## Known issues` for CONTRIBUTING.md (D8), and "
+            "the two spelled cardinals in its last sentence went with it; the new "
+            "first-screen prose adds none (the one it first carried, in the preview "
+            "recipe, was reworded away). CONTRIBUTING.md stays 6 because the relocated "
+            "sentence was reworded to carry no cardinal (D8(b)). MEASURED with this "
+            "module's own backstop on the PDF-130 tree at landing: README.md 27, "
+            "CONTRIBUTING.md 6; CLAUDE.md and TESTING.md are untouched. Lowering is "
+            "ordinary (PDF-70); nothing is raised."
+        ),
+    ),
 )
 
 #: The LIVE ceiling: the newest record's mapping, and nothing else. There is no
@@ -2886,6 +2910,12 @@ def test_pdf105_fixture_proposed_known_answers() -> None:
 # --------------------------------------------------------------------------- #
 
 KNOWN_ISSUES_HEADING = "## Known issues"
+#: PDF-130 D8. The maintainer-facing planning-tree pointer left the README (a
+#: first-time visitor cannot open the tree) and lives under this heading in
+#: this document. The sweep/commit instruments below follow it; the README keeps
+#: `## Known issues` as the PUBLIC affordance (issues URL + known limitations).
+POINTER_DOCUMENT = "CONTRIBUTING.md"
+POINTER_HEADING = "## Where open findings are tracked"
 #: PDF-102 D4: the captured group is the WHOLE directory name, so a run whose
 #: name carries a `_suffix` (B-362: `2026-09-18_091200_sweep`) can be named.
 SWEEP_ID = re.compile(r"\b(\d{4}-\d{2}-\d{2}_\d{6}(?:_[A-Za-z0-9][A-Za-z0-9-]*)?)(?![A-Za-z0-9_-])")
@@ -3016,10 +3046,11 @@ def _isolated_git_env() -> dict[str, str]:
     return env
 
 
-def pointer_written_at(repo: Path, named: str) -> str | None:
+def pointer_written_at(repo: Path, named: str, document: str = POINTER_DOCUMENT) -> str | None:
     """PDF-102 D2. The AUTHOR time (`YYYY-MM-DD_HHMMSS`, in the commit's own
     recorded offset) of the most recent commit whose diff changes the number
-    of occurrences of *named* in `README.md`; `None` when no commit did (the
+    of occurrences of *named* in *document* (`CONTRIBUTING.md` since PDF-130
+    D8; `README.md` before); `None` when no commit did (the
     id exists only in an uncommitted edit, so the pointer is being written
     now). Author date, not committer date: a rebase-merge rewrites the
     latter."""
@@ -3032,7 +3063,7 @@ def pointer_written_at(repo: Path, named: str) -> str | None:
             "--date=format:%Y-%m-%d_%H%M%S",
             f"-S{named}",
             "--",
-            "README.md",
+            document,
         ],
         cwd=repo,
         capture_output=True,
@@ -3104,14 +3135,27 @@ def known_issues_body() -> str:
     return _known_issues_body_of(read("README.md"))
 
 
-def test_the_known_issues_section_exists_and_points_by_path() -> None:
-    """AC21/AC23. The populated state: the real, current README.md's `##
-    Known issues` section names both planning-tree paths, discloses they are
+def _pointer_body_of(text: str) -> str:
+    """PDF-130 D8. The relocated pointer's body: text-level, so the vacuous
+    rendering is sliced with the exact extractor the populated state uses."""
+    assert POINTER_HEADING in text, f"document carries no `{POINTER_HEADING}` section"
+    after = text.split(POINTER_HEADING, 1)[1]
+    return after.split("\n## ", 1)[0]
+
+
+def pointer_body() -> str:
+    return _pointer_body_of(read(POINTER_DOCUMENT))
+
+
+def test_the_findings_pointer_exists_and_points_by_path() -> None:
+    """AC21/AC23, retargeted by PDF-130 D8. The populated state: the real,
+    current CONTRIBUTING.md's `## Where open findings are tracked` section
+    names both planning-tree paths, discloses they are
     not part of this distribution, and carries a sweep id and a short sha.
     The vacuous state — the heading surviving when nothing is open — is a
     different rendering of the same section, covered separately by
     `test_the_known_issues_section_survives_the_vacuous_rendering` below."""
-    body = known_issues_body()
+    body = pointer_body()
     assert "BACKLOG.md" in body
     assert "qa/FINDINGS-LEDGER.md" in body
     assert "not part of this distribution" in body, (
@@ -3142,6 +3186,43 @@ def test_the_no_count_criterion_can_fail() -> None:
     assert re.findall(r"[0-9]+", stripped) == ["27"]
 
 
+PUBLIC_ISSUES_URL = "https://github.com/ArmandoHerra/pdf-tooling/issues"
+PRIVATE_TREE_TOKENS = ("ai_plans/", "BACKLOG.md", "FINDINGS-LEDGER")
+
+
+def public_known_issues_complaints(body: str) -> list[str]:
+    """PDF-130 D8/D7. A README `## Known issues` body a first-time visitor can
+    act on: the public tracker, a known-limitations list, and no pointer at
+    the maintainer's private planning tree (that pointer lives in
+    CONTRIBUTING.md). Pure, so the red control feeds it scratch text."""
+    complaints: list[str] = []
+    if PUBLIC_ISSUES_URL not in body:
+        complaints.append(f"the section does not carry {PUBLIC_ISSUES_URL}")
+    if "### Known limitations" not in body:
+        complaints.append("the section carries no `### Known limitations` list")
+    complaints.extend(
+        f"the section names the private planning tree via {token!r}"
+        for token in PRIVATE_TREE_TOKENS
+        if token in body
+    )
+    return complaints
+
+
+def test_the_known_issues_section_is_public() -> None:
+    """PDF-130 D8: the README body is public content; the planning-tree
+    pointer is CONTRIBUTING.md's now."""
+    assert public_known_issues_complaints(known_issues_body()) == []
+
+
+def test_the_public_known_issues_criterion_can_fail() -> None:
+    """AC8's RED, on a scratch body -- never the real README."""
+    poisoned = known_issues_body() + "\n- `ai_plans/pdf-tooling/BACKLOG.md`\n"
+    complaints = public_known_issues_complaints(poisoned)
+    assert any("'ai_plans/'" in c for c in complaints)
+    assert any("'BACKLOG.md'" in c for c in complaints)
+    assert public_known_issues_complaints("## Known issues\n\nnothing\n") != []
+
+
 def vacuous_fixture_sweep_and_sha() -> tuple[str, str]:
     """PDF-56 D8. The vacuous-rendering fixture's sweep id and sha, DERIVED
     rather than transcribed — this fixture used to hardcode the exact same
@@ -3167,7 +3248,7 @@ def vacuous_fixture_sweep_and_sha() -> tuple[str, str]:
     return "1999-01-01_000000", "0000000"
 
 
-def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path) -> None:
+def test_the_findings_pointer_survives_the_vacuous_rendering(tmp_path: Path) -> None:
     """AC23. `README.md:162` promises that if a sweep ever records nothing
     open, the section still stands and reads a no-open-findings sentence
     rather than being deleted (cycle 1's `planned.length > 0` ruling, applied
@@ -3182,7 +3263,7 @@ def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path)
     is worth more than a fixture that is correct today."""
     sweep_id, sha = vacuous_fixture_sweep_and_sha()
     vacuous = (
-        f"{KNOWN_ISSUES_HEADING}\n\n"
+        f"{POINTER_HEADING}\n\n"
         "Open defects and planned work are recorded, per finding, in the "
         "maintainer's planning tree:\n\n"
         "- `ai_plans/pdf-tooling/BACKLOG.md` — the groomed intake list.\n"
@@ -3192,14 +3273,14 @@ def test_the_known_issues_section_survives_the_vacuous_rendering(tmp_path: Path)
         "are not part of this distribution.**\n\n"
         f"no open findings are recorded as of sweep `{sweep_id}` "
         f"(`{sha}`)\n\n"
-        "## License\n\n"
-        "Apache-2.0 — see `LICENSE` and `NOTICE`.\n"
+        "## Tests\n\n"
+        "See `TESTING.md`.\n"
     )
-    scratch = tmp_path / "README.md"
+    scratch = tmp_path / POINTER_DOCUMENT
     scratch.write_text(vacuous)
 
-    assert KNOWN_ISSUES_HEADING in vacuous, "the heading must survive the vacuous rendering"
-    body = _known_issues_body_of(scratch.read_text())
+    assert POINTER_HEADING in vacuous, "the heading must survive the vacuous rendering"
+    body = _pointer_body_of(scratch.read_text())
     assert "no open findings are recorded as of sweep" in body, (
         "the section must still be found once it is vacuous, not merely present as prose"
     )
@@ -3226,12 +3307,12 @@ def test_the_named_sweep_resolves_to_a_readable_verdict() -> None:
     count as sweep-class. Recency IS asserted now, over that narrower
     population, by `test_the_named_sweep_was_the_newest_when_the_pointer_was_written` below."""
     root = require_planning_dir()
-    body = known_issues_body()
+    body = pointer_body()
     match = SWEEP_ID.search(body)
     assert match, "the section names no sweep id"
     sweep = root / "qa" / "runs" / match.group(1)
     assert sweep.is_dir(), (
-        f"README names sweep {match.group(1)}, which does not exist under {sweep}"
+        f"{POINTER_DOCUMENT} names sweep {match.group(1)}, which does not exist under {sweep}"
     )
     found = [name for name in VERDICT_ARTIFACTS if list(sweep.rglob(name))]
     assert found, (
@@ -3270,16 +3351,16 @@ def test_the_named_sweep_was_the_newest_when_the_pointer_was_written() -> None:
     reproduced by `test_the_newest_sweep_arm_still_bites_after_the_refresh`
     and the pure matrix below, so a green here is never the only evidence."""
     root = require_planning_dir()
-    match = SWEEP_ID.search(known_issues_body())
+    match = SWEEP_ID.search(pointer_body())
     assert match, "the section names no sweep id"
     named = match.group(1)
     cutoff = pointer_written_at(REPO_ROOT, named)
     superseding = superseding_sweeps(named, root / "qa" / "runs", cutoff)
     assert superseding == (), (
-        f"README names sweep {named}, but {', '.join(superseding)} (sweep-class, "
+        f"{POINTER_DOCUMENT} names sweep {named}, but {', '.join(superseding)} (sweep-class, "
         f"verdict-bearing) were already newer when the pointer was written "
         f"(cutoff {cutoff or 'now: uncommitted edit'}). Refresh the "
-        "`## Known issues` pointer -- this pointer is what the section exists for."
+        f"`{POINTER_HEADING}` pointer -- this pointer is what the section exists for."
     )
 
 
@@ -3291,7 +3372,7 @@ def test_the_named_commit_is_the_one_the_named_sweep_records() -> None:
     transcribed into this field by mistake, and no README-only predicate
     could have told the two apart)."""
     root = require_planning_dir()
-    body = known_issues_body()
+    body = pointer_body()
     sweep_match = SWEEP_ID.search(body)
     assert sweep_match, "the section names no sweep id"
     sha_match = SHORT_SHA.search(body)
@@ -3299,7 +3380,7 @@ def test_the_named_commit_is_the_one_the_named_sweep_records() -> None:
     named_sweep, named_sha = sweep_match.group(1), sha_match.group(1)
     run_dir = root / "qa" / "runs" / named_sweep
     assert run_dir.is_dir(), (
-        f"README names sweep {named_sweep}, which does not exist under {run_dir}"
+        f"{POINTER_DOCUMENT} names sweep {named_sweep}, which does not exist under {run_dir}"
     )
     files = [p for p in run_dir.rglob("*") if p.is_file()]
     if not commit_occurs_in_run(named_sha, run_dir):
@@ -3310,7 +3391,7 @@ def test_the_named_commit_is_the_one_the_named_sweep_records() -> None:
             else "That run records no short-sha-shaped token at all."
         )
         pytest.fail(
-            f"README names commit {named_sha} as the commit sweep {named_sweep} was "
+            f"{POINTER_DOCUMENT} names commit {named_sha} as the commit sweep {named_sweep} was "
             f"taken at; that string occurs in none of the {len(files)} file(s) under "
             f"{run_dir}. {recorded_clause}"
         )
@@ -3612,10 +3693,10 @@ def test_the_pointer_cutoff_is_the_commit_that_wrote_the_id(tmp_path: Path) -> N
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
-    readme = repo / "README.md"
+    readme = repo / POINTER_DOCUMENT
     named = "2026-09-19_120144"
     readme.write_text(f"intro\nsweep `{named}`\nother\n")
-    _git(repo, "add", "README.md")
+    _git(repo, "add", POINTER_DOCUMENT)
     _git(repo, "commit", "-q", "-m", "a", when="2026-09-19T12:57:04 -0600")
     readme.write_text(f"intro changed\nsweep `{named}`\nother\n")
     _git(repo, "commit", "-q", "-am", "b", when="2026-09-25T08:00:00 -0600")
@@ -4963,25 +5044,47 @@ def test_the_migration_section_cardinal_criterion_can_fail() -> None:
 # --- AC1: the section exists, in the ruled place, and is commit-anchored. --- #
 
 
+def migration_position_complaint(text: str) -> str | None:
+    """PDF-130 D6, re-ruling PDF-30 AC1's position. The migration tables left
+    the first screen: the section now sits BELOW the contract run, after
+    `## OCR and Office conversion` and before `## Naming`. Pure, so the red
+    control feeds it scratch text."""
+    migration = text.index(MIGRATION_HEADING)
+    if not text.index("## OCR and Office conversion") < migration < text.index("## Naming"):
+        return (
+            "the migration section must sit below the contract run: after "
+            "'## OCR and Office conversion' and before '## Naming'"
+        )
+    return None
+
+
 def test_the_migration_section_exists_and_is_commit_anchored() -> None:
-    """AC1. Exactly one `## Upgrading to 1.0.0` heading, positioned between
-    `## Getting Started`'s content and `## What exists today`, and its body
-    ends with a commit-anchored provenance line (PDF-30 D4)."""
+    """AC1, re-ruled by PDF-130 D6. Exactly one `## Upgrading to 1.0.0`
+    heading, positioned below the contract run (after `## OCR and Office
+    conversion`, before `## Naming`), and its body ends with a
+    commit-anchored provenance line (PDF-30 D4)."""
     text = read("README.md")
     heading_count = text.count(MIGRATION_HEADING)
     assert heading_count == 1, (
         f"README.md carries the migration heading {heading_count} time(s), expected exactly 1"
     )
-    getting_started = text.index("## Getting Started")
-    what_exists_today = text.index("## What exists today")
-    migration = text.index(MIGRATION_HEADING)
-    assert getting_started < migration < what_exists_today, (
-        "the migration section must sit between '## Getting Started' and '## What exists today'"
-    )
+    assert migration_position_complaint(text) is None, migration_position_complaint(text)
     body = migration_section_body().rstrip()
     assert PROVENANCE_PATTERN.search(body), (
         "the section's body does not end with a commit-anchored provenance line"
     )
+
+
+def test_the_migration_position_arm_can_fail() -> None:
+    """The re-ruled position predicate's RED (PDF-130 AC5), on scratch text:
+    the 1.0.0 section moved back above `## What exists today`."""
+    text = read("README.md")
+    start = text.index(MIGRATION_HEADING)
+    end = text.index("\n## Naming", start) + 1
+    block = text[start:end]
+    moved = text[:start] + text[end:]
+    moved = moved.replace("## What exists today", block + "## What exists today", 1)
+    assert migration_position_complaint(moved) is not None
 
 
 def test_the_commit_anchor_check_fails_if_the_provenance_line_is_missing() -> None:
@@ -4998,7 +5101,7 @@ def _vacuous_migration_fixture() -> str:
         f"{MIGRATION_HEADING}\n\n"
         "`1.0.0` introduces no breaking change for a `0.3.1` consumer.\n\n"
         "Re-derived at `0000000` on `1999-01-01`.\n\n"
-        "## What exists today\n\n"
+        "## Naming\n\n"
         "placeholder body\n"
     )
 

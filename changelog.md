@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-130] Rebuild the README's first screen for a first-time visitor — 2026-10-08
+
+- **First screen:** `README.md` now opens with a `uvx pdf-tooling --help` try-it line, a demo GIF rendered by VHS from the committed `docs/demo/pdf-tooling.tape`, the install lines, and `## Recipes` for merge, compress, OCR, password-file encrypt and decrypt, and a `--dry-run` preview piped to `jq`. `encrypt` takes `--owner-password-file` and `--user-password-file`; `decrypt` takes `--password-file`.
+- **Moved down, byte for byte:** `## Upgrading to 1.1`, `## Upgrading to 1.0.0` and `## Naming` now follow the contract sections, and the phase line sits at the top of `## Development`. No contract text changed: `## Output contract`, `## Exit codes` and every other contract section are byte-identical.
+- **Added:** `## When to use something else`, a sourced comparison with qpdf, pdfcpu, pdfly and OCRmyPDF, in the README only; `## Known issues` is now public, with the issue tracker, the security policy and a known-limitations list.
+- **Relocated:** the planning-tree pointer and the arms that police it moved to `CONTRIBUTING.md` under `## Where open findings are tracked`; none was deleted. The README residue ceiling is lowered by a recorded `down` record.
+
 ## [PDF-129] Say what a SIGKILLed run leaves behind, and prove a live run's temp is never swept — 2026-10-08
 
 - Documented, not reaped: a SIGKILL (or OOM kill) mid-write can leave hidden `0600` temp files beside the destination, and pdftooling still never deletes them. The temp name carries no liveness signal and `PLAN.md` §12 R-07 ("report, never sweep") is decided; the reaper question is handed up to the operator.
