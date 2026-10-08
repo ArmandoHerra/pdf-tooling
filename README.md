@@ -335,7 +335,7 @@ A `1.1.x` invocation or script that relied on any of the following observes a di
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
-Re-derived at `a99db64` on `2026-10-08`.
+Re-derived at `1ffa890` on `2026-10-08`.
 
 ## Upgrading to 1.1
 
