@@ -118,8 +118,10 @@ lint: ## Lint the tree
 typecheck: ## Type-check src/ in strict mode
 	$(UV_RUN) mypy src/
 
-vulncheck: ## Audit dependencies for known CVEs
-	$(UV_RUN) pip-audit
+vulncheck: ## Audit every locked package -- runtime, all extras, all dev groups -- for known CVEs
+	d=$$(mktemp -d) && trap 'rm -f "$$d/pylock.toml"; rmdir "$$d"' EXIT && \
+	uv export --locked --format pylock.toml --all-extras --all-groups --no-emit-project --quiet -o "$$d/pylock.toml" && \
+	$(UV_RUN) pip-audit --locked "$$d"
 
 sast: ## Static security analysis of src/
 	$(UV_RUN) bandit -r src/ -c pyproject.toml

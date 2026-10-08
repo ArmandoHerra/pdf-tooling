@@ -351,8 +351,10 @@ jobs:
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
-      # A red here is a CVE in a pinned dependency. Remedy: bump the dependency
-      # and re-lock. Q5 freezes the dependency SET, not its versions.
+      # A red here is a known CVE in ANY locked package: runtime, every extra
+      # ([html]/[all]) and every dependency group, whatever `uv sync` installed
+      # (PDF-122). Remedy: bump the dependency and re-lock. Q5 freezes the
+      # dependency SET, not its versions.
       - run: make vulncheck
 
   secret-scan:

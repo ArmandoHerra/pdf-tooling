@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-122] Make the required `vulncheck` audit the `[html]`/`[all]` extras — 2026-10-08
+
+- **The blind spot (`5ee5b98ec1`, `B-434`):** `make vulncheck` ran `uv run pip-audit` against the synced `.venv`, and CI's `uv sync --locked` installs no extras, so an advisory in `[html]`/`[all]` was invisible; that is how `PYSEC-2026-3940` (weasyprint 69.0) sat on `main` unseen.
+- **The recipe now audits the whole lock:** it exports every extra and dependency group as `pylock.toml` with `uv export --locked` and runs `pip-audit --locked` on it, so all 76 locked packages are audited regardless of platform marker, and a missing or empty lock fails closed. It is `--locked`, never `--frozen` (which collides with CI's `UV_LOCKED=1`), and not piped.
+- **Planted red driven:** a `weasyprint==69.0` pin in `html`/`all` leaves the old recipe green at rc 0 and turns the new one red (make rc 2) with `PYSEC-2026-3940` and `CVE-2026-106443`; a stale lock also reds. A PDF-104-shape guard (`pdf122_vulncheck_gate_problems`) pins the recipe and the single ungated `make vulncheck` step against eight mutations.
+- **Unchanged:** the check name `vulncheck`, its steps and its `timeout-minutes: 5` bound; only the `ci.yml` comment changed.
+- **Out:** the `setup-uv` `version:` pin / `[tool.uv] required-version` rider (PDF-113 H2) is not Low and is handed up.
+
 ## [PDF-118] Make the DCO gate mean what CONTRIBUTING.md says, and give Dependabot a cooldown — 2026-10-07
 
 - **`dco` no longer grades a PR with the PR's own checker:** `dco.yml` stays on `pull_request`, narrowed to `branches: [main]`, and checks out only `scripts/dco_check.py` from the PR's base SHA into `dco-base/` (`persist-credentials: false`, PR tree never checked out). A self-check step fails the job unless that checkout is the base SHA and prints the evidence line `dco: checker <sha256> from base <sha> (PR head <sha>)`. No `${{ }}` remains inside any `run:` (CICD-I4).
