@@ -68,6 +68,8 @@ def test_ac2_meta_get_reports_both_halves_on_the_metadata_rich_fixture(corpus) -
         "annotation_authors",
         "embedded_files",
         "trailer_id",
+        "unreferenced_metadata",
+        "prior_revisions",
     }
 
 

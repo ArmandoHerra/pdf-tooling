@@ -539,9 +539,14 @@ class MetadataReport:
     disagreement with ``None`` on the missing side."""
 
     residual_surfaces: Mapping[str, object]
-    """D2.4's five facts, already keyed exactly as the report needs them:
-    ``page_xmp_pages``, ``doc_piece_info``, ``page_piece_info_pages``,
-    ``annotation_authors``, ``embedded_files``, ``trailer_id``."""
+    """D2.4's facts, already keyed exactly as the report needs them, in
+    emission order: ``page_xmp_pages``, ``doc_piece_info``,
+    ``page_piece_info_pages``, ``annotation_authors``, ``embedded_files``,
+    ``trailer_id``, ``unreferenced_metadata``, ``prior_revisions``. The first
+    six are document parts ``--clear-all`` does not clear; the last two
+    (PDF-126, integer counts) count residue no viewer follows: metadata
+    objects nothing references and earlier revisions an incremental save
+    kept."""
 
     # --- PDF-39 (B-143) — the three envelope-level keys `meta get` omitted ---
     # Appended HERE, at this class's own tail, and no other model is touched.
