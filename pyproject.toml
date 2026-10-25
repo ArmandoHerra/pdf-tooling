@@ -83,6 +83,18 @@ Repository = "https://github.com/ArmandoHerra/pdf-tooling"
 Changelog = "https://github.com/ArmandoHerra/pdf-tooling/blob/main/changelog.md"
 Issues = "https://github.com/ArmandoHerra/pdf-tooling/issues"
 
+[tool.uv]
+# Pinned below 0.13 (ledger 9a0daae8ee, B-461): uv 0.13 stopped writing the
+# `_virtualenv.pth` startup shim, so a bare venv interpreter loads 12 fewer
+# modules (45 -> 33 locally; CI's recorded floor 36 -> 24). That floor is the
+# DENOMINATOR of test_total_startup_import_cost_stays_under_its_ceiling, so
+# every Linux 3.11/3.12 cell read 27-30 against the 26.5 ceiling with no
+# change in this project's own import cost. setup-uv reads this key when its
+# `version:` input is unset, so it also pins every CI and release job. Lifting
+# it needs the ceiling re-derived under uv 0.13 with a fresh measured
+# distribution, never a widened constant.
+required-version = ">=0.12.3,<0.13"
+
 [dependency-groups]
 dev = [
   "ruff>=0.6",
