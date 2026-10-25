@@ -54,13 +54,20 @@ dependencies = [
   # lifting it needs the suite run against 7.x). The lock was refreshed
   # targeted (pypdf and urllib3 only); urllib3 >= 2.8.0 clears three more
   # advisories in the dev-only closure (requests <- pip-audit).
-  "pypdf[crypto]>=6.19.0,<7",
+  # 2026-10-24 (ledger 9a0daae8ee follow-up): floor 6.19.0 -> 6.21.2, the
+  # lowest version that fixes all 11 pip-audit advisories published against
+  # 6.19.0; the `<7` ceiling stays (no fix needs 7.x).
+  "pypdf[crypto]>=6.21.2,<7",
   "pypdfium2>=5.13.0,<6",
   "reportlab>=5.0.1,<6",
   "pikepdf>=10.12.0,<11",
   "pdfplumber>=0.11.10,<0.12",
   "pytesseract>=0.3.13,<0.4",
-  "pillow>=12.3.0,<13",
+  # 2026-10-24: 13.0.0 is the only release that fixes the 37 advisories
+  # pip-audit reports against 12.3.0, so the `<13` ceiling held every user on
+  # a vulnerable Pillow. Floor and ceiling move together to >=13.0.0,<14; the
+  # full suite was run against 13.0.0 before the move.
+  "pillow>=13.0.0,<14",
   "typer>=0.12,<1",
 ]
 
