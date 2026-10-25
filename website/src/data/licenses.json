@@ -12,7 +12,7 @@
   {
     "License": "MIT",
     "Name": "brotli",
-    "Version": "1.2.0"
+    "Version": "1.2.1"
   },
   {
     "License": "MIT-0",
@@ -77,7 +77,7 @@
   {
     "License": "MIT-CMU",
     "Name": "pillow",
-    "Version": "12.3.0"
+    "Version": "13.0.0"
   },
   {
     "License": "BSD-3-Clause",
@@ -92,7 +92,7 @@
   {
     "License": "BSD-3-Clause",
     "Name": "pypdf",
-    "Version": "6.19.0"
+    "Version": "6.21.2"
   },
   {
     "License": "BSD-3-Clause, Apache-2.0, dependency licenses",
