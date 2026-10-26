@@ -20,6 +20,11 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-132] Admit the idle worker's own SIGTERM-unwind exit (143) in the group-SIGINT oracle — 2026-10-26
+
+- **Test-only; no user-facing change.** The idle arm of `tests/integration/test_procpool_group_signals.py` now admits exit status 143 next to 130 and -15, and its verdict lives in one predicate, `_assert_idle_quiet`, tested against the recorded CI shapes and a table of red controls. Targets ledger `4cd72d3c53` (carrier `B-468`).
+- **Why 143 is honest:** it is the worker's own `_WorkerUnwind(SIGTERM)` exit through `_raise_worker_unwind`, not a kill; a killed worker reports -15. A traceback, a survivor, `-9`/`137`, any other code, or a trial with no self-unwound SIGINT still fails the arm.
+
 ## [PDF-131] Make the rasterize signal arms assert zero strays only when the pool did not SIGKILL-escalate — 2026-10-25
 
 - **Test-side de-flake, no product change (`OR-52`):** the SIGTERM, SIGINT and SIGHUP arms of `tests/integration/test_rasterize_signals.py` now read the pool's own teardown record. With no SIGKILL escalation they still demand zero stray temp files. With escalation they admit only the documented hard-kill residue and still demand no unreaped worker, an empty process group and no output growth. Targets ledger `7e5cb962e2` and `5c0e8b1f47`.
