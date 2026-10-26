@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Final
 
 from pdf_tooling.errors import OutputEscapesDirError
-from pdf_tooling.safety.paths import ensure_within
+from pdf_tooling.safety.paths import MAX_COMPONENT_BYTES, ensure_within
 
 __all__ = ["FIELDS", "render_name", "used_fields"]
 
@@ -58,7 +58,7 @@ FIELDS: Final[frozenset[str]] = frozenset({"stem", "page", "index", "range", "ex
 
 #: A rendered component longer than this is refused rather than handed to the
 #: filesystem, which would otherwise fail with a bare ``OSError`` (AC9).
-_MAX_COMPONENT_BYTES: Final[int] = 255
+_MAX_COMPONENT_BYTES: Final[int] = MAX_COMPONENT_BYTES
 
 _formatter: Final[string.Formatter] = string.Formatter()
 

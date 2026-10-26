@@ -156,6 +156,40 @@ def ensure_within(base: Path | str, candidate: Path | str) -> None:
     )
 
 
+#: The one component-length limit (moved from safety/naming.py, PDF-07 AC9).
+MAX_COMPONENT_BYTES: Final[int] = 255
+
+
+def _overlong_component(target: Path | str) -> tuple[str, int] | None:
+    """The first component of the AS-WRITTEN, ~-expanded spelling whose
+    ``os.fsencode()`` length exceeds :data:`MAX_COMPONENT_BYTES`, with that
+    length. Makes no OS call."""
+    for part in Path(target).expanduser().parts:
+        size = len(os.fsencode(part))
+        if size > MAX_COMPONENT_BYTES:
+            return part, size
+    return None
+
+
+def ensure_component_lengths(target: Path | str) -> None:
+    """Refuse (exit 5) a destination with a component no filesystem here will accept.
+
+    PDF-138. Pure and OS-free: it reads the spelling the user typed, never
+    ``canonical()``, and runs before any ``stat`` so that CPython 3.11-3.13
+    (whose ``Path.exists`` raises ``ENAMETOOLONG``) and 3.14 (which swallows
+    it) answer identically. Raises the class and limit the ``--name`` tier
+    already uses.
+    """
+    found = _overlong_component(target)
+    if found is not None:
+        part, size = found
+        raise OutputEscapesDirError(
+            f"the output path component is {size} bytes, over the "
+            f"{MAX_COMPONENT_BYTES}-byte filename limit: {part!r}",
+            path=str(target),
+        )
+
+
 def target_exists(target: Path | str) -> bool:
     """Whether *target* already occupies a directory entry — a plain read.
 
@@ -166,7 +200,12 @@ def target_exists(target: Path | str) -> bool:
     consumer: it must decide whether a run is "destructive" — `--force` over
     an *existing* target — before deciding whether to prompt at all, and
     prompting is a CLI-layer concern this module has no business making.
+
+    A spelling with an over-long component (PDF-138) cannot exist, so it answers
+    ``False`` without an OS call; the refusal is raised once, by the planners.
     """
+    if _overlong_component(target) is not None:
+        return False
     written = Path(target).expanduser().absolute()
     return canonical(target).exists() or os.path.lexists(written)
 
