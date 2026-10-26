@@ -581,11 +581,14 @@ def _count(
 #: rotate-dry (0, 1, 2), compress-real (6, 1, 3), compress-dry (0, 0, 1). The two dry
 #: cells and the secret reads are UNCHANGED (AC9: D2 adds no read to a dry path). The two
 #: real cells now fail inside ``for_source`` and so skip the later re-read: 3 -> 2.
+#: PDF-137 (2026-10-25, ``7b1286b``): compress's dry run now parses each document whether
+#: or not a password is supplied, so a malformed input is still detected; that is +1
+#: operand read. The secret-read count stays 0 (AC9's guarantee).
 M7_LITERAL: Final[dict[str, tuple[int, int, int]]] = {
     "rotate-real": (6, 1, 2),
     "rotate-dry": (6, 1, 2),
     "compress-real": (6, 1, 2),
-    "compress-dry": (0, 0, 1),
+    "compress-dry": (0, 0, 2),
 }
 
 

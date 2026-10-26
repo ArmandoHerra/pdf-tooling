@@ -298,7 +298,10 @@ def compress_run(
     :func:`~pdf_tooling.safety.atomic.plan_filesystem`. PDF-37 adds the
     global ``--password-file`` resolvability tier alongside it, via the same
     credential-free `read_encryption` check `ops/crypto.py`'s own dry-run
-    predictions already use -- never the correctness tier (X-89).
+    predictions already use -- never the correctness tier (X-89). PDF-137: the
+    probe runs per row and parses each document whether or not a password is
+    supplied, so a malformed input is still detected and a password failure is
+    charged to its own row only.
     """
     preflight_operands(sources)
     if name_template is not None and out_dir is None:
@@ -319,65 +322,47 @@ def compress_run(
     )
 
     if policy.dry_run:
-        refusal = plan.refusal
-        if refusal is None:
-            # Each source's own probe, INSIDE its own guard. The credential-free
-            # `read_encryption` this prediction runs is a document read, so it
-            # raises on a corrupt or unreadable input exactly as the real run's
-            # engine does. Run batch-wide (as it was) one bad input aborts the
-            # whole preview -- the same defect on the preview side, and it would
-            # leave the unreadable arm's dry run disagreeing with its own real
-            # run on both OR-7 observables. Charged to the source it is about,
-            # never to the first source in argv order.
-            refusal = None
-            for item in planned:
-                predicted_refusal = ledger.guard(
+        plan_refusal = plan.refusal  # run-scoped: stays batch-wide
+        # PDF-52 (`d01c9d52fb`): the pair rides along on every row. A dry run
+        # never reads the secret, so `verified` is unconditionally `False`.
+        pw_detail = password_detail([password], verified=False)
+
+        # PDF-137: each row predicts its OWN refusal, inside its own guard, so a
+        # corrupt input is that row's `1` and one row's AuthError is never
+        # stamped on the others. The guard is the one the real run's item lands in.
+        def _predict_row(item: _CompressTarget) -> ItemResult:
+            refusal = plan_refusal
+            detail = plan.detail()
+            if refusal is None:
+                # One keyword per line is deliberate: the credential keyword
+                # followed on the same line by an upper-case-constant keyword is
+                # the shape the secret scanner reads as a generic API key.
+                refusal = predict_password_refusal(
                     item.source,
-                    # One keyword per line here is deliberate and is NOT a style
-                    # preference: the credential keyword followed on the SAME
-                    # line by another keyword whose value is an upper-case
-                    # constant is the shape this repository's secret scanner
-                    # reads as a generic API key, and it is right to be
-                    # suspicious of it. Splitting the arguments is the cheap
-                    # side of that trade -- the alternative is an allowlist
-                    # entry, which buys the same green by making the gate
-                    # blinder.
-                    lambda item=item: predict_password_refusal(  # type: ignore[misc]
-                        item.source,
-                        verb=VERB_COMPRESS,
-                        password=password,
-                    ),
+                    verb=VERB_COMPRESS,
+                    password=password,
+                    probe_document=True,
                 )
-                if predicted_refusal is not None:
-                    refusal = predicted_refusal
-                    break
-        detail = plan.detail()
-        if refusal is not None and plan.refusal is None:
-            detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
-        # PDF-52 (`d01c9d52fb`): the pair rides along on every arm of this dry
-        # tier -- including the refusal arm just above (D2's boundary arm ii).
-        # A dry run never reads the secret, so `verified` is unconditionally
-        # `False` here, for the whole batch's single global slot.
-        detail = {**detail, **password_detail([password], verified=False)}
-        # The dry run classifies every operand through the SAME guard the real
-        # run uses (OR-7 / X-185): an unreadable input predicts its own exit
-        # code AND its own envelope shape, rather than the preview claiming a
-        # clean batch the real run then fails.
-        predicted = [
-            ledger.guard(
-                item.source,
-                lambda item=item: ItemResult(  # type: ignore[misc]
-                    input=str(item.source),
-                    output=str(item.target),
-                    ok=refusal is None,
-                    exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
-                    message=("planned: compress" if refusal is None else refusal.message),
-                    bytes_before=item.source.stat().st_size,
-                    bytes_after=None,
-                    duration_ms=0,
-                    detail=detail,
-                ),
+                if refusal is not None:
+                    detail = {
+                        **detail,
+                        "would_exit": refusal.exit_code,
+                        "planned_refusal": "AuthError",
+                    }
+            return ItemResult(
+                input=str(item.source),
+                output=str(item.target),
+                ok=refusal is None,
+                exit_code=(refusal.exit_code if refusal is not None else plan.would_exit),
+                message=("planned: compress" if refusal is None else refusal.message),
+                bytes_before=item.source.stat().st_size,
+                bytes_after=None,
+                duration_ms=0,
+                detail={**detail, **pw_detail},
             )
+
+        predicted = [
+            ledger.guard(item.source, lambda item=item: _predict_row(item))  # type: ignore[misc]
             for item in planned
         ]
         return OperationResult(
