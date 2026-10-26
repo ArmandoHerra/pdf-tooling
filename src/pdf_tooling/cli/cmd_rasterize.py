@@ -32,7 +32,7 @@ from pdf_tooling.ops.batch import preflight_operands
 from pdf_tooling.ops.pagerange import GRAMMAR_HELP
 from pdf_tooling.ops.raster import rasterize_document
 from pdf_tooling.output import emit_result
-from pdf_tooling.ports.raster import DPI_CEILING, PIXEL_BUDGET, WIDTH_CEILING
+from pdf_tooling.ports.raster import DPI_CEILING, PIXEL_BUDGET, RUN_PIXEL_BUDGET, WIDTH_CEILING
 
 __all__ = ["RasterFormat", "rasterize_command"]
 
@@ -94,7 +94,11 @@ template: '{{stem}}-{{page:04}}.{{ext}}'.
 --threads N caps per-page render parallelism (default: min(8, CPU count)).
 --threads 1 forces deterministic sequential rendering and is the switch to
 reproduce a parallel failure -- --threads 1 and --threads 8 render
-byte-identical files in the same order (PLAN.md §12 R-08).
+byte-identical files in the same order (PLAN.md §12 R-08). A run is also
+bounded: at most {RUN_PIXEL_BUDGET:,} pixels render at once across all workers.
+When the largest planned page times the worker count would exceed that, fewer
+workers render (always at least 1), a warning names the count, --dry-run
+predicts it, and the files written are unchanged.
 
 Teardown is stated per platform. On any POSIX platform, SIGTERM, SIGINT or
 SIGHUP sent to this command alone tears the render pool down through one

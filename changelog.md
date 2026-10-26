@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-140] Bound render memory per run, not just pixels per page — 2026-10-26
+
+- **Added:** `ports/raster.py::RUN_PIXEL_BUDGET` (`357,913,940` px, twice the per-page budget) and `render_workers()`. `rasterize` now renders with fewer workers (never fewer than `1`, never refused) when the largest planned page times the worker count would exceed it. The cap is decided in the parent from the pixel counts PDF-112 already measures, before the pool exists; `ops/procpool.py` is untouched.
+- **Observable:** a capped run carries one `render workers capped at <n> of <m>:` entry in the existing `warnings` array (echoed as `warning:` on stderr), and `--dry-run` predicts the same line. No exit code, envelope key or `schema_version` moves, and the files written are byte-identical to `--threads 1`. At the default `--threads` a run stays under about `5` GiB (about `15.5` GB uncapped at A4 `--dpi 1360`); README `## Render budget` states the measured basis and `## Upgrading to 1.3` is new.
+- **Release:** this is a minor-release candidate (`1.3.0`): new behaviour (X-1070), not a patch; the package version is unchanged.
+- **Targets ledger:** `ca20ac2144` (B-458). It stays open until a pushed green CI run and a dedicated-host full-scale observation (GR-005).
+- **Added tests:** `tests/rss_probe.py` (independent stdlib `/proc` process-group sampler) and `tests/integration/test_pdf140_render_memory.py`; opt-in skip class `full-scale-render-memory` in `scripts/assert_skips.py`.
+
 ## [PDF-138] Refuse an over-long -O destination component with the error envelope, and have --dry-run predict it — 2026-10-26
 
 - **Fix:** a `-O` destination with any path component over 255 bytes (`os.fsencode`, so bytes not characters) now refuses at exit 5 (`kind: "refused"`, `OutputEscapesDirError`, message `the output path component is N bytes, over the 255-byte filename limit: '…'`) with `--dry-run` predicting the same, instead of a raw `OSError [Errno 36]` traceback with empty stdout (real) and a traceback or a false `ok: true` (dry, by interpreter). One pure gate, `safety/paths.py::ensure_component_lengths`, runs before any `stat` in `plan_output_set` and `AtomicWriter._plan`; `target_exists` answers `False` for such a spelling so `merge --force` cannot route around it. The one 255 now lives in `paths.MAX_COMPONENT_BYTES`; `naming.py` imports it.

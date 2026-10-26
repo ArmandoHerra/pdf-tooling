@@ -57,6 +57,13 @@ here leaves every render worker running (and writing) after a SIGTERM to the
 parent, why that same constraint rules out a thread pool (X-104) as the fix
 for this too, and exactly what is and is not guaranteed once a signal
 arrives.
+
+**The worker count is memory-bounded (PDF-140).** The number of concurrent
+render workers is ``min(--threads, len(work))`` reduced by
+:func:`~pdf_tooling.ports.raster.render_workers` so that the run's largest
+planned page times the worker count never exceeds ``RUN_PIXEL_BUDGET``. The
+decision is made here, in the parent, before the pool exists; when it engages
+a ``render workers capped at`` warning names the count, in both tiers.
 """
 
 from __future__ import annotations
@@ -73,7 +80,12 @@ from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, Pas
 from pdf_tooling.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_tooling.ops.procpool import guarded_process_pool
 from pdf_tooling.ports import BROKEN_INSTALL_HINT
-from pdf_tooling.ports.raster import enforce_render_budget, require_raster
+from pdf_tooling.ports.raster import (
+    enforce_render_budget,
+    render_cap_warning,
+    render_workers,
+    require_raster,
+)
 from pdf_tooling.ports.structure import require_structure
 from pdf_tooling.safety.atomic import AtomicWriter, plan_output_set
 from pdf_tooling.safety.confirm import BulkContext
@@ -160,7 +172,8 @@ def _plan_pages(
 
 
 def _chunk(work: list[_WorkItem], threads: int) -> list[list[_WorkItem]]:
-    """At most ``min(threads, len(work))`` contiguous chunks over *work*,
+    """At most ``min(threads, len(work))`` contiguous chunks over *work* (the
+    caller passes the already-capped ``render_workers(...)`` count, PDF-140),
     which is already ordered input-major, page-minor (Design §D5.2) — so a
     contiguous split keeps one input's pages together whenever the input
     isn't itself split across a chunk boundary by an uneven thread count."""
@@ -347,6 +360,7 @@ def rasterize_document(
 
     resolver = PasswordResolver(password)
     secret_by_source: dict[Path, Secret | None] = {}
+    peak_by_source: dict[Path, int] = {}
     planned: list[tuple[Path, int]] = []
 
     def _plan_one(source: Path) -> list[int]:
@@ -368,6 +382,8 @@ def rasterize_document(
             enforce_render_budget(
                 pixels, page_number=page_number, path=str(source), dpi=dpi, width_px=width_px
             )
+        # PDF-140: the run's worker cap is sized from the largest planned page.
+        peak_by_source[source] = max((p.alloc_pixels for p in measured), default=0)
         return pages
 
     try:
@@ -386,6 +402,7 @@ def rasterize_document(
             planned,
             ledger=ledger,
             secret_by_source=secret_by_source,
+            peak_alloc_pixels=max(peak_by_source.values(), default=0),
             fmt=fmt,
             dpi=dpi,
             width_px=width_px,
@@ -406,6 +423,7 @@ def _rasterize_planned(
     *,
     ledger: BatchLedger,
     secret_by_source: dict[Path, Secret | None],
+    peak_alloc_pixels: int,
     fmt: str,
     dpi: float | None,
     width_px: int | None,
@@ -444,6 +462,13 @@ def _rasterize_planned(
         targets, out_dir=out_dir, policy=policy, sources=sources, confirm=confirm
     )
 
+    # PDF-140: decided once, in the parent, before the dry/real split.
+    natural = max(1, min(policy.threads, len(rendered)))
+    workers = render_workers(peak_alloc_pixels, requested=policy.threads, work_items=len(rendered))
+    cap_warnings = (
+        (render_cap_warning(workers, natural, peak_alloc_pixels),) if workers < natural else ()
+    )
+
     if policy.dry_run:
         # A run-level refusal (an unwritable --out-dir) is not attributable
         # to one page, and this is not a loss of precision: rasterize's own
@@ -478,7 +503,7 @@ def _rasterize_planned(
             verb=VERB,
             dry_run=True,
             items=ledger.assemble(list(items)),
-            warnings=(),
+            warnings=cap_warnings if plan.refusal is None else (),
             duration_ms=0,
             batch=ledger.is_batch,
         )
@@ -506,7 +531,7 @@ def _rasterize_planned(
         )
         for slot, (source, page_number, target) in enumerate(rendered)
     ]
-    chunks = _chunk(work, policy.threads)
+    chunks = _chunk(work, workers)
 
     # Slot-indexed collection (Design §D5.4): ordering is never derived from
     # completion order, only ever from the slot each item was assigned at
@@ -544,7 +569,7 @@ def _rasterize_planned(
         verb=VERB,
         dry_run=False,
         items=ledger.assemble(rendered_items),
-        warnings=(),
+        warnings=cap_warnings,
         duration_ms=0,
         batch=ledger.is_batch,
     )

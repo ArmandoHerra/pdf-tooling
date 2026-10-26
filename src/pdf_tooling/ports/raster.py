@@ -25,6 +25,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 __all__ = [
     "DPI_CEILING",
     "PIXEL_BUDGET",
+    "RUN_PIXEL_BUDGET",
     "WIDTH_CEILING",
     "PagePixels",
     "RasterEngine",
@@ -33,6 +34,8 @@ __all__ = [
     "enforce_render_budget",
     "page_pixels",
     "probe",
+    "render_cap_warning",
+    "render_workers",
     "require_raster",
 ]
 
@@ -43,6 +46,16 @@ PORT = "RasterEngine"
 #: ruling, written as a literal on purpose: a Pillow bump must never move a
 #: published number. No env var, flag or config key reads it.
 PIXEL_BUDGET: Final[int] = 178_956_970
+
+#: PDF-140 / X-1070 / X-1076 -- the most pixels that may render at once across
+#: ALL workers of one ``rasterize`` run (2 x ``PIXEL_BUDGET`` at ruling time).
+#: A literal, like ``PIXEL_BUDGET``; no env var, flag or config key reads it.
+#: Measured basis (PDF-140 E3, Linux, CPython 3.14, pypdfium2 5.13.0): a worker
+#: peaks at about 11.0 B/px worst case; the documented model is
+#: ``peak <= K * pixels_in_flight + P + W * Q`` with K = 13 B/px, P = 80 MiB
+#: (parent + tracker) and Q = 45 MiB per worker. The product enforces PIXELS and
+#: never computes bytes; K/P/Q exist for the README figure and the harness bound.
+RUN_PIXEL_BUDGET: Final[int] = 357_913_940
 
 #: ``rasterize --dpi`` ceiling; larger (or non-finite) values exit 2.
 DPI_CEILING: Final[float] = 2400.0
@@ -136,6 +149,33 @@ def page_pixels(
         alloc_height=math.ceil(displayed_height_pt * scale),
         scale=scale,
         dpi_effective=dpi_effective,
+    )
+
+
+def render_workers(peak_alloc_pixels: int, *, requested: int, work_items: int) -> int:
+    """Concurrent render workers for a run: ``min(requested, work_items)``,
+    reduced so that ``workers x peak_alloc_pixels <= RUN_PIXEL_BUDGET``, never
+    below 1 (PDF-140 D2).
+
+    Every page that reaches scheduling already passed the per-page budget, so
+    ``peak_alloc_pixels <= PIXEL_BUDGET <= RUN_PIXEL_BUDGET`` and the floor of
+    1 never hides an overflow: no run-level refusal is ever needed. Reads
+    :data:`RUN_PIXEL_BUDGET` as a module global at call time.
+    """
+    natural = max(1, min(requested, work_items))
+    if peak_alloc_pixels <= 0:
+        return natural
+    fit = RUN_PIXEL_BUDGET // peak_alloc_pixels
+    return max(1, min(natural, fit))
+
+
+def render_cap_warning(workers: int, natural: int, peak_alloc_pixels: int) -> str:
+    """The one-line warning emitted iff the worker cap engaged (PDF-140 D3).
+    Stable prefix: ``render workers capped at <n> of <m>:``."""
+    return (
+        f"render workers capped at {workers} of {natural}: the largest planned page "
+        f"allocates {peak_alloc_pixels:,} px, and at most {RUN_PIXEL_BUDGET:,} px may "
+        f"render at once (README: Render budget); output files are unchanged"
     )
 
 
