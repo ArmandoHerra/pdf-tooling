@@ -93,6 +93,45 @@ CEILING_LEDGER: Final[tuple[_CeilingRatification, ...]] = (
             "HELP_MODULE_CEILING and the three *_RATIO_CEILING_PER_MILLE."
         ),
     ),
+    _CeilingRatification(
+        date="2026-10-26",
+        spec="PDF-134",
+        direction="up",
+        ruling="X-1116",
+        ceilings=MappingProxyType(
+            {
+                "test_coverage_policy.py::PRAGMA_CEILING": 46,
+                "test_docstring_pointers.py::UNTARGETED_CEILING": 35,
+                "test_gate_budget.py::TIMEOUT_CEILING": 30,
+                "test_import_boundaries.py::HELP_MODULE_CEILING": 320,
+                "test_import_boundaries.py::MODULE_SELF_RATIO_CEILING_PER_MILLE": 470,
+                "test_import_boundaries.py::PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE": 2600,
+                "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE": 53900,
+                "test_read_seams.py::BOUNDARY_SITE_CEILING": 12,
+                "test_read_seams.py::METADATA_POPULATION_CEILING": 54,
+                "test_secret_leak_sweeps.py::SWEEP_1_CEILING": 79,
+                "test_secret_leak_sweeps.py::SWEEP_2_DEAD_BUT_HONEST_CEILING": (),
+                "test_secret_leak_sweeps.py::SWEEP_2_GENUINE_CEILING": (
+                    "src/pdf_tooling/ops/merge.py::BOOKMARK_MODES",
+                    "src/pdf_tooling/ops/metadata.py::CLEARABLE_FIELDS",
+                    "src/pdf_tooling/ops/metadata.py::SETTABLE_FIELDS",
+                ),
+            }
+        ),
+        reason=(
+            "PDF-134 (B-461, xref 9a0daae8ee). "
+            "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE 26500 -> 53900: "
+            "the OPERAND moved, not the product (X-946). uv 0.13 dropped the _virtualenv.pth "
+            "shim; the CI bare floor fell 36 -> 24 names (3.11), 37 -> 25 (3.12), 39 -> 27 "
+            "(3.13) and 39 -> 26 (3.14); re-derived by the recorded procedure, 1.25x the "
+            "loaded p95 of the shipped estimator, governing cell linux/3.12 = 43.0476, "
+            "measured under uv 0.13.5 on GitHub ubuntu-latest in runs "
+            "40329456836/40331924934/40334289707, plant run 40338041719 (f=2.5 median "
+            "98.5185 >= 2x loaded max 97.9098). Measured first, derived second, planted "
+            "third (X-476). Ruled OR-63 / X-1116, conditional on the plant separation "
+            "and the dev-host corroboration passing."
+        ),
+    ),
 )
 
 

@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-134] Re-derive the startup-cost ceiling under uv 0.13 and lift the setup-uv pin — 2026-10-26
+
+- **Test and CI only; no product change.** CI ran uv 0.12.24 in all 13 `setup-uv` steps (ledger `9a0daae8ee`, carrier `B-461`) because uv 0.13 stopped writing the `_virtualenv.pth` startup shim, which shrank the bare-interpreter floor the startup-cost ratio divides by (36 -> 24, 37 -> 25, 39 -> 27 and 39 -> 26 names on 3.11 / 3.12 / 3.13 / 3.14, same runner). All 13 steps now run uv `0.13.5`, the uv the ceiling was re-measured under, and `test_every_setup_uv_step_runs_the_uv_the_ceiling_was_measured_under` holds the two equal. Never `[tool.uv] required-version` (Dependabot run `40158928056`).
+- **`STARTUP_COST_RATIO_CEILING_PER_MILLE` 26500 -> 53900** (`up`, ruling `X-1116`; a new `CEILING_LEDGER` record, record 0 untouched). Re-derived by the recorded procedure, 1.25x the loaded p95 of the shipped estimator, from three measurement dispatches on `ubuntu-latest` (`40329456836`, `40331924934`, `40334289707`): governing cell linux/3.12, loaded p95 43.0476 (3.11 37.3936, 3.13 25.1042, 3.14 29.9949). The operand moved, not the product: the quiet level rose 16.7 -> 27.3 on 3.12 while the same runner under 0.12.24 still reads 16.5.
+- **Separation was driven last** (plant run `40338041719`, created after all three): the f = 2.5 escaping-class plant reads a median-of-5 of 98.5185 against 53.900 and against 2 x the loaded max (97.9098); the sensitivity boundary is f = 1.00 (red) / 0.95 (green). At 26500 the `suite` jobs for 3.11 and 3.12 red on exactly this arm in all three measurement runs and at 53900 all four are green.
+- **Sensitivity, per cell (f_min %, old -> new):** 3.11 56.0 -> 98.7, 3.12 59.1 -> 97.8, 3.13 113.5 -> 195.6, 3.14 97.2 -> 166.6. The loss is the CI runner's load dispersion, not uv; `B-513` carries the load-isolation follow-up.
+- **Added:** `StartupCalibration.loaded_p95`, `StartupRederivation` / `STARTUP_COST_REDERIVATION`, the two `PDF-134` derivation paragraphs, and arms G1-G8 in `tests/test_import_boundaries.py`; three PDF-86 controls now read the ceiling instead of the literal 26.500. Targets ledger `9a0daae8ee` and `B-461`; they are closed only by the push and `schedule` runs at the landed SHA, never by this commit.
+
 ## [PDF-143] Close the docs-gate parsing traps and guard the "In 1.2" cells — 2026-10-26
 
 - Docs-gate `SWEEP_ID` now takes a dotted run-dir name whole, and a `ci`-mode run (AGL-127) is its own class instead of raising in the sweep population. Targets ledger `8ae79938af` (B-483) and `74112666be`; test-only; no behaviour change.
