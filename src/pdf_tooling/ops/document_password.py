@@ -42,6 +42,10 @@ capability is asked, in memory over the bytes already read, whether the supplied
 secret opens it. A secret that does not is an ``AuthError`` on every verb. A
 dry run that does not open the document still predicts ``0`` with
 ``password_verified: false`` (the X-89 carve-out); no secret is read there.
+
+PDF-137 adds the keyword-only ``probe_document`` to :func:`predict_password_refusal`;
+``compress``'s dry run alone uses it, so each row's malformed input is detected
+even when a password is supplied. It reads the document, never the secret.
 """
 
 from __future__ import annotations
@@ -226,7 +230,7 @@ class PasswordResolver:
 
 
 def predict_password_refusal(
-    source: Path, *, password: PasswordSource, verb: str
+    source: Path, *, password: PasswordSource, verb: str, probe_document: bool = False
 ) -> AuthError | None:
     """D8's resolvability tier, for a verb whose ``--dry-run`` does not
     otherwise open the document at all.
@@ -236,16 +240,23 @@ def predict_password_refusal(
     resolvable, never whether it is correct (X-89's oracle limit: a
     resolvable-but-wrong password predicts success here, and the real run is
     what finds out, `ops/crypto.py:44-53`'s own ruling, inherited).
+
+    PDF-137: ``probe_document`` (default ``False``, which keeps every caller's
+    path byte-identical, including the zero-read short-circuit when a password
+    is resolvable) parses the document credential-free even when a password IS
+    resolvable, so a malformed file is still detected by a preview. The secret
+    is never read, and a resolvable password still predicts ``None``.
     """
     # PDF-108: first statement of the seam, as in `PasswordResolver.for_source`.
     from pdf_tooling.ops.carriage import record as record_carriage
 
     record_carriage(source)
-    if password.resolvable:
-        return None
-    facts = require_encryption().read_encryption(read_source_bytes(source), None)
-    if facts.encrypted and not facts.unlocked:
-        return AuthError(f"a password is required to {verb} this document; {PASSWORD_HINT}")
+    if probe_document or not password.resolvable:
+        facts = require_encryption().read_encryption(read_source_bytes(source), None)
+        if password.resolvable:
+            return None  # X-89: a supplied password's correctness is never tested
+        if facts.encrypted and not facts.unlocked:
+            return AuthError(f"a password is required to {verb} this document; {PASSWORD_HINT}")
     return None
 
 

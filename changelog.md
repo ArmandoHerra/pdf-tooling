@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-137] Make a compress --dry-run batch predict each row's own code when passwords are supplied or missing — 2026-10-26
+
+- **Fix:** each row of a `compress --dry-run` batch now predicts its own code. With no password, one input's password failure is no longer stamped on every row (`PLAIN-a UO-AES256 PLAIN-b` previewed `[6,6,6]` and really exits `1` with `[0,6,0]`; it now previews `[0,6,0]`). With a password supplied, a malformed input is detected again (`PLAIN-a corrupt UO-AES256` previewed rc `0` `[0,0,0]` and really exits `1`; it now previews rc `1`). The run code is PDF-128's batch collapse over those rows.
+- **Unchanged:** the X-89 carve-out (a supplied-but-wrong password on an encrypted input still previews `0` with `password_verified: false`; no secret is read on any dry path), the real-run path, the exit-code table, every envelope key, `schema_version`, README and `--help`. The preview now reads each document (one more operand read), never the secret. `predict_password_refusal` gains a keyword-only `probe_document` (default off); only `compress` uses it.
+- **Added:** `tests/integration/test_pdf137_compress_dry_batch_per_row.py` (the dry/real matrix, the carve-out census, the read budget and an AST guard). One moved literal: `M7_LITERAL["compress-dry"]` `(0, 0, 1)` to `(0, 0, 2)` in the PDF-128 test. Targets ledger `72d60e9040` and `952937b15a` (B-474, B-475).
+
 ## [PDF-134] Re-derive the startup-cost ceiling under uv 0.13 and lift the setup-uv pin — 2026-10-26
 
 - **Test and CI only; no product change.** CI ran uv 0.12.24 in all 13 `setup-uv` steps (ledger `9a0daae8ee`, carrier `B-461`) because uv 0.13 stopped writing the `_virtualenv.pth` startup shim, which shrank the bare-interpreter floor the startup-cost ratio divides by (36 -> 24, 37 -> 25, 39 -> 27 and 39 -> 26 names on 3.11 / 3.12 / 3.13 / 3.14, same runner). All 13 steps now run uv `0.13.5`, the uv the ceiling was re-measured under, and `test_every_setup_uv_step_runs_the_uv_the_ceiling_was_measured_under` holds the two equal. Never `[tool.uv] required-version` (Dependabot run `40158928056`).
