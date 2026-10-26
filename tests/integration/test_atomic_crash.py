@@ -125,6 +125,11 @@ def park_at(point: str, args: Sequence[str]) -> Iterator[Parked]:
             process.kill()
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=20)
+        # The PIPE ends this process holds are this process's to close: reaping
+        # the child does not, and an unclosed one is reported when it is collected.
+        for pipe in (process.stdout, process.stderr):
+            if pipe is not None:
+                pipe.close()
 
 
 def assert_only_temp_residue(before: Snapshot, after: Snapshot) -> None:

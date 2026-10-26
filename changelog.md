@@ -20,6 +20,11 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-145] Make the suite pass its own pre-land gate command: close the subprocess pipes and files the tests leak under -W error — 2026-10-26
+
+- **Test-only; no user-facing change.** `make test PYTEST_ARGS='-W error -p no:cacheprovider'` reds on a green tree because tests leak pipes and files. The fix is at the four leak sites: `park_at`'s child pipes (which also covers the PDF-129 residue contract), the two render-pool `Popen(stderr=PIPE)` arms, and the two `test_compose.py` sinks. `-W error` is unchanged and nothing is filtered. Targets ledger `733aa76428` (carrier `B-506`).
+- **Channel:** half 2 of the PDF-88 counterexample test now asserts the encoding-refusal publication with `pytest.warns`, and the uncaught worker-to-controller crossing PDF-88 AC6 relies on is asserted by a child run of a new probe, `test_the_channel_crosses_the_worker_boundary_uncaught`.
+
 ## [PDF-132] Admit the idle worker's own SIGTERM-unwind exit (143) in the group-SIGINT oracle — 2026-10-26
 
 - **Test-only; no user-facing change.** The idle arm of `tests/integration/test_procpool_group_signals.py` now admits exit status 143 next to 130 and -15, and its verdict lives in one predicate, `_assert_idle_quiet`, tested against the recorded CI shapes and a table of red controls. Targets ledger `4cd72d3c53` (carrier `B-468`).
