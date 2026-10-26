@@ -182,6 +182,7 @@ from pdf_tooling.safety.paths import (
     canonical,
     declared_device,
     ensure_backup_sidecar_free,
+    ensure_component_lengths,
     ensure_destination_is_not_an_input,
     ensure_destination_writable,
     ensure_no_clobber,
@@ -622,6 +623,7 @@ def plan_output_set(
             if not (policy.dry_run and not resolved_out_dir.exists()):
                 ensure_destination_writable(resolved_out_dir, as_written=out_dir)
         for target in targets:
+            ensure_component_lengths(target)
             if confirm is not None and not policy.in_place and target_exists(target):
                 clobbered.append(str(target))
             ensure_no_clobber(target, force=policy.force, in_place=policy.in_place)
@@ -969,13 +971,25 @@ class AtomicWriter:
         the real run would have stopped — which is why the warning below sits
         after the ``except`` and not inside a ``finally``.
 
-        **PDF-90 (``§D1``).** The FIRST statement, unconditionally, in both
+        **PDF-138.** The over-long-component gate runs before anything else. It
+        makes no OS call and raises (real) or captures (dry) exactly like the
+        checks below; the PDF-90 statement is therefore the first statement
+        after the PDF-138 length gate, which makes no OS call.
+
+        **PDF-90 (``§D1``).** The first statement after that gate, in both
         modes: a ``stat`` is read-only, so this costs nothing under
         ``--dry-run`` and keeps that purity intact. Capturing here, before the
         no-clobber and writability checks below have run, is what makes
         ``--in-place`` correct for free — the destination is the input, it
         exists, and its mode is read before anything has moved.
         """
+        try:
+            ensure_component_lengths(self.target)
+        except PdfToolingError as refusal:
+            if not self._dry_run:
+                raise
+            self.planned_refusal = refusal
+            return
         self._destination_mode = (
             stat.S_IMODE(os.stat(self.destination).st_mode) & 0o777
             if self.destination.exists()

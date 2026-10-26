@@ -373,6 +373,33 @@ _PDF_96_CEILINGS: Final[Mapping[str, int]] = MappingProxyType(
     {**_PDF_89_RATIFICATION.ceilings, "tests/test_website_diagrams.py": 1}
 )
 
+_PDF_112_RATIFICATION: Final[_GatingRatification] = _GatingRatification(
+    date="2026-10-07",
+    spec="PDF-112",
+    direction="up",
+    ruling="X-1016",
+    ceilings=MappingProxyType(
+        {
+            **_PDF_96_CEILINGS,
+            "tests/integration/test_pdf112_render_budget.py": 4,
+        }
+    ),
+    reason=(
+        "X-1016: PDF-112 bounds the render with a per-page pixel budget, and the "
+        "refusal (exit 5) must outrank the missing-engine tier (exit 3) for `ocr`. "
+        "Four arms in tests/integration/test_pdf112_render_budget.py drive `ocr` "
+        "engine-blind by purpose: "
+        "test_ac2_ocr_refuses_the_same_page_before_allocation_and_before_the_engine, "
+        "test_ac3_ocr_dry_run_predicts_the_same_refusal_byte_for_byte, "
+        "test_ac4_ocr_batch_is_refused_whole_and_writes_nothing, and "
+        "test_ac9_skip_text_pages_does_not_budget_an_unrendered_page. "
+        "They prove exit 5 comes before 3, a proof that exists "
+        'only on a leg where tesseract is absent; a `requires("tesseract")` marker '
+        "would mis-declare them and DELETE that proof under engines-hidden. "
+        "The key enters at 4 and no other key moves."
+    ),
+)
+
 ENGINE_GATING_LEDGER: Final[tuple[_GatingRatification, ...]] = (
     _PDF_82_GENESIS,
     _PDF_84_RATIFICATION,
@@ -412,30 +439,49 @@ ENGINE_GATING_LEDGER: Final[tuple[_GatingRatification, ...]] = (
             "construction rather than by exemption."
         ),
     ),
+    _PDF_112_RATIFICATION,
     _GatingRatification(
-        date="2026-10-07",
-        spec="PDF-112",
+        date="2026-10-26",
+        spec="PDF-138",
         direction="up",
-        ruling="X-1016",
+        ruling="X-1117",
         ceilings=MappingProxyType(
             {
-                **_PDF_96_CEILINGS,
-                "tests/integration/test_pdf112_render_budget.py": 4,
+                **_PDF_112_RATIFICATION.ceilings,
+                "tests/integration/test_pdf138_overlong_output_component.py": 2,
             }
         ),
         reason=(
-            "X-1016: PDF-112 bounds the render with a per-page pixel budget, and the "
-            "refusal (exit 5) must outrank the missing-engine tier (exit 3) for `ocr`. "
-            "Four arms in tests/integration/test_pdf112_render_budget.py drive `ocr` "
-            "engine-blind by purpose: "
-            "test_ac2_ocr_refuses_the_same_page_before_allocation_and_before_the_engine, "
-            "test_ac3_ocr_dry_run_predicts_the_same_refusal_byte_for_byte, "
-            "test_ac4_ocr_batch_is_refused_whole_and_writes_nothing, and "
-            "test_ac9_skip_text_pages_does_not_budget_an_unrendered_page. "
-            "They prove exit 5 comes before 3, a proof that exists "
-            'only on a leg where tesseract is absent; a `requires("tesseract")` marker '
-            "would mis-declare them and DELETE that proof under engines-hidden. "
-            "The key enters at 4 and no other key moves."
+            "X-1117: PDF-138 refuses an over-long `-O` destination component at exit 5 "
+            "in both modes, and AC7's population of single-output `-O` verbs includes "
+            "`convert` and `ocr`, the two engine-blind verbs. "
+            "(1) The key tests/integration/test_pdf138_overlong_output_component.py "
+            "enters at 2 and no other key moves; the census run measures 141 -> 143 "
+            "ungated items and 18 -> 19 modules (the PM's expected values), 7498 -> "
+            "7579 collected, 31 gated unchanged. "
+            "(2) The two members are test_ac7_engine_blind_members (the `ocr` pair and "
+            "the `convert` pair) and test_ac7_population_matches_probe (the 26-leaf "
+            "classification); each is counted only because the population names "
+            "`convert` and `ocr`. "
+            "(3) M1, MEASURED in both engine states on this host (soffice present, "
+            "tesseract absent), both arms `passed` with no skip each time: engines "
+            "present, `ocr` --skip-text-pages answered (5, 5) and `convert` ran its "
+            "soffice-present branch, (5, 5), and the population arm matched with "
+            "`convert` included; with PDF_TOOLING_TEST_HIDE_ENGINES=tesseract,soffice, "
+            "`ocr` answered (5, 5) again, `convert` ran its soffice-absent branch "
+            "(office_binary_present() False, its P probe rc 3 engine_missing), and the "
+            "population arm passed with `convert` dropped from the expected set. "
+            "(4) A `@pytest.mark.requires(...)` marker would be a FALSE declaration "
+            "-- `ocr` needs no engine under --skip-text-pages and the `convert` branch "
+            "adapts to the engine -- and would DELETE both arms under engines-hidden, "
+            "in the without-engines job release.yml:44 gates the tag on, removing the "
+            "`ocr` refusal proof and the whole classification. "
+            "(5) The limit: on a soffice-absent leg the arm asserts `convert`'s P probe "
+            "answer (rc 3) and does NOT assert its over-long refusal, so only the "
+            "engines-present job proves convert's 5-before-3 ordering. "
+            "(6) +2 AND NO MORE: `population()` appends one Member per ARM, so "
+            "parametrizing either arm over the verbs, or splitting `convert` out, would "
+            "cost more and is not authorized by X-1117."
         ),
     ),
 )

@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-138] Refuse an over-long -O destination component with the error envelope, and have --dry-run predict it — 2026-10-26
+
+- **Fix:** a `-O` destination with any path component over 255 bytes (`os.fsencode`, so bytes not characters) now refuses at exit 5 (`kind: "refused"`, `OutputEscapesDirError`, message `the output path component is N bytes, over the 255-byte filename limit: '…'`) with `--dry-run` predicting the same, instead of a raw `OSError [Errno 36]` traceback with empty stdout (real) and a traceback or a false `ok: true` (dry, by interpreter). One pure gate, `safety/paths.py::ensure_component_lengths`, runs before any `stat` in `plan_output_set` and `AtomicWriter._plan`; `target_exists` answers `False` for such a spelling so `merge --force` cannot route around it. The one 255 now lives in `paths.MAX_COMPONENT_BYTES`; `naming.py` imports it.
+- **Targets ledger:** `dbef257306` (B-352, the ENAMETOOLONG half only). `B-352` stays open: the encoding half `2b88707a36` is untouched and `AtomicWriter._replace` is byte-unchanged (X-1068, X-797).
+- **Behaviour change:** an over-long PARENT component (`-O <256 a's>/x.pdf`) moves from exit 1 "destination directory does not exist" (3.14; a traceback on 3.11-3.13) to exit 5. The `--out-dir` tier (PDF-64, exit 1) and the `--name` tier keep their answers and precedence.
+- **Added:** `tests/integration/test_pdf138_overlong_output_component.py` (six-verb refused/accepted/parent matrices as dry-and-real pairs, the derived 19-verb `-O` population, `stat`-forbidden planner arm, one-limit and `_replace` pins).
+
 ## [PDF-139] Escape control characters in -o table cells — 2026-10-26
 
 - Fixes CWE-150 (audit 2026-10-04/2026-10-06, carrier `B-426`): a hostile PDF `/Title` or operand filename could write terminal escape sequences (ESC/CSI, OSC, C1, CR, BEL, DEL) raw into `-o table` output. Targets ledger: none (audit finding, no ledger row).
