@@ -36,6 +36,7 @@ from pdf_tooling.cli.password import ENV_PASSWORD, plan_password
 from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordSource
 from pdf_tooling.ops.metadata import meta_get_run
 from pdf_tooling.output import OutputFormat, render_payload
+from pdf_tooling.output.table import escape_controls
 from pdf_tooling.safety.paths import classify_operand
 
 __all__ = ["build_payload", "meta_get_command"]
@@ -84,7 +85,9 @@ def build_payload(
 
 def _table_block(title: str, lines: list[str]) -> list[str]:
     rendered = [title]
-    rendered.extend(f"  {line}" for line in lines) if lines else rendered.append("  (none)")
+    rendered.extend(f"  {escape_controls(line)}" for line in lines) if lines else rendered.append(
+        "  (none)"
+    )
     return rendered
 
 
@@ -98,7 +101,7 @@ def _render_table(payload: dict[str, Any]) -> str:
     disagreements = payload.get("disagreements") or []
     residual = payload.get("residual_surfaces") or {}
 
-    lines: list[str] = [f"path: {payload.get('path')}"]
+    lines: list[str] = [f"path: {escape_controls(str(payload.get('path')))}"]
     lines.extend(_table_block("Document Info", [f"{key}: {value}" for key, value in info.items()]))
     if xmp is None:
         lines.extend(_table_block("XMP", []))

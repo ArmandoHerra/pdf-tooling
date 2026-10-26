@@ -6,6 +6,12 @@ though the CLI framework pulls it into the environment.
 
 Everything here consumes the dict produced by ``OperationResult.to_dict()`` (or
 ``PdfToolingError.to_dict()``); it never reaches into a dataclass field.
+
+**Control characters are escaped (PDF-139, CWE-150).** Every code point of Unicode
+category ``Cc`` (U+0000-U+001F, U+007F-U+009F) in a cell renders as its ``repr``-style
+escape (``\\t``, ``\\n``, ``\\r``, otherwise ``\\xNN``), so a hostile document title or
+filename cannot drive the operator's terminal. Printable non-ASCII is left untouched.
+``-o json`` / ``-o ndjson`` do not pass through here and are unchanged.
 """
 
 from __future__ import annotations
@@ -16,12 +22,24 @@ from typing import Any
 _SUPPRESSED_COLUMNS: frozenset[str] = frozenset({"ok"})
 
 
+#: PDF-139 (CWE-150). Unicode category Cc -> the repr() escape for it.
+_CONTROL_ESCAPES: dict[int, str] = {
+    code: {0x09: "\\t", 0x0A: "\\n", 0x0D: "\\r"}.get(code, f"\\x{code:02x}")
+    for code in (*range(0x00, 0x20), *range(0x7F, 0xA0))
+}
+
+
+def escape_controls(text: str) -> str:
+    """Render every control code point (Cc) as visible text; leave all else."""
+    return text.translate(_CONTROL_ESCAPES)
+
+
 def _cell(value: Any) -> str:
     if value is None:
         return "-"
     if isinstance(value, bool):
         return "yes" if value else "no"
-    return str(value)
+    return escape_controls(str(value))
 
 
 def _columns(rows: list[dict[str, Any]]) -> list[str]:
