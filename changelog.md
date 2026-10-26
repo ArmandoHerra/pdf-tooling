@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-139] Escape control characters in -o table cells — 2026-10-26
+
+- Fixes CWE-150 (audit 2026-10-04/2026-10-06, carrier `B-426`): a hostile PDF `/Title` or operand filename could write terminal escape sequences (ESC/CSI, OSC, C1, CR, BEL, DEL) raw into `-o table` output. Targets ledger: none (audit finding, no ledger row).
+- Every Unicode `Cc` code point in a table cell now renders as visible text — `\t`, `\n`, `\r`, otherwise `\xNN` — in all `_cell` verbs and in `meta get`'s own table; printable non-ASCII (`é`, `中文`) is unchanged and files on disk keep their real names.
+- `-o json` and `-o ndjson` are byte-unchanged (frozen contract, proven by sha256 on a hostile fixture); stderr and `text`/`tables` content bodies are out of scope. Patch candidate.
+
 ## [PDF-137] Make a compress --dry-run batch predict each row's own code when passwords are supplied or missing — 2026-10-26
 
 - **Fix:** each row of a `compress --dry-run` batch now predicts its own code. With no password, one input's password failure is no longer stamped on every row (`PLAIN-a UO-AES256 PLAIN-b` previewed `[6,6,6]` and really exits `1` with `[0,6,0]`; it now previews `[0,6,0]`). With a password supplied, a malformed input is detected again (`PLAIN-a corrupt UO-AES256` previewed rc `0` `[0,0,0]` and really exits `1`; it now previews rc `1`). The run code is PDF-128's batch collapse over those rows.
