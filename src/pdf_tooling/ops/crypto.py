@@ -140,6 +140,11 @@ _ALREADY_ENCRYPTED: Final[str] = (
 )
 
 _NOT_ENCRYPTED: Final[str] = "document is not encrypted; nothing to decrypt"
+#: The one spelling of ``permissions``' missing-password refusal: the real branch
+#: raises it and the dry branch predicts it (PDF-135), so the two cannot drift.
+_PERMISSIONS_PASSWORD_REQUIRED: Final[str] = (
+    "a password is required to read this document's permissions"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -554,9 +559,12 @@ def permissions_run(
     """Report the algorithm, revision, key bits and granted permission set.
 
     **Non-producing**: it writes nothing, declares ``consumes=()`` under OR-3,
-    and therefore has no filesystem tier to plan at all. ``--dry-run`` renders
-    the plan and stops without opening the engine, which is the only honest
-    thing a preview of a pure report can say.
+    and therefore has no filesystem tier to plan at all. ``--dry-run`` makes
+    the same credential-free encryption read the real run makes (so a malformed
+    document fails the preview exactly as it fails the run) and predicts the
+    missing-password ``6`` when the document is locked and no password is
+    resolvable. It never reads or tests a supplied password (X-89): a
+    resolvable password's correctness is the one thing a preview cannot know.
 
     ``advisory`` rides the payload as a machine-readable ``True`` and no
     prose: PDF permission bits are a request to the reader, not an
@@ -566,6 +574,23 @@ def permissions_run(
     _validate_sources([source])
 
     if policy.dry_run:
+        # PDF-135: the same credential-free read the real run makes (no secret), so
+        # a malformed document fails here exactly as it fails there. The password
+        # tier is RESOLVABILITY only (X-89): a resolvable password is never read.
+        facts = _read_facts(source, None)
+        if facts.encrypted and not facts.unlocked and not password.resolvable:
+            refusal = AuthError(_PERMISSIONS_PASSWORD_REQUIRED, path=str(source))
+            return _refusal_result(
+                VERB_PERMISSIONS,
+                source=source,
+                target=None,
+                refusal=refusal,
+                would_exit=refusal.exit_code,
+                detail={
+                    **_Prediction(refusal=refusal).detail(),
+                    **password_detail([password], verified=False),
+                },
+            )
         return OperationResult(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_PERMISSIONS,
@@ -608,10 +633,7 @@ def permissions_run(
         # the flag gained teeth. Removed rather than left in place with the
         # chokepoint softened for it: `redacted=True` communicates "this path
         # might be a secret," which was never true here.
-        raise AuthError(
-            "a password is required to read this document's permissions",
-            path=str(source),
-        )
+        raise AuthError(_PERMISSIONS_PASSWORD_REQUIRED, path=str(source))
 
     detail: dict[str, object] = {
         **facts.to_dict(),
