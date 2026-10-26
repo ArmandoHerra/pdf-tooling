@@ -3339,6 +3339,78 @@ STARTUP_FLOOR_SANITY_FLOOR_US: Final = 1_700
 #: ratio arms GREEN on the planted tree under the default `-n auto`, floor
 #: within its own noise. The SEPARATION and the measured SENSITIVITY BOUNDARY
 #: ("reds at f >= X, green at f <= Y") are in this spec's Implementation Log.
+#: PDF-134 RE-DERIVATION (uv 0.13.5, 2026-10-26). The OPERAND moved, not the product (X-946):
+#:   uv 0.13 stopped writing the `_virtualenv.pth` startup shim, which shrank the bare
+#:   interpreter floor this ratio divides by, so the ceiling above was re-derived by the
+#:   recorded procedure on the CI runner class rather than carried over.
+#: STATISTIC: unchanged -- median of K=5 paired readings, warm-up discarded.
+#: DATE: 2026-10-26
+#: COMMIT: 68447f3 (the measured code; the harness lived on a throwaway branch that never
+#:   landed)
+#: HOST: GitHub `ubuntu-latest`, ubuntu-24.04 20261023.334.3, 4 vCPU, the CI runner
+#:   class; the PDF-68 figures above were station-01.
+#: INTERPRETER: four, one per member of STARTUP_COST_CALIBRATION (provenance names each
+#:   executable).
+#: ENGINES: irrelevant -- the census is `pdftooling --help`.
+#: UV: 0.13.5, one exact version in every job (same-runner A side: 0.12.24).
+#: RUNS: measurement 40329456836/40331924934/40334289707; plant 40338041719. Each cell
+#:   pooled over the three runs.
+#: Figures are `attributable self / in-run floor self`, unitless, K=1 readings unless
+#:   the line says shipped estimator (median-of-5):
+#:   linux/3.11  floor 36 -> 24 on this runner
+#:     serial (N=60 = 3 x 20): min 24.0015  median 27.0877
+#:       p95 28.3929  max 28.6388  spread 4.6374  cv 4.09%
+#:     `-n auto` ambient (N=60): min 13.8206  median 27.5038
+#:       p95 38.3866  max 44.6463  spread 30.8257  cv 22.93%
+#:     loaded 5x and 8x nproc (N=150): min 17.6892  median 30.3105
+#:       p95 42.7038  max 247.4117  spread 229.7225  cv 61.77%
+#:     shipped estimator, loaded (138 windows): min 24.0529  median 30.2825
+#:       p95 37.3936  max 42.2565  spread 18.2036  cv 12.62%
+#:   linux/3.12  floor 37 -> 25 on this runner
+#:     serial (N=60 = 3 x 20): min 24.2717  median 27.2164
+#:       p95 28.5891  max 29.5437  spread 5.2720  cv 4.83%
+#:     `-n auto` ambient (N=60): min 13.3321  median 27.5157
+#:       p95 37.3244  max 52.7016  spread 39.3695  cv 26.17%
+#:     loaded 5x and 8x nproc (N=150): min 17.6081  median 31.0876
+#:       p95 48.8430  max 175.9693  spread 158.3612  cv 42.31%
+#:     shipped estimator, loaded (138 windows): min 25.3705  median 31.0876
+#:       p95 43.0476  max 48.9549  spread 23.5843  cv 16.42%
+#:   linux/3.13  floor 39 -> 27 on this runner
+#:     serial (N=60 = 3 x 20): min 15.7564  median 18.2859
+#:       p95 19.0237  max 21.7570  spread 6.0006  cv 4.52%
+#:     `-n auto` ambient (N=60): min 9.3489  median 19.1605
+#:       p95 29.8426  max 37.4469  spread 28.0980  cv 27.77%
+#:     loaded 5x and 8x nproc (N=150): min 13.5821  median 21.7143
+#:       p95 28.2767  max 34.1500  spread 20.5679  cv 17.57%
+#:     shipped estimator, loaded (138 windows): min 17.4137  median 21.5402
+#:       p95 25.1042  max 27.1103  spread 9.6966  cv 10.08%
+#:   linux/3.14  floor 39 -> 26 on this runner
+#:     serial (N=60 = 3 x 20): min 16.5494  median 20.1569
+#:       p95 20.9196  max 21.7208  spread 5.1714  cv 3.70%
+#:     `-n auto` ambient (N=60): min 10.2691  median 21.0515
+#:       p95 28.7781  max 30.8507  spread 20.5816  cv 22.47%
+#:     loaded 5x and 8x nproc (N=150): min 17.0955  median 25.5903
+#:       p95 32.6270  max 50.2441  spread 33.1485  cv 18.04%
+#:     shipped estimator, loaded (138 windows): min 20.5923  median 25.4713
+#:       p95 29.9949  max 32.4981  spread 11.9058  cv 11.33%
+#: FACTOR: 1.25x the loaded p95 of the shipped estimator in the governing cell, linux/3.12
+#:   (43.0476), rounded UP to the next 0.100: 53.900. That reproduces the
+#:   PDF-68 rule exactly (1250 x 21.1705 = 26463.1 -> 26.500); the loaded arm governs.
+#: SEPARATION: the escaping-class plant at f = 2.5 reads a median-of-5 of 98.5185
+#:   (quorum medians 97.9303 / 99.9777 / 98.5185) against this 53.900 ceiling, and
+#:   2 x the governing loaded max is 97.9098; both clauses clear. Boundary,
+#:   measured on a descending ladder: the arm REDS at f >= 1.00 and stays GREEN at
+#:   f <= 0.95. The order is the criterion (X-476): measured 40329456836/40331924934/40334289707
+#:   first, derived second, planted third (run 40338041719, created after all three).
+#: CLASS and CONTROL: unchanged; see above.
+#: WHY THIS IS NOT THE WIDENING REFUTED UNDER PDF-86: that proposal chose a bound to clear
+#:   an observed red. This one is the unchanged rule applied to a re-measured operand.
+#: RESIDUAL (e), declared: uv version is not a StartupCondition coordinate, so a developer
+#:   host on another uv reads a different floor and its red would print 'reference not
+#:   comparable' (message only, never the verdict). A future uv that moves the floor again
+#:   reds CI only after someone moves the pin, a deliberate, reviewed act. A runner-image
+#:   roll that moves /usr/bin/python3.12 inherits the key's verdict.
+#:
 #: THE DOMAIN THIS VALUE IS ASSERTED IN IS DECLARED BELOW: see STARTUP_COST_CALIBRATION.
 STARTUP_COST_RATIO_CEILING_PER_MILLE: Final = ceiling(
     "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE"
@@ -3460,6 +3532,11 @@ class StartupCalibration(NamedTuple):
     They are (a) the evidence that admits a cell to the asserting branch and
     (b) the reference the failure message divides by, so a reader is told WHICH
     HALF moved instead of running a four-interpreter campaign to find out.
+
+    `loaded_p95` (PDF-134) is the derivation basis: the p95 of the shipped
+    estimator under deliberate load in this cell. Nothing fails against it
+    directly; `test_the_startup_ceiling_is_the_recorded_procedure_over_the_recorded_basis`
+    checks that the ceiling was computed from it.
     """
 
     floor_names: int
@@ -3468,6 +3545,7 @@ class StartupCalibration(NamedTuple):
     denominator_median_us: int
     headroom: float
     f_min_pct: float
+    loaded_p95: float
     provenance: str
 
 
@@ -3540,6 +3618,35 @@ class StartupDeclaration(NamedTuple):
 #: made to hold by turning an arm that catches a 1.6x-2.1x slowdown into one
 #: that catches a 3.0x-6.3x slowdown. That is not a rule broken, it is a policy
 #: call taken silently in the wrong direction.
+#:
+#: PDF-134 RE-MEASUREMENT (uv 0.13.5). The same four cells, re-recorded on the CI runner.
+#: STATISTIC: unchanged -- median of K=5 paired readings; the level is the median of the
+#:   nine quorum medians (three runs x three quorums).
+#: CONDITION: unchanged -- the same four keys, `(sys.platform, interpreter major.minor)`;
+#:   uv is not a coordinate (declared residual (e) above).
+#: UNMEASURED: the four `macos-15` legs, unchanged and still declared in
+#:   STARTUP_COST_UNCALIBRATED.
+#: DATE: 2026-10-26
+#: COMMIT: 68447f3
+#: HOST: GitHub `ubuntu-latest`, ubuntu-24.04 20261023.334.3, 4 vCPU.
+#: INTERPRETER: CPython 3.11.17, 3.12.3, 3.13.17, 3.14.9.
+#: ENGINES: irrelevant -- the census is `pdftooling --help`.
+#: RUNS: measurement 40329456836/40331924934/40334289707; plant 40338041719.
+#: THE FIGURES, floor on the left is the PDF-86 floor, three quorums per run, three runs:
+#:   linux/3.11  floor 36 -> 24  ratio medians
+#:     25.4744 / 25.8669 / 25.5878 / 27.0750 / 27.3815 /
+#:     28.3541 / 27.1228 / 27.3069 / 27.8431 -> 27.1228  loaded p95 37.3936
+#:   linux/3.12  floor 37 -> 25  ratio medians
+#:     27.4568 / 27.3232 / 26.1726 / 27.4103 / 27.2505 /
+#:     27.5353 / 25.4497 / 25.3030 / 25.5970 -> 27.2505  loaded p95 43.0476
+#:   linux/3.13  floor 39 -> 27  ratio medians
+#:     18.5635 / 18.6590 / 19.0521 / 18.0325 / 18.2359 /
+#:     18.2808 / 17.7295 / 17.7671 / 17.7872 -> 18.2359  loaded p95 25.1042
+#:   linux/3.14  floor 40 -> 26  ratio medians
+#:     20.1604 / 20.2212 / 20.4715 / 19.9487 / 19.6258 /
+#:     19.9318 / 20.7029 / 20.5689 / 20.4957 -> 20.2212  loaded p95 29.9949
+#: The same runner under 0.12.24 (A side, same dispatches): floors 36 / 37 / 39 / 39 names
+#:   for 3.11 / 3.12 / 3.13 / 3.14.
 STARTUP_COST_CALIBRATED_CONDITIONS: Final = 4
 
 #: The cells the ceiling has been measured in, and the evidence that admits
@@ -3548,40 +3655,64 @@ STARTUP_COST_CALIBRATED_CONDITIONS: Final = 4
 STARTUP_COST_CALIBRATION: Final[Mapping[StartupCondition, StartupCalibration]] = MappingProxyType(
     {
         StartupCondition("linux", "3.11"): StartupCalibration(
-            floor_names=36,
-            ratio_median=16.9894,
-            numerator_median_us=138_053,
-            denominator_median_us=7_983,
-            headroom=1.5598,
-            f_min_pct=56.0,
-            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.11.15",
+            floor_names=24,
+            ratio_median=27.1228,
+            numerator_median_us=129_361,
+            denominator_median_us=4_701,
+            headroom=1.9873,
+            f_min_pct=98.7,
+            loaded_p95=37.3936,
+            provenance=(
+                "PDF-134, 2026-10-26, 68447f3, GitHub ubuntu-latest "
+                "(ubuntu24 20261023.334.3, 4 vCPU), uv 0.13.5"
+                ", CPython 3.11.17 (/home/runner/work/pdf-tooling/pdf-tooling/.venv/bin/python)"
+                ", runs 40329456836/40331924934/40334289707"
+            ),
         ),
         StartupCondition("linux", "3.12"): StartupCalibration(
-            floor_names=37,
-            ratio_median=16.6557,
-            numerator_median_us=143_421,
-            denominator_median_us=8_554,
-            headroom=1.5910,
-            f_min_pct=59.1,
-            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.12.13",
+            floor_names=25,
+            ratio_median=27.2505,
+            numerator_median_us=122_048,
+            denominator_median_us=4_487,
+            headroom=1.9779,
+            f_min_pct=97.8,
+            loaded_p95=43.0476,
+            provenance=(
+                "PDF-134, 2026-10-26, 68447f3, GitHub ubuntu-latest "
+                "(ubuntu24 20261023.334.3, 4 vCPU), uv 0.13.5"
+                ", CPython 3.12.3 (/home/runner/work/pdf-tooling/pdf-tooling/.venv/bin/python)"
+                ", runs 40329456836/40331924934/40334289707"
+            ),
         ),
         StartupCondition("linux", "3.13"): StartupCalibration(
-            floor_names=39,
-            ratio_median=12.4120,
-            numerator_median_us=132_973,
-            denominator_median_us=10_536,
-            headroom=2.1350,
-            f_min_pct=113.5,
-            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.13.14",
+            floor_names=27,
+            ratio_median=18.2359,
+            numerator_median_us=122_210,
+            denominator_median_us=6_711,
+            headroom=2.9557,
+            f_min_pct=195.6,
+            loaded_p95=25.1042,
+            provenance=(
+                "PDF-134, 2026-10-26, 68447f3, GitHub ubuntu-latest "
+                "(ubuntu24 20261023.334.3, 4 vCPU), uv 0.13.5"
+                ", CPython 3.13.17 (/home/runner/work/pdf-tooling/pdf-tooling/.venv/bin/python)"
+                ", runs 40329456836/40331924934/40334289707"
+            ),
         ),
         StartupCondition("linux", "3.14"): StartupCalibration(
-            floor_names=40,
-            ratio_median=13.4405,
-            numerator_median_us=141_192,
-            denominator_median_us=10_403,
-            headroom=1.9717,
-            f_min_pct=97.2,
-            provenance="PDF-86 AC7, 2026-09-18, 559183b, station-01 Linux, CPython 3.14.4",
+            floor_names=26,
+            ratio_median=20.2212,
+            numerator_median_us=125_070,
+            denominator_median_us=6_067,
+            headroom=2.6655,
+            f_min_pct=166.6,
+            loaded_p95=29.9949,
+            provenance=(
+                "PDF-134, 2026-10-26, 68447f3, GitHub ubuntu-latest "
+                "(ubuntu24 20261023.334.3, 4 vCPU), uv 0.13.5"
+                ", CPython 3.14.9 (/home/runner/work/pdf-tooling/pdf-tooling/.venv/bin/python)"
+                ", runs 40329456836/40331924934/40334289707"
+            ),
         ),
     }
 )
@@ -3618,6 +3749,120 @@ STARTUP_COST_UNCALIBRATED: Final[Mapping[StartupCondition, StartupDeclaration]] 
         StartupCondition("darwin", condition.interpreter): _NO_HOST_FOR_THIS_PLATFORM
         for condition in STARTUP_COST_CALIBRATION
     }
+)
+
+
+class StartupRederivation(NamedTuple):
+    """PDF-134. How the calibrated cells and the ceiling were re-derived, as data.
+
+    The measurement runs, the plant run, the governing cell and the separation
+    the ceiling was graded by. The arms below check that the ceiling is the
+    recorded procedure applied to the recorded basis, and that the plant was
+    driven after every measurement run (X-476).
+    """
+
+    uv: str
+    runner: str
+    measured_commit: str
+    measurement_runs: tuple[int, ...]
+    plant_run: int
+    governing: StartupCondition
+    loaded_max: float
+    plant_f: float
+    plant_median: float
+    boundary_red_f: float
+    boundary_green_f: float
+    floor_names_previous_uv: Mapping[StartupCondition, int]
+    names_left_the_floor: Mapping[StartupCondition, tuple[str, ...]]
+
+
+#: The shim's modules left the bare floor under uv 0.13; `names_left_the_floor` is the
+#: mechanism recorded, not a claim about the product.
+STARTUP_COST_REDERIVATION: Final = StartupRederivation(
+    uv="0.13.5",
+    runner="ubuntu-24.04 20261023.334.3, 4 vCPU",
+    measured_commit="68447f3637894f3ae9f239fd52931f1bd4420f4a",
+    measurement_runs=(
+        40329456836,
+        40331924934,
+        40334289707,
+    ),
+    plant_run=40338041719,
+    governing=StartupCondition("linux", "3.12"),
+    loaded_max=48.9549,
+    plant_f=2.5,
+    plant_median=98.5185,
+    boundary_red_f=1.00,
+    boundary_green_f=0.95,
+    floor_names_previous_uv=MappingProxyType(
+        {
+            StartupCondition("linux", "3.11"): 36,
+            StartupCondition("linux", "3.12"): 37,
+            StartupCondition("linux", "3.13"): 39,
+            StartupCondition("linux", "3.14"): 39,
+        }
+    ),
+    names_left_the_floor=MappingProxyType(
+        {
+            StartupCondition("linux", "3.11"): (
+                "_collections",
+                "_functools",
+                "_operator",
+                "_virtualenv",
+                "collections",
+                "contextlib",
+                "functools",
+                "itertools",
+                "keyword",
+                "operator",
+                "reprlib",
+                "types",
+            ),
+            StartupCondition("linux", "3.12"): (
+                "_collections",
+                "_functools",
+                "_operator",
+                "_virtualenv",
+                "collections",
+                "contextlib",
+                "functools",
+                "itertools",
+                "keyword",
+                "operator",
+                "reprlib",
+                "types",
+            ),
+            StartupCondition("linux", "3.13"): (
+                "_collections",
+                "_functools",
+                "_operator",
+                "_virtualenv",
+                "collections",
+                "contextlib",
+                "functools",
+                "itertools",
+                "keyword",
+                "operator",
+                "reprlib",
+                "types",
+            ),
+            StartupCondition("linux", "3.14"): (
+                "_collections",
+                "_functools",
+                "_operator",
+                "_types",
+                "_virtualenv",
+                "collections",
+                "contextlib",
+                "functools",
+                "itertools",
+                "keyword",
+                "operator",
+                "reprlib",
+                "types",
+            ),
+        }
+    ),
 )
 
 #: The three verdicts, named once so the classifier, the arm and every control
@@ -5016,7 +5261,10 @@ def test_nothing_the_product_can_do_moves_a_cell_out_of_the_asserting_branch() -
     inflated = synthetic_readings(
         int(recorded.numerator_median_us * escaped), recorded.denominator_median_us
     )
-    with pytest.raises(AssertionError, match="readings exceeded the 26.500"):
+    with pytest.raises(
+        AssertionError,
+        match=f"readings exceeded the {STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000:.3f}",
+    ):
         assert_startup_cost_in_its_domain(
             condition, inflated, floor_names=recorded.floor_names, attributable=273
         )
@@ -5095,6 +5343,224 @@ def test_a_calibrated_member_missing_a_field_reddens_naming_both(field: str) -> 
     )
 
 
+def _comment_block_above(text: str, name: str) -> str:
+    """The contiguous `#` block immediately above the module-level binding of *name*."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if re.match(rf"^{name}\s*(?::[^=]+)?=", line):
+            start = index
+            while start > 0 and lines[start - 1].startswith("#"):
+                start -= 1
+            return "\n".join(lines[start:index])
+    raise AssertionError(f"{name} is not bound at module scope")
+
+
+def _pdf134_paragraph(block: str, header: str) -> str:
+    """The paragraph of *block* from the line carrying *header* to the next `#:` blank."""
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        if header in line:
+            end = index + 1
+            while end < len(lines) and lines[end].strip() not in ("#:", "#"):
+                end += 1
+            return "\n".join(lines[index:end])
+    raise AssertionError(f"no paragraph carrying {header!r} in the block")
+
+
+def test_the_startup_ceiling_is_the_recorded_procedure_over_the_recorded_basis() -> None:
+    """PDF-134 G1 / AC2. The ceiling is 1.25x the governing cell's loaded p95, rounded up
+    to the next 0.100, computed from the figures recorded beside it and not chosen."""
+    import math
+
+    p95s = {c: m.loaded_p95 for c, m in STARTUP_COST_CALIBRATION.items()}
+    derived = 100 * math.ceil(1250 * max(p95s.values()) / 100)
+    assert STARTUP_COST_RATIO_CEILING_PER_MILLE == derived, (
+        f"the ceiling reads {STARTUP_COST_RATIO_CEILING_PER_MILLE} but 100 x ceil(1250 x "
+        f"{max(p95s.values())} / 100) = {derived} over the recorded loaded p95s {p95s}. A ceiling "
+        "that is not the recorded procedure applied to the recorded basis is a bound chosen "
+        "to the instrument (X-476)."
+    )
+    assert STARTUP_COST_REDERIVATION.governing == max(p95s, key=lambda c: p95s[c]), (
+        f"the recorded governing cell {STARTUP_COST_REDERIVATION.governing} is not the argmax "
+        f"of the loaded p95s {p95s}"
+    )
+
+
+def test_every_calibrated_member_headroom_is_the_ceiling_over_its_level() -> None:
+    """PDF-134 G2 / AC3. headroom = ceiling / level and f_min = (headroom - 1) x 100, per member."""
+    ceiling_ratio = STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000
+    for condition, member in STARTUP_COST_CALIBRATION.items():
+        headroom = round(ceiling_ratio / member.ratio_median, 4)
+        assert member.headroom == headroom, (
+            f"{condition} headroom reads {member.headroom}, expected {headroom} "
+            f"({ceiling_ratio} / {member.ratio_median})"
+        )
+        f_min = round((headroom - 1) * 100, 1)
+        assert member.f_min_pct == f_min, (
+            f"{condition} f_min_pct reads {member.f_min_pct}, expected {f_min} from headroom "
+            f"{headroom}"
+        )
+
+
+def test_every_calibrated_member_is_a_pdf134_ci_measurement() -> None:
+    """PDF-134 G3 / AC1. Each member names the uv and every measurement run; the plant is a
+    different run; the loaded p95 sits above the level it is a dispersion around."""
+    rederivation = STARTUP_COST_REDERIVATION
+    assert len(set(rederivation.measurement_runs)) >= 3, (
+        f"fewer than 3 distinct measurement runs: {rederivation.measurement_runs}"
+    )
+    assert rederivation.plant_run not in rederivation.measurement_runs, (
+        f"the plant run {rederivation.plant_run} is one of the measurement runs"
+    )
+    for condition, member in STARTUP_COST_CALIBRATION.items():
+        assert member.provenance.startswith("PDF-134, "), (
+            f"{condition} provenance does not start with 'PDF-134, ': {member.provenance!r}"
+        )
+        assert f"uv {rederivation.uv}" in member.provenance, (
+            f"{condition} provenance does not name uv {rederivation.uv}"
+        )
+        for run in rederivation.measurement_runs:
+            assert str(run) in member.provenance, (
+                f"{condition} provenance does not name measurement run {run}"
+            )
+        assert member.loaded_p95 > member.ratio_median, (
+            f"{condition} loaded p95 {member.loaded_p95} is not above its level "
+            f"{member.ratio_median}"
+        )
+
+
+def test_the_separation_was_driven_against_the_derived_ceiling() -> None:
+    """PDF-134 G4 / AC4. The f = 2.5 plant clears the derived ceiling and twice the loaded max."""
+    rederivation = STARTUP_COST_REDERIVATION
+    ceiling_ratio = STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000
+    assert rederivation.plant_f == 2.5
+    assert rederivation.plant_median > ceiling_ratio, (
+        f"the plant median {rederivation.plant_median} does not exceed the ceiling {ceiling_ratio}"
+    )
+    assert rederivation.plant_median >= 2 * rederivation.loaded_max, (
+        f"the plant median {rederivation.plant_median} is under 2 x the governing loaded max "
+        f"{rederivation.loaded_max} = {2 * rederivation.loaded_max}"
+    )
+    assert rederivation.boundary_green_f < rederivation.boundary_red_f, (
+        f"boundary green f {rederivation.boundary_green_f} is not below red f "
+        f"{rederivation.boundary_red_f}"
+    )
+
+
+def test_the_floor_record_covers_every_calibrated_cell() -> None:
+    """PDF-134 G5 / AC7. The previous-uv floor and the names that left it cover every cell."""
+    rederivation = STARTUP_COST_REDERIVATION
+    members = set(STARTUP_COST_CALIBRATION)
+    assert set(rederivation.floor_names_previous_uv) == members
+    assert set(rederivation.names_left_the_floor) == members
+    for condition, names in rederivation.names_left_the_floor.items():
+        assert isinstance(names, tuple) and list(names) == sorted(names), (
+            f"{condition} names_left_the_floor is not a sorted tuple: {names!r}"
+        )
+
+
+def test_every_setup_uv_step_runs_the_uv_the_ceiling_was_measured_under() -> None:
+    """PDF-134 G6 / AC8. Every `astral-sh/setup-uv` step in every workflow runs the recorded uv,
+    and the project does not declare `[tool.uv] required-version` (run 40158928056)."""
+    import yaml
+
+    found: list[str] = []
+    wrong: list[str] = []
+    for workflow in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        for job_name, job in (document.get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                if str(step.get("uses", "")).startswith("astral-sh/setup-uv@"):
+                    found.append(f"{workflow.name}:{job_name}")
+                    version = str((step.get("with") or {}).get("version"))
+                    if version != STARTUP_COST_REDERIVATION.uv:
+                        wrong.append(
+                            f"{workflow.name} job {job_name}: version {version!r} != "
+                            f"{STARTUP_COST_REDERIVATION.uv!r}"
+                        )
+    print(f"setup-uv steps found: {len(found)}")
+    assert found, "no astral-sh/setup-uv step found in any workflow"
+    assert wrong == [], f"{len(wrong)} setup-uv step(s) off the measured uv: {wrong}"
+    pyproject = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    assert "required-version" not in pyproject.get("tool", {}).get("uv", {}), (
+        "pyproject.toml declares [tool.uv] required-version, which broke Dependabot (run "
+        "40158928056); the pin lives in the setup-uv `version:` inputs"
+    )
+
+
+def test_the_startup_blocks_carry_the_pdf134_paragraphs() -> None:
+    """PDF-134 G7 / AC6. The re-derivation and re-measurement paragraphs exist and carry their
+    tokens, read from the paragraph alone (the landed PDF-68/86 text already carries every
+    token, so the whole-block guards cannot see a missing paragraph)."""
+    text = Path(__file__).read_text(encoding="utf-8")
+    runs = [str(run) for run in STARTUP_COST_REDERIVATION.measurement_runs]
+    ceiling_paragraph = _pdf134_paragraph(
+        _comment_block_above(text, "STARTUP_COST_RATIO_CEILING_PER_MILLE"), "PDF-134 RE-DERIVATION"
+    )
+    for token in (
+        "STATISTIC", "DATE", "COMMIT", "HOST", "INTERPRETER", "ENGINES",
+        "min", "median", "p95", "max", "spread", "FACTOR", "SEPARATION", "serial", "-n auto",
+    ):  # fmt: skip
+        assert token in ceiling_paragraph, f"the PDF-134 RE-DERIVATION paragraph lacks {token!r}"
+    registry_paragraph = _pdf134_paragraph(
+        _comment_block_above(text, "STARTUP_COST_CALIBRATED_CONDITIONS"), "PDF-134 RE-MEASUREMENT"
+    )
+    for token in (
+        "CONDITION", "UNMEASURED", "STATISTIC", "DATE", "COMMIT", "HOST", "INTERPRETER",
+        "ENGINES",
+    ):  # fmt: skip
+        assert token in registry_paragraph, f"the PDF-134 RE-MEASUREMENT paragraph lacks {token!r}"
+    for run in runs:
+        assert run in ceiling_paragraph, (
+            f"measurement run {run} is not in the RE-DERIVATION paragraph"
+        )
+        assert run in registry_paragraph, (
+            f"measurement run {run} is not in the RE-MEASUREMENT paragraph"
+        )
+    for condition, member in STARTUP_COST_CALIBRATION.items():
+        pattern = re.compile(
+            rf"linux/{re.escape(condition.interpreter)}\s+floor \d+ -> {member.floor_names}\b"
+        )
+        assert pattern.search(registry_paragraph), (
+            f"the RE-MEASUREMENT paragraph has no `floor A -> {member.floor_names}` line for "
+            f"{condition}"
+        )
+
+
+def test_the_pdf134_register_record_moves_only_the_startup_key() -> None:
+    """PDF-134 G8 / AC5. The appended record moves the startup key and no other, with a ruling
+    and a reason carrying its measured basis. No record at all if the ceiling did not move."""
+    from ceiling_register import CEILING_LEDGER
+
+    key = "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE"
+    record, previous = CEILING_LEDGER[-1], CEILING_LEDGER[-2]
+    named = [record for record in CEILING_LEDGER if record.spec == "PDF-134"]
+    assert len(named) == int(STARTUP_COST_RATIO_CEILING_PER_MILLE != 26500), (
+        f"{len(named)} PDF-134 register record(s) for a ceiling of "
+        f"{STARTUP_COST_RATIO_CEILING_PER_MILLE}"
+    )
+    moved_up = record.ceilings[key] > previous.ceilings[key]
+    governing_p95 = STARTUP_COST_CALIBRATION[STARTUP_COST_REDERIVATION.governing].loaded_p95
+    for _ in named:
+        assert record.spec == "PDF-134", f"the newest register record is {record.spec}"
+        assert record.direction == ("up" if moved_up else "down"), (
+            f"direction {record.direction!r} does not match the move {previous.ceilings[key]} "
+            f"-> {record.ceilings[key]}"
+        )
+        assert record.ruling, "the PDF-134 record carries no ruling"
+        moved_elsewhere = [
+            other
+            for other in record.ceilings
+            if other != key and record.ceilings[other] != previous.ceilings[other]
+        ]
+        assert moved_elsewhere == [], f"the PDF-134 record also moves {moved_elsewhere}"
+        assert record.ceilings[key] == STARTUP_COST_RATIO_CEILING_PER_MILLE
+        assert STARTUP_COST_REDERIVATION.uv in record.reason
+        assert f"{governing_p95:.4f}" in record.reason, "the reason does not name the governing p95"
+        for run in STARTUP_COST_REDERIVATION.measurement_runs:
+            assert str(run) in record.reason, f"the reason does not name measurement run {run}"
+
+
 def registry_numeric_literals(text: str, name: str) -> list[str]:
     """Every numeric constant inside the module-level assignment to *name*.
 
@@ -5167,8 +5633,8 @@ def test_a_figure_planted_in_the_declared_unmeasured_registry_reddens(planted: s
 @pytest.mark.parametrize(
     ("numerator_factor", "denominator_factor", "carrier", "passenger"),
     [
-        (1.68, 0.99, "the NUMERATOR carries this red (x1.68 against x0.99)", "DENOMINATOR"),
-        (0.99, 0.55, "the DENOMINATOR carries this red (x0.55 against x0.99)", "NUMERATOR"),
+        (2.10, 0.99, "the NUMERATOR carries this red (x2.10 against x0.99)", "DENOMINATOR"),
+        (0.99, 0.45, "the DENOMINATOR carries this red (x0.45 against x0.99)", "NUMERATOR"),
     ],
     ids=["numerator-side", "denominator-collapse"],
 )
@@ -5205,7 +5671,7 @@ def test_the_observation_names_the_half_that_moved(
     )
     assert f"of this condition's recorded {recorded.numerator_median_us} us" in message
     assert f"of its recorded {recorded.denominator_median_us} us" in message
-    assert "readings exceeded the 26.500" in message
+    assert f"readings exceeded the {STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000:.3f}" in message
 
 
 def test_the_observation_refuses_a_reference_this_run_does_not_share() -> None:

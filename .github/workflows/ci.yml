@@ -139,7 +139,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
@@ -160,7 +160,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
@@ -200,7 +200,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: ${{ matrix.python-version }}
       # Engines are deliberately NOT installed here; the two engine
@@ -240,7 +240,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - name: Install engines
@@ -293,7 +293,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       # This job's ENTIRE POINT is engine absence. If a runner image ever starts
@@ -327,7 +327,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
@@ -354,7 +354,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
@@ -425,7 +425,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
@@ -458,7 +458,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.11"
       - run: uv sync --locked
@@ -499,7 +499,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv build
@@ -544,7 +544,7 @@ jobs:
           cache-dependency-path: website/package-lock.json
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked
@@ -565,7 +565,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
-          version: "0.12.24"  # pinned below 0.13: see the CI uv pin note in pyproject.toml
+          version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
       - run: uv sync --locked

@@ -90,18 +90,21 @@ Repository = "https://github.com/ArmandoHerra/pdf-tooling"
 Changelog = "https://github.com/ArmandoHerra/pdf-tooling/blob/main/changelog.md"
 Issues = "https://github.com/ArmandoHerra/pdf-tooling/issues"
 
-# CI uv pin (ledger 9a0daae8ee, B-461). uv 0.13 stopped writing the
-# `_virtualenv.pth` startup shim, so a bare venv interpreter loads 12 fewer
-# modules (45 -> 33 locally; CI's recorded floor 36 -> 24). That floor is the
-# DENOMINATOR of test_total_startup_import_cost_stays_under_its_ceiling, so
-# every Linux 3.11/3.12 cell read 27-30 against the 26.5 ceiling with no
-# change in this project's own import cost. CI therefore pins uv 0.12.24 in
-# every `astral-sh/setup-uv` step's `version:` input. It is deliberately NOT
-# a `[tool.uv] required-version` here: Dependabot's uv updater runs only the
-# newest uv and drops every update with `tool_version_not_supported` when the
-# project declares an older range. Lifting the pin needs the ceiling
-# re-derived under uv 0.13 with a fresh measured distribution, never a
-# widened constant. A local `make test` under uv 0.13 reds the same arm.
+# CI uv pin (ledger 9a0daae8ee, B-461; PDF-134, ruling X-1115). CI runs uv 0.13.5
+# in every `astral-sh/setup-uv` step's `version:` input, because
+# STARTUP_COST_RATIO_CEILING_PER_MILLE was re-derived under exactly that uv
+# (tests/test_import_boundaries.py, STARTUP_COST_REDERIVATION; the test
+# test_every_setup_uv_step_runs_the_uv_the_ceiling_was_measured_under holds the
+# two equal). uv 0.13 stopped writing the `_virtualenv.pth` startup shim, so a
+# bare venv interpreter loads 12 fewer modules (CI's measured floor, same runner,
+# 3.11 / 3.12 / 3.13 / 3.14: 36 -> 24, 37 -> 25, 39 -> 27, 39 -> 26 names). That
+# floor is the DENOMINATOR of the startup-cost arm, so the ceiling had to be
+# measured again rather than carried over. Moving this pin needs a re-measurement
+# of that ceiling, never a widened constant. It is deliberately NOT a
+# `[tool.uv] required-version` here: Dependabot's uv updater runs only the newest
+# uv and drops every update with `tool_version_not_supported` when the project
+# declares an older range (run 40158928056). Developer-host uv stays unpinned,
+# and a host on another uv reads a different floor.
 
 [dependency-groups]
 dev = [
