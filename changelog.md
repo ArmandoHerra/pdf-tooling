@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-135] Make permissions --dry-run predict exit 6 for a user-password input with no password — 2026-10-26
+
+- **`permissions --dry-run` now returns the code the real run returns.** On a user-password document with no password to resolve it previewed `0` (`password_verified: false`) while the real run exits `6`, against the README's `## Exit codes` promise. The dry branch now makes the same credential-free encryption read the real run makes and predicts the real run's own `AuthError` (one shared message constant) when the document is locked and nothing is resolvable. Targets ledger `6d7b6c5321` (carrier `B-473`).
+- **Unchanged:** the X-89 carve-out (a supplied-but-wrong password still previews `0` with `password_verified: false`; no secret is read on any dry path), the exit table, every JSON key name, `schema_version` `1`, `ops/document_password.py` and every `cli/` module.
+- **Also agrees now:** a malformed document (truncated or not a PDF) with a supplied password previewed `0` and really exits `1`; the preview now fails with the same error envelope (16 unledgered cells, spec D2/H3).
+
 ## [PDF-145] Make the suite pass its own pre-land gate command: close the subprocess pipes and files the tests leak under -W error — 2026-10-26
 
 - **Test-only; no user-facing change.** `make test PYTEST_ARGS='-W error -p no:cacheprovider'` reds on a green tree because tests leak pipes and files. The fix is at the four leak sites: `park_at`'s child pipes (which also covers the PDF-129 residue contract), the two render-pool `Popen(stderr=PIPE)` arms, and the two `test_compose.py` sinks. `-W error` is unchanged and nothing is filtered. Targets ledger `733aa76428` (carrier `B-506`).
