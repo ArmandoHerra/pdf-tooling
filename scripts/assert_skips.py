@@ -113,6 +113,13 @@ SKIP_CLASSES = {
     # instead (Design D4) -- a skip is not a pass, and the one job that exists
     # to run these arms must not be able to pass by skipping them.
     "website-not-built": re.compile(r"website not built", re.IGNORECASE),
+    # PDF-140 D8. The full-scale render-memory arm (8 workers' worth of a
+    # 1360-dpi A4 render) is opt-in via `PDF_TOOLING_FULL_SCALE_RSS=1`, so its
+    # skip is a NAMED, COUNTED class (the PDF-47 precedent), not an anonymous
+    # remainder. APPENDED LAST (first-match-wins); the reason string carries
+    # none of the earlier classes' words, and `tests/test_assert_skips.py`
+    # asserts the partition in both directions. VISIBILITY, NOT FAILURE.
+    "full-scale-render-memory": re.compile(r"full-scale render memory", re.IGNORECASE),
 }
 
 

@@ -237,6 +237,8 @@ No page of any PDF may make `rasterize` or `ocr` allocate a bitmap above `178,95
 
 The recourse is a lower `--dpi` or `--width`. There is no override.
 
+The budget above bounds a page; a run is bounded too. At most `357,913,940` pixels render at once across all the workers of a `rasterize` run. When the largest planned page times the worker count would exceed that, fewer workers render (always at least `1`), and the run is never refused for it. The run says so in its `warnings` array, which is echoed on stderr as a `warning:` line beginning `render workers capped at`, and `--dry-run` predicts the same line. The files written are unchanged and the exit code is unchanged; a capped run is only slower. This was measured on Linux with CPython `3.14` and pypdfium2 `5.13.0`: a worker costs about `11` bytes per pixel worst case, bounded here at `13`, plus about `45` MiB per worker process and about `80` MiB for the parent. At the default `--threads`, a `rasterize` run therefore stays under about `5` GiB. The cap counts pixels whatever the colour mode, so `--grayscale` leaves the worker count unchanged even though it costs far less per pixel. `ocr` renders page by page in the main process, so its bound is the per-page budget. macOS RSS accounting was not measured.
+
 ## Encryption, passwords and permissions
 
 `encrypt` writes AES-256 (revision 6) by default. `--legacy` selects RC4-128, which is cryptographically broken and exists only for readers that predate PDF 1.7 ExtensionLevel 3; it also leaves document metadata unencrypted, because the format cannot encrypt metadata without AES. Every cryptographic operation is libqpdf's, reached through `pikepdf`. This tool implements no cryptography of its own — no key derivation, no cipher, no password comparison.
@@ -321,6 +323,18 @@ A supplied password is checked even when the document would open without one: an
 5. Hyperlinks remain clickable links in the PDF. They are not followed during conversion.
 6. The `soffice` child inherits the caller's environment (tracked as `B-427`).
 7. The settings were verified against LibreOffice 24.2.7.
+
+## Upgrading to 1.3
+
+A `1.2.x` invocation or script that relied on any of the following observes a different message or timing at `1.3`. These changes are on `main` and ship in the first `1.3` release.
+
+| In 1.2 | In 1.3 | What to change |
+|---|---|---|
+| `rasterize` ran `--threads` workers whatever the page size; at A4 `--dpi 1360` the default worker count peaked near `15` GB | when the largest planned page times the worker count would exceed `357,913,940` pixels, fewer workers render, a `warnings` entry and a `warning:` stderr line name the count, and `--dry-run` predicts it. Exit codes and the files written are unchanged | nothing; a consumer that asserts an empty `warnings` array for `rasterize` should allow an entry beginning `render workers capped at`. Lower `--dpi` or `--width` to render with more workers |
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
+
+Re-derived at `549f589` on `2026-10-26`.
 
 ## Upgrading to 1.2
 

@@ -353,3 +353,56 @@ def test_the_registered_website_pattern_matches_the_reason_the_suite_actually_em
         "earliest claimant the one that counts, so this reason would be filed under the wrong "
         "class with a green exit code"
     )
+
+
+# --------------------------------------------------------------------------- #
+# PDF-140 D8 -- the `full-scale-render-memory` class, mirroring the PDF-47 and
+# PDF-91 arms above. The reason string lives in `tests/rss_probe.py` (stdlib
+# only) and is imported, never transcribed, so a reword there cannot silently
+# empty the class here.
+# --------------------------------------------------------------------------- #
+
+from rss_probe import FULL_SCALE_SKIP_REASON  # noqa: E402
+
+_FULL_SCALE_SKIP = (
+    '  <testcase classname="tests.integration.test_pdf140_render_memory" '
+    'name="test_ac10_full_scale_capped_run_stays_under_the_documented_bound" time="0.001">\n'
+    f'    <skipped type="pytest.skip" message="{FULL_SCALE_SKIP_REASON}"/>\n'
+    "  </testcase>\n"
+)
+
+
+def test_the_full_scale_skip_class_counts_its_own_reason(tmp_path: Path) -> None:
+    """PDF-140 AC10. The opt-in skip is visible BY NAME in the census."""
+    report = tmp_path / "junit-full-scale.xml"
+    report.write_text(_junit(_FULL_SCALE_SKIP, _REAL_ENGINE_SKIP, total=2, skipped=2))
+
+    result = _run(report)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _census_line(result.stdout, "full-scale-render-memory") == 1, result.stdout
+    assert _census_line(result.stdout, "engine-gated") == 1, result.stdout
+    assert _census_line(result.stdout, "unclassified") == 0, result.stdout
+
+
+def test_the_registered_full_scale_pattern_partitions_against_the_live_registry() -> None:
+    """PDF-140 AC10, both directions against the LIVE registry: only the new
+    class claims the reason, and the new class claims no earlier class's reason."""
+    spec = importlib.util.spec_from_file_location("assert_skips_under_test", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    classes = module.SKIP_CLASSES
+    assert "full-scale-render-memory" in classes, sorted(classes)
+    claimants = [
+        name for name, pattern in classes.items() if pattern.search(FULL_SCALE_SKIP_REASON)
+    ]
+    assert claimants == ["full-scale-render-memory"], (
+        f"the full-scale skip reason is claimed by {claimants}; first-match-wins would file it "
+        "under the wrong class with a green exit code"
+    )
+    assert list(classes)[-1] == "full-scale-render-memory", "the class must be APPENDED last"
+    assert not classes["engine-gated"].search(FULL_SCALE_SKIP_REASON)
+    others = [PROVENANCE_SKIP_REASON, WEBSITE_NOT_BUILT_REASON]
+    assert not any(classes["full-scale-render-memory"].search(reason) for reason in others)

@@ -5325,6 +5325,7 @@ def test_the_vacuous_rendering_extractor_fails_if_the_heading_is_deleted() -> No
 
 MIGRATION_HEADING_1_1 = "## Upgrading to 1.1"
 MIGRATION_HEADING_1_2 = "## Upgrading to 1.2"
+MIGRATION_HEADING_1_3 = "## Upgrading to 1.3"
 RENDER_BUDGET_HEADING = "## Render budget"
 
 
@@ -5339,6 +5340,10 @@ def migration_section_body_1_1() -> str:
 
 def migration_section_body_1_2() -> str:
     return _section_body_after(read("README.md"), MIGRATION_HEADING_1_2)
+
+
+def migration_section_body_1_3() -> str:
+    return _section_body_after(read("README.md"), MIGRATION_HEADING_1_3)
 
 
 def _derive_1_1_budget_row() -> None:
@@ -5523,6 +5528,45 @@ def test_the_1_2_section_exists_ordered_and_commit_anchored() -> None:
     assert MIGRATION_BOUNDING_SENTENCE_ANCHOR in body
 
 
+def test_the_1_3_section_exists_ordered_and_commit_anchored() -> None:
+    text = read("README.md")
+    assert text.count(MIGRATION_HEADING_1_3) == 1
+    assert (
+        text.index("## Getting Started")
+        < text.index(MIGRATION_HEADING_1_3)
+        < text.index(MIGRATION_HEADING_1_2)
+        < text.index(MIGRATION_HEADING_1_1)
+        < text.index(MIGRATION_HEADING)
+    ), "## Upgrading to 1.3 must sit directly above ## Upgrading to 1.2"
+    body = migration_section_body_1_3().rstrip()
+    assert PROVENANCE_PATTERN.search(body), "the 1.3 section does not end with a provenance line"
+    assert MIGRATION_BOUNDING_SENTENCE_ANCHOR in body
+
+
+def test_the_1_3_section_carries_no_unmasked_cardinal() -> None:
+    body = migration_section_body_1_3()
+    masked = _blank(body, code_spans(body))
+    for pattern in (*STRUCTURED_REFERENCE, EXIT_CODE):
+        masked = _blank(masked, [match.span() for match in pattern.finditer(masked)])
+    residue = [match.group(0) for match in CANDIDATE.finditer(masked)]
+    assert residue == [], f"the 1.3 section carries an unmasked cardinal: {residue}"
+
+
+def test_the_1_3_section_quotes_the_run_budget_and_the_warning_prefix_derived() -> None:
+    """PDF-140 D6: the figure is read from the constant, and the quoted anchor
+    must be the stem the product's own warning builder emits."""
+    from pdf_tooling.ports import raster as raster_port
+
+    body = migration_section_body_1_3()
+    quoted = f"`{raster_port.RUN_PIXEL_BUDGET:,}`"
+    assert quoted in body, f"the 1.3 section does not quote the run budget {quoted}"
+    anchor = "render workers capped at"
+    assert f"`{anchor}`" in body, "the 1.3 section does not quote the warning anchor"
+    assert raster_port.render_cap_warning(2, 8, 178_829_235).startswith(anchor + " 2 of 8:"), (
+        "the README's quoted anchor is not the prefix render_cap_warning emits"
+    )
+
+
 def test_the_1_1_section_carries_no_unmasked_cardinal() -> None:
     body = migration_section_body_1_1()
     masked = _blank(body, code_spans(body))
@@ -5560,6 +5604,34 @@ def test_the_render_budget_section_derives_its_figures_from_the_constants() -> N
         str(raster_port.WIDTH_CEILING),
     ):
         assert f"`{figure}`" in body, f"README `## Render budget` does not carry `{figure}`"
+
+
+def test_the_render_budget_section_derives_the_run_figure_and_the_gib_bound() -> None:
+    """PDF-140 D6: the run budget is read from the constant and the GiB figure
+    is computed from the measured model coefficients (K, P, Q), never typed.
+    Provenance: PDF-140 E3, `7b1286b`, 2026-10-25 (Linux, CPython 3.14.7,
+    pypdfium2 5.13.0). The coefficients are for documentation only; the product
+    enforces pixels and never computes bytes."""
+    import math
+
+    from pdf_tooling.ports import raster as raster_port
+
+    k_bytes_per_px, parent_mib, worker_mib, default_workers = 13, 80, 45, 8
+    gib = math.ceil(
+        (
+            raster_port.RUN_PIXEL_BUDGET * k_bytes_per_px
+            + (parent_mib + default_workers * worker_mib) * 2**20
+        )
+        / 2**30
+    )
+    body = _section_body_after(read("README.md"), RENDER_BUDGET_HEADING)
+    run_figure = f"`{raster_port.RUN_PIXEL_BUDGET:,}`"
+    assert run_figure in body, f"README `## Render budget` does not carry {run_figure}"
+    assert f"stays under about `{gib}` GiB" in body, (
+        f"README `## Render budget` does not state the derived bound of `{gib}` GiB"
+    )
+    for coefficient in (k_bytes_per_px, worker_mib):
+        assert f"`{coefficient}`" in body, f"README does not carry the coefficient `{coefficient}`"
 
 
 # --------------------------------------------------------------------------- #
