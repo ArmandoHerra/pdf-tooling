@@ -47,6 +47,7 @@ from pathlib import Path
 
 import pytest
 
+from pdf_tooling.ops import procpool
 from pdf_tooling.safety.tempnames import find_stray_temps
 
 pytestmark = pytest.mark.skipif(
@@ -427,23 +428,133 @@ def test_ac4_a_following_sigterm_cannot_break_the_unwind(tmp_path: Path) -> None
         assert t.alive_after_window == [], table
 
 
-def test_ac7_an_idle_worker_exits_quietly_on_a_group_sigint(tmp_path: Path) -> None:
-    trials = _run_arm(tmp_path, 2, "idle", signal.SIGINT)
+#: The exit statuses an IDLE worker may report after a group SIGINT (PDF-132, ledger
+#: ``4cd72d3c53``, carrier ``B-468``). The driver's executor is a bare `_GuardedExecutor`
+#: (no `_terminate_pool`), so the only signals in play are the group SIGINT and the
+#: SIGTERM the stdlib executor sends from `terminate_broken` once the first worker exits:
+#:
+#: - ``128 + SIGINT`` (130): the worker's own `_raise_worker_unwind` turned the group
+#:   SIGINT into `_WorkerUnwind`, a `SystemExit(130)` that `BaseProcess._bootstrap`
+#:   returns as the exit status. The pool breaks only when a worker exits, and only the
+#:   group SIGINT can make the first one exit, so every honest trial holds at least one.
+#: - ``128 + SIGTERM`` (143): the SAME handler, but the executor's SIGTERM was the first
+#:   guarded signal that worker acted on, so it raised `SystemExit(143)` and absorbed the
+#:   SIGINT. An EXIT through the worker's own unwind, not a kill (CI-observed on
+#:   macos-15, runs 37793542242 and 40179263830). The sibling arm admits it for the
+#:   same reason.
+#: - ``-SIGTERM`` (-15): that SIGTERM landed after the worker's interpreter had begun
+#:   finalizing (`spawn_main`'s `sys.exit`), which resets the handlers to the default.
+#:
+#: Never ``-SIGKILL``/``128 + SIGKILL``: nothing in this arm sends SIGKILL before the
+#: exit codes are recorded, so either status means an unknown path and reds the arm.
+_IDLE_ADMITTED_EXITCODES: frozenset[int] = frozenset(
+    {128 + signal.SIGINT, 128 + signal.SIGTERM, -signal.SIGTERM}
+)
+
+
+def _assert_idle_quiet(trials: list[Trial]) -> None:
+    """The idle arm's verdict (PDF-101 AC7; the admitted set is PDF-132's)."""
     table = "\n".join(t.describe() for t in trials)
     for t in trials:
-        assert len(t.pids) == _K, table
+        assert len(t.pids) == _K, f"idle trial has {len(t.pids)} workers, want {_K}:\n{table}"
         assert t.alive_after_window == [], f"an idle worker outlived {_EXIT_WITHIN_S}s:\n{table}"
         assert t.tracebacks == 0, f"an idle worker printed a traceback:\n{table}"
-        # An idle worker unwinds outside any task, as a quiet SystemExit whose status
-        # matches the task path (where a worker killed by the signal reports -2). The
-        # first worker to exit makes the driver's executor SIGTERM the rest, and a
-        # worker already finalizing its interpreter has had its handlers reset to the
-        # default by then, so -15 is the one other honest status for a worker that
-        # holds no writer. At least one worker must have exited by its own unwind.
-        assert set(t.exitcodes) <= {128 + signal.SIGINT, -signal.SIGTERM}, (
-            f"idle exit status:\n{table}"
-        )
+        assert len(t.exitcodes) == _K, f"idle exit-status record incomplete:\n{table}"
+        assert set(t.exitcodes) <= _IDLE_ADMITTED_EXITCODES, f"idle exit status:\n{table}"
         assert 128 + signal.SIGINT in t.exitcodes, f"no idle worker unwound by itself:\n{table}"
+
+
+def test_ac7_an_idle_worker_exits_quietly_on_a_group_sigint(tmp_path: Path) -> None:
+    _assert_idle_quiet(_run_arm(tmp_path, 2, "idle", signal.SIGINT))
+
+
+def _idle_trial(
+    exitcodes: list[int | None],
+    *,
+    tracebacks: int = 0,
+    alive: tuple[int, ...] = (),
+    workers: int = _K,
+) -> Trial:
+    """A synthetic idle trial: the oracle is judged on recorded shapes, not on a race."""
+    return Trial(
+        mode="idle",
+        signame="SIGINT",
+        returncode=0,
+        pids=list(range(1000, 1000 + workers)),
+        alive_after_window=list(alive),
+        tracebacks=tracebacks,
+        exitcodes=list(exitcodes),
+    )
+
+
+@pytest.mark.parametrize(
+    "exitcodes",
+    [
+        pytest.param([-15, -15, 130, 143], id="ci-40179263830"),
+        pytest.param([130, -15, -15, 143], id="ci-37793542242"),
+        pytest.param([130, -15, -15, -15], id="pdf101-shape"),
+        pytest.param([130, 130, 130, 130], id="all-self-unwound"),
+    ],
+)
+def test_the_idle_oracle_admits_the_sigterm_unwind(exitcodes: list[int | None]) -> None:
+    """PDF-132 (B-468, 4cd72d3c53): a clean trial with a 143 worker is not a red."""
+    _assert_idle_quiet([_idle_trial(exitcodes)])
+
+
+@pytest.mark.parametrize(
+    ("trial", "message"),
+    [
+        pytest.param(
+            _idle_trial([130, -15, -15, 143], tracebacks=1), "printed a traceback", id="traceback"
+        ),
+        pytest.param(_idle_trial([130, -15, -15, 143], alive=(1003,)), "outlived", id="survivor"),
+        pytest.param(_idle_trial([130, -15, -15, 128 + 9]), "idle exit status", id="exit-137"),
+        pytest.param(_idle_trial([130, -15, -15, -9]), "idle exit status", id="killed-9"),
+        pytest.param(_idle_trial([130, -2, -15, 143]), "idle exit status", id="killed-2"),
+        pytest.param(_idle_trial([130, 1, -15, 143]), "idle exit status", id="exit-1"),
+        pytest.param(_idle_trial([130, None, -15, 143]), "idle exit status", id="still-running"),
+        pytest.param(
+            _idle_trial([143, 143, -15, -15]),
+            "no idle worker unwound by itself",
+            id="no-self-unwound-sigint",
+        ),
+        pytest.param(_idle_trial([130, 143]), "record incomplete", id="record-incomplete"),
+        pytest.param(_idle_trial([130, 143, -15], workers=3), "workers, want", id="worker-count"),
+    ],
+)
+def test_the_idle_oracle_still_rejects(trial: Trial, message: str) -> None:
+    """PDF-132 red controls: widening by 143 must not admit any other shape."""
+    with pytest.raises(AssertionError, match=message):
+        _assert_idle_quiet([trial])
+
+
+def test_the_sigterm_unwind_status_is_the_workers_own_handler_code() -> None:
+    """PDF-132: 143 is admitted because it IS `_WorkerUnwind(SIGTERM)`'s exit code."""
+    assert procpool._WorkerUnwind(signal.SIGTERM).code == 128 + signal.SIGTERM
+    assert procpool._WorkerUnwind(signal.SIGINT).code == 128 + signal.SIGINT
+    assert not _IDLE_ADMITTED_EXITCODES & {-signal.SIGKILL, 128 + signal.SIGKILL}
+
+
+def test_the_idle_arm_judges_by_the_idle_oracle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """PDF-132: the live arm's verdict is `_assert_idle_quiet`, on an idle SIGINT arm."""
+    calls: list[tuple[str, signal.Signals]] = []
+
+    def fake(trials: list[Trial]) -> object:
+        def run(_tmp: Path, _n: int, mode: str, sig: signal.Signals, **_kw: object) -> list[Trial]:
+            calls.append((mode, sig))
+            return trials
+
+        return run
+
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "_run_arm", fake([_idle_trial([-15, -15, 130, 143])]))
+    test_ac7_an_idle_worker_exits_quietly_on_a_group_sigint(tmp_path)
+    monkeypatch.setattr(module, "_run_arm", fake([_idle_trial([130, -15, -15, 143], tracebacks=1)]))
+    with pytest.raises(AssertionError, match="printed a traceback"):
+        test_ac7_an_idle_worker_exits_quietly_on_a_group_sigint(tmp_path)
+    assert calls == [("idle", signal.SIGINT)] * 2
 
 
 def test_ac8_full_stack_the_parent_dies_by_sigint_with_no_residue(tmp_path: Path) -> None:
