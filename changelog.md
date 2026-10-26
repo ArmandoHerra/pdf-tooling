@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-136] Keep LibreOffice's temp dir inside the product's temp namespace so a convert --timeout kill leaves nothing in $TMPDIR — 2026-10-26
+
+- **Fix:** `convert` now starts `soffice` with `TMPDIR` set to its per-invocation scratch directory (the inherited environment plus that one key). LibreOffice's `lu<pid><rand>.tmp` therefore lands inside a directory the product created and already removes on every exit path, the `--timeout` kill included, so the user's `$TMPDIR` holds exactly what it held before. Targets ledger `93a251f005`.
+- **Not a reaper:** the product still deletes nothing it did not create and never lists or matches `lu*`; a foreign `lu*.tmp` in `$TMPDIR` is untouched. `HOME`, `XDG_*` and `PATH` are still inherited, and the success path is unchanged.
+- **Added:** `tests/integration/test_pdf136_soffice_tmpdir.py` (timeout kills leave a private `$TMPDIR` empty, the engine temp dir lands in the scratch root, the env contract, success-path emptiness, foreign entries survive, no engine-temp glob in `src/`).
+
 ## [PDF-135] Make permissions --dry-run predict exit 6 for a user-password input with no password — 2026-10-26
 
 - **`permissions --dry-run` now returns the code the real run returns.** On a user-password document with no password to resolve it previewed `0` (`password_verified: false`) while the real run exits `6`, against the README's `## Exit codes` promise. The dry branch now makes the same credential-free encryption read the real run makes and predicts the real run's own `AuthError` (one shared message constant) when the document is locked and nothing is resolvable. Targets ledger `6d7b6c5321` (carrier `B-473`).

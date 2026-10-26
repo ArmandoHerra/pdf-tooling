@@ -85,6 +85,34 @@ PROFILE_SEED_KEYS: Final[tuple[tuple[str, str, str], ...]] = (
 )
 
 
+def _conversion_env(scratch_dir: Path, base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """PDF-136 -- the conversion spawn's environment: the inherited one plus
+    ``TMPDIR`` pointing at the caller's per-invocation ``scratch_dir``.
+
+    LibreOffice creates a ``lu<pid><rand>.tmp`` directory in whatever ``TMPDIR``
+    it inherits and removes it only on a clean exit; the process-group kill of
+    a ``--timeout`` gives it none. Pointing ``TMPDIR`` at the ``ScratchDir`` root
+    (which ``ScratchDir.__exit__`` removes on every exit path) puts that
+    directory inside a directory this product created and already removes.
+
+    This is NOT a reaper (PLAN §12 R-07 "report, never sweep" governs the
+    product's own writer temp names beside a destination). The product never
+    lists, globs or matches ``lu*`` and never touches an entry of the user's
+    ``$TMPDIR``; the engine's private directory goes with its container.
+
+    The value is ``str(scratch_dir)`` verbatim (never canonicalized -- it is
+    the same string the ``-env:UserInstallation`` and ``--outdir`` arguments
+    are built from). Only ``TMPDIR`` is overridden; ``HOME``, ``XDG_*``,
+    ``PATH``, ``TMP`` and ``TEMP`` are inherited, so this site stays a
+    non-sandboxed operational spawn (it must NOT use ``probe_env``). Mirrors
+    ``subprocess_util.probe_env``: ``base`` defaults to ``os.environ`` and the
+    result is always a copy.
+    """
+    prepared = dict(os.environ if base is None else base)
+    prepared["TMPDIR"] = str(scratch_dir)
+    return prepared
+
+
 def _render_seed(keys: tuple[tuple[str, str, str], ...]) -> bytes:
     items = "\n".join(
         f'<item oor:path="{path}"><prop oor:name="{name}" oor:op="fuse">'
@@ -297,6 +325,7 @@ class SofficeOfficeAdapter:
             ],
             timeout=timeout,
             check=False,
+            env=_conversion_env(scratch_dir),
         )
         if run.timed_out:
             raise FailureError(f"{source}: soffice timed out after {timeout:g}s")
