@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-131] Make the rasterize signal arms assert zero strays only when the pool did not SIGKILL-escalate — 2026-10-25
+
+- **Test-side de-flake, no product change (`OR-52`):** the SIGTERM, SIGINT and SIGHUP arms of `tests/integration/test_rasterize_signals.py` now read the pool's own teardown record. With no SIGKILL escalation they still demand zero stray temp files. With escalation they admit only the documented hard-kill residue and still demand no unreaped worker, an empty process group and no output growth. Targets ledger `7e5cb962e2` and `5c0e8b1f47`.
+- **Added:** a forced-escalation arm that drives the escalated path on every CI leg, and planted-file oracle tests that spawn no process.
+- **SIGKILL arm:** its mid-flight precondition is now judged on a frozen process group by counting final pages, not temp files. Targets ledger `6770913e68`.
+
 ## [PDF-130] Rebuild the README's first screen for a first-time visitor — 2026-10-08
 
 - **First screen:** `README.md` now opens with a `uvx pdf-tooling --help` try-it line, a demo GIF rendered by VHS from the committed `docs/demo/pdf-tooling.tape`, the install lines, and `## Recipes` for merge, compress, OCR, password-file encrypt and decrypt, and a `--dry-run` preview piped to `jq`. `encrypt` takes `--owner-password-file` and `--user-password-file`; `decrypt` takes `--password-file`.

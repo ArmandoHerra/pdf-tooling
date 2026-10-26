@@ -1,8 +1,11 @@
 """``rasterize`` does not survive a signal to its parent (B-055).
 
 Black-box, subprocess-level, and **start-method agnostic by construction**:
-this file never touches ``multiprocessing`` internals, never patches
-anything in-process, and never asks "was this worker forked or spawned?" —
+this file never touches ``multiprocessing`` internals, patches nothing in
+the TEST process (PDF-131: in the CLI SUBPROCESS only, ``_LAUNCHER`` wraps one
+function, ``ops/procpool.py::_terminate_pool``, with a call-through observer
+that records the pool's own teardown report and alters nothing), and never asks
+"was this worker forked or spawned?" --
 it only observes three things any start method produces identically: files
 landing on disk, the LAUNCHED PROCESS's own exit status, and whether its OS
 process GROUP still has any member at all. Commit ``26f4c79`` ("make
@@ -67,14 +70,19 @@ docstring calls a best-effort, not a guaranteed, property.
 from __future__ import annotations
 
 import contextlib
+import json
 import multiprocessing
 import os
 import signal
+import stat
 import subprocess
 import sys
 import time
+import types
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -82,7 +90,7 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(TESTS_DIR) not in sys.path:  # pragma: no cover - import plumbing
     sys.path.insert(0, str(TESTS_DIR))
 
-from pdf_tooling.safety.tempnames import find_stray_temps  # noqa: E402
+from pdf_tooling.safety.tempnames import TEMP_PREFIX, find_stray_temps  # noqa: E402
 from registry import console_script  # noqa: E402
 
 pytestmark = [
@@ -416,19 +424,101 @@ def _wait_for_progress(out_dir: Path, *, at_least: int, timeout: float) -> int:
     )
 
 
+#: PDF-131 D1. The CLI is launched through this program so the test can read the
+#: pool's OWN teardown record (``_TeardownReport``, which ``_teardown_and_die``
+#: discards) instead of inferring from timing whether the pool SIGKILL-escalated.
+#: It wraps ``_terminate_pool`` with a call-through observer: the unforced
+#: teardown is byte-for-byte the product's. ``force`` is the one stimulus it
+#: adds -- SIGSTOP every worker first, which stands in for "a worker held in a C
+#: call past TEARDOWN_GRACE_S" (SIGTERM stays pending, the grace expires, the
+#: pool SIGKILLs). Argv: record path, force flag ("1"/"0"), then the CLI args.
+_LAUNCHER = """
+import importlib.metadata, json, os, signal, sys
+from pdf_tooling.ops import procpool
+
+record_path, force, *rest = sys.argv[1:]
+real = procpool._terminate_pool
+
+
+def recording(executor, **kwargs):
+    if force == "1":
+        for pid in list(getattr(executor, "_processes", {})):
+            try:
+                os.kill(pid, signal.SIGSTOP)
+            except OSError:
+                pass
+    report = real(executor, **kwargs)
+    outcomes = [
+        {
+            "pid": o.pid,
+            "liveness_at_kill": o.liveness_at_kill,
+            "sigkill": o.sigkill,
+            "liveness_after": o.liveness_after,
+            "tail": o.tail,
+        }
+        for o in report.outcomes
+    ]
+    fd = os.open(record_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, json.dumps({"outcomes": outcomes}).encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return report
+
+
+procpool._terminate_pool = recording
+(entry,) = importlib.metadata.entry_points(group="console_scripts", name="pdftooling")
+sys.argv = ["pdftooling", *rest]
+sys.exit(entry.load()())
+"""
+
+#: Tails that mean "this worker is gone". ``stale-liveness`` is a worker the
+#: executor's manager thread had already reaped when the pool re-probed it (the
+#: kernel had forgotten the pid), so judging on ``liveness_after`` would red
+#: for a worker that no longer exists. ``_group_alive`` still catches a real one.
+_REAPED_TAILS = frozenset({"reaped", "stale-liveness"})
+
+
+@dataclass(frozen=True)
+class _Measured:
+    proc: Any
+    count_at_death: int
+    count_after_settle: int
+    strays: tuple[Path, ...]
+    record: dict[str, Any] | None
+    out_dir: Path
+    parent_exit_s: float
+
+
+def _read_record(path: Path) -> dict[str, Any] | None:
+    """The launcher's teardown record, or ``None`` when absent or unparsable.
+    Absence is never read as "no escalation" -- the oracle reds on it."""
+    try:
+        loaded = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
 def _send_signal_and_measure(
-    tmp_path: Path, sig: signal.Signals
-) -> tuple[subprocess.Popen[bytes], int, int, tuple[Path, ...]]:
+    tmp_path: Path, sig: signal.Signals, *, force: bool = False
+) -> _Measured:
     """Launch a real `rasterize` job, signal the PARENT PID ONLY once it has
-    made substantial, demonstrable progress, and return
-    ``(process, count_at_death, count_after_settle, stray_temps)``.
+    made substantial, demonstrable progress, and return what was measured,
+    including the pool's own teardown record (PDF-131 D1).
     """
     source = _make_source(tmp_path / "src")
     out_dir = tmp_path / "out"
+    record_path = tmp_path / "teardown-record.json"
 
     proc = subprocess.Popen(
         [
-            *console_script(),
+            sys.executable,
+            "-c",
+            _LAUNCHER,
+            str(record_path),
+            "1" if force else "0",
             "rasterize",
             str(source),
             "--dpi",
@@ -448,17 +538,21 @@ def _send_signal_and_measure(
         # THE PID ONLY -- never the group. A group delivery reaches the workers
         # directly, where each one unwinds itself, so it would not isolate the
         # parent's own teardown that this arm measures (see module docstring).
+        sent_at = time.monotonic()
         os.kill(proc.pid, sig)
 
         try:
             proc.wait(timeout=_PARENT_EXIT_TIMEOUT_S)
         except subprocess.TimeoutExpired:
+            record = _read_record(record_path)
             proc.kill()
             proc.wait(timeout=5)
             pytest.fail(
                 f"parent did not exit within {_PARENT_EXIT_TIMEOUT_S}s of "
-                f"{sig.name} -- teardown hung instead of tearing down"
+                f"{sig.name} -- teardown hung instead of tearing down. "
+                f"Teardown record at the time: {record}"
             )
+        parent_exit_s = time.monotonic() - sent_at
 
         count_at_death = len(list(out_dir.iterdir()))
         # Decisive by construction, not by luck -- see module docstring.
@@ -466,20 +560,25 @@ def _send_signal_and_measure(
         count_after_settle = len(list(out_dir.iterdir()))
 
         strays = find_stray_temps(out_dir)
+        record = _read_record(record_path)
     finally:
         if proc.poll() is None:  # pragma: no cover - defensive, only if the above raised
             proc.kill()
             proc.wait(timeout=5)
 
-    return proc, count_at_death, count_after_settle, strays
+    return _Measured(
+        proc=proc,
+        count_at_death=count_at_death,
+        count_after_settle=count_after_settle,
+        strays=strays,
+        record=record,
+        out_dir=out_dir,
+        parent_exit_s=parent_exit_s,
+    )
 
 
-def _assert_clean_signal_death(
-    proc: subprocess.Popen[bytes],
-    sig: signal.Signals,
-    count_at_death: int,
-    count_after_settle: int,
-    strays: tuple[Path, ...],
+def _assert_death_without_growth(
+    proc: Any, sig: signal.Signals, count_at_death: int, count_after_settle: int
 ) -> None:
     # (f) Died BY the signal -- WIFSIGNALED true -- not via sys.exit(). A
     # negative returncode is `subprocess`'s own encoding of that fact.
@@ -505,6 +604,25 @@ def _assert_clean_signal_death(
         f"produced it no longer exists"
     )
 
+
+def _assert_no_group_member(proc: Any) -> None:
+    # T4: zero surviving workers, by the same portable check
+    # `adapters/subprocess_util.py` already uses for its own group teardown.
+    assert not _group_alive(proc.pid), (
+        f"a process is still alive in the launched job's own process group "
+        f"(pgid {proc.pid}) after the parent exited -- a worker outlived it"
+    )
+
+
+def _assert_clean_signal_death(
+    proc: Any,
+    sig: signal.Signals,
+    count_at_death: int,
+    count_after_settle: int,
+    strays: tuple[Path, ...],
+) -> None:
+    _assert_death_without_growth(proc, sig, count_at_death, count_after_settle)
+
     # (e) The fix must not trade orphaned processes for orphaned temp files.
     #
     # PDF-78 D7.2: the COUNT is recorded on every drive, red or green, because
@@ -526,12 +644,75 @@ def _assert_clean_signal_death(
         f"{len(strays)} stray .pdftoolkit-* temp file(s) left behind after {sig.name}: {strays}"
     )
 
-    # T4: zero surviving workers, by the same portable check
-    # `adapters/subprocess_util.py` already uses for its own group teardown.
-    assert not _group_alive(proc.pid), (
-        f"a process is still alive in the launched job's own process group "
-        f"(pgid {proc.pid}) after the parent exited -- a worker outlived it"
+    _assert_no_group_member(proc)
+
+
+def _assert_record_clean(record: dict[str, Any] | None, sig: signal.Signals) -> tuple[int, int]:
+    """The pool's own record must exist and name no unreaped worker. Returns
+    ``(escalated, total)`` where *escalated* counts workers the pool SIGKILLed."""
+    assert record is not None, (
+        f"no teardown record after {sig.name} -- the launcher's observer never saw "
+        f"`_terminate_pool` return, so escalation cannot be judged (this is never "
+        f"read as 'no escalation')"
     )
+    outcomes = record.get("outcomes")
+    assert isinstance(outcomes, list) and outcomes, (
+        f"the teardown record after {sig.name} lists no workers: {record}"
+    )
+    unreaped = [o for o in outcomes if o.get("tail") not in _REAPED_TAILS]
+    assert not unreaped, (
+        f"_terminate_pool reported workers it could not reap after {sig.name}: {unreaped}"
+    )
+    return sum(1 for o in outcomes if o.get("sigkill") == "sent"), len(outcomes)
+
+
+def _assert_escalated_residue(strays: tuple[Path, ...], out_dir: Path, escalated: int) -> None:
+    """Admit only the documented hard-kill residue (PLAN §12 R-07 / PDF-129): a
+    regular toolkit temp, mode 0600, directly in *out_dir*, and no more of them
+    than the pool SIGKILLed workers (a sequential worker holds at most one)."""
+    assert len(strays) <= escalated, (
+        f"{len(strays)} stray temp file(s) but the pool SIGKILLed only {escalated} "
+        f"worker(s) -- residue not explained by a hard kill: {strays}"
+    )
+    for stray in strays:
+        mode = os.lstat(stray).st_mode
+        assert stat.S_ISREG(mode), f"stray {stray} is not a regular file"
+        assert stray.parent == out_dir, f"stray {stray} is not directly beside the destination"
+        assert stray.name.startswith(TEMP_PREFIX), f"stray {stray} is not a toolkit temp"
+        assert stat.S_IMODE(mode) == 0o600, (
+            f"stray {stray} has mode {stat.S_IMODE(mode):o}, not the 0600 of a hard-killed temp"
+        )
+
+
+def _assert_signal_death_observed(
+    measured: _Measured, sig: signal.Signals, *, forced: bool = False
+) -> None:
+    escalated, total = _assert_record_clean(measured.record, sig)
+    print(
+        f"PDF-131 escalation census: {sig.name} escalated={escalated}/{total} "
+        f"strays={len(measured.strays)}"
+    )
+    if forced:
+        assert escalated == total >= 1, (
+            f"escalation was not exercised: the pool SIGKILLed {escalated}/{total} workers"
+        )
+        assert measured.parent_exit_s < _PARENT_EXIT_TIMEOUT_S, (
+            f"parent took {measured.parent_exit_s:.2f}s to exit, bound {_PARENT_EXIT_TIMEOUT_S}s"
+        )
+    if escalated == 0:
+        _assert_clean_signal_death(
+            measured.proc,
+            sig,
+            measured.count_at_death,
+            measured.count_after_settle,
+            measured.strays,
+        )
+        return
+    _assert_death_without_growth(
+        measured.proc, sig, measured.count_at_death, measured.count_after_settle
+    )
+    _assert_escalated_residue(measured.strays, measured.out_dir, escalated)
+    _assert_no_group_member(measured.proc)
 
 
 #: PDF-21/AC10-AC11. `_group_alive` answers "does ANYTHING exist under this
@@ -594,6 +775,56 @@ def _wait_for_no_survivors(pgid: int, *, timeout: float) -> tuple[tuple[int, str
     return survivors
 
 
+def _final_pages(out_dir: Path) -> int:
+    """Finished outputs only: toolkit temps are in-flight residue, not progress."""
+    if not out_dir.is_dir():
+        return 0
+    return sum(1 for entry in out_dir.iterdir() if not entry.name.startswith(TEMP_PREFIX))
+
+
+def _wait_for_final_pages(out_dir: Path, *, at_least: int, timeout: float) -> int:
+    deadline = time.monotonic() + timeout
+    count = 0
+    while time.monotonic() < deadline:
+        count = _final_pages(out_dir)
+        if count >= at_least:
+            return count
+        time.sleep(0.05)
+    pytest.fail(
+        f"only {count}/{at_least} final pages appeared under {out_dir} within {timeout}s "
+        f"-- render started too slowly (or not at all) for this test to be decisive"
+    )
+
+
+def _group_states(pgid: int) -> dict[int, str]:
+    """``{pid: state}`` for every non-zombie member of *pgid*, from /proc."""
+    states: dict[int, str] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat_text = (entry / "stat").read_text()
+            fields = stat_text[stat_text.rindex(")") + 2 :].split()
+            state, pgrp = fields[0], int(fields[2])
+        except (OSError, ValueError, IndexError):  # pragma: no cover - raced exit
+            continue
+        if pgrp == pgid and state != "Z":
+            states[int(entry.name)] = state
+    return states
+
+
+def _wait_until_group_stopped(pgid: int, *, timeout: float) -> None:
+    """Bounded 0.01 s poll until every non-zombie member is in a stopped state."""
+    deadline = time.monotonic() + timeout
+    states = _group_states(pgid)
+    while time.monotonic() < deadline:
+        states = _group_states(pgid)
+        if states and all(state in ("T", "t") for state in states.values()):
+            return
+        time.sleep(0.01)
+    pytest.fail(f"the process group {pgid} did not stop within {timeout}s: {states}")
+
+
 def _assert_enumerated_zero_survivors(proc: subprocess.Popen[bytes], sig: signal.Signals) -> None:
     """Zero survivors, with NO exclusion list.
 
@@ -617,10 +848,8 @@ def _assert_enumerated_zero_survivors(proc: subprocess.Popen[bytes], sig: signal
 def test_sigterm_to_parent_only_stops_new_output_and_leaves_no_survivors(
     tmp_path: Path,
 ) -> None:
-    proc, count_at_death, count_after_settle, strays = _send_signal_and_measure(
-        tmp_path, signal.SIGTERM
-    )
-    _assert_clean_signal_death(proc, signal.SIGTERM, count_at_death, count_after_settle, strays)
+    measured = _send_signal_and_measure(tmp_path, signal.SIGTERM)
+    _assert_signal_death_observed(measured, signal.SIGTERM)
 
 
 def test_sigint_to_parent_only_stops_new_output_and_leaves_no_survivors(
@@ -637,10 +866,8 @@ def test_sigint_to_parent_only_stops_new_output_and_leaves_no_survivors(
     harder, accident-free discipline too, because
     `guarded_process_pool` now handles it through the identical routine.
     """
-    proc, count_at_death, count_after_settle, strays = _send_signal_and_measure(
-        tmp_path, signal.SIGINT
-    )
-    _assert_clean_signal_death(proc, signal.SIGINT, count_at_death, count_after_settle, strays)
+    measured = _send_signal_and_measure(tmp_path, signal.SIGINT)
+    _assert_signal_death_observed(measured, signal.SIGINT)
 
 
 # --------------------------------------------------------------------------- #
@@ -667,11 +894,25 @@ def test_sighup_to_parent_only_stops_new_output_and_leaves_no_survivors(
     output after death, and zero survivors -- here ENUMERATED by pid as well as
     probed with ``killpg(pgid, 0)``.
     """
-    proc, count_at_death, count_after_settle, strays = _send_signal_and_measure(
-        tmp_path, signal.SIGHUP
-    )
-    _assert_clean_signal_death(proc, signal.SIGHUP, count_at_death, count_after_settle, strays)
-    _assert_enumerated_zero_survivors(proc, signal.SIGHUP)
+    measured = _send_signal_and_measure(tmp_path, signal.SIGHUP)
+    _assert_signal_death_observed(measured, signal.SIGHUP)
+    _assert_enumerated_zero_survivors(measured.proc, signal.SIGHUP)
+
+
+def test_sigterm_with_all_workers_held_past_the_grace_is_sigkilled_with_only_documented_residue(
+    tmp_path: Path,
+) -> None:
+    """PDF-131 D2c -- the escalated path, driven on every POSIX CI leg.
+
+    The launcher SIGSTOPs every worker before the pool's real teardown. That is a
+    STAND-IN for "a worker held in a C call past ``TEARDOWN_GRACE_S``": SIGTERM
+    stays pending, the grace expires and the pool SIGKILLs. The arm asserts the
+    pool really escalated (a positive control), that it named no unreaped
+    worker, that only the documented hard-kill residue remains, that the group
+    is empty and that no output grows. Costs about one grace window of wall time.
+    """
+    measured = _send_signal_and_measure(tmp_path, signal.SIGTERM, force=True)
+    _assert_signal_death_observed(measured, signal.SIGTERM, forced=True)
 
 
 # PDF-21 hung an `xfail(_START_METHOD == "forkserver", strict=True)` marker here,
@@ -708,20 +949,193 @@ def test_sigkill_to_parent_only_leaves_no_survivors_on_linux(tmp_path: Path) -> 
     is what the guarantee actually claims: **zero surviving processes and zero
     new output after the parent is gone.**
     """
-    proc, count_at_death, count_after_settle, _strays = _send_signal_and_measure(
-        tmp_path, signal.SIGKILL
+    source = _make_source(tmp_path / "src")
+    out_dir = tmp_path / "out"
+    proc = subprocess.Popen(
+        [
+            *console_script(),
+            "rasterize",
+            str(source),
+            "--dpi",
+            _DPI,
+            "--out-dir",
+            str(out_dir),
+            "--threads",
+            "8",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
-    assert proc.returncode == -signal.SIGKILL, proc.returncode
-    # The positive control, part of the assertion and not a preamble: the job
-    # was genuinely mid-flight, so "no growth after death" is not vacuously
-    # true of a run that had already finished.
-    assert count_at_death < _PAGE_COUNT, (
-        f"{count_at_death}/{_PAGE_COUNT} files existed at parent death -- the job "
-        f"already finished before SIGKILL arrived; tune _DPI/_PAGE_COUNT"
+    pgid = proc.pid
+    try:
+        _wait_for_final_pages(out_dir, at_least=_SIGNAL_AT_COUNT, timeout=_PROGRESS_TIMEOUT_S)
+
+        # PDF-131 D3: judge the precondition on a group that cannot move.
+        os.killpg(pgid, signal.SIGSTOP)
+        _wait_until_group_stopped(pgid, timeout=_SURVIVOR_TIMEOUT_S)
+        final_at_freeze = _final_pages(out_dir)
+        members_at_freeze = _live_group_members(pgid)
+
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=_PARENT_EXIT_TIMEOUT_S)
+        entries_at_death = len(list(out_dir.iterdir()))
+        # The thaw is mandatory: without it a broken PDEATHSIG would leave stopped,
+        # harmless-looking workers and the no-growth check below could never fail.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGCONT)
+
+        assert proc.returncode == -signal.SIGKILL, proc.returncode
+        # The positive control, part of the assertion and not a preamble: the job
+        # was genuinely mid-flight, so "no growth after death" is not vacuously
+        # true of a run that had already finished. FINAL pages, not temps.
+        assert final_at_freeze < _PAGE_COUNT, (
+            f"{final_at_freeze}/{_PAGE_COUNT} final pages existed at the freeze -- the job "
+            f"already finished before SIGKILL arrived; tune _DPI/_PAGE_COUNT"
+        )
+        assert [m for m in members_at_freeze if m[0] != proc.pid], (
+            f"no worker was alive in the frozen group besides the parent: {members_at_freeze}"
+        )
+        _assert_enumerated_zero_survivors(proc, signal.SIGKILL)
+        # Only NOW is "no new output" decisive: it is asserted after the survivors
+        # are gone, so it cannot pass merely because the settle window was short.
+        time.sleep(_SETTLE_S)
+        assert len(list(out_dir.iterdir())) == entries_at_death, (
+            "new output appeared after the parent was SIGKILLed -- a worker outlived it"
+        )
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGCONT)
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGKILL)
+        proc.wait(timeout=5)
+
+
+# --------------------------------------------------------------------------- #
+# PDF-131 D4 -- oracle tests over planted files and synthetic records. No
+# process is spawned by any of these.
+# --------------------------------------------------------------------------- #
+
+
+def _reaped_pid() -> int:
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    return done.pid
+
+
+def _plant_temp(directory: Path, suffix: str, *, mode: int = 0o600) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    planted = directory / (TEMP_PREFIX + suffix)
+    planted.write_bytes(b"x")
+    planted.chmod(mode)
+    return planted
+
+
+def _record(*, sigkill: str, tail: str = "reaped", count: int = 8) -> dict[str, Any]:
+    return {
+        "outcomes": [
+            {
+                "pid": 1000 + index,
+                "liveness_at_kill": "alive",
+                "sigkill": sigkill,
+                "liveness_after": "dead",
+                "tail": tail,
+            }
+            for index in range(count)
+        ]
+    }
+
+
+def test_a_stray_without_escalation_reds_on_the_strict_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # `capsys` keeps this planted oracle's census line out of a `-s` run, so the
+    # census count in the real arms' output stays exactly one per real arm.
+    out_dir = tmp_path / "out"
+    stray = _plant_temp(out_dir, "aaaa")
+    measured = _Measured(
+        proc=types.SimpleNamespace(returncode=-signal.SIGTERM, pid=_reaped_pid()),
+        count_at_death=3,
+        count_after_settle=3,
+        strays=(stray,),
+        record=_record(sigkill="not-needed"),
+        out_dir=out_dir,
+        parent_exit_s=0.1,
     )
-    _assert_enumerated_zero_survivors(proc, signal.SIGKILL)
-    # Only NOW is "no new output" decisive: it is asserted after the survivors
-    # are gone, so it cannot pass merely because the settle window was short.
-    assert len(list((tmp_path / "out").iterdir())) == count_after_settle == count_at_death, (
-        "new output appeared after the parent was SIGKILLed -- a worker outlived it"
-    )
+
+    with pytest.raises(AssertionError, match=r"1 stray.*after SIGTERM"):
+        _assert_signal_death_observed(measured, signal.SIGTERM)
+    assert "escalated=0/8" in capsys.readouterr().out
+
+
+def test_escalated_residue_oracle_accepts_documented_crash_residue(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    strays = (_plant_temp(out_dir, "aaaa"), _plant_temp(out_dir, "bbbb"))
+
+    _assert_escalated_residue(strays, out_dir, 2)
+
+
+@pytest.mark.parametrize("case", ["mode-0644", "no-prefix", "nested-dir"])
+def test_escalated_residue_oracle_rejects_what_the_contract_does_not_describe(
+    tmp_path: Path, case: str
+) -> None:
+    out_dir = tmp_path / "out"
+    if case == "mode-0644":
+        stray = _plant_temp(out_dir, "aaaa", mode=0o644)
+    elif case == "no-prefix":
+        out_dir.mkdir()
+        stray = out_dir / "page-0001.png.part"
+        stray.write_bytes(b"x")
+        stray.chmod(0o600)
+    else:
+        stray = _plant_temp(out_dir / "nested", "aaaa")
+
+    with pytest.raises(AssertionError):
+        _assert_escalated_residue((stray,), out_dir, 8)
+
+
+def test_escalated_residue_oracle_rejects_a_symlink_stray(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    target = tmp_path / "target"
+    target.write_bytes(b"x")
+    target.chmod(0o600)
+    link = out_dir / (TEMP_PREFIX + "link")
+    link.symlink_to(target)
+
+    with pytest.raises(AssertionError):
+        _assert_escalated_residue((link,), out_dir, 8)
+
+
+def test_escalated_residue_oracle_rejects_more_strays_than_sigkills(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    strays = (_plant_temp(out_dir, "aaaa"), _plant_temp(out_dir, "bbbb"))
+
+    with pytest.raises(AssertionError):
+        _assert_escalated_residue(strays, out_dir, 1)
+
+
+def test_record_oracle_fails_on_a_missing_record_and_on_an_unreaped_worker() -> None:
+    with pytest.raises(AssertionError, match="no teardown record after SIGTERM"):
+        _assert_record_clean(None, signal.SIGTERM)
+
+    with pytest.raises(AssertionError, match="could not reap after SIGTERM"):
+        _assert_record_clean(
+            _record(sigkill="sent", tail="outlived-sigkill", count=1), signal.SIGTERM
+        )
+
+    # `stale-liveness` is a worker the executor had already reaped: not a survivor.
+    assert _assert_record_clean(
+        _record(sigkill="sent", tail="stale-liveness", count=1), signal.SIGTERM
+    ) == (1, 1)
+
+
+def test_final_pages_exclude_toolkit_temps(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    for number in range(28):
+        (out_dir / f"page-{number:04d}.png").write_bytes(b"x")
+    for index in range(4):
+        _plant_temp(out_dir, f"t{index}")
+
+    assert _final_pages(out_dir) == 28
