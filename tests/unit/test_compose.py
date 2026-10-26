@@ -308,8 +308,8 @@ def test_ac27_the_a85_toggle_is_restored_when_the_render_raises(tmp_path: Path) 
         draw_box=(0.0, 0.0, 10.0, 10.0),
         clip_box=None,
     )
-    with pytest.raises(Exception):  # noqa: B017 - the renderer's own error type
-        engine.compose_images([broken], out=(tmp_path / "sink.pdf").open("wb"))
+    with (tmp_path / "sink.pdf").open("wb") as sink, pytest.raises(Exception):  # noqa: B017 - the renderer's own error type
+        engine.compose_images([broken], out=sink)
     assert rl_config.useA85 == before
 
 
@@ -796,8 +796,8 @@ def _layout():
 
 def test_ac23_the_engine_refuses_an_empty_placement_list(tmp_path: Path) -> None:
     engine = require_compose(capability="compose")
-    with pytest.raises(ValueError):
-        engine.compose_images([], out=(tmp_path / "out.pdf").open("wb"))
+    with (tmp_path / "out.pdf").open("wb") as sink, pytest.raises(ValueError):
+        engine.compose_images([], out=sink)
 
 
 def test_ac19_a_dry_run_writes_nothing_and_leaves_no_temp_file(tmp_path: Path) -> None:

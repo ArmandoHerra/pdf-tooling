@@ -584,6 +584,10 @@ def _run_matrix_arm(method: str, tmp_path: Path, *, plant: str | None = None) ->
             plant_pid=int(plant_pid_file.read_text()) if plant_pid_file.exists() else None,
         )
     finally:
+        if proc.stderr is not None:
+            # The PIPE end this process holds: reaping the child does not close it.
+            # First in the `finally`, so a failing reap below cannot skip it.
+            proc.stderr.close()
         if gate_fd >= 0:
             os.close(gate_fd)
         if proc.poll() is None:  # pragma: no cover - defensive
@@ -1104,6 +1108,10 @@ def test_ac2_an_explicit_context_defeats_a_forced_ambient_forkserver(tmp_path: P
             f"outlived the command that started it and kept writing"
         )
     finally:
+        if proc.stderr is not None:
+            # The PIPE end this process holds: reaping the child does not close it.
+            # First in the `finally`, so a failing reap below cannot skip it.
+            proc.stderr.close()
         if proc.poll() is None:  # pragma: no cover - defensive
             proc.kill()
             proc.wait(timeout=5)

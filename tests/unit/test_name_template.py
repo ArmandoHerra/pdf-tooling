@@ -61,6 +61,8 @@ from __future__ import annotations
 
 import errno
 import os
+import re
+import subprocess
 import sys
 import warnings
 from collections.abc import Callable
@@ -799,10 +801,11 @@ def test_the_measured_counterexample_passes_here_and_is_recorded_where_it_is_ref
        the errno — which is the property that keeps a real length refusal red on
        a host this loop cannot run.
 
-    Halves 2 and 3 are byte-untouched by PDF-88. Half 2's oracle call now also
-    publishes the channel UNCAUGHT, which is what exercises the
-    worker-to-controller crossing on every leg of an ordinary `-n auto` run
-    rather than only on the four that refuse.
+    Halves 2 and 3 are byte-untouched by PDF-88. Half 2 ASSERTS the publication
+    (PDF-145: under the pre-land gate's `-W error` an uncaught publication is an
+    exception). The uncaught worker-to-controller crossing PDF-88 AC6 relies on
+    is carried, and asserted, by
+    `test_the_channel_crosses_the_worker_boundary_uncaught`.
     """
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -819,7 +822,10 @@ def test_the_measured_counterexample_passes_here_and_is_recorded_where_it_is_ref
     monkeypatch.setattr(sys.modules[__name__], "event", recorded.append)
     monkeypatch.setattr(Path, "touch", _refusing_touch(errno.EILSEQ))
 
-    _the_filesystem_accepts(candidate, out_dir=out_dir)
+    with pytest.warns(
+        conftest._EncodingRefusalRecorded, match=re.escape(_ENCODING_REFUSAL_PUBLICATION)
+    ):
+        _the_filesystem_accepts(candidate, out_dir=out_dir)
 
     assert recorded == [_ENCODING_REFUSED], (
         f"the encoding refusal recorded {recorded!r}; an observation nobody emits is an "
@@ -1011,6 +1017,34 @@ def test_the_publication_channel_is_defined_where_every_process_can_import_it() 
     assert issubclass(channel, UserWarning), (
         f"the channel's base is {channel.__mro__[1].__name__}, not UserWarning, so it has "
         "silently left the category set PDF-86's landed liveness guard matches on"
+    )
+
+
+def test_the_channel_crosses_the_worker_boundary_uncaught() -> None:
+    """PDF-88 AC6's crossing, now ASSERTED (PDF-145).
+
+    Half 2 of the counterexample arm used to carry this by publishing
+    uncaught, which the pre-land gate's `-W error` turns into a red. A child
+    run of the probe under the project's own config and `-n 2`, and without
+    the parent's `-W error`, carries it instead: the controller rebuilds the
+    worker's warning by importing `conftest`, so a class whose home it cannot
+    import is an INTERNALERROR here, not a summary line.
+    """
+    probe = Path(__file__).with_name("channel_crossing_probe.py")
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", "2", str(probe)],
+        cwd=conftest.REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    out = done.stdout + done.stderr
+    assert "INTERNALERROR" not in out, f"the channel did not cross the worker boundary:\n{out}"
+    assert done.returncode == 0, f"the crossing probe run failed (rc {done.returncode}):\n{out}"
+    assert "1 passed" in out, f"the probe did not run exactly its one test:\n{out}"
+    assert "_EncodingRefusalRecorded" in out and "PDF-145 crossing probe" in out, (
+        f"the published warning never reached the controller's warnings summary:\n{out}"
     )
 
 
