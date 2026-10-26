@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-143] Close the docs-gate parsing traps and guard the "In 1.2" cells — 2026-10-26
+
+- Docs-gate `SWEEP_ID` now takes a dotted run-dir name whole, and a `ci`-mode run (AGL-127) is its own class instead of raising in the sweep population. Targets ledger `8ae79938af` (B-483) and `74112666be`; test-only; no behaviour change.
+- The commit-agreement control derives its foreign sha from the run it checks, so PDF-130 AC9(ii)'s `deadbee` red drive no longer reds the gate, and the control now also feeds the foreign sha to the named-commit predicate. Targets ledger `23cb3cacd5` (B-484); test-only; no behaviour change.
+- Each of the four "In 1.2" cells of `## Upgrading to 1.2` is parsed and compared with the product's driven behaviour; an unbound row or figure reds. Targets ledger `99ce1f45b9` (B-480); test-only; no behaviour change.
+
 ## [PDF-136] Keep LibreOffice's temp dir inside the product's temp namespace so a convert --timeout kill leaves nothing in $TMPDIR — 2026-10-26
 
 - **Fix:** `convert` now starts `soffice` with `TMPDIR` set to its per-invocation scratch directory (the inherited environment plus that one key). LibreOffice's `lu<pid><rand>.tmp` therefore lands inside a directory the product created and already removes on every exit path, the `--timeout` kill included, so the user's `$TMPDIR` holds exactly what it held before. Targets ledger `93a251f005`.

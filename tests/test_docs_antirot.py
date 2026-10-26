@@ -68,6 +68,7 @@ as skipped, never silently absent* (X-153).
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -2918,7 +2919,11 @@ POINTER_DOCUMENT = "CONTRIBUTING.md"
 POINTER_HEADING = "## Where open findings are tracked"
 #: PDF-102 D4: the captured group is the WHOLE directory name, so a run whose
 #: name carries a `_suffix` (B-362: `2026-09-18_091200_sweep`) can be named.
-SWEEP_ID = re.compile(r"\b(\d{4}-\d{2}-\d{2}_\d{6}(?:_[A-Za-z0-9][A-Za-z0-9-]*)?)(?![A-Za-z0-9_-])")
+#: PDF-143: a dot inside the suffix is part of the name (8ae79938af); never at its end.
+SWEEP_ID = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2}_\d{6}(?:_[A-Za-z0-9](?:[A-Za-z0-9-]|\.(?=[A-Za-z0-9]))*)?)"
+    r"(?![A-Za-z0-9_-])"
+)
 SHORT_SHA = re.compile(r"\b([0-9a-f]{7,40})\b")
 
 #: AC22, strengthened by X-368. A sweep directory that carries none of these is
@@ -2941,6 +2946,7 @@ VERDICT_ARTIFACTS = ("report.md", "REPRO.txt", "VERDICT.txt", "RUN-SUMMARY.txt")
 #: fallback ONLY when a run declares no `**Mode:**` line at all.
 RUN_CLASS_SWEEP = "sweep"
 RUN_CLASS_VERIFICATION = "verification"
+RUN_CLASS_CI = "ci"
 
 #: The literal shape E6 counted (13 of 30): the bold label AND the colon
 #: BOTH inside the `**...**` span. `` **Mode** `verify` `` (bold, no colon)
@@ -2948,6 +2954,8 @@ RUN_CLASS_VERIFICATION = "verification"
 #: fallback cases, not declarations -- the frozen table below pins one of
 #: each on the record, by name, so this distinction cannot regress quietly.
 MODE_LINE = re.compile(r"\*\*Mode:\*\*.*")
+#: PDF-143 D9 (X-1077): the AGL-127 default-branch CI steward declares `ci`.
+MODE_CI = re.compile(r"^\*\*Mode:\*\*\s+`?ci`?(?![\w-])")
 
 
 def run_mode_line(report_text: str) -> str | None:
@@ -2977,8 +2985,13 @@ def classify_run(*, name: str, mode_line: str | None) -> str:
     side of this boundary (E6 — 17-of-30 undeclared, a layer-side
     convention this instrument reads but does not own) would read as a
     stale README instead of a broken classifier.
+
+    PDF-143 D9: a declared `ci` mode (AGL-127 CI steward) is neither class and never a
+    sweep (X-1077)
     """
     if mode_line is not None:
+        if MODE_CI.match(mode_line):
+            return RUN_CLASS_CI
         lowered = mode_line.lower()
         verif_at = lowered.find("verif")
         sweep_at = lowered.find("sweep")
@@ -3261,6 +3274,11 @@ def test_the_findings_pointer_survives_the_vacuous_rendering(tmp_path: Path) -> 
     The sweep id and sha inside the vacuous sentence are DERIVED (D8), never
     a frozen literal transcribed a second time — a fixture that cannot rot
     is worth more than a fixture that is correct today."""
+    _assert_vacuous_rendering(tmp_path)
+
+
+def _assert_vacuous_rendering(tmp_path: Path) -> None:
+    """The vacuous-rendering body, reusable (PDF-143 D2)."""
     sweep_id, sha = vacuous_fixture_sweep_and_sha()
     vacuous = (
         f"{POINTER_HEADING}\n\n"
@@ -3291,6 +3309,112 @@ def test_the_findings_pointer_survives_the_vacuous_rendering(tmp_path: Path) -> 
     # then no digit may survive — `grep -o … | wc -l`, never `grep -c`.
     stripped = SHORT_SHA.sub(" ", SWEEP_ID.sub(" ", body))
     assert re.findall(r"[0-9]+", stripped) == []
+
+
+def _mint_pdf143_run(runs_root: Path, name: str, report: str | None = None) -> Path:
+    """A verdict-bearing sweep-class run under *runs_root* (PDF-143 fixtures)."""
+    run = runs_root / name
+    (run / "logs").mkdir(parents=True)
+    (run / "report.md").write_text(
+        report if report is not None else "**Mode:** `sweep`\n`abc1234`\n"
+    )
+    (run / "logs" / "RUN-SUMMARY.txt").write_text("x\n")
+    return run
+
+
+def _mint_pdf143_tree(root: Path, *names: str) -> Path:
+    (root / "specs").mkdir(parents=True)
+    (root / "specs" / "SPEC-INDEX.md").write_text("stub\n")
+    runs = root / "qa" / "runs"
+    for name in names:
+        _mint_pdf143_run(runs, name)
+    return runs
+
+
+def test_pdf143_the_vacuous_rendering_survives_a_dotted_newest_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC2 / E1 (8ae79938af). The dotted run is the newest sweep, so the vacuous sentence names
+    it; the digit residue after stripping the id and sha must be empty."""
+    dotted = "2026-10-08_123426_sweep-cycle8-1.2.0-candidate"
+    root = tmp_path / "plan"
+    _mint_pdf143_tree(root, dotted)
+    monkeypatch.setenv(PLANNING_DIR_ENV, str(root))
+    assert vacuous_fixture_sweep_and_sha() == (dotted, "abc1234")
+    (tmp_path / "scratch").mkdir()
+    _assert_vacuous_rendering(tmp_path / "scratch")
+
+
+def sweep_ids_not_taken_whole(names: Iterable[str]) -> list[str]:
+    """PDF-143 D3. Every name that SWEEP_ID does not capture exactly, in backticks or as the
+    last word of a sentence."""
+    return [
+        name
+        for name in names
+        if not all(
+            (m := SWEEP_ID.search(text)) is not None and m.group(1) == name
+            for text in (f"`{name}`", f"sweep {name}.")
+        )
+    ]
+
+
+def test_pdf143_every_sweep_class_run_name_is_one_sweep_id(tmp_path: Path) -> None:
+    """AC3. The population is read back THROUGH sweep_class_runs_with_verdict, never listed."""
+    runs = _mint_pdf143_tree(
+        tmp_path / "plan",
+        "2026-10-01_000000",
+        "2026-10-02_000000_sweep",
+        "2026-10-03_000000_sweep-cycle8-candidate",
+        "2026-10-08_123426_sweep-cycle8-1.2.0-candidate",
+    )
+    population = sweep_class_runs_with_verdict(runs)
+    assert len(population) == 4
+    assert sweep_ids_not_taken_whole(population) == []
+    _mint_pdf143_run(runs, "2026-10-09_000000_sweep+x")
+    assert sweep_ids_not_taken_whole(sweep_class_runs_with_verdict(runs)) == [
+        "2026-10-09_000000_sweep+x"
+    ]
+
+
+def test_pdf143_the_real_sweep_population_agrees_with_the_sweep_id_grammar() -> None:
+    """AC4. A naming drift reds with its cause, not as a digit list."""
+    root = require_planning_dir()
+    offenders = sweep_ids_not_taken_whole(sweep_class_runs_with_verdict(root / "qa" / "runs"))
+    assert offenders == [], (
+        f"runs {offenders}: the population accepts this name and the grammar cannot name it: "
+        f"widen the grammar or rename the run. SWEEP_ID.pattern = {SWEEP_ID.pattern!r}"
+    )
+
+
+def test_pdf143_the_sweep_id_grammar_takes_a_dotted_run_name_whole() -> None:
+    """AC1."""
+    dotted = "2026-10-08_123426_sweep-cycle8-1.2.0-candidate"
+    in_ticks = SWEEP_ID.search(f"`{dotted}`")
+    assert in_ticks is not None and in_ticks.group(1) == dotted
+    for tail in (".", ",", ")"):
+        bare = SWEEP_ID.search(f"taken at sweep 2026-09-18_091200_sweep{tail} next")
+        assert bare is not None and bare.group(1) == "2026-09-18_091200_sweep"
+        dotted_bare = SWEEP_ID.search(f"sweep {dotted}{tail}")
+        assert dotted_bare is not None and dotted_bare.group(1) == dotted
+
+
+def test_pdf143_a_ci_mode_run_is_its_own_class_and_never_a_sweep(tmp_path: Path) -> None:
+    """AC16 / D9 (X-1077)."""
+    real_ci_line = (
+        "- **Mode:** `ci` (default-branch CI steward, AGL-127). Read-only toward the product and "
+        "toward GitHub. No product code built or executed; no SCRATCH sandbox (ci mode)."
+    )
+    follow_up = "**Mode:** `ci` (default-branch CI steward), a follow-up to the sweep"
+    runs = tmp_path / "runs"
+    _mint_pdf143_run(runs, "2026-10-01_000000_sweep")
+    _mint_pdf143_run(runs, "2026-10-24_203757_ci", f"# run\n\n{real_ci_line}\n")
+    _mint_pdf143_run(runs, "2026-10-24_234602_ci", f"# run\n\n{follow_up}\n")
+    assert sweep_class_runs_with_verdict(runs) == ("2026-10-01_000000_sweep",)
+    for line in (run_mode_line(real_ci_line), follow_up):
+        assert classify_run(name="2026-10-24_000000_ci", mode_line=line) == RUN_CLASS_CI
+    for bad in ("`audit`", "`circle`", "`ci-foo`"):
+        with pytest.raises(ValueError, match="neither"):
+            classify_run(name="2026-01-01_000000", mode_line=f"**Mode:** {bad}")
 
 
 def test_the_named_sweep_resolves_to_a_readable_verdict() -> None:
@@ -3372,29 +3496,35 @@ def test_the_named_commit_is_the_one_the_named_sweep_records() -> None:
     transcribed into this field by mistake, and no README-only predicate
     could have told the two apart)."""
     root = require_planning_dir()
-    body = pointer_body()
+    complaint = named_commit_complaint(pointer_body(), root / "qa" / "runs")
+    assert complaint is None, complaint
+
+
+def named_commit_complaint(body: str, runs_root: Path) -> str | None:
+    """PDF-143 D5. The named-commit predicate, pure: the failure message, or ``None``."""
     sweep_match = SWEEP_ID.search(body)
     assert sweep_match, "the section names no sweep id"
     sha_match = SHORT_SHA.search(body)
     assert sha_match, "the section names no commit sha"
     named_sweep, named_sha = sweep_match.group(1), sha_match.group(1)
-    run_dir = root / "qa" / "runs" / named_sweep
+    run_dir = runs_root / named_sweep
     assert run_dir.is_dir(), (
         f"{POINTER_DOCUMENT} names sweep {named_sweep}, which does not exist under {run_dir}"
     )
     files = [p for p in run_dir.rglob("*") if p.is_file()]
-    if not commit_occurs_in_run(named_sha, run_dir):
-        recorded = recorded_commit(run_dir)
-        recorded_clause = (
-            f"That run records {recorded}."
-            if recorded
-            else "That run records no short-sha-shaped token at all."
-        )
-        pytest.fail(
-            f"{POINTER_DOCUMENT} names commit {named_sha} as the commit sweep {named_sweep} was "
-            f"taken at; that string occurs in none of the {len(files)} file(s) under "
-            f"{run_dir}. {recorded_clause}"
-        )
+    if commit_occurs_in_run(named_sha, run_dir):
+        return None
+    recorded = recorded_commit(run_dir)
+    recorded_clause = (
+        f"That run records {recorded}."
+        if recorded
+        else "That run records no short-sha-shaped token at all."
+    )
+    return (
+        f"{POINTER_DOCUMENT} names commit {named_sha} as the commit sweep {named_sweep} was "
+        f"taken at; that string occurs in none of the {len(files)} file(s) under "
+        f"{run_dir}. {recorded_clause}"
+    )
 
 
 #: AC3. A FROZEN sample of the 30 directories measured under `qa/runs/` at
@@ -3726,19 +3856,75 @@ def test_the_newest_sweep_arm_still_bites_after_the_refresh() -> None:
     )
 
 
+def foreign_sha_absent_from(run_dir: Path) -> str:
+    """PDF-143 D4. A deterministic 7-hex sha that occurs nowhere under *run_dir*, derived from
+    the run's name; never a literal (23cb3cacd5)."""
+    for i in range(64):
+        candidate = hashlib.sha256(f"{run_dir.name}:{i}".encode()).hexdigest()[:7]
+        if not commit_occurs_in_run(candidate, run_dir):
+            return candidate
+    raise AssertionError(f"no derived foreign sha is absent from {run_dir.name}")
+
+
+def commit_agreement_control(runs_root: Path) -> None:
+    """PDF-143 D5. The newest sweep with a FOREIGN sha must still red the named-commit predicate,
+    and with its own recorded sha must pass."""
+    sweeps = sweep_class_runs_with_verdict(runs_root)
+    assert sweeps, "the inventory carries no sweep-class run with a verdict"
+    newest = sweeps[-1]
+    foreign = foreign_sha_absent_from(runs_root / newest)
+    complaint = named_commit_complaint(f"sweep `{newest}` at `{foreign}`", runs_root)
+    assert complaint is not None and foreign in complaint, (
+        f"a foreign sha `{foreign}` was accepted by the named-commit predicate"
+    )
+    recorded = recorded_commit(runs_root / newest)
+    assert recorded is not None, (
+        f"the newest sweep `{newest}` records no short sha in its report.md, so the positive "
+        "control cannot prove the named-commit predicate accepts anything"
+    )
+    assert named_commit_complaint(f"sweep `{newest}` at `{recorded}`", runs_root) is None
+
+
 def test_the_commit_agreement_arm_still_bites_after_the_refresh() -> None:
     """AC8, half 2. The correct newest sweep id, paired with a FOREIGN sha,
     checked against the REAL run directory it names, must still turn red."""
-    root = require_planning_dir()
-    runs_root = root / "qa" / "runs"
-    sweeps = sweep_class_runs_with_verdict(runs_root)
-    assert sweeps, "the real inventory carries no sweep-class run with a verdict"
-    run_dir = runs_root / sweeps[-1]
-    foreign_sha = "deadbee"
-    assert not commit_occurs_in_run(foreign_sha, run_dir), (
-        f"the foreign sha {foreign_sha!r} must not coincidentally occur under "
-        f"{run_dir}, or this control proves nothing"
-    )
+    commit_agreement_control(require_planning_dir() / "qa" / "runs")
+
+
+def test_pdf143_the_foreign_sha_control_survives_the_ac9_ii_literal(tmp_path: Path) -> None:
+    """AC5/AC6 (23cb3cacd5). The newest sweep carries PDF-130 AC9(ii)'s literal AND the
+    derivation's first candidate; the control still holds. A newest sweep with no sha fails."""
+    runs = _mint_pdf143_tree(tmp_path / "a", "2026-10-01_000000_sweep", "2026-10-02_000000_sweep")
+    newest = runs / "2026-10-02_000000_sweep"
+    poison = newest / "logs" / "pdf-130"
+    poison.mkdir()
+    (poison / "ac9-red-control.txt").write_text("deadbee\n")
+    first = hashlib.sha256(f"{newest.name}:0".encode()).hexdigest()[:7]
+    (poison / "coincidence.txt").write_text(first + "\n")
+    assert foreign_sha_absent_from(newest) not in ("deadbee", first)
+    commit_agreement_control(runs)
+
+    shaless = _mint_pdf143_tree(tmp_path / "b", "2026-10-01_000000_sweep")
+    (shaless / "2026-10-01_000000_sweep" / "report.md").write_text("**Mode:** `sweep`\nno token\n")
+    with pytest.raises(AssertionError, match="records no short sha"):
+        commit_agreement_control(shaless)
+
+    tree = ast.parse(Path(__file__).read_text())
+    hexish = re.compile(r"^[0-9a-f]{7,40}$")
+    for fn in tree.body:
+        if isinstance(fn, ast.FunctionDef) and fn.name in (
+            "test_the_commit_agreement_arm_still_bites_after_the_refresh",
+            "commit_agreement_control",
+            "foreign_sha_absent_from",
+        ):
+            literals = [
+                n.value
+                for n in ast.walk(fn)
+                if isinstance(n, ast.Constant)
+                and isinstance(n.value, str)
+                and hexish.match(n.value)
+            ]
+            assert literals == [], f"{fn.name} carries a sha literal: {literals}"
 
 
 def top_level_commands() -> set[str]:
