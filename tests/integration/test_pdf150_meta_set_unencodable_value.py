@@ -918,49 +918,156 @@ def test_ac11_success_shapes_unchanged(tmp_path: Path, fixtures_dir: Path, fmt: 
 # --------------------------------------------------------------------------- #
 
 
-def _git(*args: str) -> str | None:
+#: X-1182. The arm measures PDF-150's OWN landed commit, commit to commit, never the branch it
+#: happens to run on: a merge-base against origin/main measured every later branch (X-1181).
+PDF150_COMMIT: Final[str] = "662fa6ae5726e7d7b42c987150758960599e3e7e"
+PDF150_SUBJECT: Final[str] = (
+    "[PDF-150] fix: refuse a non-UTF-8 meta set value at exit 2 and predict it in --dry-run"
+)
+_FROZEN_PATHS: Final[tuple[str, ...]] = (
+    "src/pdf_tooling/errors.py",
+    "src/pdf_tooling/cli/",
+    "src/pdf_tooling/adapters/",
+    "README.md",
+    "tests/golden/",
+)
+_ALLOWED_SRC: Final[frozenset[str]] = frozenset({"src/pdf_tooling/ops/metadata.py"})
+
+
+def _git(*args: str, repo: Path = REPO_ROOT, env: Mapping[str, str] | None = None) -> str | None:
     try:
         done = subprocess.run(
             ["git", *args],
-            cwd=str(REPO_ROOT),
+            cwd=str(repo),
             capture_output=True,
             text=True,
             check=False,
             stdin=subprocess.DEVNULL,
+            env=None if env is None else dict(env),
         )
     except OSError:
         return None
     return done.stdout if done.returncode == 0 else None
 
 
+def _frozen_surface_violations(
+    repo: Path, parent: str, commit: str, env: Mapping[str, str] | None = None
+) -> list[str]:
+    """Violations of the PDF-150 diff shape between two COMMITS (never the working tree)."""
+
+    def run(*args: str) -> str:
+        out = _git(*args, repo=repo, env=env)
+        assert out is not None, f"git {' '.join(args)} failed in {repo}"
+        return out
+
+    found: list[str] = []
+    frozen = run("diff", "--name-only", parent, commit, "--", *_FROZEN_PATHS)
+    found += [f"frozen surface changed: {n}" for n in frozen.split()]
+    for name in run("diff", "--name-only", parent, commit, "--", "src/").split():
+        if name not in _ALLOWED_SRC:
+            found.append(f"src/ name outside the allow-list: {name}")
+    for line in run("diff", "--numstat", parent, commit, "--", "src/").splitlines():
+        _added, deleted, path = line.split("\t", 2)
+        if deleted != "0":
+            found.append(f"the src/ diff deletes {deleted} line(s): {path}")
+    return found
+
+
 def test_ac12_frozen_surface() -> None:
     # The class and schema pins hold on any checkout.
     assert SRC_METADATA.is_file()
     assert UsageError.exit_code == 2 and UsageError.kind == "usage"
-    # The diff-shape pins need history; skip where the checkout has none.
-    base = _git("merge-base", "HEAD", "origin/main")
-    if base is None or not base.strip():
-        pytest.skip("no origin/main merge-base on this checkout")
-    base = base.strip()
-    frozen = _git(
-        "diff",
-        base,
-        "--",
-        "src/pdf_tooling/errors.py",
-        "src/pdf_tooling/cli/",
-        "src/pdf_tooling/adapters/",
-        "README.md",
-        "tests/golden/",
+    # X-1182: history-dependent, so skip only where the pinned commit or its parent is absent
+    # (a shallow clone; a depth-1 clone AT the pin has the commit but not its parent).
+    if any(_git("cat-file", "-e", f"{PDF150_COMMIT}{rev}^{{commit}}") is None for rev in ("", "^")):
+        pytest.skip(f"shallow history: PDF-150 commit {PDF150_COMMIT[:7]} or its parent is absent")
+    subject = _git("log", "-1", "--format=%s", PDF150_COMMIT)
+    assert subject is not None and subject.strip() == PDF150_SUBJECT, (
+        f"PDF150_COMMIT no longer names PDF-150: {subject!r}"
     )
-    assert frozen == "", f"frozen surface changed:\n{frozen[:600] if frozen else frozen}"
-    names = _git("diff", "--name-only", base, "--", "src/")
-    assert names is not None
-    # Vacuous on main after landing (the merge-base is then HEAD, so the list is empty). The
-    # pre-land exact check is `git diff --name-only $(git merge-base HEAD origin/main) -- src/`
-    # printing exactly src/pdf_tooling/ops/metadata.py (X-1168).
-    assert set(names.split()) <= {"src/pdf_tooling/ops/metadata.py"}, names
-    numstat = _git("diff", "--numstat", base, "--", "src/")
-    assert numstat is not None
-    for line in numstat.splitlines():
-        added, deleted, _path = line.split("\t", 2)
-        assert deleted == "0", f"the src/ diff deletes {deleted} line(s): {line}"
+    assert _frozen_surface_violations(REPO_ROOT, f"{PDF150_COMMIT}^", PDF150_COMMIT) == []
+
+
+# Synthetic arms: the real arm measures immutable history and can never go red again, so the
+# helper is proven able to see each break on a hermetic temp repo (X-1182).
+
+
+def _synthetic_env(tmp_path: Path) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1", HOME=str(tmp_path))
+    return env
+
+
+def _commit(repo: Path, env: Mapping[str, str], files: Mapping[str, str | None], msg: str) -> str:
+    for rel, text in files.items():
+        path = repo / rel
+        if text is None:
+            path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    ident = [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+    ]
+    assert _git("add", "-A", repo=repo, env=env) is not None
+    assert _git(*ident, "commit", "-q", "-m", msg, repo=repo, env=env) is not None
+    head = _git("rev-parse", "HEAD", repo=repo, env=env)
+    assert head is not None
+    return head.strip()
+
+
+def _base_repo(tmp_path: Path) -> tuple[Path, dict[str, str], str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = _synthetic_env(tmp_path)
+    assert _git("init", "-q", repo=repo, env=env) is not None
+    base = _commit(
+        repo,
+        env,
+        {
+            "README.md": "readme\n",
+            "src/pdf_tooling/errors.py": "e1\ne2\n",
+            "src/pdf_tooling/ops/metadata.py": "m1\n",
+            "src/pdf_tooling/cli/x.py": "c1\n",
+        },
+        "base",
+    )
+    return repo, env, base
+
+
+def test_ac12_synthetic_s1_a_metadata_only_commit_is_clean(tmp_path: Path) -> None:
+    repo, env, base = _base_repo(tmp_path)
+    s1 = _commit(repo, env, {"src/pdf_tooling/ops/metadata.py": "m1\nm2\nm3\n"}, "s1")
+    assert _frozen_surface_violations(repo, base, s1, env) == []
+
+
+def test_ac12_synthetic_s2_a_later_commit_never_moves_the_measurement(tmp_path: Path) -> None:
+    repo, env, base = _base_repo(tmp_path)
+    s1 = _commit(repo, env, {"src/pdf_tooling/ops/metadata.py": "m1\nm2\n"}, "s1")
+    s2 = _commit(
+        repo,
+        env,
+        {"README.md": "changed\n", "src/pdf_tooling/errors.py": "e1\n"},
+        "s2",
+    )
+    assert _frozen_surface_violations(repo, base, s1, env) == []
+    own = "\n".join(_frozen_surface_violations(repo, s1, s2, env))
+    assert "README.md" in own and "errors.py" in own
+    assert "deletes 1 line(s)" in own
+
+
+def test_ac12_synthetic_s3_a_cli_touch_is_named(tmp_path: Path) -> None:
+    repo, env, base = _base_repo(tmp_path)
+    s3 = _commit(
+        repo,
+        env,
+        {"src/pdf_tooling/ops/metadata.py": "m1\nm2\n", "src/pdf_tooling/cli/x.py": "c1\nc2\n"},
+        "s3",
+    )
+    found = "\n".join(_frozen_surface_violations(repo, base, s3, env))
+    assert "src/pdf_tooling/cli/x.py" in found
