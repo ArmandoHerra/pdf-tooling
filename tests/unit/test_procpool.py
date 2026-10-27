@@ -41,6 +41,8 @@ from typing import Any, Final
 import pytest
 
 from pdf_tooling.ops import procpool
+from pdf_tooling.safety import atomic
+from pdf_tooling.safety.policy import SafetyPolicy
 
 # --------------------------------------------------------------------------- #
 # Module-level, picklable-by-reference helpers -- the same discipline
@@ -1288,3 +1290,144 @@ def test_a_planted_emission_on_the_teardown_path_reddens(tmp_path: Path) -> None
     )
     found = teardown_emissions(ast.parse(planted.read_text()), _TEARDOWN_SYMBOLS)
     assert any(entry.startswith("line 5:") and "_terminate_pool" in entry for entry in found), found
+
+
+# --------------------------------------------------------------------------- #
+# PDF-146 -- D2's portable presence probe and D1's unwind shield, in-process.
+# --------------------------------------------------------------------------- #
+
+#: The tests that drive the REAL presence probe, directly or through `_terminate_pool`.
+_REAL_PRESENCE_TESTS: Final = frozenset(
+    {
+        "test_kernel_presence_reads_a_reaped_child_absent_and_a_live_one_present",
+        "test_terminate_pool_names_a_worker_reaped_elsewhere_stale_liveness_without_proc",
+    }
+)
+
+
+@pytest.fixture(autouse=True)
+def _presence_probe_is_host_independent(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The planted-pid tests above monkeypatch `_kernel_state` to `unavailable` with
+    small invented pids. `_terminate_pool` now falls back to `os.kill(pid, 0)` there,
+    and whether an invented pid is alive depends on the host. Pin the fallback to
+    `unavailable` (the pre-PDF-146 reading) for every test that does not drive it.
+
+    It also snapshots `atomic._UNWIND_HOOK`, so a test that installs the worker hook
+    (`_worker_initializer` called in-process) leaves it as it found it."""
+    monkeypatch.setattr(atomic, "_UNWIND_HOOK", atomic._UNWIND_HOOK)
+    if request.node.name not in _REAL_PRESENCE_TESTS:
+        monkeypatch.setattr(procpool, "_kernel_presence", lambda pid: "unavailable")
+
+
+def test_kernel_presence_reads_a_reaped_child_absent_and_a_live_one_present() -> None:
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert procpool._kernel_presence(child.pid) == "present"
+        child.kill()
+        child.wait()
+        assert procpool._kernel_presence(child.pid) == "absent"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+    assert procpool._kernel_presence(os.getpid()) == "present"
+    assert procpool._kernel_presence(0) == "unavailable"
+    assert procpool._kernel_presence(-1) == "unavailable"
+
+
+def test_terminate_pool_names_a_worker_reaped_elsewhere_stale_liveness_without_proc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plant_kernel(monkeypatch, "unavailable")
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        # A live child's pid: something holds it, so the tail stays honestly red.
+        live = _teardown(_Planted(child.pid))
+        assert [o.kernel for o in live.outcomes] == ["present"]
+        assert [o.tail for o in live.outcomes] == ["undetermined"]
+        child.kill()
+        child.wait()
+        # The same pid once reaped elsewhere, while the Process still reads alive.
+        reaped = _teardown(_Planted(child.pid))
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+    assert [o.liveness_after for o in reaped.outcomes] == ["alive"]
+    assert [o.kernel for o in reaped.outcomes] == ["absent"]
+    assert [o.tail for o in reaped.outcomes] == ["stale-liveness"]
+
+
+def test_the_unwind_shield_is_inert_without_the_worker_hook(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(atomic, "_UNWIND_HOOK", None)
+    monkeypatch.setattr(atomic, "_SHIELD_DEPTH", 1)
+    monkeypatch.setattr(atomic, "_PENDING_SIGNUM", 0)
+    assert atomic.defer_unwind(signal.SIGTERM, None) is False
+    assert atomic._PENDING_SIGNUM == 0
+
+    monkeypatch.setattr(atomic, "_SHIELD_DEPTH", 0)
+    policy = SafetyPolicy(
+        dry_run=False, force=False, in_place=False, backup=False,
+        assume_yes=True, is_tty=False, threads=1,
+    )  # fmt: skip
+    destination = tmp_path / "page.bin"
+    with atomic.AtomicWriter(destination, policy=policy, kind="image") as writer:
+        writer.stream.write(b"x")
+    assert destination.read_bytes() == b"x"
+    assert atomic._SHIELD_DEPTH == 0
+    assert atomic._PENDING_SIGNUM == 0
+
+
+class _DiscardSpy:
+    def __init__(self) -> None:
+        self.discards = 0
+
+    def _discard(self) -> None:
+        self.discards += 1
+
+
+def test_a_deferred_signal_does_not_consume_the_one_shot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+    before: dict[signal.Signals, Any] = {sig: signal.getsignal(sig) for sig in signals}
+    monkeypatch.setattr(
+        atomic, "_UNWIND_HOOK", lambda signum: procpool._raise_worker_unwind(signum, None)
+    )
+    monkeypatch.setattr(atomic, "_SHIELD_DEPTH", 1)
+    monkeypatch.setattr(atomic, "_PENDING_SIGNUM", 0)
+    spy = _DiscardSpy()
+    try:
+        for sig in signals:
+            signal.signal(sig, procpool._raise_worker_unwind)
+
+        assert procpool._raise_worker_unwind(signal.SIGTERM, None) is None
+        for sig in signals:
+            assert signal.getsignal(sig) is procpool._raise_worker_unwind
+        assert atomic._PENDING_SIGNUM == signal.SIGTERM
+
+        with pytest.raises(procpool._WorkerUnwind) as caught:
+            atomic._lower_shield_and_deliver(spy)  # type: ignore[arg-type]
+        assert caught.value.signum == signal.SIGTERM
+        assert spy.discards == 1
+        assert atomic._SHIELD_DEPTH == 0
+        assert atomic._PENDING_SIGNUM == 0
+        for sig in signals:
+            assert signal.getsignal(sig) is procpool._absorb_signal
+    finally:
+        for sig, handler in before.items():
+            signal.signal(sig, handler)
