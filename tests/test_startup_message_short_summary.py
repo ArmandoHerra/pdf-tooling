@@ -46,10 +46,13 @@ import pytest
 _tests_dir = str(Path(__file__).resolve().parent)
 if _tests_dir not in sys.path:
     sys.path.insert(0, _tests_dir)
+import test_import_boundaries as _boundaries  # noqa: E402  (path must be set up first)
 from test_import_boundaries import (  # noqa: E402  (path must be set up first)
     STARTUP_CALIBRATED,
     STARTUP_COST_CALIBRATION,
+    STARTUP_COST_READINGS,
     StartupCondition,
+    assert_startup_cost_in_its_domain,
     startup_cost_observation,
     synthetic_readings,
 )
@@ -59,16 +62,26 @@ ARM_NAME: Final[str] = "test_total_startup_import_cost_stays_under_its_ceiling"
 ARM_NODE_ID: Final[str] = f"{ARM_FILE}::{ARM_NAME}"
 _CONDITION: Final[StartupCondition] = StartupCondition("linux", "3.12")
 
-#: AC1's two vectors: (numerator factor, denominator factor, carrier word).
+#: AC1's two vectors, named by the half that carries the red.
 _VECTORS: Final = (
-    pytest.param(1.68, 0.99, "NUMERATOR", id="numerator-side"),
-    pytest.param(0.99, 0.55, "DENOMINATOR", id="denominator-collapse"),
+    pytest.param("NUMERATOR", id="numerator-side"),
+    pytest.param("DENOMINATOR", id="denominator-collapse"),
 )
 
+#: How far past the live ceiling a derived vector's ratio sits. Dimensionless; not a ceiling figure.
+_RED_MARGIN: Final = 1.25
+#: The factor the half that does NOT carry the red holds (the base vectors' own off-half).
+_OFF_HALF: Final = 0.99
 
-#: The vector the three inner-session arms render: AC1's denominator-collapse one.
-_DENOMINATOR_COLLAPSE: Final = (0.99, 0.55)
-_DENOMINATOR_COLLAPSE_CARRIER: Final = "DENOMINATOR"
+
+def _derived_vector(carrier: str) -> tuple[float, float]:
+    """A (numerator factor, denominator factor) pair whose ratio sits above the LIVE ceiling."""
+    recorded = STARTUP_COST_CALIBRATION[_CONDITION]
+    level = recorded.numerator_median_us / recorded.denominator_median_us
+    target = _RED_MARGIN * _boundaries.STARTUP_COST_RATIO_CEILING_PER_MILLE / 1000
+    if carrier == "NUMERATOR":
+        return target * _OFF_HALF / level, _OFF_HALF
+    return _OFF_HALF, _OFF_HALF * level / target
 
 
 class _Rendered:
@@ -78,6 +91,8 @@ class _Rendered:
         recorded = STARTUP_COST_CALIBRATION[_CONDITION]
         numerator = int(recorded.numerator_median_us * numerator_factor)
         denominator = int(recorded.denominator_median_us * denominator_factor)
+        self.numerator = numerator
+        self.denominator = denominator
         self.message = startup_cost_observation(
             STARTUP_CALIBRATED,
             _CONDITION,
@@ -143,15 +158,13 @@ def test_the_startup_cost_halves_survive_a_200_column_terminal(tmp_path: Path) -
     RED: put the lead behind the readings header (or strip the factors from it)
     -> the line is cut before the first factor -> red naming the missing text.
     """
-    rendered = _Rendered(*_DENOMINATOR_COLLAPSE)
+    rendered = _Rendered(*_derived_vector("DENOMINATOR"))
 
     line = _inner_failed_line(rendered.message, columns=200, ci=False, tmp_path=tmp_path)
 
     assert rendered.numerator_text in line, f"numerator factor missing from -ra line:\n{line}"
     assert rendered.denominator_text in line, f"denominator factor missing from -ra line:\n{line}"
-    assert f"the {_DENOMINATOR_COLLAPSE_CARRIER} carries this red" in line, (
-        f"verdict missing from -ra line:\n{line}"
-    )
+    assert "the DENOMINATOR carries this red" in line, f"verdict missing from -ra line:\n{line}"
 
 
 def test_the_startup_cost_halves_survive_a_ci_log(tmp_path: Path) -> None:
@@ -160,15 +173,13 @@ def test_the_startup_cost_halves_survive_a_ci_log(tmp_path: Path) -> None:
     A REGRESSION PIN, not a change: `running_on_ci()` makes pytest keep the whole
     first line, so this held before PDF-114 and must keep holding in every CI log.
     """
-    rendered = _Rendered(*_DENOMINATOR_COLLAPSE)
+    rendered = _Rendered(*_derived_vector("DENOMINATOR"))
 
     line = _inner_failed_line(rendered.message, columns=80, ci=True, tmp_path=tmp_path)
 
     assert rendered.numerator_text in line, f"numerator factor missing from CI line:\n{line}"
     assert rendered.denominator_text in line, f"denominator factor missing from CI line:\n{line}"
-    assert f"the {_DENOMINATOR_COLLAPSE_CARRIER} carries this red" in line, (
-        f"verdict missing from CI line:\n{line}"
-    )
+    assert "the DENOMINATOR carries this red" in line, f"verdict missing from CI line:\n{line}"
 
 
 def test_the_node_id_leaves_no_room_below_100_columns(tmp_path: Path) -> None:
@@ -179,7 +190,7 @@ def test_the_node_id_leaves_no_room_below_100_columns(tmp_path: Path) -> None:
     the rule this reds, and the reader learns it from here rather than re-chasing
     the ledger slug's "at 80 columns".
     """
-    rendered = _Rendered(*_DENOMINATOR_COLLAPSE)
+    rendered = _Rendered(*_derived_vector("DENOMINATOR"))
 
     line = _inner_failed_line(rendered.message, columns=80, ci=False, tmp_path=tmp_path)
 
@@ -190,12 +201,10 @@ def test_the_node_id_leaves_no_room_below_100_columns(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize(("numerator_factor", "denominator_factor", "carrier"), _VECTORS)
-def test_the_lead_clause_opens_the_first_line_and_names_the_body_carrier(
-    numerator_factor: float, denominator_factor: float, carrier: str
-) -> None:
+@pytest.mark.parametrize("carrier", _VECTORS)
+def test_the_lead_clause_opens_the_first_line_and_names_the_body_carrier(carrier: str) -> None:
     """PDF-114 AC4: the lead is within the first 100 characters, and agrees with the body."""
-    message = _Rendered(numerator_factor, denominator_factor).message
+    message = _Rendered(*_derived_vector(carrier)).message
 
     first_line = message.split("\n", 1)[0]
     head = first_line[:100]
@@ -205,3 +214,44 @@ def test_the_lead_clause_opens_the_first_line_and_names_the_body_carrier(
     body_carrier = re.search(r"-- the (\w+) carries this red \(x", first_line)
     assert lead_carrier is not None and body_carrier is not None, first_line
     assert lead_carrier.group(1) == body_carrier.group(1) == carrier
+
+
+@pytest.mark.parametrize("scenario", ("live", "up", "down"))
+@pytest.mark.parametrize("carrier", _VECTORS)
+def test_each_vector_reds_the_arm_and_leads_with_its_halves(
+    carrier: str, scenario: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PDF-148: each derived vector is a REAL red at the live ceiling AND at a moved one.
+
+    RED (live): the vector no longer exceeds the ceiling -> DID NOT RAISE (the B-516 vacuity).
+    RED (up): the vectors were re-pinned instead of derived -> DID NOT RAISE.
+    RED (any): the lead is dropped from, or disagrees with, the red message.
+    """
+    recorded = STARTUP_COST_CALIBRATION[_CONDITION]
+    live = _boundaries.STARTUP_COST_RATIO_CEILING_PER_MILLE
+    level = recorded.numerator_median_us / recorded.denominator_median_us
+    if scenario == "up":
+        monkeypatch.setattr(_boundaries, "STARTUP_COST_RATIO_CEILING_PER_MILLE", 2 * live)
+    elif scenario == "down":
+        monkeypatch.setattr(
+            _boundaries,
+            "STARTUP_COST_RATIO_CEILING_PER_MILLE",
+            (live + round(1000 * level)) // 2,
+        )
+    ceiling = _boundaries.STARTUP_COST_RATIO_CEILING_PER_MILLE
+    rendered = _Rendered(*_derived_vector(carrier))
+
+    with pytest.raises(AssertionError) as caught:
+        assert_startup_cost_in_its_domain(
+            _CONDITION,
+            synthetic_readings(rendered.numerator, rendered.denominator),
+            floor_names=recorded.floor_names,
+            attributable=273,
+        )
+
+    first = str(caught.value).split("\n", 1)[0]
+    assert first.startswith(rendered.numerator_text), first[:120]
+    assert rendered.denominator_text in first[:100], first[:120]
+    assert f"the {carrier} carries this red" in first[:100], first[:120]
+    k = STARTUP_COST_READINGS
+    assert f"{k} of {k} readings exceeded the {ceiling / 1000:.3f}" in first, first[:200]

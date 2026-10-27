@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-148] Re-derive the startup short-summary message vectors from the live ceiling — 2026-10-27
+
+- **Fixed (test-only):** `tests/test_startup_message_short_summary.py` fed the startup-cost message tests two literal factor vectors sized for the 26500 ceiling, so at 53900 (PDF-134) both were green readings and a regression that only touches the red message stayed green (`B-516`, `X-1123`(b)). The vectors are now derived at run time from `STARTUP_COST_RATIO_CEILING_PER_MILLE`, so a later ceiling record needs no edit here.
+- **Added test:** `test_each_vector_reds_the_arm_and_leads_with_its_halves` proves each derived vector makes the real `assert_startup_cost_in_its_domain` raise, at the live ceiling and at a derived higher and lower one.
+- **Scope:** test-only; no user-facing change. `src/`, `tests/test_import_boundaries.py` and `tests/ceiling_register.py` are unchanged.
+
 ## [PDF-140] Bound render memory per run, not just pixels per page — 2026-10-26
 
 - **Added:** `ports/raster.py::RUN_PIXEL_BUDGET` (`357,913,940` px, twice the per-page budget) and `render_workers()`. `rasterize` now renders with fewer workers (never fewer than `1`, never refused) when the largest planned page times the worker count would exceed it. The cap is decided in the parent from the pixel counts PDF-112 already measures, before the pool exists; `ops/procpool.py` is untouched.
