@@ -20,6 +20,14 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-147] Bound the CI network fetches: the engines-present apt install and the secret-scan gitleaks download — 2026-10-27
+
+- **Fixed (CI), B-469 / ledger `ae19c17972`:** `engines-present` / `Install engines` split into a bounded, retried fetch half (`apt-get update` and `install --download-only`, each under `timeout -s KILL`, 3 attempts, a `::warning` per failed attempt and an `::error` on exhaustion) and one offline `--no-download` dpkg half that never runs on a partial fetch. A slow mirror can no longer spend the job's 30-minute budget before the suite starts. The package set is unchanged.
+- **Fixed (CI), B-515 / ledger `27960d012b`:** `secret-scan` / `Install pinned gitleaks`: the one `curl -fsSL` line gained `--retry`, `--max-time` and `--retry-max-time`. The `GITLEAKS_SHA256` check is untouched, so a retry can only end in the pinned bytes or in a red.
+- **Derived, not picked (X-476):** per-attempt bound = 3 x p95 rounded up to 10 s (PDF-29's multiplier); fetch budget = job budget less the largest observed pre/post/non-fetch time; attempts = whole attempts that fit. Figures: apt update 40 s, apt download 60 s, 3 attempts (budget 364 s); gitleaks 10 s per attempt, 7 retries, 282 s retry cap. Each step carries its basis line in `ci.yml`.
+- **Unchanged:** `engines-present` stays `timeout-minutes: 30` and `secret-scan` stays `5`; no step-level timeout, no `continue-on-error`. `release.yml` and `deploy-website.yml` inherit the change through `ci.yml`.
+- **Added test:** `tests/test_ci_fetch_bounds.py` recomputes every figure from the basis line and executes both steps against a stubbed `apt-get` and a real `curl` on a local server.
+
 ## [PDF-149] Pay the wave-3 instrument and comment debt — 2026-10-27
 
 - **Fixed (test-only), B-517:** PDF-138 AC9's `--out-dir` tier now asserts all four cells (split/rotate x dry/real) against their literal messages with `==`, where it matched substrings; re-pointed the two stale `paths.py:<line>` citations in `tests/test_cli_contract.py` to symbol names, named `ensure_component_lengths` in `plan_output_set`'s docstring, and corrected the `CONTROLS` comment in `tests/unit/test_table_escape.py`. Test-only; no user-facing change.

@@ -243,10 +243,39 @@ jobs:
           version: "0.13.5"  # the uv STARTUP_COST_RATIO_CEILING_PER_MILLE was measured under (PDF-134); move only with a re-measurement
           enable-cache: true
           python-version: "3.13"
+      # PDF-147 (B-469, ae19c17972): the NETWORK half of this step is bounded per
+      # attempt and retried, so a slow mirror can no longer spend the suite's
+      # 30-minute budget (X-1110: that budget is never widened). Derived, not
+      # picked (X-476); tests/test_ci_fetch_bounds.py recomputes every env value
+      # below from the basis line and reds on any drift between them.
+      #   PDF-147 basis (engines-present): update_p95_s=11.9 download_p95_s=18.1 install_max_s=53.1 pre_max_s=42 post_max_s=1340
+      #   window: 336 completed installs / 288 green jobs, 2026-08-29..2026-10-26, ci.yml + release.yml gate
+      #   rule: attempt_s = ceil10(3 x p95); budget_s = floor(job_s - pre_max_s - install_max_s - post_max_s);
+      #         attempts = floor(budget_s / (update_attempt_s + download_attempt_s))
+      # The dpkg half (`--no-download`) touches no network and is bounded by the job.
       - name: Install engines
+        env:
+          ENGINES_UPDATE_ATTEMPT_S: "40"
+          ENGINES_DOWNLOAD_ATTEMPT_S: "60"
+          ENGINES_FETCH_ATTEMPTS: "3"
         run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng libreoffice-writer
+          set -euo pipefail
+          pkgs=(tesseract-ocr tesseract-ocr-eng libreoffice-writer)
+          fetch() {
+            sudo timeout -s KILL "${ENGINES_UPDATE_ATTEMPT_S}" apt-get update &&
+              sudo timeout -s KILL "${ENGINES_DOWNLOAD_ATTEMPT_S}" apt-get install -y --download-only "${pkgs[@]}"
+          }
+          attempt=1
+          until fetch; do
+            rc=$?
+            if [ "${attempt}" -ge "${ENGINES_FETCH_ATTEMPTS}" ]; then
+              echo "::error title=Install engines::apt fetch failed on attempt ${attempt}/${ENGINES_FETCH_ATTEMPTS} (rc ${rc}); no attempt left inside the job budget (PDF-147)"
+              exit 1
+            fi
+            echo "::warning title=Install engines::apt fetch attempt ${attempt}/${ENGINES_FETCH_ATTEMPTS} failed (rc ${rc}); retrying (PDF-147)"
+            attempt=$((attempt + 1))
+          done
+          sudo apt-get install -y --no-download "${pkgs[@]}"
       # PDF-15's engineer extends the apt list above if convert fixtures need
       # libreoffice-calc / -impress.
       - name: Verify engines present
@@ -377,11 +406,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+      # PDF-147 (B-515, 27960d012b): the download is bounded per attempt and
+      # retried, so one transient GitHub release-asset 5xx or stall no longer reds
+      # the gate before the scan runs. Derived, not picked (X-476);
+      # tests/test_ci_fetch_bounds.py recomputes every env value below from the
+      # basis line and reds on any drift between them.
+      #   PDF-147 basis (secret-scan): fetch_p95_s=0.422 after_fetch_max_s=0.544 pre_max_s=9 post_max_s=8
+      #   window: 255 checksum-verified fetches / 340 green jobs, 2026-09-06..2026-10-26
+      #   rule: attempt_s = ceil10(3 x p95); budget_s = floor(job_s - pre_max_s - after_fetch_max_s - post_max_s);
+      #         retries = max R with (R + 1) x attempt_s + (2^R - 1) <= budget_s  (2^R - 1 is curl's own backoff)
+      # The SHA-256 check below is unchanged, so a retry can only ever end in the
+      # pinned bytes or in a red.
       - name: Install pinned gitleaks
+        env:
+          GITLEAKS_FETCH_ATTEMPT_S: "10"
+          GITLEAKS_FETCH_RETRIES: "7"
+          GITLEAKS_FETCH_BUDGET_S: "282"
         run: |
           set -euo pipefail
           url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -fsSL "$url" -o /tmp/gitleaks.tar.gz
+          curl -fsSL --retry "${GITLEAKS_FETCH_RETRIES}" --max-time "${GITLEAKS_FETCH_ATTEMPT_S}" --retry-max-time "${GITLEAKS_FETCH_BUDGET_S}" "$url" -o /tmp/gitleaks.tar.gz
           echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
