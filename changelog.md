@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-150] Remediation: test_ac12_frozen_surface measures PDF-150's own commit, not every later branch — 2026-10-27
+
+- **Defect (B-529, X-1181):** the arm diffed the working tree against `git merge-base HEAD origin/main`, so after landing it forbade any README, `cli/`, `errors.py`, `adapters/`, `tests/golden/` edit, any other `src/` file and any `src/` deletion on every later branch; the 1.3.0 bump worktree went 1 failed / 7754 passed and `make ci` exited 2.
+- **Fix (X-1182):** the arm is pinned to PDF-150's commit by SHA, cross-checked by subject, and diffs `<sha>^ <sha>` commit to commit through `_frozen_surface_violations`; it skips only when that commit is absent (shallow history).
+- **Tests:** three permanent synthetic-repo arms (clean stand-in, a later commit that must not move the measurement, a `cli/` touch) prove the helper can see each break.
+- No surface moves: no exit code, envelope, flag or message changes; `schema_version` stays `1`.
+
 ## [PDF-150] Refuse a non-UTF-8 meta set value with the error envelope, and have --dry-run predict it — 2026-10-27
 
 - **`meta set`** now refuses a value that is not Unicode text (any surrogate code point, which is what Python's argv decoder yields for every argv byte the command-line encoding cannot decode) with the existing `usage` error envelope, exit `2`, for `--title`, `--author`, `--subject`, `--keywords` and `--creator` (`3044f42cda`, `B-519`). Before, `--dry-run` predicted `0` while the real run exited `1` with a raw `UnicodeEncodeError` traceback and no envelope; both modes now print the same envelope, naming the option, the byte or code point, its 1-based position and the command-line encoding. Nothing is re-encoded: a value is written as decoded or refused.
