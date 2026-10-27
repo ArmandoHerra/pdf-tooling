@@ -10,7 +10,8 @@ from pdf_tooling.output.table import _cell
 TITLE = "A\x1b[31mRED\x1b[0m B\x1b]0;pwned\x07 C\x9b2J D\rE\x07F\x7fG é 中文 H\tI\nJ"
 ESCAPED_TITLE = r"A\x1b[31mRED\x1b[0m B\x1b]0;pwned\x07 C\x9b2J D\rE\x07F\x7fG é 中文 H\tI\nJ"
 
-#: Unicode category Cc, written out as literals (not computed by the code under test).
+#: Unicode category Cc. EXPECTED restates table.py's rule rather than being independent
+#: of it; ESCAPED_TITLE above is the hand-written literal oracle.
 CONTROLS = [*range(0x00, 0x20), *range(0x7F, 0xA0)]
 EXPECTED = {c: {0x09: "\\t", 0x0A: "\\n", 0x0D: "\\r"}.get(c, f"\\x{c:02x}") for c in CONTROLS}
 IDENT = [
