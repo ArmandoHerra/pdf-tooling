@@ -234,7 +234,13 @@ def merge_documents(
                     ok=refusal is None,
                     exit_code=0 if refusal is None else refusal.exit_code,
                     message=(
-                        f"{len(indices)} pages selected" if refusal is None else refusal.message
+                        (
+                            f"{len(indices)} page selected"
+                            if len(indices) == 1
+                            else f"{len(indices)} pages selected"
+                        )
+                        if refusal is None
+                        else refusal.message
                     ),
                     bytes_before=merge_input.path.stat().st_size,
                     bytes_after=merged_size,

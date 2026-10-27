@@ -456,7 +456,17 @@ GLOBAL_PARAMS: Final[tuple[_ParamSpec, ...]] = (
     ),
     _ParamSpec(
         "quiet",
-        Annotated[bool, typer.Option("-q", "--quiet", help="Report only errors on stderr.")],
+        Annotated[
+            bool,
+            typer.Option(
+                "-q",
+                "--quiet",
+                help=(
+                    "Hide log records below ERROR on stderr; "
+                    "errors and the result's 'warning:' lines still print."
+                ),
+            ),
+        ],
         False,
     ),
     _ParamSpec(
