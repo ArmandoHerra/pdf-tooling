@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-142] CLI papercuts, batch 3: merge --fail-fast help line, compress reduction sign, "1 pages", --quiet help text — 2026-10-27
+
+- **`merge --help`** no longer documents a `--fail-fast` that no verb declares (`e6a143a5b7`); passing it is still a usage error.
+- **`compress`** prints the signed size change: a shrink reads `(-97.8%)`, a growth `(+10.1%)` (`7c931ce9b2`). Only the `message` text changes; `bytes_before`/`bytes_after` and every key are unchanged.
+- **`merge`** says `1 page selected` for a single page (`ea69b6206e`).
+- **`--quiet`**'s help now says result `warning:` lines still print (`bab46d5ef8`, operator ruling `OR-56`); its behaviour is unchanged.
+
 ## [PDF-141] Drop the redundant security entry from the issue chooser — 2026-10-27
 
 - The chooser's `contact_links` security entry is removed from `.github/ISSUE_TEMPLATE/config.yml`: with private vulnerability reporting on, GitHub renders its own "Report a security vulnerability" entry, so the chooser no longer lists two.

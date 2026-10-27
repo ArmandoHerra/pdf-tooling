@@ -19,7 +19,7 @@ Three verbs, four rules `PLAN.md` §12 R-02 already decided:
    ``ItemResult`` — no model change, no ``SCHEMA_VERSION`` bump); the ratio
    is derived in the *message*, never stored as a new field, so it is a
    rendering concern rather than a schema one. A run whose output did not
-   shrink still exits **0**, with the negative-or-zero percentage printed as
+   shrink still exits **0**, with the zero-or-positive size change printed as
    such and a stderr warning — hiding a failed compression is the same
    dishonesty class as claiming a saving that did not occur.
 2. **`--lossless` is a guarantee, not a promise.** D-12.3's Layer 1 runtime
@@ -453,8 +453,8 @@ def _compress_write_all(
         if isinstance(skipped, int) and skipped > 0:
             warnings.append(f"{item.source}: {skipped} image(s) skipped (not safely re-encodable)")
 
-        ratio = (
-            ((bytes_before - bytes_after) / bytes_before * 100)
+        change = (
+            ((bytes_after - bytes_before) / bytes_before * 100)
             if bytes_before and bytes_after is not None
             else 0.0
         )
@@ -464,7 +464,7 @@ def _compress_write_all(
             output=str(item.target),
             ok=True,
             exit_code=0,
-            message=f"{bytes_before} -> {bytes_after} bytes ({ratio:+.1f}%)",
+            message=f"{bytes_before} -> {bytes_after} bytes ({change:+.1f}%)",
             bytes_before=bytes_before,
             bytes_after=bytes_after,
             duration_ms=duration_ms,

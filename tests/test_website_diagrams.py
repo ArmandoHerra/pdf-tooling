@@ -989,9 +989,9 @@ def test_ac22_the_changelog_carries_a_pdf96_entry_directly_below_the_anchor() ->
     anchor_line_end = text.index("\n", anchor_idx) + 1
     remainder = text[anchor_line_end:].lstrip("\n")
     first_line = remainder.splitlines()[0]
-    assert first_line.startswith("## [PDF-141] "), (
-        "the PDF-141 entry must be the first heading directly below the anchor line"
+    assert first_line.startswith("## [PDF-142] "), (
+        "the PDF-142 entry must be the first heading directly below the anchor line"
     )
-    assert re.match(r"^## \[PDF-141\] .+ — \d{4}-\d{2}-\d{2}$", first_line), (
+    assert re.match(r"^## \[PDF-142\] .+ — \d{4}-\d{2}-\d{2}$", first_line), (
         f"changelog heading does not match the required format: {first_line!r}"
     )

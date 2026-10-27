@@ -66,7 +66,7 @@ degrades gracefully and the path survives intact.
 Fails closed: every input is opened and every selection resolved before
 anything is written, so a failure on any input aborts the run and writes
 nothing -- a partially merged document is a wrong document that looks
-right. --fail-fast is consequently a no-op for merge.
+right.
 """
 
 

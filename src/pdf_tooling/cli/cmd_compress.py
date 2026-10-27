@@ -129,7 +129,7 @@ input, with a .bak sidecar first. Exactly one of --output/--out-dir/
 
 The measurement, never a claim: every item's bytes_before/bytes_after are
 reported, and a run whose output did not shrink still exits 0, with the
-percentage rendered as negative or zero and a stderr warning -- hiding a
+size change rendered as zero or positive and a stderr warning -- hiding a
 failed compression is the same dishonesty this tool refuses everywhere else.
 """
 
