@@ -10,6 +10,9 @@ Deliberately NOT widened into ``GUARDED_DOCS``: these files are free prose (and
 the code of conduct is third-party text), so the properties that matter -- a
 URL, no promise, no version number, no overclaim -- are guarded by specific
 arms instead.
+
+PDF-141 inverted the chooser arm, because GitHub renders its own private
+vulnerability reporting entry once that feature is on.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +37,7 @@ CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 PVR_URL = "https://github.com/ArmandoHerra/pdf-tooling/security/advisories/new"
+PVR_PATH_FRAGMENT = "/security/advisories"
 BLOB_CONTRIBUTING = "https://github.com/ArmandoHerra/pdf-tooling/blob/main/CONTRIBUTING.md"
 FORM_ELEMENT_TYPES = {"markdown", "input", "textarea", "dropdown", "checkboxes"}
 
@@ -166,11 +171,54 @@ def test_h3_bug_form_never_asks_for_the_document() -> None:
 # H4 -- AC5
 
 
-def test_h4_chooser_routes_security_privately() -> None:
+def _pvr_contact_links(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every contact_links entry whose url points at the private advisory form.
+    contact_links may be absent or a list; anything else is malformed."""
+    if "contact_links" not in config:
+        return []
+    links = config["contact_links"]
+    assert isinstance(links, list), (
+        f"contact_links must be a list when present, got {type(links).__name__}"
+    )
+    return [e for e in links if PVR_PATH_FRAGMENT in str(e.get("url", "")).strip().lower()]
+
+
+def test_h4_chooser_keeps_blank_issues_off_and_carries_no_pvr_contact_link() -> None:
     config = _yaml(CHOOSER)
+    assert isinstance(config, dict)
     assert config.get("blank_issues_enabled") is False, "blank issues must be off"
-    links = [c for c in config.get("contact_links") or [] if c.get("url") == PVR_URL]
-    assert len(links) == 1, f"expected exactly one contact link to {PVR_URL}, found {len(links)}"
+    hits = _pvr_contact_links(config)
+    assert not hits, (
+        f"config.yml re-adds a contact link to the private advisory form "
+        f"{[h.get('url') for h in hits]}; GitHub renders its own PVR entry (PDF-141)"
+    )
+
+
+def test_h4_pvr_contact_link_detector_is_two_sided() -> None:
+    pvr = {"name": "Report a security vulnerability", "url": PVR_URL, "about": "x"}
+    slash = {"name": "x", "url": PVR_URL + "/", "about": "x"}
+    unrelated = {
+        "name": "Package page",
+        "url": "https://pypi.org/project/pdf-tooling/",
+        "about": "x",
+    }
+    assert _pvr_contact_links({"blank_issues_enabled": False}) == []
+    assert _pvr_contact_links({"contact_links": []}) == []
+    assert len(_pvr_contact_links({"contact_links": [pvr]})) == 1
+    assert len(_pvr_contact_links({"contact_links": [slash]})) == 1
+    assert _pvr_contact_links({"contact_links": [unrelated]}) == []
+    assert _pvr_contact_links({"contact_links": [unrelated, pvr]}) == [pvr]
+    with pytest.raises(AssertionError):
+        _pvr_contact_links({"contact_links": None})
+
+
+def test_h4_bug_form_still_points_security_reports_at_the_private_channel() -> None:
+    first = _elements(_yaml(BUG_FORM))[0]
+    assert first["type"] == "markdown"
+    assert PVR_URL in first["attributes"]["value"], (
+        "the bug form lost the private-channel URL; the chooser no longer carries the "
+        "link, so the bug form and SECURITY.md are the in-repo pointers (PDF-141)"
+    )
 
 
 # H5 -- AC6

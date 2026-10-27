@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-141] Drop the redundant security entry from the issue chooser — 2026-10-27
+
+- The chooser's `contact_links` security entry is removed from `.github/ISSUE_TEMPLATE/config.yml`: with private vulnerability reporting on, GitHub renders its own "Report a security vulnerability" entry, so the chooser no longer lists two.
+- Blank issues stay off, and `SECURITY.md` and the bug form still point at the private advisory form; the chooser arm in `tests/test_community_health_files.py` is inverted, backed by a two-sided detector self-test, and a new arm pins the advisory URL in the bug form.
+- Repo files only: no behaviour change.
+
 ## [PDF-146] Close the non-escalated SIGTERM/SIGHUP stray-temp race and the macOS escalated-arm liveness read — 2026-10-27
 
 - **Fixed, B-510 (ledger `7e5cb962e2`, `5c0e8b1f47`):** a worker's async `_WorkerUnwind` could land inside `AtomicWriter.__enter__` after the temp inode existed, or at `__exit__`'s frame entry, where nothing discarded it; the worker still exited by its own `os._exit(143)`, so the pool recorded no SIGKILL and the census read `escalated=0/8 strays>=1`. A worker-only unwind shield in `safety/atomic.py` now defers a guarded signal while a writer is in `__enter__`/`__exit__`, discards, and raises it afterwards; the `with` body stays interruptible and the shield is inert outside a pool worker.
