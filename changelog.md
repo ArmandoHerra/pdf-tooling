@@ -20,6 +20,10 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-149] Pay the wave-3 instrument and comment debt — 2026-10-27
+
+- **Fixed (test-only), B-517:** PDF-138 AC9's `--out-dir` tier now asserts all four cells (split/rotate x dry/real) against their literal messages with `==`, where it matched substrings; re-pointed the two stale `paths.py:<line>` citations in `tests/test_cli_contract.py` to symbol names, named `ensure_component_lengths` in `plan_output_set`'s docstring, and corrected the `CONTROLS` comment in `tests/unit/test_table_escape.py`. Test-only; no user-facing change.
+
 ## [PDF-148] Re-derive the startup short-summary message vectors from the live ceiling — 2026-10-27
 
 - **Fixed (test-only):** `tests/test_startup_message_short_summary.py` fed the startup-cost message tests two literal factor vectors sized for the 26500 ceiling, so at 53900 (PDF-134) both were green readings and a regression that only touches the red message stayed green (`B-516`, `X-1123`(b)). The vectors are now derived at run time from `STARTUP_COST_RATIO_CEILING_PER_MILLE`, so a later ceiling record needs no edit here.

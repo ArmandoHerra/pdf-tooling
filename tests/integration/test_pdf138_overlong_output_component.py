@@ -110,6 +110,16 @@ NAME_TIER_MESSAGE: Final[str] = (
     + "1.pdf'"
 )
 
+#: PDF-149: the `--out-dir` tier's E5 messages, literal (PDF-64 tier, both verbs, both modes).
+OUT_DIR: Final[str] = "a" * 300
+OUT_DIR_REAL_MESSAGE: Final[str] = (
+    f"destination directory could not be created: {OUT_DIR} (File name too long)"
+)
+OUT_DIR_DRY_MESSAGE: Final[str] = (
+    f"destination directory cannot be created: {OUT_DIR} "
+    f"(path component {OUT_DIR!r} exceeds the filesystem's 255-byte name limit)"
+)
+
 
 # --------------------------------------------------------------------------- #
 # Inputs and cells
@@ -635,7 +645,7 @@ def test_ac9_precedents_unchanged(inputs: dict[str, Path], tmp_path: Path) -> No
         assert refusal["message"] == NAME_TIER_MESSAGE, refusal["message"][:120]
         assert refusal["kind"] == "refused"
     # --out-dir tier: rc 1 both modes, PDF-64's own messages, gate stays behind it
-    long_dir = "a" * 300
+    long_dir = OUT_DIR
     for argv in (
         ["split", single, "--each-page", "--out-dir", long_dir],
         ["rotate", single, "--pages", "1", "--angle", "90", "--out-dir", long_dir],
@@ -646,10 +656,8 @@ def test_ac9_precedents_unchanged(inputs: dict[str, Path], tmp_path: Path) -> No
             assert result.returncode == FAILURE, (argv[0], dry, result.stdout[:300])
             _assert_no_traceback(result)
             message = str((_dry_refusal_any(result) if dry else _real_refusal(result))["message"])
-            if dry:
-                assert "cannot be created" in message and "255-byte name limit" in message
-            else:
-                assert "could not be created" in message and "File name too long" in message
+            expected = OUT_DIR_DRY_MESSAGE if dry else OUT_DIR_REAL_MESSAGE
+            assert message == expected, (argv[0], dry, message[:160])
             assert "-byte filename limit" not in message, "the PDF-138 gate stepped in front"
 
 

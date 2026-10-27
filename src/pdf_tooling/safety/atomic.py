@@ -513,6 +513,10 @@ def plan_output_set(
     1. :func:`_ensure_out_dir` — now able to refuse in both modes (PDF-18).
     2. :func:`~pdf_tooling.safety.paths.ensure_destination_writable`.
     3. per *target*, in order:
+       :func:`~pdf_tooling.safety.paths.ensure_component_lengths` (PDF-138: a
+       pure byte-length gate that makes no OS call, so it answers before any
+       ``stat``; it runs after :func:`_ensure_out_dir`, so PDF-64's
+       ``--out-dir`` tier keeps answering first), then
        :func:`~pdf_tooling.safety.paths.ensure_no_clobber`, then
        :func:`~pdf_tooling.safety.paths.ensure_destination_is_not_an_input`
        (PDF-89) — **after**, and inside the same per-target step, never

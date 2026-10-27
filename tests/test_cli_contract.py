@@ -4718,7 +4718,7 @@ def _plant_dangling_sidecar(sidecar: Path) -> Path:
 # --------------------------------------------------------------------------- #
 # AC3 -- the fix site itself. Neither occupancy test may decide with a bare
 # `Path.exists()`; both must also read `os.path.lexists`, the idiom
-# `target_exists`/`ensure_no_clobber` already ship at `paths.py:169`/`:186`.
+# `safety/paths.py::target_exists` and `::ensure_no_clobber` already ship.
 # --------------------------------------------------------------------------- #
 
 
@@ -4749,8 +4749,8 @@ def test_c23_the_sidecar_occupancy_test_is_not_a_bare_exists(
     RED, free: revert either site to `if not sidecar.exists():` / `if
     sidecar.exists():` and this fails, naming the file and the function --
     fixing only the predicate (`paths.py`) and reverting the writer
-    (`atomic.py`), or vice versa, is exactly the half-fix `paths.py:270-273`'s
-    own TOCTOU rationale forbids.
+    (`atomic.py`), or vice versa, is exactly the half-fix
+    `safety/paths.py::ensure_backup_sidecar_free`'s own TOCTOU rationale forbids.
     """
     calls = _occupancy_decision_calls(REPO_ROOT / relative_path, func_name)
     assert any(call.endswith("lexists") for call in calls), (
