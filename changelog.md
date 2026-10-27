@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-150] Refuse a non-UTF-8 meta set value with the error envelope, and have --dry-run predict it — 2026-10-27
+
+- **`meta set`** now refuses a value that is not Unicode text (any surrogate code point, which is what Python's argv decoder yields for every argv byte the command-line encoding cannot decode) with the existing `usage` error envelope, exit `2`, for `--title`, `--author`, `--subject`, `--keywords` and `--creator` (`3044f42cda`, `B-519`). Before, `--dry-run` predicted `0` while the real run exited `1` with a raw `UnicodeEncodeError` traceback and no envelope; both modes now print the same envelope, naming the option, the byte or code point, its 1-based position and the command-line encoding. Nothing is re-encoded: a value is written as decoded or refused.
+- **Precedence moves (declared):** the check answers before the target, document and password tiers, so an existing `-O` without `--force` (5 to 2), `--clear-all --in-place` without `--no-backup`/`-y` (5 to 2), an encrypted input with `--allow-decrypted-output` and no password (6 to 2) and `--clear-all --title <bad>` (0 to 2, the value was silently ignored) now answer `2`. A missing source stays `4`, and an encrypted input without `--allow-decrypted-output` stays `5`.
+- Successful runs are unchanged: valid non-ASCII, C1 and ASCII-control values write exactly as before, and the success envelopes, `schema_version` `1`, every JSON key and `--help` are byte-identical. The check lives in `ops/metadata.py` only, so the Python API refuses too.
+
 ## [PDF-142] CLI papercuts, batch 3: merge --fail-fast help line, compress reduction sign, "1 pages", --quiet help text — 2026-10-27
 
 - **`merge --help`** no longer documents a `--fail-fast` that no verb declares (`e6a143a5b7`); passing it is still a usage error.

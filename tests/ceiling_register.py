@@ -132,6 +132,41 @@ CEILING_LEDGER: Final[tuple[_CeilingRatification, ...]] = (
             "and the dev-host corroboration passing."
         ),
     ),
+    _CeilingRatification(
+        date="2026-10-27",
+        spec="PDF-150",
+        direction="down",
+        ruling="X-1167",
+        ceilings=MappingProxyType(
+            {
+                "test_coverage_policy.py::PRAGMA_CEILING": 46,
+                "test_docstring_pointers.py::UNTARGETED_CEILING": 35,
+                "test_gate_budget.py::TIMEOUT_CEILING": 30,
+                "test_import_boundaries.py::HELP_MODULE_CEILING": 320,
+                "test_import_boundaries.py::MODULE_SELF_RATIO_CEILING_PER_MILLE": 470,
+                "test_import_boundaries.py::PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE": 2600,
+                "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE": 53900,
+                "test_read_seams.py::BOUNDARY_SITE_CEILING": 12,
+                "test_read_seams.py::METADATA_POPULATION_CEILING": 54,
+                "test_secret_leak_sweeps.py::SWEEP_1_CEILING": 79,
+                "test_secret_leak_sweeps.py::SWEEP_2_DEAD_BUT_HONEST_CEILING": (),
+                "test_secret_leak_sweeps.py::SWEEP_2_GENUINE_CEILING": (
+                    "src/pdf_tooling/ops/merge.py::BOOKMARK_MODES",
+                    "src/pdf_tooling/ops/metadata.py::CLEARABLE_FIELDS",
+                ),
+            }
+        ),
+        reason=(
+            "PDF-150 (X-1167), B-074 F2 debt paid. "
+            "test_secret_leak_sweeps.py::SWEEP_2_GENUINE_CEILING drops "
+            "src/pdf_tooling/ops/metadata.py::SETTABLE_FIELDS: the symbol is now read by "
+            "tests/integration/test_pdf150_meta_set_unencodable_value.py::"
+            "test_ac1_population_is_derived, which derives the CLI population of `meta set` "
+            "against it, so the sweep no longer finds it unread. Nothing else moves and "
+            "nothing rises. Re-measured at landing with "
+            "`uv run python tests/ratchet.py remeasure`: disagreements: 0."
+        ),
+    ),
 )
 
 

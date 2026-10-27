@@ -32,6 +32,7 @@ Nothing here writes. Every byte reaches disk through `safety.AtomicWriter`.
 
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -207,6 +208,34 @@ CLEARED_BACKUP_WARNING_SUFFIX: Final = (
 )
 
 
+def _reject_unencodable_values(sets: Mapping[str, str]) -> None:
+    """PDF-150: refuse (exit 2) a value that is not Unicode text.
+
+    A PDF text string carries any Unicode scalar value (PDFDocEncoding or
+    UTF-16BE), so the only value no engine can write is one holding a
+    surrogate code point, U+D800-U+DFFF. On the CLI those come from exactly one
+    place: Python's argv decoder (os.fsdecode, surrogateescape) maps each argv
+    byte the command-line encoding cannot decode to U+DC80-U+DCFF. Decided from
+    the value alone -- no OS, document or engine call -- so the dry run and the
+    real run give the same answer. Nothing is re-encoded: a value is written as
+    decoded, or refused.
+    """
+    encoding = sys.getfilesystemencoding()
+    for field, value in sets.items():  # the CLI builds `sets` in option-declaration order
+        for position, char in enumerate(value, start=1):
+            point = ord(char)
+            if 0xD800 <= point <= 0xDFFF:
+                what = (
+                    f"byte 0x{point - 0xDC00:02X} could not be decoded"
+                    if 0xDC80 <= point <= 0xDCFF
+                    else f"lone surrogate U+{point:04X}"
+                )
+                raise UsageError(
+                    f"--{field} is not Unicode text: {what} at character {position}; "
+                    f"metadata values must be text in the command-line encoding ({encoding})"
+                )
+
+
 def meta_set_run(
     source: Path,
     *,
@@ -230,10 +259,16 @@ def meta_set_run(
     predicted) -- so the global ``--password-file`` resolvability tier is
     predicted explicitly, via the same credential-free `read_encryption`
     check `ops/crypto.py`'s own dry-run predictions already use.
+
+    PDF-150: every value in `sets` is checked for surrogate code points (an
+    argv byte the command-line encoding could not decode, or a lone surrogate
+    from an API caller) before anything else is planned, so `--dry-run`
+    predicts the same exit 2 the real run returns.
     """
     reject_missing_sources([source])
     if not sets and not clear_producer and not clear_all:
         raise UsageError(f"{VERB_META_SET} requires at least one field flag or a clear flag")
+    _reject_unencodable_values(sets)
 
     target = source if in_place else output
     if target is None:

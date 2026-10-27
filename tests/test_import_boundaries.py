@@ -5533,8 +5533,11 @@ def test_the_pdf134_register_record_moves_only_the_startup_key() -> None:
     from ceiling_register import CEILING_LEDGER
 
     key = "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE"
-    record, previous = CEILING_LEDGER[-1], CEILING_LEDGER[-2]
     named = [record for record in CEILING_LEDGER if record.spec == "PDF-134"]
+    # X-1167: bind the PDF-134 record by spec (and its predecessor by index), not by position,
+    # so a later append by another spec cannot red this arm.
+    index = next(i for i, r in enumerate(CEILING_LEDGER) if r.spec == "PDF-134")
+    record, previous = CEILING_LEDGER[index], CEILING_LEDGER[index - 1]
     assert len(named) == int(STARTUP_COST_RATIO_CEILING_PER_MILLE != 26500), (
         f"{len(named)} PDF-134 register record(s) for a ceiling of "
         f"{STARTUP_COST_RATIO_CEILING_PER_MILLE}"
@@ -5542,7 +5545,9 @@ def test_the_pdf134_register_record_moves_only_the_startup_key() -> None:
     moved_up = record.ceilings[key] > previous.ceilings[key]
     governing_p95 = STARTUP_COST_CALIBRATION[STARTUP_COST_REDERIVATION.governing].loaded_p95
     for _ in named:
-        assert record.spec == "PDF-134", f"the newest register record is {record.spec}"
+        assert CEILING_LEDGER[-1].ceilings[key] == record.ceilings[key], (
+            f"the newest register record is {CEILING_LEDGER[-1].spec}, and it moved the startup key"
+        )
         assert record.direction == ("up" if moved_up else "down"), (
             f"direction {record.direction!r} does not match the move {previous.ceilings[key]} "
             f"-> {record.ceilings[key]}"
