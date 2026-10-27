@@ -165,7 +165,7 @@ import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import TracebackType
+from types import FrameType, TracebackType
 from typing import IO, Final
 
 from pdf_tooling.cli.exit_codes import OK
@@ -192,6 +192,83 @@ from pdf_tooling.safety.paths import (
 )
 from pdf_tooling.safety.policy import SafetyPolicy
 from pdf_tooling.safety.tempnames import TEMP_PREFIX
+
+# --------------------------------------------------------------------------- #
+# PDF-146 -- the worker-only UNWIND SHIELD.
+#
+# A render worker's signal handler raises ``_WorkerUnwind`` at an eval-breaker
+# site (the instruction after a call or a backward jump, or a Python frame's
+# entry). Two such sites sit OUTSIDE the ``with AtomicWriter(...)`` statement's
+# protected region while the temp inode exists: inside ``__enter__`` after
+# ``NamedTemporaryFile`` created the file (window A), and at ``__exit__``'s own
+# frame entry (window B). ``__exit__`` never discards from either, so the worker
+# left a toolkit temp beside the destination although the pool never SIGKILLed it.
+#
+# The shield defers a guarded signal that arrives while a writer is inside
+# ``__enter__`` or ``__exit__`` and delivers it, after a discard, from a point that
+# cannot leak the temp. The ``with`` BODY is never shielded (PDF-101: a signal must
+# unwind a worker blocked in the body). It is inert unless a hook is installed, and
+# only a pool worker installs one, so the parent and every in-process verb behave as
+# before. ``safety/`` imports nothing from ``ops/``: the hook is handed in.
+# --------------------------------------------------------------------------- #
+
+#: How many writers are inside ``__enter__``/``__exit__`` right now (a counter,
+#: because a writer may be opened inside another writer's body).
+_SHIELD_DEPTH: int = 0
+#: The first guarded signal deferred inside the shield; ``0`` when none is pending.
+_PENDING_SIGNUM: int = 0
+#: Raises the worker's unwind for a signal number. ``None`` outside a pool worker.
+_UNWIND_HOOK: Callable[[int], None] | None = None
+#: ``AtomicWriter.__exit__``'s code object, bound after the class. A handler that is
+#: handed THIS frame was delivered at ``__exit__``'s frame entry, before any of its
+#: statements could raise the shield.
+_EXIT_CODE: object = None
+
+
+def install_unwind_hook(hook: Callable[[int], None] | None) -> None:
+    """Install (or, with ``None``, remove) the worker's unwind hook. Private by
+    convention: ``ops/procpool.py``'s worker initializer is the only caller."""
+    global _UNWIND_HOOK
+    _UNWIND_HOOK = hook
+
+
+def defer_unwind(signum: int, frame: FrameType | None) -> bool:
+    """Called first by the worker's signal handler. ``True`` means the signal was
+    recorded for later delivery and the handler must return without raising.
+
+    No call may be added before the shield is raised in ``__enter__``/``__exit__``:
+    a callee's frame entry is a delivery site whose frame the ``_EXIT_CODE`` clause
+    does not match.
+    """
+    global _PENDING_SIGNUM
+    if _UNWIND_HOOK is None:
+        return False
+    if _SHIELD_DEPTH > 0 or (frame is not None and frame.f_code is _EXIT_CODE):
+        if not _PENDING_SIGNUM:
+            _PENDING_SIGNUM = signum
+        return True
+    return False
+
+
+def _lower_shield_and_deliver(writer: AtomicWriter) -> None:
+    """Lower the shield; if a signal was deferred, discard first and then raise it.
+
+    The pending slot is read ONCE, and on the clear path nothing is called between
+    that read and the decrement: with no call there is no delivery site, so a signal
+    cannot be deferred after the read and never be read again.
+    """
+    global _SHIELD_DEPTH, _PENDING_SIGNUM
+    signum = _PENDING_SIGNUM
+    if signum:
+        _PENDING_SIGNUM = 0
+        writer._discard()
+        _SHIELD_DEPTH -= 1
+        hook = _UNWIND_HOOK
+        if hook is not None:
+            hook(signum)
+    else:
+        _SHIELD_DEPTH -= 1
+
 
 __all__ = [
     "AtomicWriter",
@@ -937,14 +1014,21 @@ class AtomicWriter:
         return item
 
     def __enter__(self) -> AtomicWriter:
-        # X-67: the plan runs in BOTH modes. Everything it calls is read-only,
-        # and a dry run that skipped it could not predict its own refusals.
-        self._dry_run = self.policy.dry_run
-        self._plan()
-        # THE GATE. Immediately above _open_temp(), the first mutating call.
-        if self._dry_run:
-            return self
-        self._open_temp()
+        global _SHIELD_DEPTH
+        _SHIELD_DEPTH += 1
+        try:
+            # X-67: the plan runs in BOTH modes. Everything it calls is read-only,
+            # and a dry run that skipped it could not predict its own refusals.
+            self._dry_run = self.policy.dry_run
+            self._plan()
+            # THE GATE. Immediately above _open_temp(), the first mutating call.
+            if not self._dry_run:
+                self._open_temp()
+        except BaseException:
+            self._discard()
+            _lower_shield_and_deliver(self)
+            raise
+        _lower_shield_and_deliver(self)
         return self
 
     def __exit__(
@@ -953,16 +1037,24 @@ class AtomicWriter:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        if self._dry_run:
-            return
-        if exc_type is not None:
-            self._discard()
-            return
+        global _SHIELD_DEPTH
+        _SHIELD_DEPTH += 1
         try:
-            self._commit()
-        except BaseException:
-            self._discard()
-            raise
+            if self._dry_run:
+                return
+            if exc_type is not None:
+                self._discard()
+                return
+            if _PENDING_SIGNUM:
+                self._discard()
+                return
+            try:
+                self._commit()
+            except BaseException:
+                self._discard()
+                raise
+        finally:
+            _lower_shield_and_deliver(self)
 
     # -- steps 2 and 3 ------------------------------------------------------ #
 
@@ -1252,6 +1344,9 @@ class AtomicWriter:
 #: reliably removed on every exit path, so a leftover one here would be a
 #: bug report, not evidence ``doctor`` is designed to surface.
 _SCRATCH_PREFIX: Final[str] = "pdftoolkit-scratch-"
+
+
+_EXIT_CODE = AtomicWriter.__exit__.__code__
 
 
 class ScratchDir:

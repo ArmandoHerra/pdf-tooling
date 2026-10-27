@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-146] Close the non-escalated SIGTERM/SIGHUP stray-temp race and the macOS escalated-arm liveness read — 2026-10-27
+
+- **Fixed, B-510 (ledger `7e5cb962e2`, `5c0e8b1f47`):** a worker's async `_WorkerUnwind` could land inside `AtomicWriter.__enter__` after the temp inode existed, or at `__exit__`'s frame entry, where nothing discarded it; the worker still exited by its own `os._exit(143)`, so the pool recorded no SIGKILL and the census read `escalated=0/8 strays>=1`. A worker-only unwind shield in `safety/atomic.py` now defers a guarded signal while a writer is in `__enter__`/`__exit__`, discards, and raises it afterwards; the `with` body stays interruptible and the shield is inert outside a pool worker.
+- **Fixed, B-508 (ledger `09b237db84`):** `_terminate_pool` read a worker the executor's manager thread had already reaped as `undetermined` wherever `/proc` is missing (macOS); it now falls back to an `os.kill(pid, 0)` presence probe and names it `stale-liveness`, as it already did on Linux.
+- **Added tests:** an opcode-boundary sweep of every eval-breaker site of the `with AtomicWriter` statement on the running interpreter, the forced-escalation arm with `/proc` hidden, and an exit-code fidelity arm proving every un-escalated worker died by its own unwind (143).
+- No timing constant moved and PDF-131's signal-arm module is byte-identical.
+
 ## [PDF-147] Bound the CI network fetches: the engines-present apt install and the secret-scan gitleaks download — 2026-10-27
 
 - **Fixed (CI), B-469 / ledger `ae19c17972`:** `engines-present` / `Install engines` split into a bounded, retried fetch half (`apt-get update` and `install --download-only`, each under `timeout -s KILL`, 3 attempts, a `::warning` per failed attempt and an `::error` on exhaustion) and one offline `--no-download` dpkg half that never runs on a partial fetch. A slow mirror can no longer spend the job's 30-minute budget before the suite starts. The package set is unchanged.

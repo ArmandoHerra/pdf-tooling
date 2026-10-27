@@ -51,6 +51,9 @@ discard the temp file, and :func:`_run_task` makes the exit prompt instead of
 leaving it to :func:`_terminate_pool`'s SIGKILL at the end of the grace window
 (design consideration (e) — trading orphaned processes for orphaned
 ``.pdftoolkit-*`` temp files would not be a fix either).
+PDF-146: a signal that lands while a writer is inside ``__enter__`` or ``__exit__``
+is deferred by the unwind shield in ``safety/atomic.py`` and raised only after that
+writer has discarded its temp, and the ``with`` body stays interruptible.
 
 THE START METHOD IS A PRODUCT DECISION, NOT AN INTERPRETER DEFAULT
 -------------------------------------------------------------------
@@ -133,7 +136,10 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from contextlib import contextmanager
+from types import FrameType
 from typing import Final, ParamSpec, TypedDict, TypeVar
+
+from pdf_tooling.safety import atomic
 
 __all__ = ["guarded_process_pool"]
 
@@ -411,7 +417,7 @@ def _absorb_signal(signum: int, _frame: object) -> None:
     return None
 
 
-def _raise_worker_unwind(signum: int, _frame: object) -> None:
+def _raise_worker_unwind(signum: int, _frame: FrameType | None) -> None:
     """The one worker-local handler for every guarded signal (PDF-101).
 
     One-shot: the FIRST signal re-points all three names to :func:`_absorb_signal`
@@ -421,6 +427,10 @@ def _raise_worker_unwind(signum: int, _frame: object) -> None:
     `AtomicWriter._discard` would lose the unlink (measured: residue in 10 of 10
     trials).
     """
+    # PDF-146: a deferral returns BEFORE the repoint, so it never consumes the
+    # one-shot, and it never re-sends a signal (a re-send recursed to RecursionError).
+    if atomic.defer_unwind(signum, _frame):
+        return
     for name in _GUARDED_SIGNAL_NAMES:
         sig = getattr(signal, name, None)
         if sig is not None:
@@ -457,6 +467,17 @@ class _GuardedExecutor(ProcessPoolExecutor):
         return super().submit(_run_task, fn, *args, **kwargs)
 
 
+def _install_unwind_handlers() -> None:
+    """Install the worker-local handler on every guarded signal and the shield hook."""
+    for name in _GUARDED_SIGNAL_NAMES:
+        sig = getattr(signal, name, None)
+        if sig is None:  # pragma: no cover - POSIX-only names, not on Windows
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(sig, _raise_worker_unwind)
+    atomic.install_unwind_hook(lambda signum: _raise_worker_unwind(signum, None))
+
+
 def _worker_initializer(parent_pid: int) -> None:
     """The pool's ``initializer=`` — runs first, inside every worker, before
     it processes a single work item (design considerations (b), (c), (h)).
@@ -491,12 +512,7 @@ def _worker_initializer(parent_pid: int) -> None:
     # which is exactly what left `.pdftoolkit-*` residue (design (e)).
     # `Process.terminate()` sends SIGTERM and the parent's teardown follows a group
     # signal milliseconds later, so all three names unwind through the same handler.
-    for name in _GUARDED_SIGNAL_NAMES:
-        sig = getattr(signal, name, None)
-        if sig is None:  # pragma: no cover - POSIX-only names, not on Windows
-            continue
-        with contextlib.suppress(ValueError, OSError):
-            signal.signal(sig, _raise_worker_unwind)
+    _install_unwind_handlers()
 
     # (b) SIGKILL to the PARENT is uncatchable -- nothing in this process
     # can react to it. PR_SET_PDEATHSIG is the one thing the CHILD side can
@@ -592,9 +608,32 @@ def _kernel_state(pid: int, proc_root: str = "/proc") -> str:
     return f"running:{state}" if ppid == os.getpid() else "absent"
 
 
+def _kernel_presence(pid: int) -> str:
+    """A portable presence probe for the hosts where ``_kernel_state`` is blind.
+
+    ``os.kill(pid, 0)`` signals nothing; it only asks whether the pid names a
+    process. `ProcessLookupError` means no process or zombie holds it, so the child
+    was reaped (by us or by the executor's manager thread): ``absent``. Success or
+    `PermissionError` means something holds the pid: ``present``. Anything else, and
+    a pid that is not a single process (it would address a group), is
+    ``unavailable``.
+    """
+    if pid <= 0:
+        return "unavailable"
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return "absent"
+    except PermissionError:
+        return "present"
+    except OSError:
+        return "unavailable"
+    return "present"
+
+
 class _ProcessOutcome:
     """What `_terminate_pool` observed about one process. Plain `__slots__`
-    class: this module takes no new import, so no dataclass / NamedTuple."""
+    class: no dataclass / NamedTuple, which keeps this module's imports to the few it needs."""
 
     __slots__ = (
         "exitcode_after",
@@ -759,6 +798,10 @@ def _terminate_pool(
         with contextlib.suppress(Exception):
             pid = getattr(process, "pid", -1)
         kernel = "not-read" if after == _DEAD else _kernel_state(pid)
+        if kernel == "unavailable":
+            # No /proc (macOS): `Process.is_alive()` can read `alive` for a pid the
+            # executor's manager thread already reaped, so ask the kernel portably.
+            kernel = _kernel_presence(pid)
         outcomes.append(
             _ProcessOutcome(
                 pid,
