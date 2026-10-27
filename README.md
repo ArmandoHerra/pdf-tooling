@@ -326,15 +326,18 @@ A supplied password is checked even when the document would open without one: an
 
 ## Upgrading to 1.3
 
-A `1.2.x` invocation or script that relied on any of the following observes a different message or timing at `1.3`. These changes are on `main` and ship in the first `1.3` release.
+A `1.2.x` invocation or script that relied on any of the following observes a different exit code, message or timing at `1.3`. These changes are on `main` and ship in the first `1.3` release.
 
 | In 1.2 | In 1.3 | What to change |
 |---|---|---|
 | `rasterize` ran `--threads` workers whatever the page size; at A4 `--dpi 1360` the default worker count peaked near `15` GB | when the largest planned page times the worker count would exceed `357,913,940` pixels, fewer workers render, a `warnings` entry and a `warning:` stderr line name the count, and `--dry-run` predicts it. Exit codes and the files written are unchanged | nothing; a consumer that asserts an empty `warnings` array for `rasterize` should allow an entry beginning `render workers capped at`. Lower `--dpi` or `--width` to render with more workers |
+| `compress` printed the saving with the sign of a gain: `message` read `(+97.8%)` for a shrink and `(-10.1%)` for growth | the message prints the size change: `(-97.8%)` for a shrink, `(+10.1%)` for growth, so the sign flips for the same files. Only the `message` text changes; `bytes_before`, `bytes_after` and every key are unchanged | a script that parses the percentage out of the `compress` message must expect the flipped sign; better, read `bytes_before` and `bytes_after` instead of the text |
+| `merge` said `1 pages selected` for a single page in its per-item message; `merge --help` documented a `--fail-fast` that no verb declares; `--quiet --help` did not say that result `warning:` lines still print | the message reads `1 page selected`; `merge --help` no longer mentions `--fail-fast` (passing it is still a usage error, exit `2`); the `--quiet` help says result `warning:` lines still print, and its behaviour is unchanged | a script matching the old per-item text should match `page` with an optional `s`; drop any `--fail-fast` from `merge` calls (it never worked) |
+| `meta set` with a `--title`, `--author`, `--subject`, `--keywords` or `--creator` value holding bytes the command-line encoding cannot decode (a lone surrogate in Python): the real run exited `1` with a raw `UnicodeEncodeError` traceback and no envelope, while `--dry-run` predicted `0` (or `1` for a corrupt input, where the real run also exited `1`) | both modes refuse at exit `2` with the `usage` error envelope, naming the option, the byte, its position and the encoding; nothing is re-encoded. The check answers before the target, document and password tiers, so for such a value an existing `-O` without `--force` (`5` to `2`), `--clear-all --in-place` without `--no-backup` or `-y` (`5` to `2`), an encrypted input with `--allow-decrypted-output` and no password (`6` to `2`), `--clear-all --title <value>` (`0` to `2`, the value was silently ignored) and a corrupt input (`1` to `2`) now exit `2`. A missing source stays `4` | pass values that decode (re-encode the argument as UTF-8 text); a script that handled the old exit `1` or traceback for this case should expect exit `2` and the envelope. Valid non-ASCII values behave as before |
 
 `schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed.
 
-Re-derived at `549f589` on `2026-10-26`.
+Re-derived at `6980609` on `2026-10-27`.
 
 ## Upgrading to 1.2
 
