@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-144] Commit a 1280x640 social preview image and its source — 2026-10-28
+
+- Added `docs/social/social-preview.png` (1280x640 RGB PNG) and `docs/social/generate-social-preview.py`, the Pillow script that renders it; the script docstring carries the re-render, upload and read-back steps.
+- The image draws the distribution name and the README's first positioning sentence verbatim, over a crop of one frame of the demo GIF; it carries no counts or claims. `tests/test_pdf144_social_preview.py` holds that contract.
+- It ships in neither the wheel nor the sdist, and is not part of the website build.
+- Uploading it in repository Settings → Social preview is an operator act.
+
 ## [PDF-150] Remediation: test_ac12_frozen_surface measures PDF-150's own commit, not every later branch — 2026-10-27
 
 - **Defect (B-529, X-1181):** the arm diffed the working tree against `git merge-base HEAD origin/main`, so after landing it forbade any README, `cli/`, `errors.py`, `adapters/`, `tests/golden/` edit, any other `src/` file and any `src/` deletion on every later branch; the 1.3.0 bump worktree went 1 failed / 7754 passed and `make ci` exited 2.
