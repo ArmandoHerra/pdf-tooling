@@ -5325,7 +5325,8 @@ def test_the_vacuous_rendering_extractor_fails_if_the_heading_is_deleted() -> No
 
 MIGRATION_HEADING_1_1 = "## Upgrading to 1.1"
 MIGRATION_HEADING_1_2 = "## Upgrading to 1.2"
-MIGRATION_HEADING_1_3 = "## Upgrading to 1.3"
+# Whole-line match: the newline keeps `## Upgrading to 1.3.1` from counting as this heading.
+MIGRATION_HEADING_1_3 = "## Upgrading to 1.3\n"
 RENDER_BUDGET_HEADING = "## Render budget"
 
 
