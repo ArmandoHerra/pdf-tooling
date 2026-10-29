@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-153] Re-render the README demo GIF from the current tree in a pinned VHS container — 2026-10-29
+
+- **The demo now shows the current output.** The `compress` row prints a reduction with a negative sign, and the merge row reads `1 page selected`, instead of the stale `+50.6%` and `1 pages selected` recorded from an older release.
+- **The render runs in a digest-pinned container via `docs/demo/render.sh`**, installing the checked-out tree with `uv sync --frozen`; nothing is installed on the host. The same run writes a text transcript that a test reads without OCR.
+- **The social-preview frame oracle now enforces its one-glyph-cell cap**, proved red on a 28x21 cell and on a 12x22 cell.
+- **The social preview image is unchanged:** the crop's decoded pixels are identical, so the PNG was not rewritten and no re-upload is owed.
+
 ## [PDF-154] Make the changelog-history test red on a committed body edit, and classify the shallow-clone skip — 2026-10-29
 
 - **Defect (`8fc7fb963a`, B-532):** `tests/test_changelog_history.py` compared heading SETS per commit, so a committed deletion of a bullet inside a landed entry, or a move of landed entries, left the module green and rule 3 ("never edit a landed entry") unenforced. Two new per-commit guards compare each commit with its own parent: every entry present at both keeps a byte-identical body, and entries present at both keep their relative order. The three historical body edits (`1a1459f`, `0878999`, `c06ba66`, each an appended bullet) sit in a frozen, SHA-keyed register of size 3, the guard's positive control on real history.

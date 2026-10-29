@@ -31,11 +31,13 @@ CLAIM_PATTERN = (
     r"(?i)\b(stars?|downloads?|users?|fastest|faster|best|leading|#1|\d+\s*(%|x\b|k\b|\+))"
 )
 
-# Measured on the tracked docs/demo/pdf-tooling.gif (PDF-130), zero tolerance.
-PRE_DRYRUN_FRAME = 245  # cursor-off frame just before `--dry-run` is typed
-PRE_LS_FRAME = 493  # cursor-on frame just before `ls` is typed
+# Measured on the tracked docs/demo/pdf-tooling.gif (PDF-130 tape, re-rendered by PDF-153),
+# zero tolerance.
+PRE_DRYRUN_FRAME = 237  # cursor-off frame just before `--dry-run` is typed
+PRE_LS_FRAME = 477  # cursor-on frame just before `ls` is typed
 PROMPT_CELL = (16, 238, 28, 258)  # the band-3 prompt glyph, persists
 FRAME_CROP_SHA256 = "26abb135ea0cc106e1f2ed8b40668ea7b718201bd5e88beecc69efeac745abb0"
+PROMPT_CELL_MAX = (12, 21)  # (width, height): one glyph cell (PDF-144 frame criterion)
 
 
 def _load_generator():
@@ -162,7 +164,10 @@ def _frame(gif: Image.Image, index: int) -> Image.Image:
     return gif.convert("RGB")
 
 
-def _fence_violations(crop_box: tuple[int, int, int, int]) -> list[str]:
+def _fence_violations(
+    crop_box: tuple[int, int, int, int],
+    prompt_cell: tuple[int, int, int, int] = PROMPT_CELL,
+) -> list[str]:
     """Pixel oracle on the GIF's own frame history (exact equality, no OCR)."""
     module = _load_generator()
     left, top, right, bottom = crop_box
@@ -177,12 +182,17 @@ def _fence_violations(crop_box: tuple[int, int, int, int]) -> list[str]:
         pre_ls_next = _frame(gif, PRE_LS_FRAME + 1)
 
     # Upper fence.
+    pl, pt, pr, pb = prompt_cell
+    cell_w, cell_h = pr - pl, pb - pt
+    if cell_w <= 0 or cell_h <= 0:
+        out.append(f"upper fence: PROMPT_CELL is {cell_w}x{cell_h} and has no area")
+    elif cell_w > PROMPT_CELL_MAX[0] or cell_h > PROMPT_CELL_MAX[1]:
+        out.append(f"upper fence: PROMPT_CELL is {cell_w}x{cell_h}, over the 12x21 glyph-cell cap")
     above = (0, 0, width, top)
     if top > 0 and pre_dry.crop(above).tobytes() != last.crop(above).tobytes():
         out.append(
             "upper fence: rows above the crop differ between PRE_DRYRUN_FRAME and FRAME_INDEX"
         )
-    pl, pt, pr, pb = PROMPT_CELL
     if not (left <= pl and top <= pt and pr <= right and pb <= bottom):
         out.append("upper fence: PROMPT_CELL not inside the crop")
     else:
@@ -199,7 +209,7 @@ def _fence_violations(crop_box: tuple[int, int, int, int]) -> list[str]:
             out.append(
                 f"upper fence: {stray} non-BG crop pixels outside PROMPT_CELL at PRE_DRYRUN_FRAME"
             )
-        if pre_dry.crop(PROMPT_CELL).tobytes() != last.crop(PROMPT_CELL).tobytes():
+        if pre_dry.crop(prompt_cell).tobytes() != last.crop(prompt_cell).tobytes():
             out.append("upper fence: PROMPT_CELL differs from FRAME_INDEX")
     if pre_dry_next.crop(crop_box).tobytes() == pre_dry.crop(crop_box).tobytes():
         out.append("upper fence: frame PRE_DRYRUN_FRAME+1 does not change the crop")
@@ -241,6 +251,17 @@ def test_social_preview_frame_fence_arm_can_fail() -> None:
     assert any(v.startswith("upper fence") for v in upper), upper
     lower = _fence_violations((left, top, right, bottom + 21))
     assert any(v.startswith("lower fence") for v in lower), lower
+
+
+def test_social_preview_prompt_cell_cap_arm_can_fail() -> None:
+    crop = _load_generator().CROP_BOX
+    pl, pt, _, _ = PROMPT_CELL
+    wide = (pl, pt, pl + 28, pt + 21)
+    tall = (pl, pt, pl + 12, pt + 22)
+    edge = (pl, pt, pl + 12, pt + 21)
+    for cell in (wide, tall):
+        assert any("over the 12x21 glyph-cell cap" in v for v in _fence_violations(crop, cell))
+    assert not any("glyph-cell cap" in v for v in _fence_violations(crop, edge))
 
 
 def test_social_preview_is_a_plain_blob() -> None:
