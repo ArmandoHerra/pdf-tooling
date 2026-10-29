@@ -63,6 +63,12 @@ the page centre (default {DEFAULT_ROTATE_DEG:g}); --font-size is points
 (default {DEFAULT_FONT_SIZE:g}); --color is "r,g,b", each 0.0-1.0 (default
 "{_DEFAULT_COLOR_TEXT}").
 
+CHARACTERS. --text is drawn in Helvetica-Bold, a base-14 font that uses the
+WinAnsi encoding and embeds nothing. A character outside that encoding -- CJK,
+emoji, most non-Latin scripts, and control characters such as a newline or a
+tab -- is drawn as '?', and the run warns, naming each one as a U+XXXX code
+point. --dry-run predicts the same warning; the exit code is unchanged.
+
 ROTATED PAGES. A page with its own /Rotate entry receives the layer in
 UNROTATED page space, so the watermark rotates together with the page's
 content when displayed -- correct, documented behaviour, not a defect.
@@ -100,7 +106,12 @@ def watermark_command(
     ctx: typer.Context,
     source: Annotated[Path, operand_argument(metavar="PDF", help="The PDF to watermark.")],
     text: Annotated[
-        str | None, typer.Option("--text", help="The watermark text. Required.")
+        str | None,
+        typer.Option(
+            "--text",
+            help="The watermark text. Required. "
+            "Characters outside WinAnsi are drawn as '?' and named in a warning.",
+        ),
     ] = None,
     pages: Annotated[
         str | None,

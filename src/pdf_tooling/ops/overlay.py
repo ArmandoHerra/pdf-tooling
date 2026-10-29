@@ -99,6 +99,11 @@ DEFAULT_ROTATE_DEG: Final[float] = 45.0
 #: `--from-page`'s default (Design §D4.5).
 DEFAULT_FROM_PAGE: Final[int] = 1
 
+#: PDF-151 D1: mirrors `ops/compose.py`'s `_TEXT_ENCODING`, minus the C0/DEL
+#: codes reportlab's `winansi` codec lacks (handled in `_drawable_text`);
+#: `create`'s constant is private and `create` is frozen, so it is not imported.
+_WATERMARK_ENCODING: Final[str] = "cp1252"
+
 
 def reject_missing_sources(sources: Sequence[Path]) -> None:
     """`PLAN.md` §10's own contract, shared by every cmd module."""
@@ -127,6 +132,40 @@ def _blank_warning(blank_pages: tuple[int, ...]) -> tuple[str, ...]:
     )
 
 
+def _encodable(character: str) -> bool:
+    try:
+        character.encode(_WATERMARK_ENCODING)
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _drawable_text(text: str) -> tuple[str, str | None]:
+    """PDF-151 (OR-71): replace every character the watermark font cannot draw with '?'.
+
+    Returns the text to draw and, when anything was replaced, one warning that
+    names each distinct replaced character as a U+XXXX code point, in order of
+    first occurrence. Pure: no OS, document or engine call, so the dry run and
+    the real run give the same answer.
+    """
+    drawn: list[str] = []
+    replaced: list[int] = []
+    for character in text:
+        point = ord(character)
+        if point < 0x20 or point == 0x7F or not _encodable(character):
+            drawn.append("?")
+            replaced.append(point)
+        else:
+            drawn.append(character)
+    if not replaced:
+        return text, None
+    points = ", ".join(f"U+{point:04X}" for point in dict.fromkeys(replaced))
+    return "".join(drawn), (
+        f"--text: {len(replaced)} character(s) outside the font's WinAnsi encoding "
+        f"were replaced with '?': {points}"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # The filesystem tier (X-67/B-054), through the ONE shared planner (PDF-18
 # Design D1): `watermark` and `stamp` are single-target `("--output",
@@ -149,6 +188,7 @@ def _dry_run_result(
     target: Path,
     plan: PlannedOutputs,
     password: PasswordSource = NO_PASSWORD,
+    warnings: tuple[str, ...] = (),
 ) -> OperationResult:
     """PDF-37: neither `watermark` nor `stamp` otherwise opens the document
     under ``--dry-run``, so the global ``--password-file`` resolvability
@@ -182,7 +222,7 @@ def _dry_run_result(
         verb=verb,
         dry_run=True,
         items=(item,),
-        warnings=(),
+        warnings=warnings,
         duration_ms=0,
     )
 
@@ -215,13 +255,25 @@ def watermark_run(
     receives the layer in UNROTATED page space, so the watermark rotates
     with the page's own content when displayed; that is documented,
     intended behaviour, not a defect.
+
+    PDF-151 (`OR-71`): every character of `text` the base-14 font cannot draw
+    (outside its WinAnsi encoding, including C0 controls and U+007F) is drawn
+    as `?`, and one run-level warning names each as U+XXXX. The check is pure
+    and precedes the dry/real fork, so `--dry-run` predicts the same warning.
     """
     reject_missing_sources([source])
+    text, text_warning = _drawable_text(text)
+    text_warnings = (text_warning,) if text_warning else ()
     target = _resolve_target(source, output=output, in_place=in_place, verb=VERB_WATERMARK)
     plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
     if policy.dry_run:
         return _dry_run_result(
-            VERB_WATERMARK, source=source, target=target, plan=plan, password=password
+            VERB_WATERMARK,
+            source=source,
+            target=target,
+            plan=plan,
+            password=password,
+            warnings=text_warnings,
         )
 
     started = time.monotonic()
@@ -306,7 +358,7 @@ def watermark_run(
             verb=VERB_WATERMARK,
             dry_run=False,
             items=(item,),
-            warnings=_blank_warning(tuple(blank)),
+            warnings=_blank_warning(tuple(blank)) + text_warnings,
             duration_ms=0,
         )
     finally:
