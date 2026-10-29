@@ -20,6 +20,10 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [B-546] correction: the [PDF-154] entry omitted two Makefile comment figures — 2026-10-29
+
+- **The `[PDF-154]` entry's closing bullet, "Tests and changelog only", is not exact:** its own commit (`9798fb4`) also edits two `Makefile` comment lines under `OR-79` — the `docs-gate` history-arm count THIRTEEN → SEVENTEEN and the skip census "all 26" → "all 30". Comments only; no recipe, target or shipped behaviour changed. The `[PDF-154]` entry is left byte-unchanged (rule 3); this entry is the correction (`B-546`, ledger `7ebc8ae16a`).
+
 ## [PDF-153] Re-render the README demo GIF from the current tree in a pinned VHS container — 2026-10-29
 
 - **The demo now shows the current output.** The `compress` row prints a reduction with a negative sign, and the merge row reads `1 page selected`, instead of the stale `+50.6%` and `1 pages selected` recorded from an older release.
