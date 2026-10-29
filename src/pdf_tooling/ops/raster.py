@@ -69,6 +69,7 @@ a ``render workers capped at`` warning names the count, in both tiers.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Final
 
@@ -92,6 +93,7 @@ from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
 from pdf_tooling.safety.policy import SafetyPolicy
+from pdf_tooling.safety.writer_warnings import record_writer_warnings
 from pdf_tooling.secret import Secret
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -232,6 +234,7 @@ def _render_one(
     grayscale: bool,
     policy: SafetyPolicy,
     password: str | None = None,
+    writer_messages: list[str] | None = None,
 ) -> ItemResult:
     """Render, encode and write exactly one page. Everything a worker does
     for one work item, in one call — nothing opened here escapes it
@@ -242,6 +245,9 @@ def _render_one(
         password: PDF-37 -- the REVEALED plaintext, or ``None``. See
             :data:`_WorkItem`'s own docstring for why this is a plain
             string rather than a :class:`~pdf_tooling.secret.Secret`.
+        writer_messages: PDF-156 -- when given, receives the writer's own
+            safety warnings (already printed to this process's stderr), so the
+            chunk can hand them back to the parent for the envelope.
     """
     started = time.monotonic()
     source_path = Path(source)
@@ -269,6 +275,9 @@ def _render_one(
     with AtomicWriter(target_path, policy=policy, kind="image") as writer:
         _encode(rendered.image, writer.stream, fmt=fmt, quality=quality)
 
+    if writer_messages is not None:
+        writer_messages.extend(writer.warnings)
+
     duration_ms = int((time.monotonic() - started) * 1000)
     message = (
         f"page {page_number}: {rendered.width_px}x{rendered.height_px} "
@@ -286,6 +295,27 @@ def _render_one(
     )
 
 
+class _RenderedChunk(list[tuple[int, ItemResult]]):
+    """PDF-156. What :func:`_render_chunk` returns: iterating it still yields
+    ``(slot, ItemResult)`` 2-tuples, and ``slot_warnings`` carries the safety
+    warnings each slot's writer printed in the worker. Module-level and a
+    ``list`` subclass so it pickles (its ``__dict__`` travels under protocol 2+)."""
+
+    slot_warnings: tuple[tuple[int, tuple[str, ...]], ...]
+
+    def __init__(
+        self,
+        items: Iterable[tuple[int, ItemResult]] = (),
+        slot_warnings: tuple[tuple[int, tuple[str, ...]], ...] = (),
+    ) -> None:
+        super().__init__(items)
+        self.slot_warnings = slot_warnings
+
+    @property
+    def writer_warnings(self) -> tuple[str, ...]:
+        return tuple(message for _slot, messages in self.slot_warnings for message in messages)
+
+
 def _render_chunk(
     items: list[_WorkItem],
     *,
@@ -293,7 +323,7 @@ def _render_chunk(
     quality: int | None,
     grayscale: bool,
     policy: SafetyPolicy,
-) -> list[tuple[int, ItemResult]]:
+) -> _RenderedChunk:
     """The worker `--threads` dispatches (Design §D5.5). Module-level, and
     every argument and return value is plain, picklable data (AC4/AC7) — a
     process boundary is exactly what production crosses too (module
@@ -302,24 +332,31 @@ def _render_chunk(
     :func:`rasterize_document` uses, not ``ThreadPoolExecutor``). AC7 proves
     this same function against a single-worker ``ThreadPoolExecutor``
     baseline instead, the one thread-pool shape that cannot race."""
-    return [
-        (
-            slot,
-            _render_one(
-                source,
-                page_number,
-                target,
-                dpi=dpi,
-                width_px=width_px,
-                fmt=fmt,
-                quality=quality,
-                grayscale=grayscale,
-                policy=policy,
-                password=password,
-            ),
+    done: list[tuple[int, ItemResult]] = []
+    warned: list[tuple[int, tuple[str, ...]]] = []
+    for slot, source, page_number, target, dpi, width_px, password in items:
+        messages: list[str] = []
+        done.append(
+            (
+                slot,
+                _render_one(
+                    source,
+                    page_number,
+                    target,
+                    dpi=dpi,
+                    width_px=width_px,
+                    fmt=fmt,
+                    quality=quality,
+                    grayscale=grayscale,
+                    policy=policy,
+                    password=password,
+                    writer_messages=messages,
+                ),
+            )
         )
-        for slot, source, page_number, target, dpi, width_px, password in items
-    ]
+        if messages:
+            warned.append((slot, tuple(messages)))
+    return _RenderedChunk(done, tuple(warned))
 
 
 def rasterize_document(
@@ -537,6 +574,7 @@ def _rasterize_planned(
     # completion order, only ever from the slot each item was assigned at
     # planning time.
     collected: dict[int, ItemResult] = {}
+    worker_warnings: dict[int, tuple[str, ...]] = {}
     if chunks:
         # B-055: `guarded_process_pool` is `ProcessPoolExecutor` plus a
         # signal teardown -- see `ops/procpool.py`'s module docstring for
@@ -557,8 +595,14 @@ def _rasterize_planned(
                 for chunk in chunks
             ]
             for future in futures:
-                for slot, item in future.result():
+                chunk_result = future.result()
+                for slot, item in chunk_result:
                     collected[slot] = item
+                # PDF-156: the worker's writer messages travel back with the chunk.
+                worker_warnings.update(dict(chunk_result.slot_warnings))
+    # ...and are recorded in ascending slot order, never completion order.
+    for slot in sorted(worker_warnings):
+        record_writer_warnings(worker_warnings[slot])
 
     # Slot order is per-PAGE; `assemble` re-imposes per-SOURCE input order
     # around it and splices in any source that failed planning, so a failed

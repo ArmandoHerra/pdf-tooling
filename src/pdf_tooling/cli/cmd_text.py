@@ -127,7 +127,12 @@ def _emit(outcome: TextOutcome, fmt: OutputFormat, *, has_destination: bool) -> 
     """Render the run, and place the banner on the stream that keeps stdout
     pipe-clean (Design §2): stdout when the payload is a run report, stderr when
     stdout is carrying the extracted text itself."""
+    # Function-local, as PDF-108's are: `--help` must not load the carriage module.
+    from pdf_tooling.ops.carriage import merge_writer_warnings
+
     payload = build_payload(outcome)
+    echoed = list(payload["warnings"])
+    payload = {**payload, "warnings": merge_writer_warnings(echoed)}  # PDF-156
 
     if fmt is OutputFormat.JSON:
         typer.echo(render_payload(payload, fmt))
@@ -148,7 +153,7 @@ def _emit(outcome: TextOutcome, fmt: OutputFormat, *, has_destination: bool) -> 
         if body:
             typer.echo(body)
 
-    for warning in payload["warnings"]:
+    for warning in echoed:
         print(f"warning: {warning}", file=sys.stderr)
 
 

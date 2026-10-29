@@ -1543,13 +1543,26 @@ def _attach(
             amend,
             close_ledger,
             open_ledger,
+            publish_writer_warnings,
             record_sources,
             refuse_decrypted_output,
         )
-        from pdf_tooling.output import install_result_hook, reset_result_hook
+        from pdf_tooling.output import (
+            install_publish_hook,
+            install_result_hook,
+            reset_publish_hook,
+            reset_result_hook,
+        )
+        from pdf_tooling.safety.writer_warnings import (
+            close_writer_warnings,
+            open_writer_warnings,
+        )
 
         ledger_token = open_ledger()
         hook_token = install_result_hook(amend)
+        # PDF-156 (X-1209): the AtomicWriter's stderr warnings reach the envelope.
+        writer_token = open_writer_warnings()
+        publish_token = install_publish_hook(publish_writer_warnings)
         try:
             # PDF-115 (OR-26/X-1001): the ONE refusal gate. After the ledger and
             # hook exist, before any verb body, credential-free, and blind to
@@ -1563,6 +1576,8 @@ def _attach(
                 record_sources(_verb_name(ctx), _sources(ctx, kwargs))
             return func(**kwargs)
         finally:
+            reset_publish_hook(publish_token)
+            close_writer_warnings(writer_token)
             reset_result_hook(hook_token)
             close_ledger(ledger_token)
 

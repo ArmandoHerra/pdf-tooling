@@ -28,8 +28,10 @@ __all__ = [
     "auto_format",
     "emit_error",
     "emit_result",
+    "install_publish_hook",
     "install_result_hook",
     "render_payload",
+    "reset_publish_hook",
     "reset_result_hook",
 ]
 
@@ -54,6 +56,28 @@ def reset_result_hook(
     token: Token[Callable[[OperationResult], OperationResult] | None],
 ) -> None:
     _RESULT_HOOK.reset(token)
+
+
+#: PDF-156. A second run-scoped slot, ENVELOPE-ONLY: what it adds to ``warnings``
+#: reaches the rendered payload and NOT the stderr loop, because its source (the
+#: ``AtomicWriter``) already printed it. :func:`emit_result` snapshots the
+#: stderr list before applying it.
+_PUBLISH_HOOK: ContextVar[Callable[[OperationResult], OperationResult] | None] = ContextVar(
+    "output_publish_hook", default=None
+)
+
+
+def install_publish_hook(
+    hook: Callable[[OperationResult], OperationResult],
+) -> Token[Callable[[OperationResult], OperationResult] | None]:
+    """Install the envelope-only *hook*; pair with :func:`reset_publish_hook`."""
+    return _PUBLISH_HOOK.set(hook)
+
+
+def reset_publish_hook(
+    token: Token[Callable[[OperationResult], OperationResult] | None],
+) -> None:
+    _PUBLISH_HOOK.reset(token)
 
 
 class OutputFormat(StrEnum):
@@ -87,14 +111,16 @@ def emit_result(result: OperationResult, fmt: OutputFormat) -> None:
     hook = _RESULT_HOOK.get()
     if hook is not None:
         result = hook(result)
+    echoed = list(result.warnings)  # PDF-156: stderr prints exactly what it printed before
+    publish = _PUBLISH_HOOK.get()
+    if publish is not None:
+        result = publish(result)
     payload = result.to_dict()
     text = render_payload(payload, fmt)
     if text:
         print(text, file=sys.stdout)
-    warnings = payload.get("warnings") or []
-    if isinstance(warnings, list):
-        for warning in warnings:
-            print(f"warning: {warning}", file=sys.stderr)
+    for warning in echoed:
+        print(f"warning: {warning}", file=sys.stderr)
 
 
 def emit_error(error: PdfToolingError, fmt: OutputFormat) -> None:
