@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-154] Make the changelog-history test red on a committed body edit, and classify the shallow-clone skip — 2026-10-29
+
+- **Defect (`8fc7fb963a`, B-532):** `tests/test_changelog_history.py` compared heading SETS per commit, so a committed deletion of a bullet inside a landed entry, or a move of landed entries, left the module green and rule 3 ("never edit a landed entry") unenforced. Two new per-commit guards compare each commit with its own parent: every entry present at both keeps a byte-identical body, and entries present at both keep their relative order. The three historical body edits (`1a1459f`, `0878999`, `c06ba66`, each an appended bullet) sit in a frozen, SHA-keyed register of size 3, the guard's positive control on real history.
+- **B-530:** the PDF-150 frozen-surface skip reason now starts `shallow clone`, so `scripts/assert_skips.py` files it under `shallow-clone` instead of `unclassified`; a probe drives the real skip path against the live registry. `scripts/assert_skips.py` gains no class.
+- Tests and changelog only; no landed entry was edited (the `[PDF-150] Remediation` entry's "(shallow history)" wording stays as written; this entry records the reword).
+
 ## [PDF-152] Refuse meta set --clear-all combined with a set flag at exit 2 — 2026-10-29
 
 - **Defect (B-527, OR-70):** `meta set x.pdf --clear-all --title plain -O y.pdf` exited `0` in both modes and silently dropped the `--title` (and `--author`, `--subject`, `--keywords`, `--creator`, an empty `--title ""`, on XMP-bearing inputs too). `--clear-all` combined with any field flag or with `--clear-producer` now exits `2` (`kind: "usage"`) with a message naming `--clear-all` and every other flag supplied, in declaration order; `--dry-run` answers the same envelope byte for byte, and no output file or `.bak` is written.

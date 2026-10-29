@@ -46,6 +46,18 @@ Every one of these guards is **born red on history**, and history is not
 rewritten to make them green (HC-4, and ``changelog.md:16``). The debt is
 carried in dated registers whose size is itself asserted, so it stays visible
 and readable instead of being erased by a back-fill the file's own rules forbid.
+
+BODIES AND ORDER, NOT ONLY HEADINGS (PDF-154)
+---------------------------------------------
+Ledger ``8fc7fb963a`` measured that the heading-SET arms above stay green when a
+commit deletes one bullet inside a landed entry, or moves landed entries around:
+a set holds neither a body nor an order. Two per-commit guards now close that:
+every entry present at a commit's parent and still present at the commit has a
+byte-identical body, and the entries present at both keep their relative order.
+Each commit is compared with its OWN parent, read from committed objects, never
+with ``HEAD`` or a remote ref, so a later commit cannot hide an earlier edit.
+:data:`BODY_EDIT_EXEMPT` is a fourth frozen register: the three historical
+follow-up commits that appended one bullet to their own newest entry.
 """
 
 from __future__ import annotations
@@ -559,3 +571,220 @@ def test_no_commit_subject_carries_a_malformed_spec_id() -> None:
     offenders = malformed_spec_id_subjects([subject_of(sha) for sha in commits()])
 
     assert offenders == [], "\n  ".join(["commit subject(s) with an illegal spec id:", *offenders])
+
+
+# --------------------------------------------------------------------------- #
+# PDF-154 -- entry bodies and entry order, per commit against its own parent
+# --------------------------------------------------------------------------- #
+
+
+def entry_bodies(text: str | None) -> dict[str, str]:
+    """`heading -> body` where the body is every byte after the heading line up
+    to the next heading (or EOF). Byte-exact: no strip, no normalization. The
+    first occurrence of a repeated heading wins. Text above the first heading
+    (the preamble) is not an entry."""
+    if text is None:
+        return {}
+    matches = list(HEADING.finditer(text))
+    bodies: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        bodies.setdefault(match.group(0), text[match.end() : end])
+    return bodies
+
+
+def duplicate_headings(text: str | None) -> list[str]:
+    """Every heading that occurs more than once, one item per extra occurrence."""
+    seen: set[str] = set()
+    repeated: list[str] = []
+    for raw in headings(text):
+        if raw in seen:
+            repeated.append(raw)
+        seen.add(raw)
+    return repeated
+
+
+def body_edits(old: str | None, new: str | None) -> list[str]:
+    """Sorted headings present in both texts whose bodies differ, plus every
+    heading *new* repeats. A heading on one side only is a landing or a loss,
+    which `losses_at` owns."""
+    before, after = entry_bodies(old), entry_bodies(new)
+    edited = {raw for raw in before if raw in after and before[raw] != after[raw]}
+    return sorted(edited | set(duplicate_headings(new)))
+
+
+def reorders(old: str | None, new: str | None) -> list[str]:
+    """Sorted headings present in both texts whose index differs between the two
+    filtered sequences (an adjacent swap names both)."""
+    in_new = set(entry_bodies(new))
+    in_old = set(entry_bodies(old))
+    kept_old = [raw for raw in dict.fromkeys(headings(old)) if raw in in_new]
+    kept_new = [raw for raw in dict.fromkeys(headings(new)) if raw in in_old]
+    return sorted(raw for raw in kept_old if kept_old.index(raw) != kept_new.index(raw))
+
+
+def body_edits_at(sha: str) -> list[str]:
+    """Headings whose body *sha* changed relative to its own parent(s)."""
+    edited: set[str] = set()
+    for parent in parents_of(sha):
+        edited |= set(body_edits(changelog_at(parent), changelog_at(sha)))
+    return sorted(edited)
+
+
+def reorders_at(sha: str) -> list[str]:
+    """Headings whose relative order *sha* changed relative to its own parent(s)."""
+    moved: set[str] = set()
+    for parent in parents_of(sha):
+        moved |= set(reorders(changelog_at(parent), changelog_at(sha)))
+    return sorted(moved)
+
+
+#: PDF-154 (E1). The only commits in history that edited the body of an entry
+#: present at their parent: each appended one bullet to its own spec's newest
+#: entry, pushed as its own commit. Registered, never reverted (changelog.md
+#: rule 3, HC-4). Census taken at e83c743; a fourth member is a test failure.
+BODY_EDIT_EXEMPT = {
+    "1a1459f1881fddd79ae8d39b241c4801ad138636": (
+        "[PDF-95] fix: the hero transcript arm asserted the host's ls, not the product's",
+        "## [PDF-95] The fold, rebuilt around a real transcript — 2026-09-20",
+    ),
+    "0878999180ca5c8e3ff5abedb09141be5c78ac25": (
+        "[PDF-96] test: ratify the census ceiling the new diagram module enters at",
+        "## [PDF-96] The spine and the contracts — 2026-09-20",
+    ),
+    "c06ba66b8afe26810e2730ef8906ea7f9f430cbe": (
+        "[PDF-97] ci: the website job needs the history its arms read",
+        "## [PDF-97] Density: verbs, features and posture — 2026-09-21",
+    ),
+}
+
+
+def test_the_body_edit_guard_names_exactly_the_registered_commits_when_the_register_is_emptied() -> (  # noqa: E501
+    None
+):
+    """The positive control: with no exemption applied, the guard names exactly
+    the registered commits, each with exactly its registered heading.
+
+    Scoped to the census era (history up to and including the last historical
+    edit, `c06ba66`), so a NEW unregistered edit fails the guard arm alone and
+    not this self-test too. The era end is a literal, not derived from the
+    register, so emptying the register still leaves a non-empty era to measure."""
+    require_full_history()
+    era_end = "c06ba66b8afe26810e2730ef8906ea7f9f430cbe"
+    ordered = commits()
+    assert era_end in ordered, "the census era end is unreachable"
+    era = ordered[: ordered.index(era_end) + 1]
+    found = {sha: body_edits_at(sha) for sha in era if body_edits_at(sha)}
+    expected = {sha: [heading] for sha, (_subject, heading) in BODY_EDIT_EXEMPT.items()}
+    assert found == expected
+
+
+def test_no_other_commit_ever_edits_the_body_of_an_entry_present_at_its_parent() -> None:
+    """changelog.md rule 3, enforced: a landed entry's body is never edited."""
+    require_full_history()
+    offenders = [
+        f"{sha[:7]} ({subject_of(sha)}) edited {body_edits_at(sha)}"
+        for sha in commits()
+        if sha not in BODY_EDIT_EXEMPT and body_edits_at(sha)
+    ]
+    assert offenders == [], "\n  ".join(
+        ["a landed changelog entry's body was edited (rule 3):", *offenders]
+    )
+
+
+def test_the_body_edit_register_holds_exactly_three_commits_named_by_sha_subject_and_heading() -> (
+    None
+):
+    require_full_history()
+    assert len(BODY_EDIT_EXEMPT) == 3
+    reachable = set(commits())
+    for sha, (subject, heading) in BODY_EDIT_EXEMPT.items():
+        assert _git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0, (
+            f"{sha} is not reachable; a register naming an unreachable commit is a silencer"
+        )
+        assert sha in reachable, f"{sha} is not reachable from HEAD"
+        assert subject_of(sha) == subject, (
+            f"{sha[:7]}'s subject is {subject_of(sha)!r}, not the registered {subject!r}"
+        )
+        assert body_edits_at(sha) == [heading]
+
+
+def test_no_commit_ever_reorders_entries_present_at_its_parent() -> None:
+    require_full_history()
+    offenders = [
+        f"{sha[:7]} ({subject_of(sha)}) reordered {reorders_at(sha)}"
+        for sha in commits()
+        if reorders_at(sha)
+    ]
+    assert offenders == [], "\n  ".join(["landed changelog entries were reordered:", *offenders])
+
+
+def _log(*entries: tuple[str, ...]) -> str:
+    """An anchor line plus entries given as (heading, bullet, bullet...)."""
+    parts = [f"# Changelog\n\n{ANCHOR}\n"]
+    for heading, *bullets in entries:
+        parts.append(f"\n{heading}\n\n" + "\n".join(bullets) + "\n")
+    return "".join(parts)
+
+
+H_A = "## [PDF-03] third — 2026-08-03"
+H_B = "## [PDF-02] second — 2026-08-02"
+H_C = "## [PDF-01] first — 2026-08-01"
+ENTRY_A = (H_A, "- a1", "- a2")
+ENTRY_B = (H_B, "- b1", "- b2")
+ENTRY_C = (H_C, "- c1")
+
+
+def test_body_edits_names_a_deleted_bullet() -> None:
+    old = _log(ENTRY_A, ENTRY_B, ENTRY_C)
+    new = _log(ENTRY_A, (H_B, "- b1"), ENTRY_C)
+
+    assert body_edits(old, new) == [H_B]
+    assert reorders(old, new) == []
+
+
+def test_body_edits_names_a_bullet_appended_to_a_landed_entry() -> None:
+    old = _log(ENTRY_A, ENTRY_B, ENTRY_C)
+    new = _log(ENTRY_A, ENTRY_B, (H_C, "- c1", "- c2"))
+
+    assert body_edits(old, new) == [H_C]
+
+
+def test_body_edits_names_both_entries_when_a_bullet_moves_between_them() -> None:
+    old = _log(ENTRY_A, ENTRY_B, ENTRY_C)
+    new = _log((H_A, "- a1"), (H_B, "- b1", "- b2", "- a2"), ENTRY_C)
+
+    assert body_edits(old, new) == sorted([H_A, H_B])
+
+
+def test_body_edits_names_a_whitespace_only_edit() -> None:
+    old = _log(ENTRY_A, (H_B, "- b1", "", "- b2"), ENTRY_C)
+    new = _log(ENTRY_A, ENTRY_B, ENTRY_C)
+
+    assert body_edits(old, new) == [H_B]
+
+
+def test_a_new_entry_prepended_below_the_anchor_is_neither_a_body_edit_nor_a_reorder() -> None:
+    old = _log(ENTRY_B, ENTRY_C)
+    new = _log(ENTRY_A, ENTRY_B, ENTRY_C)
+
+    assert body_edits(old, new) == []
+    assert reorders(old, new) == []
+
+
+def test_reorders_names_both_entries_of_an_adjacent_swap() -> None:
+    old = _log(ENTRY_A, ENTRY_B, ENTRY_C)
+    new = _log(ENTRY_B, ENTRY_A, ENTRY_C)
+
+    assert reorders(old, new) == sorted([H_A, H_B])
+    assert body_edits(old, new) == []
+
+
+def test_body_edits_reports_a_duplicated_heading() -> None:
+    # The first occurrence keeps its body byte for byte, so only the repeat can
+    # be what the guard names.
+    old = _log(ENTRY_A, ENTRY_B, ENTRY_C) + "\n"
+    new = old + f"{H_B}\n\n- b-other\n"
+
+    assert entry_bodies(old) == {h: entry_bodies(new)[h] for h in entry_bodies(old)}
+    assert body_edits(old, new) == [H_B]

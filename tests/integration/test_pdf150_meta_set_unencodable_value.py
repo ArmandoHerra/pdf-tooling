@@ -979,8 +979,9 @@ def test_ac12_frozen_surface() -> None:
     assert UsageError.exit_code == 2 and UsageError.kind == "usage"
     # X-1182: history-dependent, so skip only where the pinned commit or its parent is absent
     # (a shallow clone; a depth-1 clone AT the pin has the commit but not its parent).
+    # PDF-154: the reason carries the shallow-clone census token (B-530).
     if any(_git("cat-file", "-e", f"{PDF150_COMMIT}{rev}^{{commit}}") is None for rev in ("", "^")):
-        pytest.skip(f"shallow history: PDF-150 commit {PDF150_COMMIT[:7]} or its parent is absent")
+        pytest.skip(f"shallow clone: PDF-150 commit {PDF150_COMMIT[:7]} or its parent is absent")
     subject = _git("log", "-1", "--format=%s", PDF150_COMMIT)
     assert subject is not None and subject.strip() == PDF150_SUBJECT, (
         f"PDF150_COMMIT no longer names PDF-150: {subject!r}"
@@ -1071,3 +1072,26 @@ def test_ac12_synthetic_s3_a_cli_touch_is_named(tmp_path: Path) -> None:
     )
     found = "\n".join(_frozen_surface_violations(repo, base, s3, env))
     assert "src/pdf_tooling/cli/x.py" in found
+
+
+def test_ac12_shallow_skip_reason_is_classified_shallow_clone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PDF-154 / B-530: drive the REAL skip call site with an absent pinned commit
+    and assert the live skip-census registry files its reason under `shallow-clone`
+    and under no other class."""
+    import importlib.util
+
+    monkeypatch.setattr(sys.modules[__name__], "_git", lambda *args, **kwargs: None)
+    with pytest.raises(pytest.skip.Exception) as raised:
+        test_ac12_frozen_surface()
+    reason = raised.value.msg
+
+    script = REPO_ROOT / "scripts" / "assert_skips.py"
+    spec = importlib.util.spec_from_file_location("assert_skips_pdf154_probe", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    claimants = [name for name, pattern in module.SKIP_CLASSES.items() if pattern.search(reason)]
+    assert claimants == ["shallow-clone"], (reason, claimants)
