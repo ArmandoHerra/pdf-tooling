@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-151] Make watermark --text warn and draw ? for characters outside WinAnsi — 2026-10-29
+
+- **`watermark --text`** now draws `?` in Helvetica-Bold for every character the base-14 font cannot draw — CJK, emoji, most non-Latin scripts, and control characters such as a newline, a tab or ESC — where it drew a ZapfDingbats square (■) for each, at exit `0` with `warnings: []` (`d8d5dfa6f0`, `B-525`, ruling `OR-71`).
+- The run now carries one `warnings` entry, echoed on stderr as a `warning:` line, naming each replaced character as a `U+XXXX` code point, e.g. `--text: 2 character(s) outside the font's WinAnsi encoding were replaced with '?': U+6F22, U+1F600`; `--dry-run` predicts the same entry. Exit codes are unchanged.
+- A `--text` made only of drawable characters produces the same output, byte for byte. `create` and `stamp` are unchanged; `watermark --help` now says which characters `--text` can draw.
+
 ## [PDF-144] Commit a 1280x640 social preview image and its source — 2026-10-28
 
 - Added `docs/social/social-preview.png` (1280x640 RGB PNG) and `docs/social/generate-social-preview.py`, the Pillow script that renders it; the script docstring carries the re-render, upload and read-back steps.
