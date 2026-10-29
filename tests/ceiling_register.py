@@ -167,6 +167,41 @@ CEILING_LEDGER: Final[tuple[_CeilingRatification, ...]] = (
             "`uv run python tests/ratchet.py remeasure`: disagreements: 0."
         ),
     ),
+    _CeilingRatification(
+        date="2026-10-29",
+        spec="PDF-152",
+        direction="down",
+        ruling="operator scope ruling 2026-10-29 (orchestrator relay)",
+        ceilings=MappingProxyType(
+            {
+                "test_coverage_policy.py::PRAGMA_CEILING": 46,
+                "test_docstring_pointers.py::UNTARGETED_CEILING": 35,
+                "test_gate_budget.py::TIMEOUT_CEILING": 30,
+                "test_import_boundaries.py::HELP_MODULE_CEILING": 320,
+                "test_import_boundaries.py::MODULE_SELF_RATIO_CEILING_PER_MILLE": 470,
+                "test_import_boundaries.py::PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE": 2600,
+                "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE": 53900,
+                "test_read_seams.py::BOUNDARY_SITE_CEILING": 12,
+                "test_read_seams.py::METADATA_POPULATION_CEILING": 54,
+                "test_secret_leak_sweeps.py::SWEEP_1_CEILING": 79,
+                "test_secret_leak_sweeps.py::SWEEP_2_DEAD_BUT_HONEST_CEILING": (),
+                "test_secret_leak_sweeps.py::SWEEP_2_GENUINE_CEILING": (
+                    "src/pdf_tooling/ops/merge.py::BOOKMARK_MODES",
+                ),
+            }
+        ),
+        reason=(
+            "PDF-152 (operator scope ruling 2026-10-29, orchestrator relay; X-1167 "
+            "precedent), B-074 F3 debt paid. "
+            "test_secret_leak_sweeps.py::SWEEP_2_GENUINE_CEILING drops "
+            "src/pdf_tooling/ops/metadata.py::CLEARABLE_FIELDS: the symbol is now read by "
+            "tests/integration/test_pdf152_meta_set_clear_all_refuses_set_flags.py::"
+            "test_ac1_population_is_derived, which derives the CLI population of `meta set` "
+            "against it, so the sweep no longer finds it unread. Nothing else moves and "
+            "nothing rises. Re-measured at landing with "
+            "`uv run --no-sync python tests/ratchet.py remeasure`: disagreements: 0."
+        ),
+    ),
 )
 
 

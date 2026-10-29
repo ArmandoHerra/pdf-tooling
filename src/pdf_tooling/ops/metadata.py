@@ -236,6 +236,31 @@ def _reject_unencodable_values(sets: Mapping[str, str]) -> None:
                 )
 
 
+def _reject_clear_all_with_other_flags(
+    sets: Mapping[str, str], *, clear_producer: bool, clear_all: bool
+) -> None:
+    """PDF-152 (OR-70): --clear-all is mutually exclusive with every field flag
+    and with --clear-producer, at exit 2.
+
+    --clear-all empties document-level /Info and deletes the XMP packet, so a
+    field set beside it would be silently dropped. The combination is refused,
+    never applied after the clear (OR-70 rejected clear-then-apply). Decided
+    from the arguments alone -- no OS, document or engine call -- so --dry-run
+    gives the real run's answer, byte for byte.
+    """
+    if not clear_all:
+        return
+    flags = [f"--{field}" for field in sets]  # the CLI builds `sets` in declaration order
+    if clear_producer:
+        flags.append("--clear-producer")
+    if flags:
+        raise UsageError(
+            f"--clear-all cannot be combined with {', '.join(flags)}; --clear-all empties "
+            "document-level /Info and removes the XMP packet, so run it on its own, then run "
+            "meta set again to set a field"
+        )
+
+
 def meta_set_run(
     source: Path,
     *,
@@ -264,6 +289,11 @@ def meta_set_run(
     argv byte the command-line encoding could not decode, or a lone surrogate
     from an API caller) before anything else is planned, so `--dry-run`
     predicts the same exit 2 the real run returns.
+
+    PDF-152 (OR-70): `--clear-all` combined with a field set or `--clear-producer`
+    is refused with a `UsageError` (exit 2), after the existing usage checks and
+    before the PDF-127, filesystem, password and document tiers, so `--dry-run`
+    predicts it.
     """
     reject_missing_sources([source])
     if not sets and not clear_producer and not clear_all:
@@ -273,6 +303,7 @@ def meta_set_run(
     target = source if in_place else output
     if target is None:
         raise UsageError(f"{VERB_META_SET} requires -O/--output or --in-place")
+    _reject_clear_all_with_other_flags(sets, clear_producer=clear_producer, clear_all=clear_all)
 
     # PDF-127: tier 1, ahead of `plan_filesystem` (which itself raises the
     # sidecar-exists refusal), exactly as `ops/crypto.py::_plan` orders it.

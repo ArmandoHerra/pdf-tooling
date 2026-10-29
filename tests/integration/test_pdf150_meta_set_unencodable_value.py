@@ -615,7 +615,7 @@ ROWS: Final[tuple[_Row, ...]] = (
         "pdf127_clear_all_in_place",
         ("base.pdf",),
         lambda v: ["base.pdf", "--clear-all", "--title", v, "--in-place"],
-        (5, 5),
+        (2, 2),  # PDF-152 (OR-70): was (5, 5)
         (2, 2),
     ),
     _Row(
@@ -647,7 +647,7 @@ ROWS: Final[tuple[_Row, ...]] = (
         "clear_all",
         ("base.pdf",),
         lambda v: ["base.pdf", "--clear-all", "--title", v, "-O", "o.pdf"],
-        (0, 0),
+        (2, 2),  # PDF-152 (OR-70): was (0, 0)
         (2, 2),
     ),
     _Row(

@@ -705,15 +705,15 @@ def test_sweep_2_slack_is_a_red_and_an_exact_set_is_not() -> None:
 
 
 def test_sweep_2_b074_f1_f2_f3_are_found() -> None:
-    """AC13 -- the named findings (`ops/merge.py` `BOOKMARK_MODES` and
-    `ops/metadata.py` `CLEARABLE_FIELDS`) are among the sweep's own genuine
-    results, confirming the mechanism is not merely passing by missing
-    everything. F2 (`ops/metadata.py` `SETTABLE_FIELDS`) was paid by PDF-150
-    (X-1167, a `down` register record: a test now reads it); F1 and F3 remain
-    the witness."""
+    """AC13 -- the named finding (`ops/merge.py` `BOOKMARK_MODES`) is among the
+    sweep's own genuine results, confirming the mechanism is not merely passing
+    by missing everything. F2 (`ops/metadata.py` `SETTABLE_FIELDS`) was paid by
+    PDF-150 (X-1167, a `down` register record: a test now reads it), and F3
+    (`ops/metadata.py` `CLEARABLE_FIELDS`) was paid by PDF-152 the same way;
+    F1 remains the witness."""
     genuine = _sweep_2_live("genuine")
     names = {entry.rsplit(" ", 1)[-1] for entry in genuine}
-    for expected in ("BOOKMARK_MODES", "CLEARABLE_FIELDS"):
+    for expected in ("BOOKMARK_MODES",):
         assert expected in names, f"{expected} not found by the sweep -- {genuine}"
 
 
