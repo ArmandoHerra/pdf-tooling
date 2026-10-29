@@ -293,7 +293,7 @@ Carry the input's /Info and XMP packet unchanged: `rotate`, `extract`, `delete`,
 
 `merge` carries the first input's /Info and XMP packet; each other input whose metadata is not carried is named in a warning, and a later input that needs a password is reported as not checked. `split` carries them into every part. Nothing in them is rewritten: the producer entry, the dates and the XMP packet are the input's. To write an output without them, run `meta set --clear-all` on it.
 
-`meta set --clear-all` empties the document-level /Info dictionary and removes the document-level XMP packet from the file: the output keeps no copy of either, referenced or not, and is written as a single revision. It leaves page-level XMP, /PieceInfo, annotation authors, embedded-file metadata and the trailer /ID in place, and `meta get` reports those. Before 1.1.1, `--clear-all` unlinked the packet but left a copy of it in the file as an unreferenced object, which `meta get` and most tools do not show; a file cleared by an earlier version still holds that copy.
+`meta set --clear-all` empties the document-level /Info dictionary and removes the document-level XMP packet from the file: the output keeps no copy of either, referenced or not, and is written as a single revision. It leaves page-level XMP, /PieceInfo, annotation authors, embedded-file metadata and the trailer /ID in place, and `meta get` reports those. It cannot be combined with a field flag or `--clear-producer`: run it first, then set fields in a second run. Before 1.1.1, `--clear-all` unlinked the packet but left a copy of it in the file as an unreferenced object, which `meta get` and most tools do not show; a file cleared by an earlier version still holds that copy.
 
 
 `encrypt` and `decrypt` change encryption by design. With `--allow-decrypted-output`, an owner-only input needs no password for any of this; a password that is supplied must open it. Every drop is reported as a `warnings` entry and as a `warning:` line on stderr, and `--dry-run` predicts the same lines. Without `--allow-decrypted-output`, `--in-place` on an encrypted input leaves it untouched; with it, the ciphertext is replaced, and the `.bak` keeps it unless `--no-backup` is given.
@@ -323,6 +323,21 @@ A supplied password is checked even when the document would open without one: an
 5. Hyperlinks remain clickable links in the PDF. They are not followed during conversion.
 6. The `soffice` child inherits the caller's environment (tracked as `B-427`).
 7. The settings were verified against LibreOffice 24.2.7.
+
+## Upgrading to 1.3.1
+
+A `1.3.0` invocation or script that relied on any of the following observes a different exit code or message at `1.3.1`. These changes are on `main` and ship in the first `1.3.1` release.
+
+| In 1.3.0 | In 1.3.1 | What to change |
+|---|---|---|
+| `watermark --text` drew a ZapfDingbats square (■) for every character the built-in font cannot draw (CJK, emoji, most non-Latin scripts, and control characters such as a newline, a tab or ESC), exited `0` and reported `warnings: []` | each such character draws `?` in Helvetica-Bold, and the run carries a `warnings` entry, echoed on stderr as a `warning:` line, naming every replaced character as a `U+XXXX` code point (for example `--text: 2 character(s) outside the font's WinAnsi encoding were replaced with '?': U+6F22, U+1F600`); `--dry-run` predicts the same entry. The exit code is unchanged, and a `--text` made only of drawable characters produces the same output byte for byte | nothing for drawable text; a consumer that asserts an empty `warnings` array for `watermark`, or that matched the old squares, should allow the new entry. Use `--text` with characters the font can draw, because the watermark only ever draws those |
+| `meta set --clear-all` combined with a field flag (`--title`, `--author`, `--subject`, `--keywords`, `--creator`, including an empty `--title ""`) exited `0` in both modes and silently dropped the value; combined with `--clear-producer` it also exited `0`. On the precedence cells it answered `5` (the `--in-place` refusal, an existing `-O` target), `6` (a missing password) or `1` (a corrupt input) | the combination exits `2` with the `usage` error envelope, a message naming `--clear-all` and every other flag supplied, and `--dry-run` answers the same envelope; no output file or `.bak` is written. The `--in-place` refusal (`5`), `--in-place --no-backup` or `-y` (`0`), an existing `-O` target (`5`), a missing password (`6`) and a corrupt input (`1`) now answer `2` for the combination only. A missing source (`4`), the encrypted-input gate (`5`) and `--clear-all` alone are unchanged | run `meta set --clear-all` first, then set the fields in a second run; a script that relied on the `0` (the value was never written) or on the old `5`, `6` or `1` for this combination should expect exit `2` |
+
+The `meta set` row in the 1.3 table below covers a `--clear-all --title <value>` that holds undecodable bytes; for a value that decodes, the combination is the `1.3.1` row above.
+
+`schema_version` stays `1`, the published exit-code table is unchanged, and no verb was removed. The demo GIF re-render and the changelog-history test changes in this release have no script-observable effect.
+
+Re-derived at `cccd4fe` on `2026-10-29`.
 
 ## Upgrading to 1.3
 
@@ -462,6 +477,7 @@ Security reports go through the private channel described in [`SECURITY.md`](htt
 - **`convert`:** it parses the untrusted document in-process, so run it without network for input you do not trust; see **OCR and Office conversion**.
 - **Permission bits:** they are advisory, and a reader that can display a page can extract it; see **Encryption, passwords and permissions**.
 - **Oversized pages:** a page whose bitmap would exceed the render budget is refused, not shrunk; see **Render budget**.
+- **`watermark --text`:** it draws only characters the built-in font's WinAnsi encoding covers; any other character draws `?` and is named in a warning.
 - **Page operations:** they carry the input's metadata unless told otherwise; see **What a write does not carry** under **Output contract**.
 
 ## License
