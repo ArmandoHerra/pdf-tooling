@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-152] Refuse meta set --clear-all combined with a set flag at exit 2 — 2026-10-29
+
+- **Defect (B-527, OR-70):** `meta set x.pdf --clear-all --title plain -O y.pdf` exited `0` in both modes and silently dropped the `--title` (and `--author`, `--subject`, `--keywords`, `--creator`, an empty `--title ""`, on XMP-bearing inputs too). `--clear-all` combined with any field flag or with `--clear-producer` now exits `2` (`kind: "usage"`) with a message naming `--clear-all` and every other flag supplied, in declaration order; `--dry-run` answers the same envelope byte for byte, and no output file or `.bak` is written.
+- **Moved cells** (the combination only): the PDF-127 `--in-place` refusal (`5`), `--in-place --no-backup`/`-y` (`0`), an existing `-O` target (`5`), a missing password (`6`) and a corrupt input (`1`) all now answer `2`.
+- **Held cells:** a missing source (`4`), the encrypted-input gate (`5`), `--clear-all --in-place` with no field (PDF-127, `5`), the PDF-150 not-text refusal, the no-destination error and the global output-flag conflicts keep their exact bytes.
+- `--clear-all` alone and the field flags alone are byte-identical to before. No new exit code, error class or JSON key; `schema_version` stays `1`. `meta set --help` states the rule. The two PDF-127 AC7 nodes and two PDF-150 exit-table pairs are re-pointed to the new answer.
+
 ## [PDF-151] Make watermark --text warn and draw ? for characters outside WinAnsi — 2026-10-29
 
 - **`watermark --text`** now draws `?` in Helvetica-Bold for every character the base-14 font cannot draw — CJK, emoji, most non-Latin scripts, and control characters such as a newline, a tab or ESC — where it drew a ZapfDingbats square (■) for each, at exit `0` with `warnings: []` (`d8d5dfa6f0`, `B-525`, ruling `OR-71`).

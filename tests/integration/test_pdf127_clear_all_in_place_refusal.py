@@ -312,15 +312,32 @@ def test_ac6_clear_all_to_a_new_output_is_unchanged(cell: Cell) -> None:
 
 
 def test_ac7_clear_all_with_a_field_set_still_refuses(cell: Cell) -> None:
+    """Superseded by PDF-152 (OR-70): was 5 / 0."""
     proc = cell.run_refused_untouched(*CLEAR_IN_PLACE, "--title", "X")
-    assert proc.returncode == 5
-    assert json.loads(proc.stdout) == REFUSAL_ENVELOPE
+    message = (
+        "--clear-all cannot be combined with --title; --clear-all empties document-level /Info "
+        "and removes the XMP packet, so run it on its own, then run meta set again to set a field"
+    )
+    assert proc.returncode == 2, proc.stdout
+    error = json.loads(proc.stdout)["error"]
+    assert error["code"] == 2 and error["kind"] == "usage" and error["path"] is None, error
+    assert error["message"] == message
     assert cell.listing() == ["E.pdf"]
+    assert not cell.bak.exists()
 
 
 def test_ac7_clear_all_with_a_field_set_and_no_backup_proceeds(cell: Cell) -> None:
-    proc = cell.run(*CLEAR_IN_PLACE, "--title", "X", "--no-backup")
-    assert proc.returncode == 0, proc.stdout
+    """Superseded by PDF-152 (OR-70): was 5 / 0."""
+    proc = cell.run_refused_untouched(*CLEAR_IN_PLACE, "--title", "X", "--no-backup")
+    message = (
+        "--clear-all cannot be combined with --title; --clear-all empties document-level /Info "
+        "and removes the XMP packet, so run it on its own, then run meta set again to set a field"
+    )
+    assert proc.returncode == 2, proc.stdout
+    error = json.loads(proc.stdout)["error"]
+    assert error["code"] == 2 and error["kind"] == "usage" and error["path"] is None, error
+    assert error["message"] == message
+    assert cell.listing() == ["E.pdf"]
     assert not cell.bak.exists()
 
 

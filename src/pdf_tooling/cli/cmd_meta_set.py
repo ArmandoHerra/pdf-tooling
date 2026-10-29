@@ -60,6 +60,8 @@ says so in its message and a warning.
 
 --clear-producer and --clear-all REMOVE keys; they never set a field to the
 empty string.
+--clear-all cannot be combined with a field flag or --clear-producer: the run
+exits 2; run it on its own, then set fields in a second run.
 
 --clear-all's SCOPE (read this before trusting it for privacy). --clear-all
 empties the DOCUMENT-LEVEL /Info dictionary and removes the DOCUMENT-LEVEL
