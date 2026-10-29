@@ -375,12 +375,12 @@ export DOCS_GATE_ENGINES_ASSERT
 #   THIRTEEN arms read the maintainer's planning tree (`PDF_TOOLING_PLANNING_DIR`)
 #         and skip when it is absent; the recipe prints the census itself:
 #         PDF_TOOLING_PLANNING_DIR=/nonexistent make docs-gate
-#   THIRTEEN arms read git history deeper than a shallow checkout, in TWO classes
+#   SEVENTEEN arms read git history deeper than a shallow checkout, in TWO classes
 #         -- the arms guarded by require_full_history(), plus the arms that
 #         cannot check a precondition against a checkout never given the depth
 #         to check it; recipe: run the three arm-3 files inside
 #         `git clone --depth 1`.
-# `ci.yml`'s `test` job has neither, so in CI all 26 skip -- and a skipped
+# `ci.yml`'s `test` job has neither, so in CI all 30 skip -- and a skipped
 # arm is NEVER agreement. `-rs` prints every skip reason and the epilogue below
 # repeats the count, so "it ran" and "it could not run" can never be read as
 # the same green (X-153).
