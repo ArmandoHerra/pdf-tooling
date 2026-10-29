@@ -26,8 +26,11 @@ Read back (should print `true`):
 
 If the README's first sentence changes, the text test goes red; re-render and
 RE-UPLOAD, because GitHub serves the uploaded copy, not the committed file.
-If the demo GIF is re-rendered, the frame test goes red by design; re-review
-the crop and re-pin FRAME_INDEX / CROP_BOX / FRAME_CROP_SHA256.
+If the demo GIF is re-rendered (`bash docs/demo/render.sh`), re-pin FRAME_INDEX /
+CROP_BOX here and PRE_DRYRUN_FRAME / PRE_LS_FRAME / PROMPT_CELL / FRAME_CROP_SHA256 in
+tests/test_pdf144_social_preview.py. Re-render this PNG only if the generator test
+goes red. If the PNG bytes changed, re-upload it and read it back (served sha256 =
+committed).
 """
 
 from __future__ import annotations
@@ -59,7 +62,7 @@ POSITIONING = "An Apache-2.0 PDF" + " toolkit CLI in Python."
 
 #: The demo frame (PDF-130's GIF) and the crop of it that is composited.
 FRAME_SOURCE = REPO_ROOT / "docs" / "demo" / "pdf-tooling.gif"
-FRAME_INDEX = 579
+FRAME_INDEX = 581
 #: (left, top, right, bottom) in GIF pixels: the --dry-run command, its wrapped
 #: continuation and the two `ok=true` rows. Nothing above or below.
 CROP_BOX = (0, 237, 1200, 322)

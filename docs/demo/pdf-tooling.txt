@@ -1,0 +1,731 @@
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+chapter1.pdf -> small/chapter1.pdf ok=true
+chapter2.pdf -> small/chapter2.pdf ok=true
+$
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+chapter1.pdf -> small/chapter1.pdf ok=true
+chapter2.pdf -> small/chapter2.pdf ok=true
+$ ls
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+chapter1.pdf -> small/chapter1.pdf ok=true
+chapter2.pdf -> small/chapter2.pdf ok=true
+$ ls
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+chapter1.pdf -> small/chapter1.pdf ok=true
+chapter2.pdf -> small/chapter2.pdf ok=true
+$ ls
+book-small.pdf  book.pdf  chapter1.pdf  chapter2.pdf
+$
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+$ pdftooling merge chapter1.pdf chapter2.pdf -O book.pdf
+input         output    exit code  message          bytes before  bytes after  duration ms
+------------  --------  ---------  ---------------  ------------  -----------  -----------
+chapter1.pdf  book.pdf  0          1 page selected  1348          2259         0
+chapter2.pdf  book.pdf  0          1 page selected  1348          2259         0
+warning: chapter2.pdf: merge does not carry the input's document /Info to its output
+$ pdftooling compress book.pdf -O book-small.pdf
+input     output          exit code  message                      bytes before  bytes after  duration ms
+--------  --------------  ---------  ---------------------------  ------------  -----------  -----------
+book.pdf  book-small.pdf  0          2259 -> 1259 bytes (-44.3%)  2259          1259         2
+$ pdftooling --dry-run compress chapter1.pdf chapter2.pdf --out-dir small -o json | jq -r '.items[] | "\(.input) -
+> \(.output) ok=\(.ok)"'
+chapter1.pdf -> small/chapter1.pdf ok=true
+chapter2.pdf -> small/chapter2.pdf ok=true
+$ ls
+book-small.pdf  book.pdf  chapter1.pdf  chapter2.pdf
+$
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
