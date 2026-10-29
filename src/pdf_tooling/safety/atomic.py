@@ -192,6 +192,7 @@ from pdf_tooling.safety.paths import (
 )
 from pdf_tooling.safety.policy import SafetyPolicy
 from pdf_tooling.safety.tempnames import TEMP_PREFIX
+from pdf_tooling.safety.writer_warnings import record_writer_warnings
 
 # --------------------------------------------------------------------------- #
 # PDF-146 -- the worker-only UNWIND SHIELD.
@@ -1328,6 +1329,8 @@ class AtomicWriter:
     def _warn(self, message: str) -> None:
         self.warnings.append(message)
         self._warn_sink(message)
+        if self._warn_sink is _default_warn:  # PDF-156: only what reached stderr
+            record_writer_warnings((message,))
 
 
 # --------------------------------------------------------------------------- #

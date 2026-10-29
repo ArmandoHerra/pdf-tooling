@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-156] Publish every AtomicWriter safety warning in the JSON envelope's warnings — 2026-10-29
+
+- **Fixed ledger finding `9e3723551c` (carrier `B-343`, ruling `X-1209`):** a write whose destination resolves onto another filesystem printed `warning: atomicity degraded: …` on stderr but published only the cosmetic warnings, so a populated `warnings` list read as complete. Every warning the `AtomicWriter` prints to stderr is now also in the result envelope's `warnings`, for all 21 writing verbs (`rasterize` workers hand theirs back to the parent, published in page order).
+- **Entries are only appended.** The existing entries keep their order and the new ones go at the tail, deduplicated by exact string; a pre-existing duplicate is kept.
+- **Nothing else moves.** Stderr is byte-unchanged in content and order, exit codes are unchanged, no key is added, and `schema_version` stays `1`. Error envelopes are untouched.
+- **Dry runs publish exactly what they print.** `merge`, `create` and `compose` construct their writer under `--dry-run` and so publish the entry there too; the other dry runs print no such line and publish none.
+
 ## [B-546] correction: the [PDF-154] entry omitted two Makefile comment figures — 2026-10-29
 
 - **The `[PDF-154]` entry's closing bullet, "Tests and changelog only", is not exact:** its own commit (`9798fb4`) also edits two `Makefile` comment lines under `OR-79` — the `docs-gate` history-arm count THIRTEEN → SEVENTEEN and the skip census "all 26" → "all 30". Comments only; no recipe, target or shipped behaviour changed. The `[PDF-154]` entry is left byte-unchanged (rule 3); this entry is the correction (`B-546`, ledger `7ebc8ae16a`).

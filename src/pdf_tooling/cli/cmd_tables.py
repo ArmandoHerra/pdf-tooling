@@ -177,7 +177,12 @@ def _embedded_grids(outcome: TableOutcome) -> str:
 
 
 def _emit(outcome: TableOutcome, fmt: OutputFormat, *, has_destination: bool) -> None:
+    # Function-local, as PDF-108's are: `--help` must not load the carriage module.
+    from pdf_tooling.ops.carriage import merge_writer_warnings
+
     payload = build_payload(outcome)
+    echoed = list(payload["warnings"])
+    payload = {**payload, "warnings": merge_writer_warnings(echoed)}  # PDF-156
 
     if fmt is OutputFormat.JSON:
         typer.echo(render_payload(payload, fmt))
@@ -198,7 +203,7 @@ def _emit(outcome: TableOutcome, fmt: OutputFormat, *, has_destination: bool) ->
         if body:
             typer.echo(body)
 
-    for warning in payload["warnings"]:
+    for warning in echoed:
         print(f"warning: {warning}", file=sys.stderr)
 
 

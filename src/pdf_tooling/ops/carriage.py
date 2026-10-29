@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +51,7 @@ from pdf_tooling.ops.carriage_decl import (
 from pdf_tooling.ops.pagerange import is_valid_spec
 from pdf_tooling.ports.structure import CarriageFacts, require_encryption
 from pdf_tooling.safety.paths import canonical, classify_operand, read_source_bytes
+from pdf_tooling.safety.writer_warnings import writer_warnings
 
 __all__ = [
     "CARRIAGE",
@@ -60,7 +61,9 @@ __all__ = [
     "carriage_warnings",
     "close_ledger",
     "dropped_info",
+    "merge_writer_warnings",
     "open_ledger",
+    "publish_writer_warnings",
     "record",
     "record_sources",
     "refuse_decrypted_output",
@@ -236,6 +239,31 @@ def split_operand(raw: str) -> tuple[str, str | None]:
     if not tail or not is_valid_spec(tail):
         return raw, None
     return raw[:last], tail
+
+
+def merge_writer_warnings(existing: Sequence[str]) -> list[str]:
+    """PDF-156 (X-1209): *existing* unchanged, then each recorded writer warning
+    not already present, in record order. Dedupe key: the exact string.
+
+    Existing entries are never removed, reordered or deduplicated among
+    themselves; the key is the message as printed, never a canonicalized path.
+    """
+    merged = list(existing)
+    present = set(merged)
+    for message in writer_warnings():
+        if message not in present:
+            present.add(message)
+            merged.append(message)
+    return merged
+
+
+def publish_writer_warnings(result: OperationResult) -> OperationResult:
+    """The envelope-only publisher: append the run's recorded ``AtomicWriter``
+    warnings to ``result.warnings``. Returns *result* itself when nothing is added."""
+    merged = merge_writer_warnings(result.warnings)
+    if len(merged) == len(result.warnings):
+        return result
+    return dataclasses.replace(result, warnings=tuple(merged))
 
 
 def amend(result: OperationResult) -> OperationResult:
