@@ -235,6 +235,8 @@ def _plan(
 
     1. ``pre_refusal`` — the invocation-shape refusal the CLI layer computed
        (`encrypt --in-place`'s plaintext-``.bak`` gate). Exit 5.
+       ``encrypt_run`` substitutes the already-encrypted refusal here when the
+       input is encrypted (PDF-158), so the gate never speaks a false premise.
     2. The filesystem tier — no-clobber, unwritable destination, and
        (PDF-89) *target* is not *input_path* itself. Exit 5 or 1.
     3. ``document_refusal`` — already-encrypted (5) or not-encrypted (4),
@@ -336,6 +338,11 @@ def encrypt_run(
     document_refusal = (
         RefusedError(_ALREADY_ENCRYPTED, path=str(source)) if facts.encrypted else None
     )
+    if document_refusal is not None and pre_refusal is not None:
+        # PDF-158: the plaintext-.bak gate's premise is a plaintext input; on an
+        # already-encrypted input no plaintext .bak can result, so the document's
+        # own refusal speaks at the gate's tier (same class, same exit 5).
+        pre_refusal = document_refusal
 
     passwords = [owner] if user is None else [owner, user]
     plan = _plan(

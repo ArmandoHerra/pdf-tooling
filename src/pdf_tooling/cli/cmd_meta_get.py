@@ -69,7 +69,9 @@ holds that no reader follows: unreferenced_metadata is the number of metadata
 streams and /Info-style dictionaries nothing references (an unlinked or freed
 packet), and prior_revisions is the number of earlier revisions an incremental
 save kept (a stripping tool that appends an update leaves the old values in the
-file). A linearized file's two cross-reference sections are one revision. These
+file). A linearized file's two cross-reference sections are one revision. If the
+file's cross-reference chain is cyclic or broken, prior_revisions is an upper
+estimate and the report carries a warning saying so. These
 are counts; this command never removes anything. Rewriting the file, for
 example with 'meta set --clear-all', drops both.
 

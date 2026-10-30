@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-158] CLI papercuts, batch 4: three messages that mislead — 2026-10-30
+
+- **`decrypt`** with no password now says `no password available: pass --password-file PATH …`; it said `no password password available` and named a `--password-password-file` that does not exist (`B-505`). Exit code `6` unchanged.
+- **`encrypt --in-place`** on an already-encrypted input now says `this document is already encrypted` first instead of offering `--no-backup`/`-y` for a plaintext copy that could not exist (`56cb6dc40f`). Exit code `5` unchanged, on `--dry-run` too.
+- **`meta get`** on a file whose `/Prev` cross-reference chain is cyclic or broken now carries one `warnings` entry (and one `warning:` line) saying `prior_revisions` is an estimate (`dc54be861c`). Exit code `0` unchanged; no key added.
+
 ## [B-552] correction: the [PDF-155] entry is dated 2026-10-29; it landed 2026-10-30 — 2026-10-30
 
 - **The `[PDF-155]` entry's date is wrong:** it reads 2026-10-29, but PDF-155 landed 2026-10-30 via PR #97 (`7b04b5d`). Per rule 3 a landed entry is not edited, so the `[PDF-155]` entry is left byte-unchanged and this entry is the correction (`B-552`, ledger `138df37b00`, operator ruling `OR-84`).
