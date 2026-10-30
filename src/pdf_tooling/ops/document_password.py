@@ -144,9 +144,17 @@ def unresolvable_password_error(slot: str) -> AuthError:
     (``_plan_prediction``, `encrypt`/`decrypt`/`permissions`) needs the
     IDENTICAL message for the identical condition, and that call now crosses
     a module boundary the same way ``PasswordSource`` itself does above.
+
+    The single ``password`` slot renders as ``no password available: pass
+    --password-file`` (PDF-158): no repeated noun, and the flag that exists.
     """
+    # The single `password` slot (every verb but `encrypt`) has no noun to
+    # repeat and its declared flag is `--password-file` (PDF-158); mirrors
+    # `PasswordSource.key`'s special case above.
+    noun = "password" if slot == "password" else f"{slot} password"
+    flag = "--password-file" if slot == "password" else f"--{slot}-password-file"
     return AuthError(
-        f"no {slot} password available: pass --{slot}-password-file PATH "
+        f"no {noun} available: pass {flag} PATH "
         f"(or '-' to read one line from stdin), set the matching environment "
         f"variable, or run on a terminal to be prompted",
         redacted=True,

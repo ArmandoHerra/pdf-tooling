@@ -355,7 +355,7 @@ def _xmp_report_fields(
     return fields, raw, None
 
 
-def _residual_surfaces(reader: PdfReader) -> dict[str, object]:
+def _residual_surfaces(reader: PdfReader, chain: _XrefChain) -> dict[str, object]:
     """D2.4: the surfaces `--clear-all` does NOT clear, detected so they are
     REPORTED rather than merely disclaimed. Cheap, pypdf-only detection,
     exactly as D2.4 names it: `"/Metadata" in page`, `"/PieceInfo" in page`,
@@ -386,7 +386,6 @@ def _residual_surfaces(reader: PdfReader) -> dict[str, object]:
             if names_array is not None:
                 embedded_files = len(names_array.get_object()) // 2
     trailer_id = "/ID" in reader.trailer
-    chain = _xref_chain(reader)
     return {
         "page_xmp_pages": page_xmp_pages,
         "doc_piece_info": doc_piece_info,
@@ -418,12 +417,22 @@ _ROOT_KEYS: Final = ("/Root", "/Info", "/Encrypt")
 class _XrefChain:
     """The newest-first cross-reference sections of a file (D2)."""
 
-    __slots__ = ("complete", "prior_revisions", "trailers")
+    __slots__ = ("complete", "estimated", "prior_revisions", "trailers")
 
-    def __init__(self, trailers: list[Any], complete: bool, prior_revisions: int) -> None:
+    def __init__(
+        self,
+        trailers: list[Any],
+        complete: bool,
+        prior_revisions: int,
+        *,
+        estimated: bool = False,
+    ) -> None:
         self.trailers = trailers
         self.complete = complete
         self.prior_revisions = prior_revisions
+        # PDF-158: True exactly when the walk ran, tripped a guard, and the
+        # count took the fail-high `startxref` keyword fallback.
+        self.estimated = estimated
 
 
 def _dict_at(data: bytes, offset: int, reader: PdfReader, *, skip_header: bool) -> Any:
@@ -495,7 +504,7 @@ def _xref_chain(reader: PdfReader) -> _XrefChain:
     count = max(0, len(offsets) - 1 - pair)
     if not complete:
         count = max(count, data.count(b"startxref") - 1 - pair, 0)
-    chain = _XrefChain(trailers, complete, count)
+    chain = _XrefChain(trailers, complete, count, estimated=not complete)
     if paired and complete and len(trailers) == 2 and offsets[0] < (end or 0):
         # The newest revision IS the linearized pair: roots come from both.
         chain.trailers = trailers
@@ -944,7 +953,8 @@ class PypdfStructureAdapter:
         try:
             info = _info_report_dict(reader)
             xmp_fields, xmp_raw, xmp_warning = _xmp_report_fields(reader)
-            residual = _residual_surfaces(reader)
+            chain = _xref_chain(reader)
+            residual = _residual_surfaces(reader, chain)
         except PdfReadError as error:
             raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
         except (KeyError, TypeError, ValueError, OSError) as error:
@@ -955,7 +965,10 @@ class PypdfStructureAdapter:
             xmp=xmp_fields,
             xmp_raw=xmp_raw,
             residual_surfaces=residual,
-            warnings=(xmp_warning,) if xmp_warning else (),
+            warnings=(
+                *((xmp_warning,) if xmp_warning else ()),
+                *((PRIOR_REVISIONS_ESTIMATED,) if chain.estimated else ()),
+            ),
         )
 
     def write_metadata(
@@ -1503,6 +1516,13 @@ W_XMP_NOT_WELL_FORMED: Final[str] = (
     f"{_XMP_FIELDS_NOT_REPORTED}: {_XMP_NOT_WELL_FORMED} (--xmp shows the raw packet)"
 )
 W_XMP_UNREADABLE: Final[str] = f"{_XMP_FIELDS_NOT_REPORTED}: the XMP packet could not be read"
+
+#: PDF-158 D3 -- the one warning for an incomplete `/Prev` walk. Constant ASCII:
+#: no path, no document-derived bytes, so nothing to escape or redact.
+PRIOR_REVISIONS_ESTIMATED: Final[str] = (
+    "prior_revisions may be too high: the file's cross-reference chain (/Prev) is cyclic "
+    "or broken, so earlier revisions were counted from its startxref keywords"
+)
 
 
 def _xmp_over(data: bytes) -> Any:
