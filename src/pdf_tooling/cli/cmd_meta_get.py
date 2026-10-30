@@ -60,6 +60,10 @@ one is "right" and never emits a merged, single answer.
 parsing loses custom namespaces, so an operator auditing what they are about
 to share may need the packet itself, not just the parsed fields.
 
+AN XMP PACKET THAT CANNOT BE PARSED is still reported: xmp is null, a warning
+says the packet is present, and --xmp shows its raw bytes. xmp null with no
+warning means the document has no XMP packet.
+
 RESIDUE NO VIEWER SHOWS. residual_surfaces also counts metadata the file still
 holds that no reader follows: unreferenced_metadata is the number of metadata
 streams and /Info-style dictionaries nothing references (an unlinked or freed
@@ -173,6 +177,9 @@ def meta_get_command(
     text = _render(payload, config.output_format)
     if text:
         typer.echo(text)
+    # PDF-155 D7: the house `emit_result` spelling, in every output format.
+    for warning in payload.get("warnings") or []:
+        typer.echo(f"warning: {warning}", err=True)
     raise typer.Exit(0)
 
 

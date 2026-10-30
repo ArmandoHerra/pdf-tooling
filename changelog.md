@@ -20,6 +20,15 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-155] Make meta get / info report a present XMP packet instead of null — 2026-10-29
+
+- **Fixed ledger finding `9658d886b8` (carrier `B-391`):** a `/Root /Metadata` packet that does not parse (truncated, or an unbound `dc:` prefix) was reported by `meta get` and `info` as `xmp: null` with `warnings: []`, the spelling for "no packet at all", and `--xmp` hid even the raw bytes. `meta get` now carries `xmp: null` plus exactly one warning, `XMP packet present but its fields are not reported: the XMP packet is not well-formed XML (--xmp shows the raw packet)`, and `--xmp` gives the stored packet in `xmp_raw`. `info`'s `xmp` is the packet text.
+- **Fixed ledger finding `874a9bd303` (carrier `B-392`):** a valid packet whose only `rdf:Description` has a non-empty `rdf:about` (`uuid:…`, common in Acrobat output) read as an all-empty `xmp` with eight false `/Info` disagreements. The fields are now read from a detached copy with the `rdf:about` values blanked; `xmp_raw` stays the stored packet and the file is never written.
+- **Ledger finding `99dbb7ff96` (carrier `B-393`) does not reproduce at `e83c743`:** with pypdf 6.21.2 the default AES-256 `encrypt` output already reports its packet. No fix; the arm, with the RC4 and `/EncryptMetadata false` arms, is pinned by tests.
+- **The rule:** `xmp: null` with no `XMP packet present but its fields are not reported` warning means "no packet" and nothing else.
+- **`meta get` prints each warning to stderr as `warning: <text>`**, in every output format, after its stdout. A run with no warning prints nothing to stderr, as before.
+- **Nothing else moves.** No JSON key is added, `schema_version` stays `1`, no exit code changes, and the packet-less output is byte-identical. `meta set` still leaves an unparseable or `uuid:`-about packet unchanged.
+
 ## [PDF-156] Publish every AtomicWriter safety warning in the JSON envelope's warnings — 2026-10-29
 
 - **Fixed ledger finding `9e3723551c` (carrier `B-343`, ruling `X-1209`):** a write whose destination resolves onto another filesystem printed `warning: atomicity degraded: …` on stderr but published only the cosmetic warnings, so a populated `warnings` list read as complete. Every warning the `AtomicWriter` prints to stderr is now also in the result envelope's `warnings`, for all 21 writing verbs (`rasterize` workers hand theirs back to the parent, published in page order).

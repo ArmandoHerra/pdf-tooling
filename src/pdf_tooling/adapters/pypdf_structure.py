@@ -268,24 +268,91 @@ def _info_report_dict(reader: PdfReader) -> dict[str, str]:
     return {str(key).lstrip("/"): str(value) for key, value in raw.items() if value is not None}
 
 
-def _xmp_report_fields(reader: PdfReader) -> tuple[dict[str, object] | None, str | None]:
-    """D2.1's `xmp` half plus the raw packet text -- `(None, None)` when the
-    document carries no XMP packet at all."""
+def _metadata_stream_bytes(reader: PdfReader) -> tuple[bool, bytes | None]:
+    """PDF-155 D1: the ``/Root /Metadata`` stream's decoded (and, for an
+    encrypted reader, decrypted) bytes, read WITHOUT parsing them.
+
+    ``(False, None)`` iff the catalogue has no ``/Metadata`` entry or it does
+    not resolve to a stream (no packet). ``(True, data)`` when the bytes read.
+    ``(True, None)`` when a packet is present but its bytes could not be read.
+
+    ORDERING RULE: callers touch ``reader.xmp_metadata`` FIRST. That access
+    sets pypdf's ``/EncryptMetadata false`` override; a raw ``get_data()``
+    before it returns garbage on those files."""
+    from pypdf.generic import StreamObject
+
+    try:
+        root: Any = reader.trailer["/Root"].get_object()
+        entry = root.get("/Metadata")
+        if entry is None:
+            return False, None
+        stream = entry.get_object()
+    except Exception:
+        return False, None
+    if not isinstance(stream, StreamObject):
+        return False, None
+    try:
+        data = stream.get_data()
+    except Exception:
+        return True, None
+    return (True, bytes(data)) if isinstance(data, (bytes, bytearray)) else (True, None)
+
+
+def _fields_from_normalised_copy(xmp: Any) -> Any:
+    """PDF-155 D2: when NO ``rdf:Description`` has ``rdf:about=""`` (every one
+    describes a non-empty ``rdf:about``), an ``XmpInformation`` over a DETACHED
+    copy whose ``rdf:about`` values are blanked (pypdf's getters only read
+    ``about=""`` Descriptions, so such a packet reads as all-empty). A packet
+    with at least one ``about=""`` Description is read exactly as before, so
+    every shape that already read correctly reports byte-identical fields.
+    Returns *xmp* itself when no normalisation is needed or it cannot be done:
+    a valid packet is never demoted."""
+    try:
+        descriptions = _descriptions(xmp)
+        if not descriptions or any(
+            d.getAttributeNS(_RDF_NAMESPACE, "about") == "" for d in descriptions
+        ):
+            return xmp
+        stream = getattr(xmp, "stream", None)
+        if stream is None:
+            return xmp
+        copy = _xmp_over(bytes(stream.get_data()))
+        for description in _descriptions(copy):
+            description.setAttributeNS(_RDF_NAMESPACE, "rdf:about", "")
+        return _xmp_over(_serialize_xmp(copy))
+    except Exception:
+        return xmp
+
+
+def _xmp_report_fields(
+    reader: PdfReader,
+) -> tuple[dict[str, object] | None, str | None, str | None]:
+    """D2.1's `xmp` half plus the raw packet text plus (PDF-155 D3) at most one
+    warning: ``(None, None, None)`` when the document carries no XMP packet at
+    all; ``(None, raw, W_XMP_NOT_WELL_FORMED)`` for a packet pypdf cannot parse;
+    ``(None, None, W_XMP_UNREADABLE)`` when the packet's bytes cannot be read."""
     try:
         xmp = reader.xmp_metadata
-    # Malformed XMP is not a malformed document (mirrors `_xmp()` below).
+    # Malformed XMP is not a malformed document (mirrors `_xmp()` below) -- but
+    # it is a PRESENT packet, and is reported as one.
     except Exception:
-        return None, None
+        present, data = _metadata_stream_bytes(reader)
+        if not present:
+            return None, None, None
+        if data is None:
+            return None, None, W_XMP_UNREADABLE
+        return None, data.decode("utf-8", errors="replace"), W_XMP_NOT_WELL_FORMED
     if xmp is None:
-        return None, None
+        return None, None, None
     raw = _xmp(reader)  # the existing, pinned helper -- reused, not re-derived
+    source = _fields_from_normalised_copy(xmp)
     fields: dict[str, object] = {}
     for field, _info_name, xmp_attr in _ALIGNMENT:
         try:
-            fields[field] = getattr(xmp, xmp_attr)
+            fields[field] = getattr(source, xmp_attr)
         except Exception:
             fields[field] = None
-    return fields, raw
+    return fields, raw, None
 
 
 def _residual_surfaces(reader: PdfReader) -> dict[str, object]:
@@ -876,14 +943,20 @@ class PypdfStructureAdapter:
 
         try:
             info = _info_report_dict(reader)
-            xmp_fields, xmp_raw = _xmp_report_fields(reader)
+            xmp_fields, xmp_raw, xmp_warning = _xmp_report_fields(reader)
             residual = _residual_surfaces(reader)
         except PdfReadError as error:
             raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
         except (KeyError, TypeError, ValueError, OSError) as error:
             raise FailureError(f"could not read PDF: {error}", path=str(path)) from error
 
-        return MetadataFacts(info=info, xmp=xmp_fields, xmp_raw=xmp_raw, residual_surfaces=residual)
+        return MetadataFacts(
+            info=info,
+            xmp=xmp_fields,
+            xmp_raw=xmp_raw,
+            residual_surfaces=residual,
+            warnings=(xmp_warning,) if xmp_warning else (),
+        )
 
     def write_metadata(
         self,
@@ -1397,9 +1470,11 @@ def _has_signature(acroform: Any, fields: Any) -> bool:
 def _xmp(reader: PdfReader) -> str | None:
     try:
         stream = reader.xmp_metadata
-    # Malformed XMP is not a malformed document.
+    # Malformed XMP is not a malformed document -- but its text is still the
+    # packet `info` reports (PDF-155 D4); None only for no packet / unreadable.
     except Exception:
-        return None
+        present, data = _metadata_stream_bytes(reader)
+        return data.decode("utf-8", errors="replace") if present and data is not None else None
     if stream is None:
         return None
     raw = getattr(stream, "stream", None)
@@ -1421,6 +1496,13 @@ _XMLNS_NAMESPACE: Final[str] = "http://www.w3.org/2000/xmlns/"
 _XMP_NOT_WELL_FORMED: Final[str] = "the XMP packet is not well-formed XML"
 _XMP_NON_EMPTY_ABOUT: Final[str] = "the XMP packet describes a non-empty rdf:about"
 _XMP_UNVERIFIED: Final[str] = "rewriting the XMP packet did not verify"
+
+#: PDF-155 D3 -- the READ side's two fixed warnings (no document content).
+_XMP_FIELDS_NOT_REPORTED: Final[str] = "XMP packet present but its fields are not reported"
+W_XMP_NOT_WELL_FORMED: Final[str] = (
+    f"{_XMP_FIELDS_NOT_REPORTED}: {_XMP_NOT_WELL_FORMED} (--xmp shows the raw packet)"
+)
+W_XMP_UNREADABLE: Final[str] = f"{_XMP_FIELDS_NOT_REPORTED}: the XMP packet could not be read"
 
 
 def _xmp_over(data: bytes) -> Any:
