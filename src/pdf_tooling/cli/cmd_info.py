@@ -80,6 +80,7 @@ from pdf_tooling.cli.password import ENV_PASSWORD, plan_password
 from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordSource
 from pdf_tooling.ops.inspect import InspectionOutcome, inspect_paths, validate_operands
 from pdf_tooling.output import OutputFormat, render_payload
+from pdf_tooling.output.table import escape_controls, escape_controls_multiline
 
 __all__ = ["build_payload", "info_command", "run_exit_code"]
 
@@ -233,5 +234,6 @@ def info_command(
         typer.echo(text)
     for outcome in outcomes:
         if outcome.error is not None:
-            typer.echo(f"error: {outcome.error.message} ({outcome.path})", err=True)
+            message = escape_controls_multiline(outcome.error.message)
+            typer.echo(f"error: {message} ({escape_controls(str(outcome.path))})", err=True)
     raise typer.Exit(run_exit_code(outcomes))

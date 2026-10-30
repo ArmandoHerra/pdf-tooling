@@ -39,6 +39,7 @@ from pdf_tooling.ops.batch import preflight_operands
 from pdf_tooling.ops.pagerange import GRAMMAR_HELP
 from pdf_tooling.ops.textract import TextOutcome, extract_text_run
 from pdf_tooling.output import OutputFormat, render_payload
+from pdf_tooling.output.table import escape_controls_multiline
 
 __all__ = ["build_payload", "text_command"]
 
@@ -81,6 +82,11 @@ stdout and the 'strategy: ...' banner goes to stderr, so
 'pdftooling text a.pdf -o table > a.txt' yields clean text. Note that stdout's
 SHAPE still follows -o, which defaults to table on a terminal and json on a
 pipe: a bare redirect captures the json report, not bare text.
+
+CONTROL CHARACTERS. On stdout in table mode, control characters other than tab
+and newline are shown escaped (an ESC appears as the four characters \\x1b), so
+document text cannot drive the terminal. -o json, -o ndjson and the files
+written with -O or a destination directory carry the extracted text exactly.
 
 EMPTY IS A REAL ANSWER. A page that exists and yields no characters returns
 empty text, exits 0, and warns on stderr. That is an empty-but-valid report --
@@ -149,12 +155,12 @@ def _emit(outcome: TextOutcome, fmt: OutputFormat, *, has_destination: bool) -> 
         typer.echo(render_payload(payload, fmt))
     else:
         print(_banner(outcome), file=sys.stderr)
-        body = _stdout_text(outcome)
+        body = escape_controls_multiline(_stdout_text(outcome))
         if body:
             typer.echo(body)
 
     for warning in echoed:
-        print(f"warning: {warning}", file=sys.stderr)
+        print(f"warning: {escape_controls_multiline(str(warning))}", file=sys.stderr)
 
 
 @global_options(consumes=("--output", "--out-dir", "--name"))
