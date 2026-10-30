@@ -20,6 +20,10 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [B-552] correction: the [PDF-155] entry is dated 2026-10-29; it landed 2026-10-30 — 2026-10-30
+
+- **The `[PDF-155]` entry's date is wrong:** it reads 2026-10-29, but PDF-155 landed 2026-10-30 via PR #97 (`7b04b5d`). Per rule 3 a landed entry is not edited, so the `[PDF-155]` entry is left byte-unchanged and this entry is the correction (`B-552`, ledger `138df37b00`, operator ruling `OR-84`).
+
 ## [PDF-157] Escape control characters in stderr operand echoes and in text/tables table output — 2026-10-30
 
 - **Fixed `B-496` (CWE-150):** a hostile file name such as `info "nope\x1b[31m\x07.pdf"` no longer writes a raw ESC/BEL to stderr, and `text` / `tables` no longer print extracted control characters raw in `-o table` mode with no destination. `error:` lines (`render_error_table`, `info`'s per-file line), every `warning:` line (the shared envelope loop, `text`, `tables`, the `AtomicWriter` sink) and the two content verbs' stdout show each control code point as a visible `\xNN` / `\r` escape.
