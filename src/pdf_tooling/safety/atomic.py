@@ -343,8 +343,15 @@ _LINK_FALLBACK_ERRNOS: Final[frozenset[int]] = frozenset(
 
 
 def _default_warn(message: str) -> None:
-    """Warnings go to stderr. stdout is the payload and nothing else."""
-    print(f"warning: {message}", file=sys.stderr)
+    """Warnings go to stderr. stdout is the payload and nothing else.
+
+    PDF-157: the message embeds the target/destination path, so it is escaped at the print
+    only (``AtomicWriter.warnings``, which PDF-156 publishes, keeps the raw string). The
+    import is function-local so ``safety/`` gains no module-scope edge into ``output/``.
+    """
+    from pdf_tooling.output.table import escape_controls_multiline
+
+    print(f"warning: {escape_controls_multiline(message)}", file=sys.stderr)
 
 
 def _digest(path: Path) -> tuple[int, str]:

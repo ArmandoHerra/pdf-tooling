@@ -12,6 +12,11 @@ category ``Cc`` (U+0000-U+001F, U+007F-U+009F) in a cell renders as its ``repr``
 escape (``\\t``, ``\\n``, ``\\r``, otherwise ``\\xNN``), so a hostile document title or
 filename cannot drive the operator's terminal. Printable non-ASCII is left untouched.
 ``-o json`` / ``-o ndjson`` do not pass through here and are unchanged.
+
+**Stderr and content verbs (PDF-157, CWE-150).** The same rule covers the lines that echo an
+operand or a document string. A path is escaped with :func:`escape_controls`; a message or
+extracted text, whose own line breaks are content, with :func:`escape_controls_multiline`
+(the same ``Cc`` escapes except TAB and LF). Display only: no payload is ever escaped.
 """
 
 from __future__ import annotations
@@ -32,6 +37,18 @@ _CONTROL_ESCAPES: dict[int, str] = {
 def escape_controls(text: str) -> str:
     """Render every control code point (Cc) as visible text; leave all else."""
     return text.translate(_CONTROL_ESCAPES)
+
+
+#: PDF-157. The same Cc escapes, minus TAB and LF, for multi-line human text
+#: (stderr messages, extracted text) whose own line structure must survive.
+_MULTILINE_ESCAPES: dict[int, str] = {
+    code: text for code, text in _CONTROL_ESCAPES.items() if code not in (0x09, 0x0A)
+}
+
+
+def escape_controls_multiline(text: str) -> str:
+    """Like :func:`escape_controls`, but keep TAB and LF as real characters."""
+    return text.translate(_MULTILINE_ESCAPES)
 
 
 def _cell(value: Any) -> str:
@@ -86,8 +103,8 @@ def render_table(payload: dict[str, Any]) -> str:
 
 def render_error_table(error: dict[str, Any]) -> str:
     """Render an error payload as the single line that goes to stderr."""
-    message = error.get("message", "")
+    message = escape_controls_multiline(str(error.get("message", "")))
     path = error.get("path")
     if path:
-        return f"error: {message} ({path})"
+        return f"error: {message} ({escape_controls(str(path))})"
     return f"error: {message}"

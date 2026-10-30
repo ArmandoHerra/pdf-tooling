@@ -21,7 +21,11 @@ from typing import Any
 from pdf_tooling.errors import PdfToolingError
 from pdf_tooling.models import OperationResult
 from pdf_tooling.output.json import render_error_json, render_json, render_ndjson
-from pdf_tooling.output.table import render_error_table, render_table
+from pdf_tooling.output.table import (
+    escape_controls_multiline,
+    render_error_table,
+    render_table,
+)
 
 __all__ = [
     "OutputFormat",
@@ -120,7 +124,7 @@ def emit_result(result: OperationResult, fmt: OutputFormat) -> None:
     if text:
         print(text, file=sys.stdout)
     for warning in echoed:
-        print(f"warning: {warning}", file=sys.stderr)
+        print(f"warning: {escape_controls_multiline(str(warning))}", file=sys.stderr)
 
 
 def emit_error(error: PdfToolingError, fmt: OutputFormat) -> None:

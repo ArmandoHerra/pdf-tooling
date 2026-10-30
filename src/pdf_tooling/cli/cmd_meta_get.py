@@ -36,7 +36,7 @@ from pdf_tooling.cli.password import ENV_PASSWORD, plan_password
 from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordSource
 from pdf_tooling.ops.metadata import meta_get_run
 from pdf_tooling.output import OutputFormat, render_payload
-from pdf_tooling.output.table import escape_controls
+from pdf_tooling.output.table import escape_controls, escape_controls_multiline
 from pdf_tooling.safety.paths import classify_operand
 
 __all__ = ["build_payload", "meta_get_command"]
@@ -179,7 +179,7 @@ def meta_get_command(
         typer.echo(text)
     # PDF-155 D7: the house `emit_result` spelling, in every output format.
     for warning in payload.get("warnings") or []:
-        typer.echo(f"warning: {warning}", err=True)
+        typer.echo(f"warning: {escape_controls_multiline(str(warning))}", err=True)
     raise typer.Exit(0)
 
 

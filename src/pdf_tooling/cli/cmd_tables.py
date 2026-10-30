@@ -40,6 +40,7 @@ from pdf_tooling.ops.batch import preflight_operands
 from pdf_tooling.ops.pagerange import GRAMMAR_HELP
 from pdf_tooling.ops.textract import TableOutcome, extract_tables_run
 from pdf_tooling.output import OutputFormat, render_payload
+from pdf_tooling.output.table import escape_controls, escape_controls_multiline
 
 __all__ = ["TableFormat", "TableStrategy", "build_payload", "tables_command"]
 
@@ -110,7 +111,9 @@ DESTINATIONS. With a destination directory, one artifact per detected table is
 written as '{{stem}}-p{{page:03}}-t{{index}}.{{ext}}' by default. -O accepts
 exactly one table; a selection yielding two or more onto one path is an output
 collision and exits 5. With no destination nothing is written and the grids are
-embedded in the run report on stdout.
+embedded in the run report on stdout. In table mode, control characters in a cell
+or source name are shown escaped there; -o json, -o ndjson and the written files
+carry every cell exactly.
 
 ZERO TABLES IS A LEGITIMATE ANSWER: the run exits 0, reports an empty list, and
 warns on stderr naming the strategy it used.
@@ -168,10 +171,12 @@ def _embedded_grids(outcome: TableOutcome) -> str:
     chunks: list[str] = []
     for grid in outcome.tables:
         header = (
-            f"# source={grid.source} page={grid.page} table={grid.index} "
+            f"# source={escape_controls(str(grid.source))} page={grid.page} table={grid.index} "
             f"strategy={outcome.strategy} rows={grid.row_count} cols={grid.col_count}"
         )
-        body = _render_grid([["" if cell is None else cell for cell in row] for row in grid.rows])
+        body = _render_grid(
+            [["" if cell is None else escape_controls(cell) for cell in row] for row in grid.rows]
+        )
         chunks.append(f"{header}\n{body}" if body else header)
     return "\n\n".join(chunks)
 
@@ -204,7 +209,7 @@ def _emit(outcome: TableOutcome, fmt: OutputFormat, *, has_destination: bool) ->
             typer.echo(body)
 
     for warning in echoed:
-        print(f"warning: {warning}", file=sys.stderr)
+        print(f"warning: {escape_controls_multiline(str(warning))}", file=sys.stderr)
 
 
 @global_options(consumes=("--output", "--out-dir", "--name"))

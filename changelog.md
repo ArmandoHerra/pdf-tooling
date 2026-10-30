@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-157] Escape control characters in stderr operand echoes and in text/tables table output — 2026-10-30
+
+- **Fixed `B-496` (CWE-150):** a hostile file name such as `info "nope\x1b[31m\x07.pdf"` no longer writes a raw ESC/BEL to stderr, and `text` / `tables` no longer print extracted control characters raw in `-o table` mode with no destination. `error:` lines (`render_error_table`, `info`'s per-file line), every `warning:` line (the shared envelope loop, `text`, `tables`, the `AtomicWriter` sink) and the two content verbs' stdout show each control code point as a visible `\xNN` / `\r` escape.
+- **Two rules, on purpose:** the full `escape_controls` for one-line text (a path in an error line, a `tables` cell, the `# source=` value), and the new `escape_controls_multiline` (the same escapes except TAB and LF) for messages and the `text` body, so the product's own multi-line `hint:` and the document's real line breaks survive.
+- **Unchanged (frozen, asserted as sha256):** `-o json` / `-o ndjson` stdout, every envelope key, `schema_version` 1, every exit code, and every file a verb writes (`text -O`, `tables --out-dir`). Raw DEL/C1 in JSON and bidi in cells stay `B-497`. `pdftooling text a.pdf -o table > a.txt` now holds `\x1b` text where the document held an ESC.
+
 ## [PDF-155] Make meta get / info report a present XMP packet instead of null — 2026-10-29
 
 - **Fixed ledger finding `9658d886b8` (carrier `B-391`):** a `/Root /Metadata` packet that does not parse (truncated, or an unbound `dc:` prefix) was reported by `meta get` and `info` as `xmp: null` with `warnings: []`, the spelling for "no packet at all", and `--xmp` hid even the raw bytes. `meta get` now carries `xmp: null` plus exactly one warning, `XMP packet present but its fields are not reported: the XMP packet is not well-formed XML (--xmp shows the raw packet)`, and `--xmp` gives the stored packet in `xmp_raw`. `info`'s `xmp` is the packet text.
