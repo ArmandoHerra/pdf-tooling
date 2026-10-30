@@ -532,10 +532,15 @@ class MetadataReport:
     merged (Design D2.1). `info` and `xmp` are reported independently and a
     disagreement between them is stated, never resolved.
 
-    ``xmp``/``xmp_raw`` are ``None`` when the document carries no XMP packet
-    at all -- not an empty dict/string, which would claim a packet with no
-    fields. ``xmp_raw`` is populated only when the CLI's ``--xmp`` flag was
-    given (D2.1's additive rule); the op decides that, not this model.
+    ``xmp`` is ``None`` when the document carries no XMP packet, **or** when a
+    packet is present but its fields could not be parsed or read (PDF-155 D6).
+    In the second case ``warnings`` carries exactly one entry beginning ``XMP
+    packet present but its fields are not reported``. ``xmp: null`` with no
+    such warning means "no packet" and nothing else -- never an empty
+    dict/string, which would claim a packet with no fields. ``xmp_raw`` (with
+    ``--xmp``) is the stored packet whenever its bytes can be read, parseable
+    or not; it is populated only when the CLI's ``--xmp`` flag was given
+    (D2.1's additive rule); the op decides that, not this model.
     """
 
     schema_version: int

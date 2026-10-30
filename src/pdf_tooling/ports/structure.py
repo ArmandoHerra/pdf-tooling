@@ -299,13 +299,17 @@ class MetadataFacts:
     """Parsed XMP properties, keyed by the D2.1 alignment table's REPORT
     field names (``title``, ``author``, ``subject``, ``keywords``,
     ``creator``, ``producer``, ``creation_date``, ``mod_date``). ``None``
-    when the document carries no XMP packet at all."""
+    when the document carries no XMP packet, OR when a packet is present but
+    its fields could not be parsed or read (PDF-155 D6: then ``warnings``
+    carries exactly one entry beginning ``XMP packet present but its fields
+    are not reported``; ``xmp`` ``None`` with no such warning means "no
+    packet" and nothing else)."""
 
     xmp_raw: str | None
-    """The XMP packet, verbatim, or ``None``. Always populated when a packet
-    exists -- `--xmp`'s additive behaviour (D2.1) is an `ops/`-level decision
-    about what to INCLUDE in the rendered report, not a reason to withhold
-    the bytes at the port."""
+    """The XMP packet, verbatim, or ``None``. Populated whenever a packet's
+    bytes can be read, parseable or not (PDF-155 D6) -- `--xmp`'s additive
+    behaviour (D2.1) is an `ops/`-level decision about what to INCLUDE in the
+    rendered report, not a reason to withhold the bytes at the port."""
 
     residual_surfaces: Mapping[str, object]
     """D2.4's facts, already keyed exactly as the report needs them, in
@@ -316,6 +320,11 @@ class MetadataFacts:
     (PDF-126, integer counts) count residue no viewer follows: metadata
     objects nothing references and earlier revisions an incremental save
     kept."""
+
+    warnings: tuple[str, ...] = ()
+    """PDF-155 D5: warnings this read produced -- at most one XMP warning
+    (D6). Declared last with a default: an internal port field, not an
+    envelope key."""
 
 
 @dataclass(frozen=True, slots=True)
