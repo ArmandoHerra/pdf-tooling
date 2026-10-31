@@ -5356,10 +5356,13 @@ def test_the_vacuous_rendering_extractor_fails_if_the_heading_is_deleted() -> No
 # operator's bump PR re-stamps the provenance line only, X-1009).
 # --------------------------------------------------------------------------- #
 
-MIGRATION_HEADING_1_1 = "## Upgrading to 1.1"
-MIGRATION_HEADING_1_2 = "## Upgrading to 1.2"
+# Whole-line match (OR-80, PDF-169): the trailing newline keeps `## Upgrading to 1.x.y` from
+# counting as `## Upgrading to 1.x`. Every MIGRATION_HEADING_* must keep it (the census below).
+MIGRATION_HEADING_1_1 = "## Upgrading to 1.1\n"
+MIGRATION_HEADING_1_2 = "## Upgrading to 1.2\n"
 # Whole-line match: the newline keeps `## Upgrading to 1.3.1` from counting as this heading.
 MIGRATION_HEADING_1_3 = "## Upgrading to 1.3\n"
+MIGRATION_HEADING_1_3_1 = "## Upgrading to 1.3.1\n"
 RENDER_BUDGET_HEADING = "## Render budget"
 
 
@@ -6138,3 +6141,64 @@ def test_the_prime_doc_spec_id_deny_list_catches_three_digit_ids() -> None:
     """The deny-grammar is unanchored, so it already refuses a three-digit id as a prefix."""
     assert SPEC_ID.search("see PDF-100")
     assert SPEC_ID.search("pdf-101")
+
+
+# --------------------------------------------------------------------------- #
+# PDF-169 (B-548) -- every `MIGRATION_HEADING_*` constant is a whole-line match,
+# and `## Upgrading to 1.3.1` has its own exists-once / order / provenance /
+# bounding-sentence arms.
+# --------------------------------------------------------------------------- #
+
+
+def migration_heading_constants() -> dict[str, str]:
+    """Every module-level `MIGRATION_HEADING_*` constant, derived at call time.
+
+    The trailing underscore excludes the 1.0.0 `MIGRATION_HEADING`."""
+    return {
+        name: value
+        for name, value in vars(sys.modules[__name__]).items()
+        if name.startswith("MIGRATION_HEADING_") and isinstance(value, str)
+    }
+
+
+def heading_is_whole_line(heading: str) -> bool:
+    return (
+        heading.startswith("## Upgrading to ")
+        and heading.endswith("\n")
+        and heading.count("\n") == 1
+    )
+
+
+def test_every_migration_heading_constant_matches_whole_line() -> None:
+    constants = migration_heading_constants()
+    print(f"MIGRATION_HEADING_* census: {len(constants)} constants: {sorted(constants)}")
+    assert "MIGRATION_HEADING_1_3_1" in constants, "the census lost its 1.3.1 floor"
+    not_whole_line = sorted(n for n, v in constants.items() if not heading_is_whole_line(v))
+    assert not_whole_line == [], f"heading constants that are not whole-line: {not_whole_line}"
+    text = read("README.md")
+    for name, value in sorted(constants.items()):
+        assert text.count(value) == text.splitlines().count(value[:-1]) == 1, (
+            f"{name} = {value!r}: README carries it {text.count(value)} time(s) as a substring "
+            f"and {text.splitlines().count(value[:-1])} time(s) as a whole line (both must be 1)"
+        )
+
+
+def test_a_whole_line_heading_constant_never_counts_a_longer_sibling() -> None:
+    assert heading_is_whole_line("## Upgrading to 1.1") is False
+    for value in migration_heading_constants().values():
+        bare = value[:-1]
+        scratch = value + bare + "0\n" + bare + ".9\n"
+        assert scratch.count(value) == 1, f"{value!r} counts a longer sibling heading"
+
+
+def test_the_1_3_1_section_exists_ordered_and_commit_anchored() -> None:
+    text = read("README.md")
+    assert text.count(MIGRATION_HEADING_1_3_1) == 1
+    after = text.split(MIGRATION_HEADING_1_3_1, 1)[1]
+    next_heading = after.split("\n## ", 1)[1].split("\n", 1)[0] + "\n"
+    assert "## " + next_heading == MIGRATION_HEADING_1_3, (
+        "## Upgrading to 1.3.1 must sit directly above ## Upgrading to 1.3"
+    )
+    body = _section_body_after(text, MIGRATION_HEADING_1_3_1).rstrip()
+    assert PROVENANCE_PATTERN.search(body), "the 1.3.1 section does not end with a provenance line"
+    assert MIGRATION_BOUNDING_SENTENCE_ANCHOR in body
