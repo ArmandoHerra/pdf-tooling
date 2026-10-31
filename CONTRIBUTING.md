@@ -109,6 +109,16 @@ The `test` entry above reports a check per matrix leg — a Python version cross
 - **Change an exit code or a structured output field.** Both are public API. Adding is fine; renumbering and renaming are major-version changes.
 - **Import the CLI framework below the CLI layer**, or write to a user-visible path outside the safety layer. Both are enforced by tests, not by review alone.
 
+## Version bumps
+
+A release bump edits `version` in `pyproject.toml`, and `uv.lock` must follow it. Re-lock with the uv CI pins, never with a bare `uv lock` on whatever uv the host has:
+
+```bash
+uvx uv@0.13.5 lock
+```
+
+Another uv can rewrite the lock's `revision` line, and CI's `uv sync --locked` still accepts the result, so `tests/test_uv_lock_revision.py` is what turns it red. Re-locking keeps the `revision` it finds: if the lock already carries a wrong `revision`, restore it first with `git show origin/main:uv.lock > uv.lock`, then re-lock.
+
 ## Tests
 
 See `TESTING.md` for how each suite is run and what a legitimate skip looks like. The short version: a test that cannot run because an engine or a corpus is missing must **skip visibly, with a reason** — never pass silently, and never be deleted so the suite turns green.

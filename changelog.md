@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-169] Pin uv.lock's revision and make every Upgrading-heading constant whole-line — 2026-10-31
+
+- **B-549:** `tests/test_uv_lock_revision.py` derives CI's uv from the `setup-uv` steps, maps it through a measured register and pins `uv.lock`'s `revision` to what that uv writes. Driven: CI's uv accepts a revision-3 lock (`uv lock --check` and `uv sync --locked` both exit 0) and a re-lock keeps the revision it finds, so nothing else could see a downgrade. `CONTRIBUTING.md` gains `## Version bumps` (re-lock with the CI uv; restore the lock first if it is already wrong).
+- **B-548:** the `1.1` and `1.2` heading constants in `tests/test_docs_antirot.py` are whole-line, a census reds on any `MIGRATION_HEADING_*` constant that is not, and `## Upgrading to 1.3.1` gains exists-once, order, provenance and bounding-sentence arms.
+- **Unchanged:** no README section, no `pyproject.toml`, no `uv.lock`, no workflow and no `src/` file changed.
+
 ## [PDF-167] Apply the calibrated-condition rule to the per-module self-time ceiling on macOS — 2026-10-31
 
 - **B-547 (`6117be92bd`):** `test_no_single_module_costs_more_than_the_self_time_ceiling` now goes through the total arm's register (`classify_startup_condition`, `STARTUP_COST_CALIBRATION`, `STARTUP_COST_UNCALIBRATED`). It asserts 0.470 only in the register's CALIBRATED conditions (the four Linux cells), publishes its reading through `UncalibratedStartupCondition` on darwin, and reds on any undeclared condition.
