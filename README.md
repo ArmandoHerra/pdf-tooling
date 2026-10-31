@@ -496,7 +496,7 @@ Security reports go through the private channel described in [`SECURITY.md`](htt
 - **`convert`:** it parses the untrusted document in-process, so run it without network for input you do not trust; see **OCR and Office conversion**.
 - **Permission bits:** they are advisory, and a reader that can display a page can extract it; see **Encryption, passwords and permissions**.
 - **Oversized pages:** a page whose bitmap would exceed the render budget is refused, not shrunk; see **Render budget**.
-- **`watermark --text`:** it draws only characters the built-in font's WinAnsi encoding covers; any other character draws `?` and is named in a warning.
+- **`watermark --text` and `create`:** they draw only characters the built-in font's WinAnsi encoding covers; any other character draws `?` and is named in a warning. `create` keeps a newline, carriage return, tab and form feed as layout, and does not check its `Symbol` and `ZapfDingbats` fonts.
 - **Page operations:** they carry the input's metadata unless told otherwise; see **What a write does not carry** under **Output contract**.
 
 ## License

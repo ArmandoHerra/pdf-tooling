@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-161] Make create warn and draw ? for control and undrawable characters — 2026-10-31
+
+- **`create`** now draws `?` for every control character other than a newline, carriage return, tab or form feed (ESC, BEL, VT, NUL, DEL and the rest of U+0000–U+001F), where it drew a ZapfDingbats square (■) at exit `0` with `warnings: []` (`28a5ce263a`, `B-537`, ruling `OR-88`).
+- Its one warning now names every replaced character as a `U+XXXX` code point, each distinct point once in first-occurrence order, instead of only the first, e.g. `5 character(s) outside the font's WinAnsi encoding were replaced with '?': U+6F22, U+001B, U+007F, U+1F600 (first on line 1)`; the line now counts CR, LF and CRLF line ends alike. `--dry-run` predicts the same entry. Exit codes are unchanged.
+- Text made only of drawable characters produces the same output, byte for byte, and `watermark` is unchanged. `create --help` and README's Known limitations now say what `create` can draw. A consumer matching the old `(first: U+XXXX on line N)` suffix should match the new form.
+
 ## [PDF-160] Make the gitleaks 504-recovery test deterministic — 2026-10-31
 
 - **`test_gitleaks_step_recovers_from_504s_up_to_its_retry_count` no longer flakes under load** (`B-545`, ledger `e36b198ca1`). Its fixture tarball embedded the wall clock in the gzip header, so the bytes it served and the bytes it hashed differed whenever a second rolled over between two builds; the step's sha256 check was right to refuse them. The fixture is now built with `mtime=0`.

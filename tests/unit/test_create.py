@@ -279,12 +279,12 @@ def test_normalisation_is_exactly_the_documented_rules(raw: str, expected: str) 
     assert normalize_text(raw) == expected
 
 
-def test_sanitisation_counts_every_replacement_but_names_only_the_first() -> None:
-    sanitized, warning = sanitize_text("a你b好c")
-    assert sanitized == "a?b?c"
-    assert warning is not None
-    assert "2 character(s)" in warning
-    assert "U+4F60" in warning
+def test_sanitisation_counts_every_replacement_and_names_every_distinct_point() -> None:
+    assert sanitize_text("a你b好c") == (
+        "a?b?c",
+        "2 character(s) outside the font's WinAnsi encoding were replaced with '?': "
+        "U+4F60, U+597D (first on line 1)",
+    )
 
 
 def test_sanitisation_of_clean_text_is_a_no_op() -> None:
