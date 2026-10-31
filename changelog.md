@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-171] Reword the website tagline and OG card to a true licence statement — 2026-10-31
+
+- The website said "No copyleft underneath." (ES "Sin copyleft debajo.") in the hero, the page title, `og:description`, `twitter:description` and the Open Graph card, while its own licence section discloses that `pikepdf` is MPL-2.0, copyleft file by file. The operator ruled to fix the line.
+- The line now reads "Every common PDF chore. One safe CLI. Apache-2.0. MPL-2.0 dependency disclosed." (ES "Todas las tareas comunes de PDF. Una sola CLI segura. Apache-2.0. Dependencia MPL-2.0 declarada."), derived from `LICENSE`, `pyproject.toml` and the one MPL-2.0 row in `website/src/data/licenses.json`. `website/package.json`'s `description` follows.
+- `website/public/og-image.png` is re-rendered by its generator from named constants for the drawn strings; a test reads them without OCR, and the PNG's sha256 is pinned. The GitHub social preview never carried the claim and is unchanged.
+
 ## [PDF-161] Make create warn and draw ? for control and undrawable characters — 2026-10-31
 
 - **`create`** now draws `?` for every control character other than a newline, carriage return, tab or form feed (ESC, BEL, VT, NUL, DEL and the rest of U+0000–U+001F), where it drew a ZapfDingbats square (■) at exit `0` with `warnings: []` (`28a5ce263a`, `B-537`, ruling `OR-88`).

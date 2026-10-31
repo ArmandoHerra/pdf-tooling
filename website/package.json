@@ -1,7 +1,7 @@
 {
   "name": "pdf-tooling-website",
   "version": "1.0.0",
-  "description": "Project website for pdf-tooling — every common PDF chore, one safe CLI, no copyleft underneath",
+  "description": "Project website for pdf-tooling — every common PDF chore, one safe CLI, Apache-2.0, MPL-2.0 dependency disclosed",
   "private": true,
   "type": "module",
   "scripts": {

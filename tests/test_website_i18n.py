@@ -427,3 +427,48 @@ def test_the_spanish_page_ships_no_javascript_either() -> None:
     for page in sorted((DIST_ROOT / ES_SEGMENT).rglob("*.html")):
         html = page.read_text()
         assert "<script" not in html, f"{page.relative_to(DIST_ROOT)} carries a <script> tag"
+
+
+# D1 wording, re-declared here so this module needs no cross-test import. The
+# source-tier definition lives in tests/test_pdf171_site_tagline.py.
+TRUE_TAGLINE_EN: Final[str] = (
+    "Every common PDF chore. One safe CLI. Apache-2.0. MPL-2.0 dependency disclosed."
+)
+TRUE_TAGLINE_ES: Final[str] = (
+    "Todas las tareas comunes de PDF. Una sola CLI segura. Apache-2.0. "
+    "Dependencia MPL-2.0 declarada."
+)
+RETIRED_CLAIM: Final[re.Pattern[str]] = re.compile(r"(?i)\b(no|sin)\s+copyleft\b")
+
+
+def _meta_content(html: str, attr: str, name: str) -> str:
+    tag = re.search(rf'<meta\s+[^>]*{attr}="{re.escape(name)}"[^>]*>', html)
+    assert tag is not None, f"no <meta {attr}={name!r}> found"
+    content = re.search(r'content="([^"]*)"', tag.group(0))
+    assert content is not None, f"<meta {name}> has no content"
+    return content.group(1)
+
+
+def test_every_built_page_states_the_true_licence_line() -> None:
+    """D1/D4 of PDF-171: the retired claim is gone from every built page and
+    the og/twitter descriptions (and home titles) carry the locale's tagline."""
+    _require_dist()
+    pages = {
+        "index.html": TRUE_TAGLINE_EN,
+        "licensing/index.html": TRUE_TAGLINE_EN,
+        "es/index.html": TRUE_TAGLINE_ES,
+        "es/licensing/index.html": TRUE_TAGLINE_ES,
+    }
+    problems: list[str] = []
+    for rel, tagline in pages.items():
+        html = (DIST_ROOT / rel).read_text(encoding="utf-8")
+        if RETIRED_CLAIM.search(html):
+            problems.append(f"{rel}: retired claim present")
+        for attr, name in (("property", "og:description"), ("name", "twitter:description")):
+            if _meta_content(html, attr, name) != tagline:
+                problems.append(f"{rel}: {name} is not the locale tagline")
+        if rel in ("index.html", "es/index.html"):
+            title = re.search(r"<title>([^<]*)</title>", html)
+            if title is None or title.group(1) != "pdf-tooling: " + tagline:
+                problems.append(f"{rel}: <title> is not the locale tagline")
+    assert problems == []
