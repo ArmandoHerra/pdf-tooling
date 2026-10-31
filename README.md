@@ -339,6 +339,8 @@ A `1.3.x` invocation or script that relied on any of the following observes a di
 
 `schema_version` stays `1`, the published exit-code table is unchanged (the `encrypt --in-place` change moves which refusal answers first, within the existing code `5`), and no verb or flag was removed. The changelog date correction (`B-552`) and the tests added with these changes have no script-observable effect.
 
+The first `1.4` release on PyPI is `1.4.1`: `v1.4.0` was tagged but never published. `1.4.1` also requires pypdf `>=6.21.4`, which clears the denial-of-service advisories published against `6.21.2`.
+
 Re-derived at `e7384d2` on `2026-10-30`.
 
 ## Upgrading to 1.3.1
