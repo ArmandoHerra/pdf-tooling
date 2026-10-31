@@ -19,6 +19,14 @@ renders through its own redacting ``__str__``. The filter does **not** scan
 strings for secrets. :func:`register_secret` stays available for a caller that
 genuinely has a plaintext string to suppress; nothing in this product does.
 
+**Records are escaped for display, after redaction (PDF-166, CWE-150).** The formatter
+every handler here installs, :class:`EscapingFormatter`, shows each control code point of
+the finished record except TAB and LF as a visible escape, so a hostile file name or a
+document string cannot drive the terminal. The stdlib runs :class:`RedactingFilter` in
+``Handler.handle`` before ``emit`` calls ``format``, so a registered secret is already the
+placeholder when the escape sees the text. Nothing on the ``LogRecord`` is modified: any
+other handler still receives the raw message and arguments.
+
 Note that ``import logging`` inside this module resolves to the standard
 library: absolute imports are the default, so the module's own name does not
 shadow it.
@@ -30,10 +38,12 @@ import logging
 import sys
 from typing import Any, Final
 
+from pdf_tooling.output.table import escape_controls_multiline
 from pdf_tooling.secret import Secret
 
 __all__ = [
     "RECORD_FORMAT",
+    "EscapingFormatter",
     "REDACTION_PLACEHOLDER",
     "RedactingFilter",
     "clear_secrets",
@@ -130,11 +140,19 @@ def resolve_level(*, verbose: int, quiet: bool) -> int:
     return logging.WARNING
 
 
+class EscapingFormatter(logging.Formatter):
+    """PDF-166 (CWE-150): the formatted record, with every Cc code point except TAB and LF
+    shown escaped. Display only: the record itself is never modified."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return escape_controls_multiline(super().format(record))
+
+
 def _build_handler() -> logging.StreamHandler[Any]:
     """One stderr handler, formatter and redaction filter — built the same way
     for our own logger and for root, so the two cannot drift apart."""
     handler = logging.StreamHandler(stream=sys.stderr)
-    handler.setFormatter(logging.Formatter(RECORD_FORMAT))
+    handler.setFormatter(EscapingFormatter(RECORD_FORMAT))
     handler.addFilter(RedactingFilter())
     setattr(handler, _OWNED_MARKER, True)
     return handler
