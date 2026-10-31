@@ -678,12 +678,13 @@ def test_ac8_carve_out_arms_never_read_the_secret(
 
 
 @pytest.mark.parametrize("cell", sorted(PAGE_CELLS))
-def test_ac10_page_selection_cells_are_unchanged(fx: Path, cell: str) -> None:
+def test_ac10_page_selection_cells_now_agree(fx: Path, cell: str) -> None:
+    # PDF-162 / OR-96: PDF-159 left these six at (0, 2); PDF-162 makes the dry run predict them.
     verb, tail = PAGE_CELLS[cell]
     argv = [*tail, "-O", "o.pdf"]
     dry = _drive(fx, verb, argv, dry=True)
     real = _drive(fx, verb, argv, dry=False)
-    assert (dry[0], real[0]) == (0, 2)
+    assert (dry[0], real[0]) == (2, 2)
 
 
 def test_ac11_dry_open_probe_reports_the_page_count(fx: Path) -> None:

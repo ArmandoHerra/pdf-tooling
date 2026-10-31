@@ -460,8 +460,8 @@ ROWS: Final[tuple[Row, ...]] = (
     (9, ("base.pdf", "w.pdf"), lambda t: ["base.pdf", *_t(t), "-O", "w.pdf", "--force"], (0, 0)),
     (10, ("base.pdf",), lambda t: ["base.pdf", *_t(t), "--in-place"], (0, 0)),
     (11, ("base.pdf",), lambda t: ["base.pdf", *_t(t), "--in-place", "-y"], (0, 0)),
-    (12, ("base.pdf",), lambda t: ["base.pdf", *_t(t), "--pages", "abc", "-O", "w.pdf"], (0, 2)),
-    (13, ("base.pdf",), lambda t: ["base.pdf", *_t(t), "--pages", "9", "-O", "w.pdf"], (0, 2)),
+    (12, ("base.pdf",), lambda t: ["base.pdf", *_t(t), "--pages", "abc", "-O", "w.pdf"], (2, 2)),
+    (13, ("base.pdf",), lambda t: ["base.pdf", *_t(t), "--pages", "9", "-O", "w.pdf"], (2, 2)),
     (14, ("enc.pdf", "pw.txt"), lambda t: ["enc.pdf", *_t(t), "-O", "w.pdf"], (5, 5)),
     (
         15,
@@ -503,7 +503,7 @@ ROWS: Final[tuple[Row, ...]] = (
 
 #: Cells whose stdout is an error envelope, not a result envelope.
 ERR_CELLS: Final[Mapping[str, frozenset[int]]] = {
-    "dry": frozenset({2, 3, 4, 5, 6, 7, 14, 18}),
+    "dry": frozenset({2, 3, 4, 5, 6, 7, 12, 13, 14, 18}),
     "real": frozenset({2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 18}),
 }
 

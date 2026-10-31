@@ -26,6 +26,10 @@ Design D4.2 -- page-range scoping, consumed not reimplemented
 -------------------------------------------------------------
 `_resolve_pages` below is the ONE call into `ops.pagerange.parse` both verbs
 share (AC26's spy target). Nothing here parses a page-range token itself.
+PDF-162: the real run AND the dry run reach it through `_select_pages` (and
+`stamp`'s `--from-page` bound through `_check_from_page`), the dry run with the
+page counts PDF-159's credential-free probe already read, so a preview raises
+exactly the page-selection refusal the real run raises.
 
 Design D5 -- why this module never shells out to `pdftooling text`
 --------------------------------------------------------------------
@@ -122,6 +126,30 @@ def _resolve_pages(pages_spec: str | None, page_count: int) -> PageRange:
     return parse(spec, page_count, ordered=False)
 
 
+def _select_pages(source: Path, pages_spec: str | None, page_count: int, *, verb: str) -> list[int]:
+    """The ONE page-selection step (D4.2): resolve --pages against the document's
+    own page count, and refuse an empty selection. Called by the real run AND,
+    with the count from PDF-159's dry probe, by the dry run (PDF-162), so a
+    preview raises exactly what the real run raises."""
+    selection = _resolve_pages(pages_spec, page_count)
+    if selection.is_empty:
+        raise NoInputError(
+            f"{source}: --pages {(pages_spec or ALL_PAGES_TOKEN)!r} resolved to zero "
+            f"pages; nothing to {verb}",
+            path=str(source),
+        )
+    return sorted(selection.as_set())
+
+
+def _check_from_page(from_page: int, from_page_count: int, from_path: Path) -> None:
+    """The `--from-page` bound, shared by the real run and the dry run (PDF-162)."""
+    if not (1 <= from_page <= from_page_count):
+        raise UsageError(
+            f"--from-page {from_page} exceeds --from's page count ({from_page_count}): {from_path}",
+            path=str(from_path),
+        )
+
+
 def _blank_warning(blank_pages: tuple[int, ...]) -> tuple[str, ...]:
     """Design D4.4 row 1: a run-level warning naming the affected pages,
     never a refusal -- overlay and underlay are byte-identical there."""
@@ -193,11 +221,18 @@ def _dry_run_result(
     warnings: tuple[str, ...] = (),
     engine_probe: EngineProbe | None = None,
     from_probe: tuple[Path, EngineProbe] | None = None,
+    pages_spec: str | None = None,
+    from_page: int | None = None,
 ) -> OperationResult:
     """PDF-37: neither `watermark` nor `stamp` otherwise opens the document
     under ``--dry-run``, so the global ``--password-file`` resolvability
     tier is predicted here explicitly, in the SAME tier as the filesystem
-    refusal (never the correctness tier, X-89)."""
+    refusal (never the correctness tier, X-89).
+
+    PDF-162: after the probes, the page selection the real run resolves is
+    resolved here too, from the page counts those probes already read (no second
+    open, no secret), and its refusal is RAISED -- the real run's own exception.
+    An input locked behind a supplied password yields no count and is skipped."""
     refusal: PdfToolingError | None = plan.refusal
     if refusal is None and from_probe is not None:
         # PDF-159: the real run reads `--from` first (`_extract_stamp_layer`).
@@ -210,10 +245,17 @@ def _dry_run_result(
             raise _from_operand_error(error, from_path) from error
         if from_refusal is not None:
             refusal = _from_operand_error(from_refusal, from_path)
+        elif from_page is not None:
+            from_count = getattr(from_engine_probe, "page_count", None)
+            if from_count is not None:
+                _check_from_page(from_page, from_count, from_path)
     if refusal is None:
         refusal = predict_password_refusal(
             source, password=password, verb=verb, engine_probe=engine_probe
         )
+        source_count = getattr(engine_probe, "page_count", None)
+        if refusal is None and source_count is not None:
+            _select_pages(source, pages_spec, source_count, verb=verb)
     detail = plan.detail()
     if refusal is not None and plan.refusal is None:
         detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
@@ -292,6 +334,7 @@ def watermark_run(
             password=password,
             warnings=text_warnings,
             engine_probe=DryOpenProbe(composite=True),
+            pages_spec=pages_spec,
         )
 
     started = time.monotonic()
@@ -304,14 +347,7 @@ def watermark_run(
         secret = resolver.for_source(source)
         with structure_engine.open_document(source, password=secret) as document:
             page_count = document.page_count
-            selection = _resolve_pages(pages_spec, page_count)
-            if selection.is_empty:
-                raise NoInputError(
-                    f"{source}: --pages {(pages_spec or ALL_PAGES_TOKEN)!r} resolved to zero "
-                    f"pages; nothing to {VERB_WATERMARK}",
-                    path=str(source),
-                )
-            selected = sorted(selection.as_set())
+            selected = _select_pages(source, pages_spec, page_count, verb=VERB_WATERMARK)
 
             # Per-page geometry comes from the EXISTING `read_document_info(...,
             # pages=True)` path -- `rotate`'s own precedent (`ops/pages.py`):
@@ -426,12 +462,7 @@ def _extract_stamp_layer(
     try:
         with engine.open_document(from_path, password=password) as from_document:
             from_page_count = from_document.page_count
-            if not (1 <= from_page <= from_page_count):
-                raise UsageError(
-                    f"--from-page {from_page} exceeds --from's page count "
-                    f"({from_page_count}): {from_path}",
-                    path=str(from_path),
-                )
+            _check_from_page(from_page, from_page_count, from_path)
             # PDF-116 D2: a layer buffer, never an output; it must not donate or read XMP.
             writer = engine.new_writer(carry_metadata=False)
             writer.append_pages(from_document, [from_page])
@@ -468,6 +499,8 @@ def stamp_run(
             password=password,
             engine_probe=DryOpenProbe(composite=True),
             from_probe=(from_path, DryOpenProbe(composite=False)),
+            pages_spec=pages_spec,
+            from_page=from_page,
         )
 
     started = time.monotonic()
@@ -483,14 +516,7 @@ def stamp_run(
         secret = resolver.for_source(source)
         with structure_engine.open_document(source, password=secret) as document:
             page_count = document.page_count
-            selection = _resolve_pages(pages_spec, page_count)
-            if selection.is_empty:
-                raise NoInputError(
-                    f"{source}: --pages {(pages_spec or ALL_PAGES_TOKEN)!r} resolved to zero "
-                    f"pages; nothing to {VERB_STAMP}",
-                    path=str(source),
-                )
-            selected = sorted(selection.as_set())
+            selected = _select_pages(source, pages_spec, page_count, verb=VERB_STAMP)
 
             # Design D3.1 -- writer created, full range appended, BEFORE compositing.
             writer = structure_engine.new_writer()

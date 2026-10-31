@@ -20,6 +20,10 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-162] Make --dry-run predict page-selection usage errors on watermark and stamp — 2026-10-31
+
+- **`watermark --dry-run` / `stamp --dry-run`** now resolve the page selection the real run resolves: `--pages abc`, `--pages 9` (beyond the last page), `--pages 0`, a negative index past the start, `--pages ''`, `stamp --from-page` beyond `--from`'s page count, and a selection that matches no page answer exit `2` (or `4` for an empty selection) with the real run's error envelope, byte for byte. They previewed `0 planned:` (`B-536`, `0350a9161e`). Precedence is the real run's: an occupied `-O` (5), an unreadable or encrypted input (1/6) and a bad `--from` answer first. A preview still never reads a supplied password, so an input locked behind one keeps the documented `password_verified: false` exception.
+
 ## [PDF-164] Stop two tests judging a loaded host as a failure — 2026-10-31
 
 - **Tests only; no product change.** The PDF-146 async-unwind sweep now asserts every correctness field first, then judges its 240 s dev-host solo budget only on a solo host; when another pytest session shares the host and the sweep is over budget it skips with a `parallel session:` reason carrying the measured load (`B-554`, `d318e1838d`). The 240 s and 580 s figures are unchanged.
