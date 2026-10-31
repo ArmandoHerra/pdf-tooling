@@ -3120,6 +3120,16 @@ def checked_denominator(partition: ImportPartition) -> int:
 #: project's DEFAULT `-n auto` (not the deliberately-escalated regime above --
 #: E9 Finding 3 measured that a sleep plant's separation DECAYS as load rises,
 #: so direction (a) is graded at the shipped condition, per D7 blind spot 3).
+#:
+#: PDF-167 DOMAIN (B-547, 6117be92bd): this ceiling is ASSERTED only in the conditions
+#:   STARTUP_COST_CALIBRATION names, through classify_startup_condition -- the total arm's
+#:   register, reused, not copied. In a condition STARTUP_COST_UNCALIBRATED declares
+#:   unmeasured (darwin) the arm publishes its reading through UncalibratedStartupCondition
+#:   and asserts the census invariants; in any other condition it reds. 0.470 is unchanged.
+#: RESIDUAL (f), declared: the distribution above was measured on (linux, 3.12) only; the
+#:   other three linux cells take the register's verdict, as they have since PDF-55. A
+#:   darwin per-module regression is PUBLISHED, not red; the same product code still
+#:   asserts on every linux leg.
 MODULE_SELF_RATIO_CEILING_PER_MILLE: Final = ceiling(
     "test_import_boundaries.py::MODULE_SELF_RATIO_CEILING_PER_MILLE"
 )
@@ -4162,6 +4172,93 @@ def assert_startup_cost_in_its_domain(
     return verdict
 
 
+def assert_module_self_in_its_domain(
+    condition: StartupCondition,
+    self_us_by_module: Mapping[str, int],
+    *,
+    calibrated: Mapping[StartupCondition, StartupCalibration] = STARTUP_COST_CALIBRATION,
+    declared: Mapping[StartupCondition, StartupDeclaration] = STARTUP_COST_UNCALIBRATED,
+) -> str:
+    """The per-module sibling of `assert_startup_cost_in_its_domain` (PDF-167).
+
+    The same register and the same classifier, so there is one answer to "what
+    does this loop know about this condition". CALIBRATED asserts the per-module
+    ceiling exactly as before; RECORD asserts the declaration and the census
+    invariants and publishes the reading; UNDECLARED raises. The census is
+    partitioned and its denominator checked BEFORE classification, so a broken
+    census reds in every condition and RECORD is never where one goes to pass.
+
+    NOTHING HERE ABSTAINS: no branch skips, xfails or returns early out of a
+    guarded block. Returns the verdict it reached.
+    """
+    partition = partition_by_product(self_us_by_module)
+    denominator = checked_denominator(partition)
+    over = sorted(
+        (name, cost, round(cost / denominator, 4))
+        for name, cost in self_us_by_module.items()
+        if cost * 1000 > MODULE_SELF_RATIO_CEILING_PER_MILLE * denominator
+    )
+    verdict = classify_startup_condition(condition, calibrated=calibrated, declared=declared)
+    ceiling_ratio = MODULE_SELF_RATIO_CEILING_PER_MILLE / 1000
+    peak_name, peak_cost = (
+        min(self_us_by_module.items(), key=lambda item: (-item[1], item[0]))
+        if self_us_by_module
+        else ("<none>", 0)
+    )
+    reading = (
+        f"peak module {peak_name} {peak_cost} us, ratio {peak_cost / denominator:.4f} of "
+        f"{denominator} us non-product attributable self"
+    )
+
+    if verdict == STARTUP_CALIBRATED:
+        assert over == [], (
+            f"module(s) over the {MODULE_SELF_RATIO_CEILING_PER_MILLE / 1000:.3f} "
+            f"per-module-self/non-product-self ratio ceiling: {over}. Startup latency in a "
+            "Python CLI is dominated by module import, and this is a module that got "
+            "dramatically more expensive to import -- a sleep, a network call, a heavy "
+            "computation or a big eager subsystem at module scope. Find it with "
+            f"`python -X importtime {VENV_CONSOLE_SCRIPT} --help`. Either move the cost out of "
+            "module scope, or widen MODULE_SELF_RATIO_CEILING_PER_MILLE **with a fresh measured "
+            "distribution recorded beside it** -- widening a pin without a measurement is how "
+            "the wall-clock budget this section replaced came to be defended by nothing."
+        )
+    elif verdict == STARTUP_RECORD:
+        declaration = declared[condition]
+        assert declaration.reason and declaration.promotion, (
+            f"condition {condition} is in the declared-unmeasured registry but its entry "
+            f"carries {'no reason' if not declaration.reason else 'no promotion rule'}. A "
+            "declaration without both is not a declaration; it is a hole with a key."
+        )
+        assert self_us_by_module, "the census is hollow -- no module rows, so nothing to publish."
+        observation = (
+            f"PER-MODULE SELF TIME NOT ASSERTED HERE: condition {condition} is DECLARED "
+            f"UNMEASURED, so the {ceiling_ratio:.3f} per-module ceiling is not applied to it "
+            f"-- {declaration.reason}. measured: {reading}; over the uncalibrated ceiling: "
+            f"{over}. PROMOTION: {declaration.promotion}."
+        )
+        # NO `stacklevel`, for the reason `assert_startup_cost_in_its_domain` measured.
+        warnings.warn(UncalibratedStartupCondition(observation))  # noqa: B028 - measured above
+    else:
+        raise AssertionError(
+            f"UNDECLARED CONDITION {condition}: the per-module self-time ceiling is neither "
+            f"calibrated nor declared unmeasured for it. measured: {reading}; over the "
+            f"{ceiling_ratio:.3f} ceiling: {over}. Either record a distribution of this "
+            "statistic for this condition, or declare it in STARTUP_COST_UNCALIBRATED with "
+            "a reason and a promotion rule."
+        )
+    return verdict
+
+
+# A scratch copy of this file (tests/test_gate_budget.py plants into one under a unique
+# module name) publishes `UncalibratedStartupCondition` from a worker, and the xdist
+# controller re-imports the warning's class BY MODULE NAME to relay it. The controller has
+# never imported the scratch copy, so on a declared-unmeasured condition (darwin) the relay
+# raised and aborted the run (PDF-167: the receipt arms on the macos-15 3.11/3.12 legs).
+# Naming the real module, which the receipt puts on PYTHONPATH, lets the controller resolve
+# the class. In the real file this is already the class's module, so it changes nothing there.
+UncalibratedStartupCondition.__module__ = "test_import_boundaries"
+
+
 class StartupPartition(NamedTuple):
     """One `--help` census's rows, split into the two populations this ratio
     divides -- the ATTRIBUTABLE rows (the numerator a product- or
@@ -4658,25 +4755,12 @@ def test_no_single_module_costs_more_than_the_self_time_ceiling(
     (E4: 2 of 3 trials at loadavg 77-84) precisely because contention inflates
     every module's self time roughly together; the ratio does not, because the
     denominator inflates along with it.
+
+    PDF-167 (B-547, 6117be92bd): asserted in the conditions the calibrated-condition
+    register names, published through `UncalibratedStartupCondition` in the
+    conditions it declares unmeasured, red in any other.
     """
-    partition = partition_by_product(help_imports.self_us_by_module)
-    denominator = checked_denominator(partition)
-    over = sorted(
-        (name, cost, round(cost / denominator, 4))
-        for name, cost in help_imports.self_us_by_module.items()
-        if cost * 1000 > MODULE_SELF_RATIO_CEILING_PER_MILLE * denominator
-    )
-    assert over == [], (
-        f"module(s) over the {MODULE_SELF_RATIO_CEILING_PER_MILLE / 1000:.3f} "
-        f"per-module-self/non-product-self ratio ceiling: {over}. Startup latency in a "
-        "Python CLI is dominated by module import, and this is a module that got "
-        "dramatically more expensive to import -- a sleep, a network call, a heavy "
-        "computation or a big eager subsystem at module scope. Find it with "
-        f"`python -X importtime {VENV_CONSOLE_SCRIPT} --help`. Either move the cost out of "
-        "module scope, or widen MODULE_SELF_RATIO_CEILING_PER_MILLE **with a fresh measured "
-        "distribution recorded beside it** -- widening a pin without a measurement is how "
-        "the wall-clock budget this section replaced came to be defended by nothing."
-    )
+    assert_module_self_in_its_domain(live_startup_condition(), help_imports.self_us_by_module)
 
 
 def test_the_product_import_ratio_stays_under_its_ceiling(help_imports: HelpImports) -> None:
@@ -5748,7 +5832,7 @@ def test_the_record_verdict_publishes_through_the_warning_channel() -> None:
     assert "ratio median 42.8907" in text
     assert "CROSS-CONDITION, diagnostic only, NOT a bound" in text
     assert "PROMOTION:" in text
-    assert published[0].filename.endswith("test_import_boundaries.py"), (
+    assert Path(published[0].filename).resolve() == Path(__file__).resolve(), (
         f"the warning was attributed to {published[0].filename}, not to this module -- a "
         "`stacklevel` was passed and it mislocated the publication"
     )
@@ -5812,6 +5896,152 @@ def test_an_undeclared_condition_reds_naming_the_condition_and_both_halves() -> 
     assert "numerator median 143421 us" in message and "denominator median 8554 us" in message
     assert "STARTUP_COST_CALIBRATION" in message and "STARTUP_COST_UNCALIBRATED" in message
     assert "CROSS-CONDITION, diagnostic only, NOT a bound" in message
+
+
+# --------------------------------------------------------------------------- #
+# PDF-167 -- the per-module ceiling follows the total arm's calibrated-condition
+# register (B-547, 6117be92bd). In process, synthetic censuses, no subprocess.
+# --------------------------------------------------------------------------- #
+
+MODULE_SELF_DARWIN: Final = StartupCondition("darwin", "3.11")
+
+
+def module_self_census(**raised: int) -> dict[str, int]:
+    """Five 50 000 us modules (one product, four non-product) plus *raised* names."""
+    base = {
+        "pdf_tooling.models": 50_000,
+        "typing": 50_000,
+        "email": 50_000,
+        "json": 50_000,
+        "os": 50_000,
+    }
+    return {**base, **{name.replace("__", "."): cost for name, cost in raised.items()}}
+
+
+def module_self_over_ceiling() -> dict[str, int]:
+    """A census whose `email._parseaddr` is 0.5556 of the non-product self time."""
+    return module_self_census(email___parseaddr=250_000)
+
+
+def test_module_self_reds_a_planted_module_when_calibrated() -> None:
+    census = module_self_census(pdf_tooling__cli__common=550_000)
+
+    with pytest.raises(
+        AssertionError, match=r"module\(s\) over the 0\.470 .*pdf_tooling\.cli\.common"
+    ):
+        assert_module_self_in_its_domain(StartupCondition("linux", "3.12"), census)
+
+
+def test_module_self_publishes_when_declared_unmeasured() -> None:
+    with pytest.warns(UncalibratedStartupCondition) as published:
+        verdict = assert_module_self_in_its_domain(MODULE_SELF_DARWIN, module_self_over_ceiling())
+
+    message = str(published[0].message)
+    assert verdict == STARTUP_RECORD
+    assert len(published) == 1
+    for token in (
+        "PER-MODULE SELF TIME NOT ASSERTED HERE",
+        "(darwin, 3.11)",
+        "0.470",
+        "email._parseaddr",
+        "0.5556",
+        "PROMOTION:",
+    ):
+        assert token in message
+    assert Path(published[0].filename).resolve() == Path(__file__).resolve()
+
+
+def test_module_self_record_needs_a_declaration() -> None:
+    with pytest.raises(AssertionError, match=re.escape("UNDECLARED CONDITION (darwin, 3.11)")):
+        assert_module_self_in_its_domain(
+            MODULE_SELF_DARWIN, module_self_over_ceiling(), declared={}
+        )
+
+
+@pytest.mark.parametrize(
+    ("declaration", "missing"),
+    [
+        (StartupDeclaration(reason="", promotion="p"), "no reason"),
+        (StartupDeclaration(reason="r", promotion=""), "no promotion rule"),
+    ],
+    ids=["no-reason", "no-promotion"],
+)
+def test_module_self_record_needs_reason_and_promotion(
+    declaration: StartupDeclaration, missing: str
+) -> None:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(AssertionError, match=re.escape(missing)):
+            assert_module_self_in_its_domain(
+                MODULE_SELF_DARWIN,
+                module_self_over_ceiling(),
+                declared={MODULE_SELF_DARWIN: declaration},
+            )
+
+    assert caught == []
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [StartupCondition("win32", "3.12"), StartupCondition("linux", "3.15")],
+    ids=["win32-3.12", "linux-3.15"],
+)
+def test_module_self_reds_an_undeclared_condition(condition: StartupCondition) -> None:
+    with pytest.raises(AssertionError, match=re.escape(f"UNDECLARED CONDITION {condition}")):
+        assert_module_self_in_its_domain(condition, module_self_census())
+
+
+def test_module_self_record_reds_a_broken_census() -> None:
+    broken = {"pdf_tooling.models": 50_000, "typing": DENOMINATOR_SANITY_FLOOR_US - 1}
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(AssertionError, match="sanity floor"):
+            assert_module_self_in_its_domain(MODULE_SELF_DARWIN, broken)
+
+    assert caught == []
+
+
+def test_module_self_asserts_only_in_the_four_linux_cells() -> None:
+    expected = {StartupCondition("linux", minor) for minor in ("3.11", "3.12", "3.13", "3.14")}
+
+    assert set(STARTUP_COST_CALIBRATION) == expected, (
+        "STARTUP_COST_CALIBRATION no longer holds exactly the four linux cells, and the "
+        "per-module ceiling asserts in every cell it holds. The 0.470 was measured on "
+        "(linux, 3.12) only: measure the per-module statistic in any new cell first, or "
+        "change this control deliberately (PDF-167 D0 point 4)."
+    )
+
+
+def test_module_self_node_reads_the_live_condition(monkeypatch: pytest.MonkeyPatch) -> None:
+    census = module_self_over_ceiling()
+    imports = HelpImports(
+        0, len(census), frozenset(), frozenset(), census, sum(census.values()), frozenset(), 1
+    )
+    module = sys.modules[__name__]
+
+    monkeypatch.setattr(module, "live_startup_condition", lambda: MODULE_SELF_DARWIN)
+    with pytest.warns(UncalibratedStartupCondition):
+        test_no_single_module_costs_more_than_the_self_time_ceiling(imports)
+
+    monkeypatch.setattr(module, "live_startup_condition", lambda: StartupCondition("linux", "3.12"))
+    with pytest.raises(AssertionError, match=r"module\(s\) over the 0\.470"):
+        test_no_single_module_costs_more_than_the_self_time_ceiling(imports)
+
+
+def test_module_self_block_declares_its_domain() -> None:
+    text = Path(__file__).read_text(encoding="utf-8")
+    block = _comment_block_above(text, "MODULE_SELF_RATIO_CEILING_PER_MILLE")
+
+    paragraph = block[block.index("#: PDF-167 DOMAIN") :] if "#: PDF-167 DOMAIN" in block else ""
+    assert paragraph, "the ceiling's block carries no `#: PDF-167 DOMAIN` paragraph"
+    for token in (
+        "classify_startup_condition",
+        "STARTUP_COST_UNCALIBRATED",
+        "B-547",
+        "RESIDUAL (f)",
+    ):
+        assert token in paragraph, f"the PDF-167 DOMAIN paragraph does not carry {token!r}"
 
 
 #: The project's own pytest configuration, READ and never written. Adding a
