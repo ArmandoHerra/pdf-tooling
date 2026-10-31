@@ -2,7 +2,9 @@
 """Generate website/public/og-image.png (1200x630 Open Graph preview).
 
 Renders locally with Pillow -- no external network calls, no downloaded
-fonts/logos. Re-run any time the tagline changes:
+fonts/logos. Re-run any time the tagline changes. The card's tagline lines
+must join to the EN `tagline` in website/src/components/Hero.astro, which
+tests/test_pdf171_site_tagline.py asserts:
 
     uv run python website/scripts/generate-og-image.py
 
@@ -39,6 +41,14 @@ SUBTEXT = (251, 113, 133)  # primary-400  #fb7185 -- frozen byte-for-byte
 #: invisible until this item's operand-level census.
 RULE = (146, 68, 80)  # line-mark (primary-400 @ 55%) flattened over surface-900
 FOOTER = (198, 191, 196)  # surface-300  #c6bfc4
+
+# The strings the card draws, named so a test can read them without OCR.
+CARD_NAME = "pdf-tooling"
+CARD_TAGLINE_LINES = (
+    "Every common PDF chore. One safe CLI.",
+    "Apache-2.0. MPL-2.0 dependency disclosed.",
+)
+CARD_FOOTER = "pypdf · pdfium · pikepdf · reportlab — github.com/ArmandoHerra/pdf-tooling"
 
 FONT_CANDIDATES_BOLD = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -122,17 +132,10 @@ def render(out_path: pathlib.Path) -> pathlib.Path:
     footer_font = _load_font(FONT_CANDIDATES_REGULAR, 24)
 
     text_x = 350
-    draw.text((text_x, 190), "pdf-tooling", font=title_font, fill=TEXT)
-    draw.text(
-        (text_x, 310), "Every common PDF chore. One safe CLI.", font=tagline_font, fill=SUBTEXT
-    )
-    draw.text((text_x, 358), "No copyleft underneath.", font=tagline_font, fill=SUBTEXT)
-    draw.text(
-        (text_x, 440),
-        "pypdf · pdfium · pikepdf · reportlab — github.com/ArmandoHerra/pdf-tooling",
-        font=footer_font,
-        fill=FOOTER,
-    )
+    draw.text((text_x, 190), CARD_NAME, font=title_font, fill=TEXT)
+    draw.text((text_x, 310), CARD_TAGLINE_LINES[0], font=tagline_font, fill=SUBTEXT)
+    draw.text((text_x, 358), CARD_TAGLINE_LINES[1], font=tagline_font, fill=SUBTEXT)
+    draw.text((text_x, 440), CARD_FOOTER, font=footer_font, fill=FOOTER)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG")
