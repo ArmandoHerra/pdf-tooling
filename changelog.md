@@ -20,6 +20,13 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-167] Apply the calibrated-condition rule to the per-module self-time ceiling on macOS — 2026-10-31
+
+- **B-547 (`6117be92bd`):** `test_no_single_module_costs_more_than_the_self_time_ceiling` now goes through the total arm's register (`classify_startup_condition`, `STARTUP_COST_CALIBRATION`, `STARTUP_COST_UNCALIBRATED`). It asserts 0.470 only in the register's CALIBRATED conditions (the four Linux cells), publishes its reading through `UncalibratedStartupCondition` on darwin, and reds on any undeclared condition.
+- **Unchanged:** 0.470 is not widened and no `CEILING_LEDGER` record is added; the total arm, its register and its declarations keep their bytes.
+- **Residual (f), declared:** the per-module distribution was measured on `(linux, 3.12)` only, so a darwin per-module regression is published, not red.
+- **Observable:** a darwin leg now publishes 2 `UncalibratedStartupCondition` lines instead of 1; a Linux leg publishes none.
+
 ## [PDF-166] Escape control characters in logging records on stderr — 2026-10-31
 
 - **Every log record on stderr** (ours and a third-party engine's, at any verbosity) now shows each control code point except TAB and LF as a visible `\xNN` / `\r` escape, so a hostile file name or document string in a `WARNING:` or `DEBUG:` record can no longer drive the terminal (CWE-150, `B-538`, `7aa02daaf7`). The fix is one seam, the handler's formatter, with PDF-157's multiline rule; no log call site changed.
