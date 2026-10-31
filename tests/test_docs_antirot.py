@@ -72,6 +72,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -5050,23 +5051,55 @@ def test_ac4_the_env_var_row_reds_on_a_planted_old_occurrence(tmp_path: Path) ->
         _assert_old_env_prefix_absent(scratch_root)
 
 
-def test_ac6_the_console_script_row_survives_a_locally_built_wheel() -> None:
+def _snapshot_tree(root: Path) -> str | dict[str, tuple[int, str, int, int]]:
+    """B-556 / PDF-163: every file under *root* as (size, sha256, st_mtime_ns,
+    st_ino), or "absent". mtime and inode are load-bearing: hatchling rebuilds
+    byte-identical artifacts, so a hash-only snapshot cannot see a rewrite."""
+    if not root.exists():
+        return "absent"
+    snap: dict[str, tuple[int, str, int, int]] = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            st = path.stat()
+            snap[path.relative_to(root).as_posix()] = (
+                st.st_size,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+                st.st_mtime_ns,
+                st.st_ino,
+            )
+    return snap
+
+
+def test_ac6_the_console_script_row_survives_a_locally_built_wheel(tmp_path: Path) -> None:
     """AC6. The entry-point oracle is a locally built wheel, never PyPI
-    (X-703, B-250)."""
+    (X-703, B-250). PDF-163 / B-556: built into this test's own tmp_path, never
+    the checkout's dist/ (concurrent runs cannot read each other's wheel)."""
     import zipfile
 
+    uv = shutil.which("uv")
+    assert uv, "uv is not on PATH; the wheel oracle needs it (as `make build` did)"
+    dist_before = _snapshot_tree(REPO_ROOT / "dist")
+    out = tmp_path / "w"
     result = subprocess.run(
-        ["make", "build"], cwd=REPO_ROOT, capture_output=True, text=True, check=False
+        [uv, "build", "--out-dir", str(out), str(REPO_ROOT)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
     )
-    assert result.returncode == 0, f"make build failed: {result.stderr}"
-    wheels = sorted((REPO_ROOT / "dist").glob("*.whl"), key=lambda p: p.stat().st_mtime)
-    assert wheels, "make build produced no wheel in dist/"
-    with zipfile.ZipFile(wheels[-1]) as zf:
+    assert result.returncode == 0, f"uv build failed: {result.stderr}"
+    wheels = sorted(out.glob("*.whl"))
+    assert len(wheels) == 1, f"expected exactly one wheel in {out}, got {wheels}"
+    with zipfile.ZipFile(wheels[0]) as zf:
         entry_name = next(name for name in zf.namelist() if name.endswith("entry_points.txt"))
         entry_text = zf.read(entry_name).decode()
     entry_pattern = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)\s*=", re.MULTILINE)
     wheel_scripts = frozenset(match.group(1) for match in entry_pattern.finditer(entry_text))
     _assert_wheel_scripts_match(wheel_scripts)
+    assert _snapshot_tree(REPO_ROOT / "dist") == dist_before, (
+        "the wheel test touched the checkout's dist/ (B-556)"
+    )
 
 
 def _assert_wheel_scripts_match(wheel_scripts: frozenset[str]) -> None:
