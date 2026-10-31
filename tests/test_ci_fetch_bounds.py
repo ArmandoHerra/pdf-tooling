@@ -18,7 +18,7 @@ with no scan run, ledger `27960d012b`).
 * B1-B4 and G1-G4 EXECUTE the two steps' own `run:` text (stubbed `apt-get`,
   real GNU `timeout`; real `curl` against a local server) with the time figures
   overridden to small values. The mechanism is proved here; the real figures are
-  proved by S1/S2.
+  proved by S1/S2. G5 pins that the G fixture tarball is byte-reproducible (PDF-160).
 
 Paths are re-derived locally from `REPO_ROOT`; nothing is imported from
 `test_gate_budget` or `test_gate_parity` (the PDF-45 independence convention).
@@ -27,6 +27,7 @@ Every locator asserts that it matched exactly once before any assertion runs.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import http.server
 import io
@@ -557,13 +558,13 @@ _RETRIES: Final[int] = 2
 
 
 def _tarball(body: bytes) -> bytes:
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as tar:
         info = tarfile.TarInfo("gitleaks")
         info.size = len(body)
         info.mode = 0o755
         tar.addfile(info, io.BytesIO(body))
-    return buf.getvalue()
+    return gzip.compress(raw.getvalue(), mtime=0)
 
 
 class _Server:
@@ -716,3 +717,14 @@ def test_gitleaks_step_refuses_bytes_that_miss_the_pinned_sha(tmp_path: Path) ->
     assert "FAILED" in result.output, result.output
     assert count == 1, f"server saw {count} requests"
     assert "install -m 0755" not in sudo_log, sudo_log
+
+
+def test_tarball_bytes_do_not_depend_on_the_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """G5 (PDF-160, B-545): G1 serves one _tarball() and hashes another; a tick must not matter."""
+    monkeypatch.setattr(time, "time", lambda: 1000.0)
+    first = _tarball(_PINNED_BODY)
+    monkeypatch.setattr(time, "time", lambda: 2000.0)
+    second = _tarball(_PINNED_BODY)
+    assert hashlib.sha256(first).hexdigest() == hashlib.sha256(second).hexdigest(), (
+        "_tarball embeds the wall clock (gzip MTIME): the sha256 differs across a second boundary"
+    )

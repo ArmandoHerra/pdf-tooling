@@ -20,6 +20,11 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-160] Make the gitleaks 504-recovery test deterministic — 2026-10-31
+
+- **`test_gitleaks_step_recovers_from_504s_up_to_its_retry_count` no longer flakes under load** (`B-545`, ledger `e36b198ca1`). Its fixture tarball embedded the wall clock in the gzip header, so the bytes it served and the bytes it hashed differed whenever a second rolled over between two builds; the step's sha256 check was right to refuse them. The fixture is now built with `mtime=0`.
+- New test `test_tarball_bytes_do_not_depend_on_the_wall_clock` pins it. The CI step, its sha256 check and every fetch bound are unchanged; the `GITLEAKS_FETCH_ATTEMPT_S` suspect was measured and ruled out (101 ms worst attempt against a 1 s bound).
+
 ## [PDF-159] Make --dry-run predict malformed-input failures on compress, linearize, watermark, stamp and meta set, and the stamp --from refusals — 2026-10-31
 
 - **`--dry-run` of `compress`, `linearize`, `watermark`, `stamp` and `meta set` on a damaged PDF** now exits `1` with the real run's own error, where it said `planned` and exited `0` (`60ae484d91`). It does so with or without a password. The preview runs the verb's own engine read in memory and writes nothing. A dry `linearize` or `compress` therefore costs about what the real run's read does (about 5 s and 2 s on a 50 MB file).
