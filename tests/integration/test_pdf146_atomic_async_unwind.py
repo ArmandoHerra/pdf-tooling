@@ -31,14 +31,19 @@ The literal temp prefix is never spelled here (``TEMP_PREFIX`` only).
 from __future__ import annotations
 
 import ast
+import contextlib
+import importlib.util
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import textwrap
+import time
 import warnings
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 import pytest
 
@@ -559,17 +564,145 @@ def _run_sweep(tmp_path: Path) -> dict[str, Any]:
     return summary
 
 
-def test_one_async_unwind_at_any_eval_breaker_site_leaves_no_temp_and_is_never_lost(
-    tmp_path: Path,
-) -> None:
-    summary = _run_sweep(tmp_path)
-    # Recorded on every drive, red or green: AC1-AC3's base and after.
-    shown = {key: value for key, value in summary.items() if key != "offenders"}
-    print(f"PDF-146 sweep summary: {json.dumps(shown, sort_keys=True)}")
-    if _ON_GITHUB_ACTIONS:
-        # Puts wall_s/trials on green legs too, through the warnings summary xdist relays.
-        warnings.warn(f"PDF-146 sweep summary: {json.dumps(shown, sort_keys=True)}", stacklevel=1)
+# --------------------------------------------------------------------------- #
+# PDF-164 D1: the host probe and the solo verdict.
+#
+# The 240 s figure is a SOLO budget (X-1287). A second pytest suite on the host
+# stretches the sweep without any product defect (ledger d318e1838d: 361.5 s
+# with strays 0). So the node decides "solo" by looking for a FOREIGN pytest
+# process, and refuses to judge the budget on a shared host. loadavg is recorded
+# in every reason and never gates (a load of 126 gave 163.9 s, green).
+# --------------------------------------------------------------------------- #
 
+_PYTEST_NAMES: Final[frozenset[str]] = frozenset({"pytest", "py.test"})
+_ARGV_CHARS: Final[int] = 80
+_PID_CAP: Final[int] = 5
+
+
+class _HostReading(NamedTuple):
+    loadavg_1m: float
+    cpu_count: int
+    own: tuple[int, ...]
+    foreign: tuple[tuple[int, str], ...]
+    error: str | None
+
+
+def _is_pytest_argv(argv: list[str]) -> bool:
+    for index, token in enumerate(argv):
+        if os.path.basename(token) in _PYTEST_NAMES:
+            return True
+        if token == "-m" and argv[index + 1 : index + 2] == ["pytest"]:
+            return True
+    return False
+
+
+def _parse_ps(listing: str) -> dict[int, tuple[int, list[str]]]:
+    table: dict[int, tuple[int, list[str]]] = {}
+    for line in listing.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        table[pid] = (ppid, parts[2].split() if len(parts) == 3 else [])
+    return table
+
+
+def _process_table() -> dict[int, tuple[int, list[str]]]:
+    """``{pid: (ppid, argv)}``: from ``/proc`` where it exists, else from ``ps``."""
+    if not os.path.exists("/proc/self/stat"):
+        done = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,args="],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        return _parse_ps(done.stdout)
+    table: dict[int, tuple[int, list[str]]] = {}
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat", encoding="utf-8", errors="replace") as handle:
+                stat = handle.read()
+            with open(f"/proc/{name}/cmdline", "rb") as handle:
+                raw = handle.read()
+            ppid = int(stat[stat.rindex(")") + 2 :].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue  # vanished or unreadable between listdir and open
+        argv = [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+        table[int(name)] = (ppid, argv)
+    return table
+
+
+def _read_host() -> _HostReading:
+    """Mark every pytest process on the host as this session's own or foreign.
+
+    Own: every ancestor of this process, and every descendant of the session root
+    (the TOPMOST pytest-matching process among this process and its ancestors; an
+    xdist worker carries no pytest token but descends from its controller).
+    Foreign: every other pytest-matching process. Never raises.
+    """
+    cpus = os.cpu_count() or 1
+    try:
+        load = os.getloadavg()[0]
+        table = _process_table()
+        me = os.getpid()
+        chain: list[int] = []
+        cursor = me
+        while cursor > 0 and cursor not in chain and cursor in table:
+            chain.append(cursor)
+            cursor = table[cursor][0]
+        matching = {pid for pid, (_ppid, argv) in table.items() if _is_pytest_argv(argv)}
+        tops = [pid for pid in chain if pid in matching]
+        root = tops[-1] if tops else me
+        children: dict[int, list[int]] = {}
+        for pid, (ppid, _argv) in table.items():
+            children.setdefault(ppid, []).append(pid)
+        own = set(chain) | {me}
+        walked: set[int] = set()
+        pending = [root]
+        while pending:
+            pid = pending.pop()
+            if pid in walked:
+                continue
+            walked.add(pid)
+            own.add(pid)
+            pending.extend(children.get(pid, ()))
+        foreign = tuple(
+            sorted((pid, " ".join(table[pid][1])[:_ARGV_CHARS]) for pid in matching - own)
+        )
+        return _HostReading(load, cpus, tuple(sorted(own)), foreign, None)
+    except Exception as exc:  # the probe never fails a test by itself
+        return _HostReading(0.0, cpus, (), (), f"{type(exc).__name__}: {exc}")
+
+
+def _solo_verdict(
+    start: _HostReading, end: _HostReading, *, wall_s: float, budget_s: float
+) -> str | None:
+    """``None`` when the host was solo (judge the budget); else the refusal reason."""
+    errors = [reading.error for reading in (start, end) if reading.error is not None]
+    pids = sorted({pid for reading in (start, end) for pid, _argv in reading.foreign})
+    if not errors and not pids:
+        return None
+    shown = ", ".join(str(pid) for pid in pids[:_PID_CAP]) or "none"
+    lead = f"host probe failed ({errors[0]}); " if errors else ""
+    return (
+        f"parallel session: {lead}{len(pids)} foreign pytest process(es) shared this host "
+        f"during the sweep (pids {shown}); loadavg(1m) {start.loadavg_1m:.2f} -> "
+        f"{end.loadavg_1m:.2f} on {start.cpu_count} cpus; wall_s {wall_s} s over the "
+        f"{budget_s} s dev-host solo budget is not judged on a shared host (B-554, X-1287). "
+        f"Re-run solo to judge it."
+    )
+
+
+def _judge_sweep(
+    summary: dict[str, Any], *, on_ci: bool, start: _HostReading, end: _HostReading
+) -> None:
+    """Every assertion of the sweep node: correctness first, the budget LAST."""
     # 1. The instrument is stable.
     assert summary["ref_stable"], (
         "the cold and the warm reference trials listed different delivery sites"
@@ -588,7 +721,6 @@ def test_one_async_unwind_at_any_eval_breaker_site_leaves_no_temp_and_is_never_l
     assert non_resume and all(row[2] >= 1 for row in non_resume), (
         f"tempfile.NamedTemporaryFile's post-call sites were not all delivered: {non_resume}"
     )
-    _check_wall_budget(summary["wall_s"], _ON_GITHUB_ACTIONS)
     # 3. AC1: no temp survives one async unwind at any site.
     assert summary["strays"] == 0, (
         f"{summary['strays']} trial(s) left a temp (windows {summary['windows']}, harness "
@@ -601,6 +733,47 @@ def test_one_async_unwind_at_any_eval_breaker_site_leaves_no_temp_and_is_never_l
     )
     assert summary["other"] == 0, f"{summary['other']} trial(s) raised something else"
     assert summary["resends"] == 0, f"the unwind path sent {summary['resends']} signal(s)"
+    # 5. The budget, last. CI ignores the verdict; a pass never consults it.
+    wall_s = summary["wall_s"]
+    if on_ci:
+        _check_wall_budget(wall_s, True)
+        return
+    if wall_s <= _WALL_BUDGET_S:
+        return
+    reason = _solo_verdict(start, end, wall_s=wall_s, budget_s=_WALL_BUDGET_S)
+    if reason is not None:
+        pytest.skip(reason)
+    try:
+        _check_wall_budget(wall_s, False)
+    except AssertionError as exc:
+        raise AssertionError(
+            f"{exc} [solo host: loadavg(1m) {start.loadavg_1m:.2f} -> "
+            f"{end.loadavg_1m:.2f} on {start.cpu_count} cpus]"
+        ) from exc
+
+
+def _show_host(label: str, reading: _HostReading) -> str:
+    return (
+        f"{label}: loadavg(1m) {reading.loadavg_1m:.2f} on {reading.cpu_count} cpus, "
+        f"own {len(reading.own)}, foreign {len(reading.foreign)} "
+        f"(pids {[pid for pid, _argv in reading.foreign][:_PID_CAP]}), error {reading.error}"
+    )
+
+
+def test_one_async_unwind_at_any_eval_breaker_site_leaves_no_temp_and_is_never_lost(
+    tmp_path: Path,
+) -> None:
+    start = _read_host()
+    summary = _run_sweep(tmp_path)
+    end = _read_host()
+    # Recorded on every drive, red or green: AC1-AC3's base and after.
+    shown = {key: value for key, value in summary.items() if key != "offenders"}
+    print(f"PDF-146 sweep summary: {json.dumps(shown, sort_keys=True)}")
+    if _ON_GITHUB_ACTIONS:
+        # Puts wall_s/trials on green legs too, through the warnings summary xdist relays.
+        warnings.warn(f"PDF-146 sweep summary: {json.dumps(shown, sort_keys=True)}", stacklevel=1)
+    print(f"PDF-164 host readings: {_show_host('start', start)} | {_show_host('end', end)}")
+    _judge_sweep(summary, on_ci=_ON_GITHUB_ACTIONS, start=start, end=end)
 
 
 def test_the_wall_budget_reds_over_its_bound_on_the_dev_host_and_on_ci() -> None:
@@ -644,3 +817,320 @@ def test_the_worker_unwind_path_never_sends_a_signal() -> None:
                 offenders.extend(f"{node.name} calls {name}" for name in _signal_calls(node))
     assert checked >= 1, "none of the unwind-path functions was found"
     assert offenders == [], f"the worker unwind path sends a signal (I3): {offenders}"
+
+
+# --------------------------------------------------------------------------- #
+# PDF-164: fast arms for the probe, the verdict, the judge and the CI arm.
+# --------------------------------------------------------------------------- #
+
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
+_FOREIGN_ARGV: Final[str] = "python -m pytest tests"
+
+
+def _reading(
+    *,
+    load: float = 0.5,
+    cpus: int = 32,
+    foreign: tuple[int, ...] = (),
+    error: str | None = None,
+) -> _HostReading:
+    rows = tuple((pid, _FOREIGN_ARGV) for pid in foreign)
+    return _HostReading(load, cpus, (), rows, error)
+
+
+def _green_summary(**override: Any) -> dict[str, Any]:
+    resume = [[10, "resume", 1]]
+    summary: dict[str, Any] = {
+        "ref_stable": True,
+        "uncovered": 0,
+        "sites_total": 12,
+        "uncovered_list": [],
+        "anchors": {
+            "AtomicWriter.__enter__": resume,
+            "AtomicWriter._open_temp": resume,
+            "AtomicWriter.__exit__": resume,
+            "NamedTemporaryFile": [[20, "post-call", 1]],
+        },
+        "strays": 0,
+        "windows": {},
+        "harness": "hook",
+        "offenders": [],
+        "lost_in_window": 0,
+        "lost_by_site": {},
+        "other": 0,
+        "resends": 0,
+        "wall_s": 100.0,
+    }
+    summary.update(override)
+    return summary
+
+
+def _judged(summary: dict[str, Any], **kwargs: Any) -> None:
+    """``_judge_sweep`` for arms that expect a return or an AssertionError.
+
+    A ``Skipped`` raised inside a test body would turn the whole test into a skip,
+    which hides a judge that refuses when it must not. It is a failure here.
+    """
+    try:
+        _judge_sweep(summary, **kwargs)
+    except pytest.skip.Exception as skipped:
+        raise AssertionError(f"the judge skipped where it must not: {skipped.msg}") from None
+
+
+def test_pdf164_solo_verdict_judges_a_host_with_no_foreign_pytest() -> None:
+    # Loadavg does not gate: 126.0 on 32 cpus is still a solo host (E2).
+    for load in (0.5, 126.0):
+        verdict = _solo_verdict(
+            _reading(load=load), _reading(load=load), wall_s=300.0, budget_s=_WALL_BUDGET_S
+        )
+        assert verdict is None, (load, verdict)
+
+
+@pytest.mark.parametrize(
+    ("name", "start", "end", "count", "pids"),
+    [
+        ("start-only", _reading(load=70.75, foreign=(4242,)), _reading(load=38.49), 1, "4242"),
+        ("end-only", _reading(load=70.75), _reading(load=38.49, foreign=(1717,)), 1, "1717"),
+        (
+            "both-same-pid-once",
+            _reading(load=70.75, foreign=(4242, 1717)),
+            _reading(load=38.49, foreign=(4242,)),
+            2,
+            "1717, 4242",
+        ),
+        (
+            "probe-error-at-start",
+            _reading(load=70.75, error="OSError: probe"),
+            _reading(load=38.49),
+            0,
+            "none",
+        ),
+    ],
+)
+def test_pdf164_solo_verdict_refuses_with_the_measured_load(
+    name: str, start: _HostReading, end: _HostReading, count: int, pids: str
+) -> None:
+    reason = _solo_verdict(start, end, wall_s=361.5, budget_s=_WALL_BUDGET_S)
+    assert reason is not None, name
+    assert reason.startswith("parallel session: "), reason
+    for clause in ("loadavg(1m) 70.75 -> 38.49", "on 32 cpus", "wall_s 361.5", "240.0"):
+        assert clause in reason, (name, clause, reason)
+    tail = f"{count} foreign pytest process(es) shared this host during the sweep (pids {pids});"
+    assert tail in reason, (name, reason)
+    if name == "probe-error-at-start":
+        assert reason.startswith(
+            "parallel session: host probe failed (OSError: probe); "
+            "0 foreign pytest process(es) shared this host during the sweep (pids none);"
+        ), reason
+
+
+def test_pdf164_refusal_names_at_most_five_sorted_pids() -> None:
+    crowd = tuple(range(900, 907))
+    reason = _solo_verdict(
+        _reading(foreign=crowd[::-1]), _reading(), wall_s=361.5, budget_s=_WALL_BUDGET_S
+    )
+    assert reason is not None
+    assert "7 foreign pytest process(es)" in reason, reason
+    assert "(pids 900, 901, 902, 903, 904)" in reason, reason
+
+
+def _skip_class_of(reason: str) -> str | None:
+    spec = importlib.util.spec_from_file_location(
+        "assert_skips_pdf164", _REPO_ROOT / "scripts" / "assert_skips.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for name, pattern in module.SKIP_CLASSES.items():
+        if pattern.search(reason):
+            return str(name)
+    return None
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["start-only", "end-only", "both", "probe-error"],
+)
+def test_pdf164_the_refusal_reason_lands_in_the_parallel_session_skip_class(case: str) -> None:
+    readings = {
+        "start-only": (_reading(foreign=(4242,)), _reading()),
+        "end-only": (_reading(), _reading(foreign=(1717,))),
+        "both": (_reading(foreign=(4242, 1717)), _reading(foreign=(4242,))),
+        "probe-error": (_reading(error="OSError: probe"), _reading()),
+    }
+    start, end = readings[case]
+    reason = _solo_verdict(start, end, wall_s=361.5, budget_s=_WALL_BUDGET_S)
+    assert reason is not None
+    assert _skip_class_of(reason) == "parallel-session", reason
+
+
+def _ancestry(table: dict[int, tuple[int, list[str]]]) -> list[int]:
+    chain: list[int] = []
+    cursor = os.getpid()
+    while cursor > 0 and cursor not in chain and cursor in table:
+        chain.append(cursor)
+        cursor = table[cursor][0]
+    return chain
+
+
+def test_pdf164_the_host_probe_sees_this_session_as_its_own() -> None:
+    table = _process_table()
+    reading = _read_host()
+    assert reading.error is None, reading.error
+    assert reading.cpu_count >= 1
+    # Non-vacuity: the session root (a pytest-matching process) is among `own`.
+    own_pytest = [pid for pid in reading.own if pid in table and _is_pytest_argv(table[pid][1])]
+    assert own_pytest, f"no pytest-matching pid in own={reading.own}"
+    foreign_pids = {pid for pid, _argv in reading.foreign}
+    chain = set(_ancestry(table))
+    assert not (chain & foreign_pids), (chain & foreign_pids, reading.foreign)
+    assert os.getpid() in reading.own
+    assert foreign_pids.isdisjoint(own_pytest), (foreign_pids, own_pytest)
+
+
+#: Double-forks a decoy so it is NOT a descendant of this session, and prints its pid.
+_DECOY_LAUNCHER: Final[str] = textwrap.dedent(
+    """
+    import os, sys
+    if os.fork():
+        os._exit(0)
+    os.setsid()
+    if os.fork():
+        os._exit(0)
+    sys.stdout.write(str(os.getpid()) + "\\n")
+    sys.stdout.flush()
+    sink = os.open(os.devnull, os.O_RDWR)
+    hold_read, hold_write = os.pipe()
+    os.set_inheritable(hold_write, True)
+    os.dup2(hold_read, 0)
+    os.dup2(sink, 1)
+    os.dup2(sink, 2)
+    os.execv(sys.executable, [sys.executable, "-I", "-c", "import sys; sys.stdin.read()", "pytest"])
+    """
+)
+
+
+def _wait_for(condition: Any, what: str, *, within_s: float = 10.0) -> None:
+    deadline = time.monotonic() + within_s
+    while not condition():
+        assert time.monotonic() < deadline, f"timed out waiting for {what}"
+        time.sleep(0.01)
+
+
+def test_pdf164_the_host_probe_sees_a_reparented_pytest_decoy_as_foreign() -> None:
+    launcher = subprocess.Popen(
+        [sys.executable, "-I", "-c", _DECOY_LAUNCHER],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        text=True,
+    )
+    decoy = 0
+    try:
+        assert launcher.stdout is not None
+        decoy = int(launcher.stdout.readline())
+        launcher.wait(timeout=10)
+        _wait_for(
+            lambda: _process_table().get(decoy, (0, []))[1][-1:] == ["pytest"],
+            "the decoy to exec its pytest-named argv",
+        )
+        reading = _read_host()
+        assert reading.error is None, reading.error
+        assert decoy in {pid for pid, _argv in reading.foreign}, reading.foreign
+        assert decoy not in reading.own
+    finally:
+        if decoy:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(decoy, signal.SIGKILL)
+        if launcher.poll() is None:
+            launcher.kill()
+            launcher.wait(timeout=10)
+        if launcher.stdout is not None:
+            launcher.stdout.close()
+    if decoy:
+        _wait_for(lambda: decoy not in _process_table(), "the decoy to be gone")
+        again = _read_host()
+        assert decoy not in {pid for pid, _argv in again.foreign}
+
+
+def test_pdf164_the_probe_reads_ps_output_when_there_is_no_proc() -> None:
+    listing = (
+        "    1     0 /sbin/init\n"
+        "  200     1 bash -c run\n"
+        "  300   200 /usr/bin/python3 -m pytest tests -n 2\n"
+        "  400   300 python -c worker\n"
+        "garbage line\n"
+        "  500   1\n"
+    )
+    table = _parse_ps(listing)
+    assert sorted(table) == [1, 200, 300, 400, 500]
+    assert [pid for pid, (_ppid, argv) in table.items() if _is_pytest_argv(argv)] == [300]
+    assert table[400][0] == 300
+    assert table[500] == (1, [])
+
+
+def test_pdf164_the_probe_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom() -> dict[int, tuple[int, list[str]]]:
+        raise OSError("probe")
+
+    monkeypatch.setattr(sys.modules[__name__], "_process_table", _boom)
+    reading = _read_host()
+    assert reading.error == "OSError: probe"
+    assert reading.own == () and reading.foreign == ()
+
+
+_DEV_SOLO: Final[tuple[_HostReading, _HostReading]] = (_reading(load=2.0), _reading(load=3.0))
+_SHARED: Final[tuple[_HostReading, _HostReading]] = (
+    _reading(load=70.75, foreign=(4242,)),
+    _reading(load=38.49, foreign=(4242,)),
+)
+
+
+def test_pdf164_judge_reds_an_over_budget_sweep_on_a_solo_host() -> None:
+    start, end = _DEV_SOLO
+    with pytest.raises(AssertionError, match=r"over the 240\.0 s dev-host solo budget") as info:
+        _judged(_green_summary(wall_s=240.1), on_ci=False, start=start, end=end)
+    assert re.search(r"solo host: loadavg\(1m\) 2\.00 -> 3\.00 on 32 cpus", str(info.value))
+    _judged(_green_summary(wall_s=240.0), on_ci=False, start=start, end=end)
+
+
+def test_pdf164_judge_refuses_an_over_budget_sweep_on_a_shared_host() -> None:
+    start, end = _SHARED
+    expected = _solo_verdict(start, end, wall_s=361.5, budget_s=_WALL_BUDGET_S)
+    assert expected is not None
+    with pytest.raises(pytest.skip.Exception) as info:
+        _judge_sweep(_green_summary(wall_s=361.5), on_ci=False, start=start, end=end)
+    assert info.value.msg == expected
+    # Within budget passes without skipping: the verdict is not consulted (E2 M3).
+    _judged(_green_summary(wall_s=163.9), on_ci=False, start=start, end=end)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("strays", 1, r"1 trial\(s\) left a temp"),
+        ("lost_in_window", 1, r"1 signal\(s\) were never raised inside the shield span"),
+        ("other", 1, r"1 trial\(s\) raised something else"),
+        ("resends", 1, r"the unwind path sent 1 signal\(s\)"),
+        ("uncovered", 1, r"1 delivery site\(s\) of 12 were never delivered"),
+        ("ref_stable", False, r"listed different delivery sites"),
+    ],
+)
+@pytest.mark.parametrize(("shared", "wall_s"), [(True, 361.5), (False, 100.0)])
+def test_pdf164_judge_reds_a_correctness_defect_on_a_shared_host(
+    field: str, value: Any, message: str, shared: bool, wall_s: float
+) -> None:
+    start, end = _SHARED if shared else _DEV_SOLO
+    summary = _green_summary(wall_s=wall_s, **{field: value})
+    with pytest.raises(AssertionError, match=message):
+        _judged(summary, on_ci=False, start=start, end=end)
+
+
+def test_pdf164_ci_bound_ignores_the_solo_verdict() -> None:
+    start, end = _SHARED
+    with pytest.raises(AssertionError, match=r"580\.0 s CI"):
+        _judged(_green_summary(wall_s=580.1), on_ci=True, start=start, end=end)
+    _judged(_green_summary(wall_s=580.0), on_ci=True, start=start, end=end)
+    assert _WALL_BUDGET_S == 240.0
+    assert _CI_WALL_BUDGET_S == 580.0
+    assert _CHILD_TIMEOUT_S == 600
