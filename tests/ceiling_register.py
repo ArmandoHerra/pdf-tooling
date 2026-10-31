@@ -202,6 +202,40 @@ CEILING_LEDGER: Final[tuple[_CeilingRatification, ...]] = (
             "`uv run --no-sync python tests/ratchet.py remeasure`: disagreements: 0."
         ),
     ),
+    _CeilingRatification(
+        date="2026-10-31",
+        spec="PDF-159",
+        direction="up",
+        ruling="X-1329",
+        ceilings=MappingProxyType(
+            {
+                "test_coverage_policy.py::PRAGMA_CEILING": 46,
+                "test_docstring_pointers.py::UNTARGETED_CEILING": 35,
+                "test_gate_budget.py::TIMEOUT_CEILING": 30,
+                "test_import_boundaries.py::HELP_MODULE_CEILING": 320,
+                "test_import_boundaries.py::MODULE_SELF_RATIO_CEILING_PER_MILLE": 470,
+                "test_import_boundaries.py::PRODUCT_IMPORT_RATIO_CEILING_PER_MILLE": 2600,
+                "test_import_boundaries.py::STARTUP_COST_RATIO_CEILING_PER_MILLE": 53900,
+                "test_read_seams.py::BOUNDARY_SITE_CEILING": 13,
+                "test_read_seams.py::METADATA_POPULATION_CEILING": 54,
+                "test_secret_leak_sweeps.py::SWEEP_1_CEILING": 79,
+                "test_secret_leak_sweeps.py::SWEEP_2_DEAD_BUT_HONEST_CEILING": (),
+                "test_secret_leak_sweeps.py::SWEEP_2_GENUINE_CEILING": (
+                    "src/pdf_tooling/ops/merge.py::BOOKMARK_MODES",
+                ),
+            }
+        ),
+        reason=(
+            "PDF-159 (X-1329), the dry-run malformed-input prediction. "
+            "test_read_seams.py::BOUNDARY_SITE_CEILING rises 12 -> 13: the one new ops->engine "
+            "path handoff is ops/document_password.py DryOpenProbe.__call__ "
+            "engine.open_document(source, password=None), the pypdf open plus page count the "
+            "real watermark/stamp run performs (no bytes-only port method returns a pypdf page "
+            "count). PDF-162 binds to DryOpenProbe.page_count. Nothing else moves. "
+            "Re-measured at landing with `uv run --no-sync python tests/ratchet.py remeasure`: "
+            "disagreements: 0."
+        ),
+    ),
 )
 
 

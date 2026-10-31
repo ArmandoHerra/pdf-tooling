@@ -46,6 +46,12 @@ dry run that does not open the document still predicts ``0`` with
 PDF-137 adds the keyword-only ``probe_document`` to :func:`predict_password_refusal`;
 ``compress``'s dry run alone uses it, so each row's malformed input is detected
 even when a password is supplied. It reads the document, never the secret.
+
+PDF-159 adds ``engine_probe``: when the operand is not locked by encryption, the
+bytes the seam already read are handed to the verb's own engine, in memory and
+without a secret, so a malformed operand fails the preview with the real run's
+own error. An encrypted operand reached with a resolvable password is never
+probed (X-89).
 """
 
 from __future__ import annotations
@@ -62,8 +68,12 @@ from pdf_tooling.secret import Secret
 
 __all__ = [
     "NO_PASSWORD",
+    "DryOpenProbe",
+    "EngineProbe",
     "PasswordResolver",
     "PasswordSource",
+    "compress_dry_probe",
+    "linearize_dry_probe",
     "password_detail",
     "predict_password_refusal",
     "unresolvable_password_error",
@@ -237,8 +247,53 @@ class PasswordResolver:
             self._secret.clear()
 
 
+#: A verb's own in-memory engine read, used by a dry run. It is handed the operand's
+#: bytes (already read by the seam) and its path, never a secret. It raises the SAME
+#: PdfToolingError the real run's engine call would raise, and returns nothing useful.
+EngineProbe = Callable[[bytes, Path], object]
+
+
+def compress_dry_probe(data: bytes, source: Path) -> object:
+    """`compress`'s structural pass plus read-back, in memory, no secret."""
+    from pdf_tooling.ports.structure import require_structure
+
+    return require_structure(capability="object-streams").compress(data, password=None)
+
+
+def linearize_dry_probe(data: bytes, source: Path) -> object:
+    """`linearize`'s in-memory linearize plus verification, no secret."""
+    from pdf_tooling.ports.structure import require_structure
+
+    return require_structure(capability="linearize").linearize(data, password=None)
+
+
+class DryOpenProbe:
+    """The pypdf open the real `watermark`/`stamp`/`meta set` path performs, plus the
+    page count. ``composite=True`` -> ``require_composite()`` (watermark, stamp
+    primary); ``False`` -> ``require_structure()`` (stamp --from). After a
+    successful call ``page_count`` holds the document's page count (``None``
+    before)."""
+
+    def __init__(self, *, composite: bool) -> None:
+        self._composite = composite
+        self.page_count: int | None = None
+
+    def __call__(self, data: bytes, source: Path) -> object:
+        from pdf_tooling.ports.structure import require_composite, require_structure
+
+        engine = require_composite() if self._composite else require_structure()
+        with engine.open_document(source, password=None) as document:
+            self.page_count = document.page_count
+        return None
+
+
 def predict_password_refusal(
-    source: Path, *, password: PasswordSource, verb: str, probe_document: bool = False
+    source: Path,
+    *,
+    password: PasswordSource,
+    verb: str,
+    probe_document: bool = False,
+    engine_probe: EngineProbe | None = None,
 ) -> AuthError | None:
     """D8's resolvability tier, for a verb whose ``--dry-run`` does not
     otherwise open the document at all.
@@ -254,17 +309,30 @@ def predict_password_refusal(
     is resolvable) parses the document credential-free even when a password IS
     resolvable, so a malformed file is still detected by a preview. The secret
     is never read, and a resolvable password still predicts ``None``.
+
+    PDF-159 adds ``engine_probe``: when the operand is not locked by encryption,
+    the bytes the seam already read are handed to the verb's own engine, in
+    memory and without a secret, so a malformed operand fails the preview with
+    the real run's own error. An encrypted operand reached with a resolvable
+    password is never probed (X-89).
     """
     # PDF-108: first statement of the seam, as in `PasswordResolver.for_source`.
     from pdf_tooling.ops.carriage import record as record_carriage
 
     record_carriage(source)
-    if probe_document or not password.resolvable:
-        facts = require_encryption().read_encryption(read_source_bytes(source), None)
+    if engine_probe is None and password.resolvable and not probe_document:
+        return None  # base's zero-read short-circuit, unchanged
+    data = read_source_bytes(source)  # the ONE read site
+    facts = require_encryption().read_encryption(data, None)
+    if facts.encrypted:
         if password.resolvable:
-            return None  # X-89: a supplied password's correctness is never tested
-        if facts.encrypted and not facts.unlocked:
+            return None  # X-89: a supplied password is never tested
+        if not facts.unlocked:
             return AuthError(f"a password is required to {verb} this document; {PASSWORD_HINT}")
+    elif password.resolvable and engine_probe is None:
+        return None
+    if engine_probe is not None:
+        engine_probe(data, source)
     return None
 
 

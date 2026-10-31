@@ -49,6 +49,8 @@ from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, OperationResult, PageRange
 from pdf_tooling.ops.document_password import (
     NO_PASSWORD,
+    DryOpenProbe,
+    EngineProbe,
     PasswordResolver,
     PasswordSource,
     password_detail,
@@ -189,14 +191,29 @@ def _dry_run_result(
     plan: PlannedOutputs,
     password: PasswordSource = NO_PASSWORD,
     warnings: tuple[str, ...] = (),
+    engine_probe: EngineProbe | None = None,
+    from_probe: tuple[Path, EngineProbe] | None = None,
 ) -> OperationResult:
     """PDF-37: neither `watermark` nor `stamp` otherwise opens the document
     under ``--dry-run``, so the global ``--password-file`` resolvability
     tier is predicted here explicitly, in the SAME tier as the filesystem
     refusal (never the correctness tier, X-89)."""
     refusal: PdfToolingError | None = plan.refusal
+    if refusal is None and from_probe is not None:
+        # PDF-159: the real run reads `--from` first (`_extract_stamp_layer`).
+        from_path, from_engine_probe = from_probe
+        try:
+            from_refusal = predict_password_refusal(
+                from_path, password=password, verb=verb, engine_probe=from_engine_probe
+            )
+        except (AuthError, FailureError) as error:
+            raise _from_operand_error(error, from_path) from error
+        if from_refusal is not None:
+            refusal = _from_operand_error(from_refusal, from_path)
     if refusal is None:
-        refusal = predict_password_refusal(source, password=password, verb=verb)
+        refusal = predict_password_refusal(
+            source, password=password, verb=verb, engine_probe=engine_probe
+        )
     detail = plan.detail()
     if refusal is not None and plan.refusal is None:
         detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
@@ -274,6 +291,7 @@ def watermark_run(
             plan=plan,
             password=password,
             warnings=text_warnings,
+            engine_probe=DryOpenProbe(composite=True),
         )
 
     started = time.monotonic()
@@ -378,6 +396,17 @@ def _validate_from_path(from_path: Path) -> None:
     )
 
 
+def _from_operand_error(error: PdfToolingError, from_path: Path) -> PdfToolingError:
+    """The `--from` operand's wrapped refusal, shared by the real path and the dry probe."""
+    if isinstance(error, AuthError):
+        # B-074: names the DOCUMENT, never a secret -- `redacted` unset.
+        return AuthError(
+            f"a password is required to open --from ({from_path}); {error.message}",
+            path=str(from_path),
+        )
+    return FailureError(f"--from is malformed ({from_path}): {error.message}", path=str(from_path))
+
+
 def _extract_stamp_layer(
     from_path: Path, from_page: int, *, password: Secret | None = None
 ) -> bytes:
@@ -409,16 +438,8 @@ def _extract_stamp_layer(
             buffer = io.BytesIO()
             writer.write(buffer)
             return buffer.getvalue()
-    except AuthError as error:
-        # B-074: names the DOCUMENT, never a secret -- `redacted` unset.
-        raise AuthError(
-            f"a password is required to open --from ({from_path}); {error.message}",
-            path=str(from_path),
-        ) from error
-    except FailureError as error:
-        raise FailureError(
-            f"--from is malformed ({from_path}): {error.message}", path=str(from_path)
-        ) from error
+    except (AuthError, FailureError) as error:
+        raise _from_operand_error(error, from_path) from error
 
 
 def stamp_run(
@@ -440,7 +461,13 @@ def stamp_run(
     plan = plan_filesystem([target], out_dir=None, policy=policy, kind="pdf", sources=[source])
     if policy.dry_run:
         return _dry_run_result(
-            VERB_STAMP, source=source, target=target, plan=plan, password=password
+            VERB_STAMP,
+            source=source,
+            target=target,
+            plan=plan,
+            password=password,
+            engine_probe=DryOpenProbe(composite=True),
+            from_probe=(from_path, DryOpenProbe(composite=False)),
         )
 
     started = time.monotonic()
