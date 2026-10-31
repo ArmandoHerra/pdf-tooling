@@ -642,9 +642,10 @@ def test_ac9_create_is_unchanged(tmp_path: Path) -> None:
     (cell / "u.txt").write_text("A漢😀B\n", encoding="utf-8")
     run = run_cli("create", "u.txt", "-O", "c.pdf", "-o", "json", cwd=cell, stdin="")
     assert run.returncode == 0, run.stderr[-300:]
+    # Re-pinned by PDF-161 (OR-88): create names every replaced code point.
     entry = (
-        "2 character(s) outside the font's WinAnsi encoding were replaced with '?' "
-        "(first: U+6F22 on line 1)"
+        "2 character(s) outside the font's WinAnsi encoding were replaced with '?': "
+        "U+6F22, U+1F600 (first on line 1)"
     )
     assert json.loads(run.stdout)["warnings"] == [entry]
     assert _warn_lines(run) == [f"warning: {entry}"], run.stderr[-300:]

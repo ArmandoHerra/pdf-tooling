@@ -79,9 +79,14 @@ back to a character break for a single token longer than one line, so the page
 count is a function of (text, font, size, page size, margin) and nothing else.
 
 v1 uses the base-14 fonts and embeds none, so some characters cannot be
-represented. Those render as '?' AND raise a warning naming how many and the
-first offending codepoint with its line number -- visible degradation, never a
-silent drop. Markdown and HTML input are not part of v1.
+drawn: CJK, emoji, most non-Latin scripts, and every control character except
+the newline, carriage return, tab and form feed described above. Each one
+renders as '?', and the run raises one warning that counts them, names every
+replaced character as a U+XXXX code point and gives the line of the first --
+visible degradation, never a silent drop. --dry-run predicts the same warning;
+the exit code is unchanged. The Symbol and ZapfDingbats fonts draw their own
+symbol sets, which this check does not cover. Markdown and HTML input are not
+part of v1.
 
 --font NAME (default {DEFAULT_FONT}). One of: {", ".join(BASE14_FONTS)}.
 --size FLOAT (default {DEFAULT_SIZE:g}); leading is 1.2x the size.

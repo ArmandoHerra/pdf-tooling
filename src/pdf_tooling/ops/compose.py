@@ -191,7 +191,9 @@ DEFAULT_COMPOSE_MARGIN: Final[str] = "0"
 DEFAULT_CREATE_MARGIN: Final[str] = "54pt"
 
 #: The text encoding the base-14 fonts carry. Characters outside it are replaced
-#: with ``?`` **and warned about** — never silently dropped.
+#: with ``?`` **and warned about** — never silently dropped. ``cp1252`` accepts C0
+#: controls and U+007F, which the engine's ``winansi`` codec lacks;
+#: ``sanitize_text`` handles them (PDF-161).
 _TEXT_ENCODING: Final[str] = "cp1252"
 
 _UNITS: Final[dict[str, float]] = {
@@ -714,37 +716,61 @@ def normalize_text(text: str) -> str:
     return normalized
 
 
-def sanitize_text(text: str) -> tuple[str, str | None]:
-    """Replace unrepresentable characters with ``?``; return the text and a warning.
+#: PDF-161 (OR-88): the control characters `create` treats as layout, never
+#: drawn. normalize_text turns CR/CRLF into LF and a tab into spaces; the
+#: adapter splits lines on LF and pages on FF. Every other C0 control and
+#: U+007F is undrawable in the WinAnsi base-14 fonts.
+_LAYOUT_CONTROLS: Final[frozenset[str]] = frozenset("\t\n\r\f")
 
-    The base-14 fonts cannot represent CJK, emoji and much else. Left alone the
+
+def _encodable(character: str) -> bool:
+    """Whether *character* is in the base-14 fonts' text encoding."""
+    try:
+        character.encode(_TEXT_ENCODING)
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def sanitize_text(text: str) -> tuple[str, str | None]:
+    """Replace undrawable characters with ``?``; return the text and a warning.
+
+    The base-14 fonts cannot draw CJK, emoji and much else, nor any C0 control
+    other than ``_LAYOUT_CONTROLS`` or U+007F (PDF-161, OR-88). Left alone the
     engine draws a placeholder glyph and says nothing, which is exactly the
-    silent degradation this product refuses. So the substitution is explicit and
-    it is counted, and the caller surfaces the count, the first offending
-    codepoint and its line number.
+    silent degradation this product refuses. So every such character is
+    replaced explicitly and counted. The warning counts every replaced
+    occurrence, names each distinct code point once in first-occurrence order
+    and gives the line of the first. The function is pure, so the dry run
+    predicts the same warning.
     """
     out: list[str] = []
-    replaced = 0
-    first: tuple[int, int] | None = None
+    replaced: list[int] = []
+    first_line: int | None = None
     line_number = 1
+    previous = ""
     for character in text:
-        try:
-            character.encode(_TEXT_ENCODING)
-        except UnicodeEncodeError:
-            replaced += 1
-            if first is None:
-                first = (ord(character), line_number)
+        point = ord(character)
+        if (
+            (point < 0x20 and character not in _LAYOUT_CONTROLS)
+            or point == 0x7F
+            or not _encodable(character)
+        ):
+            replaced.append(point)
+            if first_line is None:
+                first_line = line_number
             out.append("?")
-            continue
-        if character == "\n":
+        else:
+            out.append(character)
+        if character == "\r" or (character == "\n" and previous != "\r"):
             line_number += 1
-        out.append(character)
-    if first is None:
+        previous = character
+    if first_line is None:
         return "".join(out), None
-    codepoint, line = first
+    points = ", ".join(f"U+{point:04X}" for point in dict.fromkeys(replaced))
     return "".join(out), (
-        f"{replaced} character(s) outside the font's WinAnsi encoding were "
-        f"replaced with '?' (first: U+{codepoint:04X} on line {line})"
+        f"{len(replaced)} character(s) outside the font's WinAnsi encoding were "
+        f"replaced with '?': {points} (first on line {first_line})"
     )
 
 
