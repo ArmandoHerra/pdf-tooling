@@ -43,6 +43,7 @@ from pdf_tooling.models import SCHEMA_VERSION as _SCHEMA_VERSION
 from pdf_tooling.models import ItemResult, MetadataReport, OperationResult
 from pdf_tooling.ops.document_password import (
     NO_PASSWORD,
+    EngineProbe,
     PasswordResolver,
     PasswordSource,
     password_detail,
@@ -262,6 +263,20 @@ def _reject_clear_all_with_other_flags(
         )
 
 
+def _meta_set_dry_probe(
+    sets: Mapping[str, str], clears: Sequence[str], clear_all: bool
+) -> EngineProbe:
+    """PDF-159: the real run's own `write_metadata` call, in memory, with no
+    secret; the candidate bytes are dropped and nothing is written."""
+
+    def probe(data: bytes, source: Path) -> object:
+        engine = require_structure()  # X-76, as the real arm
+        engine.write_metadata(data, sets=sets, clears=clears, clear_all=clear_all, password=None)
+        return None
+
+    return probe
+
+
 def meta_set_run(
     source: Path,
     *,
@@ -330,7 +345,14 @@ def meta_set_run(
             plan = plan_outputs()
             refusal = plan.refusal
             if refusal is None:
-                refusal = predict_password_refusal(source, password=password, verb=VERB_META_SET)
+                refusal = predict_password_refusal(
+                    source,
+                    password=password,
+                    verb=VERB_META_SET,
+                    engine_probe=_meta_set_dry_probe(
+                        sets, ["producer"] if clear_producer else [], clear_all
+                    ),
+                )
             detail = plan.detail()
             if refusal is not None and plan.refusal is None:
                 detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}

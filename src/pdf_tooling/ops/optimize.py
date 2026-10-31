@@ -69,6 +69,8 @@ from pdf_tooling.ops.document_password import (
     NO_PASSWORD,
     PasswordResolver,
     PasswordSource,
+    compress_dry_probe,
+    linearize_dry_probe,
     password_detail,
     predict_password_refusal,
 )
@@ -342,6 +344,7 @@ def compress_run(
                     verb=VERB_COMPRESS,
                     password=password,
                     probe_document=True,
+                    engine_probe=compress_dry_probe,
                 )
                 if refusal is not None:
                     detail = {
@@ -649,7 +652,12 @@ def linearize_run(
     if policy.dry_run:
         refusal = plan.refusal
         if refusal is None:
-            refusal = predict_password_refusal(source, password=password, verb=VERB_LINEARIZE)
+            refusal = predict_password_refusal(
+                source,
+                password=password,
+                verb=VERB_LINEARIZE,
+                engine_probe=linearize_dry_probe,
+            )
         detail = plan.detail()
         if refusal is not None and plan.refusal is None:
             detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
