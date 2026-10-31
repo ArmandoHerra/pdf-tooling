@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-166] Escape control characters in logging records on stderr — 2026-10-31
+
+- **Every log record on stderr** (ours and a third-party engine's, at any verbosity) now shows each control code point except TAB and LF as a visible `\xNN` / `\r` escape, so a hostile file name or document string in a `WARNING:` or `DEBUG:` record can no longer drive the terminal (CWE-150, `B-538`, `7aa02daaf7`). The fix is one seam, the handler's formatter, with PDF-157's multiline rule; no log call site changed.
+- **Redaction still runs first** (the record is redacted, then escaped), and the record itself is never modified, so another handler still receives the raw text.
+- **Frozen:** `-o json` / `-o ndjson` stdout, every envelope key, every exit code, every file a verb writes and PDF-157's own `error:` / `warning:` lines are byte-unchanged; only control bytes inside log records on stderr change.
+
 ## [PDF-163] Test-hygiene sweep: wheel outside the checkout, PDF-156 AC6 bytes, chained ImportError, re-quoted comment — 2026-10-31
 
 - **The console-script wheel test** now builds into its own temporary directory (`uv build --out-dir`), so a test run no longer rewrites the checkout's `dist/` and two concurrent runs cannot read each other's wheel (`B-556`). Tests only.
