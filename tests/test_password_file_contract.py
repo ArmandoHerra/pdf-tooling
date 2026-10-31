@@ -528,7 +528,7 @@ def test_ac5_on_every_honoured_verb_correct_and_wrong_differ_in_exit_code(
 #: own "6 / 0 / 6" evidence for `5ff60a280e`), never via message, and
 #: fixing that message shape is `ops/crypto.py` work this spec's own Scope
 #: table does not license. `decrypt` (the ONLY other pre-existing
-#: HONOURED_FLOOR member) DOES differ ("no password password available:
+#: HONOURED_FLOOR member) DOES differ ("no password available:
 #: ..." vs "the supplied password did not open this document") and is
 #: NOT exempted.
 _AC6_MESSAGE_EXEMPT: Final[frozenset[str]] = frozenset({"permissions"})
@@ -553,6 +553,22 @@ def test_ac6_on_every_honoured_verb_no_password_and_wrong_messages_differ(
         f"the no-password and wrong-password messages are BYTE-IDENTICAL for: {failures} "
         "-- this is the exact defect signature this spec exists to close"
     )
+
+
+def test_ac6_exemption_comment_quotes_the_products_current_decrypt_message() -> None:
+    """PDF-163 / B-557 (OR-81-shaped): the `_AC6_MESSAGE_EXEMPT` comment quotes
+    `decrypt`'s no-password message; derive the quote from the product, so a
+    future message change reds here instead of leaving a stale comment."""
+    from pdf_tooling.ops.document_password import unresolvable_password_error
+
+    prefix = unresolvable_password_error("password").args[0].split(":")[0]
+    lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+    end = next(i for i, ln in enumerate(lines) if ln.startswith("_AC6_MESSAGE_EXEMPT"))
+    start = end
+    while start > 0 and lines[start - 1].startswith("#:"):
+        start -= 1
+    block = " ".join(ln.removeprefix("#:").strip() for ln in lines[start:end])
+    assert f'"{prefix}:' in block, f"stale quote of the product message; expected {prefix!r}"
 
 
 # --------------------------------------------------------------------------- #

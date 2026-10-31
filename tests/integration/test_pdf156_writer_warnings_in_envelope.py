@@ -25,10 +25,12 @@ cell's real values and asserted by EQUALITY.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib
 import json
 import os
 import pickle
+import re
 import shutil
 import sys
 import tempfile
@@ -64,11 +66,32 @@ from registry import REPO_ROOT, discover_verbs, run_cli  # noqa: E402
 def _added(module: str, *names: str) -> tuple[Any, ...]:
     try:
         loaded = importlib.import_module(module)
-    except ImportError:
-        loaded = None
-    missing = [name for name in names if loaded is None or not hasattr(loaded, name)]
+    except ImportError as exc:
+        raise AssertionError(f"PDF-156: importing {module} failed: {exc!r}") from exc
+    missing = [name for name in names if not hasattr(loaded, name)]
     assert not missing, f"PDF-156 behaviour is absent: {module} does not provide {missing}"
     return tuple(getattr(loaded, name) for name in names)
+
+
+def test_added_names_the_original_import_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PDF-163 / B-551 (2): a module whose own import fails is reported with
+    the symbol that failed, chained, never as a bare 'does not provide'."""
+    (tmp_path / "ghost_pdf163.py").write_text(
+        "from pdf_tooling.safety.writer_warnings import _no_such_symbol_pdf163\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "ghost_pdf163", raising=False)
+    with pytest.raises(AssertionError) as caught:
+        _added("ghost_pdf163", "x")
+    assert isinstance(caught.value.__cause__, ImportError)
+    assert "_no_such_symbol_pdf163" in str(caught.value)
+    with pytest.raises(AssertionError) as absent:
+        _added("pdf_tooling.no_such_module_pdf163", "x")
+    assert isinstance(absent.value.__cause__, ModuleNotFoundError)
+    with pytest.raises(AssertionError, match=r"does not provide \['no_such_attr'\]"):
+        _added("pdf_tooling.ops.carriage", "no_such_attr")
 
 
 def merge_writer_warnings(existing: Any) -> list[str]:
@@ -543,6 +566,17 @@ def test_ac6_dry_real_pairs(world: World, leaf: str) -> None:
         assert not any(line.startswith(DEGRADED_PREFIX) for line in dry.stderr_lines)
 
 
+# PDF-163 / B-551 (1): PDF-156's refusal row as BYTES, provenance e7384d2 (E2).
+REFUSAL_REAL_STDOUT: Final = (
+    151,
+    "2aca3d7a9b971862a67b38139e7c545264d5e9349cc869001b67b05cac9caa0f",
+)
+REFUSAL_DRY_STDOUT_NORMALISED: Final = (
+    538,
+    "8945d68079f047fa1fe5c9cf6da77cc694d20e2beb64021bed355dbf6a7634bf",
+)
+
+
 def test_ac6_refusal_row_warns_before_nothing(world: World) -> None:
     argv = ("compress", "good.pdf", "-O", "L/exists.pdf")
     real_cell = world.cell()
@@ -564,6 +598,18 @@ def test_ac6_refusal_row_warns_before_nothing(world: World) -> None:
     assert dry.envelope["items"][0]["detail"]["would_exit"] == 5
     assert writer_entries(dry.warnings) == []
     assert not any(line.startswith(DEGRADED_PREFIX) for line in dry.stderr_lines)
+
+    real_raw = real.out.encode()
+    assert (len(real_raw), hashlib.sha256(real_raw).hexdigest()) == REFUSAL_REAL_STDOUT, real.out
+    assert real.err == "" and dry.err == ""
+    size = (dry_cell[0] / "good.pdf").stat().st_size
+    dry_raw = dry.out.encode()
+    assert f'"bytes_before": {size},'.encode() in dry_raw, dry.out  # good.pdf is 974|975 bytes (E2)
+    dry_norm = re.sub(rb'"duration_ms": [0-9.]+', b'"duration_ms": 0', dry_raw)
+    dry_norm = re.sub(rb'"bytes_before": [0-9]+', b'"bytes_before": 0', dry_norm)
+    assert (len(dry_norm), hashlib.sha256(dry_norm).hexdigest()) == REFUSAL_DRY_STDOUT_NORMALISED, (
+        dry.out
+    )
 
 
 # --------------------------------------------------------------------------- #

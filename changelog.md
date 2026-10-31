@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-163] Test-hygiene sweep: wheel outside the checkout, PDF-156 AC6 bytes, chained ImportError, re-quoted comment — 2026-10-31
+
+- **The console-script wheel test** now builds into its own temporary directory (`uv build --out-dir`), so a test run no longer rewrites the checkout's `dist/` and two concurrent runs cannot read each other's wheel (`B-556`). Tests only.
+- **PDF-156's refusal row** now compares the real and dry envelopes against their recorded bytes (sha256), so a content change to the no-clobber message reds it; the lazy-import helper now chains the original `ImportError` (`B-551`). Tests only.
+- **A comment** in the password-file contract tests quoted the pre-PDF-158 `decrypt` message; it is re-quoted, and a guard derives the quote from the product (`B-557`). Tests only.
+
 ## [PDF-162] Make --dry-run predict page-selection usage errors on watermark and stamp — 2026-10-31
 
 - **`watermark --dry-run` / `stamp --dry-run`** now resolve the page selection the real run resolves: `--pages abc`, `--pages 9` (beyond the last page), `--pages 0`, a negative index past the start, `--pages ''`, `stamp --from-page` beyond `--from`'s page count, and a selection that matches no page answer exit `2` (or `4` for an empty selection) with the real run's error envelope, byte for byte. They previewed `0 planned:` (`B-536`, `0350a9161e`). Precedence is the real run's: an occupied `-O` (5), an unreadable or encrypted input (1/6) and a bad `--from` answer first. A preview still never reads a supplied password, so an input locked behind one keeps the documented `password_verified: false` exception.
