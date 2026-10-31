@@ -57,7 +57,12 @@ dependencies = [
   # 2026-10-24 (ledger 9a0daae8ee follow-up): floor 6.19.0 -> 6.21.2, the
   # lowest version that fixes all 11 pip-audit advisories published against
   # 6.19.0; the `<7` ceiling stays (no fix needs 7.x).
-  "pypdf[crypto]>=6.21.2,<7",
+  # 2026-10-30: floor 6.21.2 -> 6.21.4, the lowest version that fixes the 7
+  # DoS advisories published against 6.21.2 (GHSA-5849-834g-hvw5,
+  # GHSA-cggf-277g-3q54, GHSA-mfr5-77xh-9j7h in 6.21.4; GHSA-42gh-23hr-vphw,
+  # GHSA-4vqv-7265-gm2w, GHSA-62m5-6wh8-28x7, GHSA-x3rh-gjgm-fmqc in 6.21.3);
+  # the `<7` ceiling stays (no fix needs 7.x).
+  "pypdf[crypto]>=6.21.4,<7",
   "pypdfium2>=5.13.0,<6",
   "reportlab>=5.0.1,<6",
   "pikepdf>=10.12.0,<11",

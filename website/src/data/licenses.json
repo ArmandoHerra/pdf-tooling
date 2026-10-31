@@ -92,7 +92,7 @@
   {
     "License": "BSD-3-Clause",
     "Name": "pypdf",
-    "Version": "6.21.2"
+    "Version": "6.21.4"
   },
   {
     "License": "BSD-3-Clause, Apache-2.0, dependency licenses",
