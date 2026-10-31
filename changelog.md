@@ -20,6 +20,11 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-164] Stop two tests judging a loaded host as a failure — 2026-10-31
+
+- **Tests only; no product change.** The PDF-146 async-unwind sweep now asserts every correctness field first, then judges its 240 s dev-host solo budget only on a solo host; when another pytest session shares the host and the sweep is over budget it skips with a `parallel session:` reason carrying the measured load (`B-554`, `d318e1838d`). The 240 s and 580 s figures are unchanged.
+- The PDF-136 soffice tempdir test no longer races LibreOffice's own first-temp removal: it holds the 1.0 s timeout until a persistent `lu*.tmp` exists inside the scratch root, bounded by the engine's lifetime, and reds at once if one lands in the user's `TMPDIR` (`B-555`, `31ea27c2da`).
+
 ## [PDF-171] Reword the website tagline and OG card to a true licence statement — 2026-10-31
 
 - The website said "No copyleft underneath." (ES "Sin copyleft debajo.") in the hero, the page title, `og:description`, `twitter:description` and the Open Graph card, while its own licence section discloses that `pikepdf` is MPL-2.0, copyleft file by file. The operator ruled to fix the line.
