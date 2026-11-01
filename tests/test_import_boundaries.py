@@ -6261,8 +6261,8 @@ def _atomic_writer_construction_sites(root: Path) -> dict[str, bool]:
 
 def test_ac13b_exactly_three_atomicwriter_constructions_pass_sources() -> None:
     sites = _atomic_writer_construction_sites(SRC)
-    assert len(sites) == 18, (
-        f"expected 18 AtomicWriter construction sites (D2), found {len(sites)}: {sorted(sites)}"
+    assert len(sites) == 19, (
+        f"expected 19 AtomicWriter construction sites (D2), found {len(sites)}: {sorted(sites)}"
     )
     carrying_modules = sorted(site.split(":")[0] for site, has in sites.items() if has)
     assert carrying_modules == [

@@ -279,6 +279,7 @@ __all__ = [
     "ScratchDir",
     "plan_filesystem",
     "plan_output_set",
+    "predict_degraded_destinations",
 ]
 
 #: The one warning class both cross-filesystem conditions are reported under, so
@@ -1357,6 +1358,29 @@ _SCRATCH_PREFIX: Final[str] = "pdftoolkit-scratch-"
 
 
 _EXIT_CODE = AtomicWriter.__exit__.__code__
+
+
+def predict_degraded_destinations(
+    targets: Sequence[Path], *, policy: SafetyPolicy, kind: str
+) -> None:
+    """PDF-170 (OR-87): a dry run predicts the writer's condition-1 warning.
+
+    For each target, in order: build the writer the real run would build,
+    WITHOUT entering it, and ask its own `_warn_if_destination_moved()`.
+    Same producer, same template, same `_warn` -> `_default_warn` sink, same
+    PDF-156 ledger, so the dry envelope publishes it through PDF-156's
+    publisher. Reads only: `canonical()`, `lstat`, `stat`, `exists()`.
+    Never `__enter__`, `_plan`, `_open_temp`, `mkdir` or any open.
+
+    A target whose canonical parent does not exist is skipped: the real run
+    creates that `--out-dir` on the resolved filesystem before any writer
+    plans, after which the named and actual devices agree (PDF-170 E2 (d)).
+    """
+    for target in targets:
+        writer = AtomicWriter(target, policy=policy, kind=kind)
+        if not writer.destination.parent.exists():
+            continue
+        writer._warn_if_destination_moved()
 
 
 class ScratchDir:

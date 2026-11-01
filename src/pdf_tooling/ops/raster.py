@@ -88,7 +88,7 @@ from pdf_tooling.ports.raster import (
     require_raster,
 )
 from pdf_tooling.ports.structure import require_structure
-from pdf_tooling.safety.atomic import AtomicWriter, plan_output_set
+from pdf_tooling.safety.atomic import AtomicWriter, plan_output_set, predict_degraded_destinations
 from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
@@ -517,6 +517,11 @@ def _rasterize_planned(
         detail: dict[str, object] = {"would_exit": plan.would_exit}
         if plan.refusal is not None:
             detail["would_refuse"] = plan.would_refuse
+        else:
+            # PDF-170 (OR-87): the plan is clean, so every page is written.
+            predict_degraded_destinations(
+                [target for _source, _page, target in rendered], policy=policy, kind="image"
+            )
         items = tuple(
             ItemResult(
                 input=str(source),

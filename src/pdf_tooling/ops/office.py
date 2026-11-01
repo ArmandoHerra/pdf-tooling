@@ -49,7 +49,12 @@ from pdf_tooling.ports.office import (
     office_binary_present,
     require_office,
 )
-from pdf_tooling.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
+from pdf_tooling.safety.atomic import (
+    AtomicWriter,
+    ScratchDir,
+    plan_filesystem,
+    predict_degraded_destinations,
+)
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
 from pdf_tooling.safety.policy import SafetyPolicy
@@ -218,6 +223,8 @@ def convert_run(
             # must not be overridden by a per-item verdict here.
             if not plan.refused:
                 ensure_office_source_loadable(item.source)
+                # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+                predict_degraded_destinations([item.target], policy=policy, kind="pdf")
             return ItemResult(
                 input=str(item.source),
                 output=str(item.target),

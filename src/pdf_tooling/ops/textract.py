@@ -79,7 +79,7 @@ from pdf_tooling.ports.text import (
     require_layout_text,
     require_tables,
 )
-from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem, predict_degraded_destinations
 from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name, used_fields
 from pdf_tooling.safety.paths import check_output_collisions
@@ -612,6 +612,11 @@ def extract_text_run(
         # path `split` and `rasterize` already take -- no per-verb prediction
         # logic and no per-verb exit-code logic is added on top of it.
         detail = plan.detail()
+        if not plan.refused:
+            # PDF-170 (OR-87): the plan is clean, so every artifact is written.
+            predict_degraded_destinations(
+                [item.target for item in planned], policy=policy, kind="text"
+            )
         items = tuple(
             ItemResult(
                 input=str(item.source),
@@ -866,6 +871,13 @@ def extract_tables_run(
 
     if policy.dry_run:
         detail = plan.detail()
+        if not plan.refused:
+            # PDF-170 (OR-87): the plan is clean, so every table is written.
+            predict_degraded_destinations(
+                [Path(grid.path) for grid in grids if grid.path is not None],
+                policy=policy,
+                kind="table",
+            )
         items = tuple(
             ItemResult(
                 input=grid.source,

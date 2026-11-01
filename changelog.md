@@ -20,6 +20,12 @@ grep at `HEAD` — a grep at `HEAD` is exactly what hides a lost prepend.
 
 <!-- CHANGELOG-ANCHOR: insert new entries directly below this line, newest first -->
 
+## [PDF-170] Make --dry-run predict atomicity degraded on the writing verbs — 2026-10-31
+
+- Through a symlinked or cross-device destination, the `--dry-run` of `compress`, `repair`, `linearize`, `split`, `extract`, `delete`, `rotate`, `reorder`, `encrypt`, `decrypt`, `watermark`, `stamp`, `meta set`, `convert`, `ocr`, `rasterize`, `text` and `tables` now prints the same `warning: atomicity degraded: …` line, and publishes the same `warnings` entry, as the real run (`eacb414790`, `B-541`, operator ruling `OR-87`). `merge`, `create` and `compose` already did and are unchanged.
+- The prediction is a device comparison only (`stat`/`lstat`): a dry run still writes nothing, anywhere. An `--out-dir` the real run would create first is not predicted, because the real run does not warn there.
+- Same-device runs, every real run, exit codes, keys and `schema_version` are unchanged.
+
 ## [PDF-169] Pin uv.lock's revision and make every Upgrading-heading constant whole-line — 2026-10-31
 
 - **B-549:** `tests/test_uv_lock_revision.py` derives CI's uv from the `setup-uv` steps, maps it through a measured register and pins `uv.lock`'s `revision` to what that uv writes. Driven: CI's uv accepts a revision-3 lock (`uv lock --check` and `uv sync --locked` both exit 0) and a re-lock keeps the revision it finds, so nothing else could see a downgrade. `CONTRIBUTING.md` gains `## Version bumps` (re-lock with the CI uv; restore the lock first if it is already wrong).
