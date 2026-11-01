@@ -99,7 +99,7 @@ from pdf_tooling.ports.structure import (
     EncryptionFacts,
     require_encryption,
 )
-from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem, predict_degraded_destinations
 from pdf_tooling.safety.paths import classify_operand, read_source_bytes
 from pdf_tooling.safety.policy import SafetyPolicy
 from pdf_tooling.secret import Secret
@@ -367,6 +367,8 @@ def encrypt_run(
                 would_exit=plan.would_exit,
                 detail=detail,
             )
+        # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+        predict_degraded_destinations([target], policy=policy, kind="pdf")
         return OperationResult(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_ENCRYPT,
@@ -493,6 +495,8 @@ def decrypt_run(
                 would_exit=plan.would_exit,
                 detail=detail,
             )
+        # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+        predict_degraded_destinations([target], policy=policy, kind="pdf")
         return OperationResult(
             schema_version=_SCHEMA_VERSION,
             verb=VERB_DECRYPT,

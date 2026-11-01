@@ -63,7 +63,12 @@ from pdf_tooling.ops.document_password import (
 from pdf_tooling.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_tooling.ports.compose import require_compose
 from pdf_tooling.ports.structure import require_composite, require_structure
-from pdf_tooling.safety.atomic import AtomicWriter, PlannedOutputs, plan_filesystem
+from pdf_tooling.safety.atomic import (
+    AtomicWriter,
+    PlannedOutputs,
+    plan_filesystem,
+    predict_degraded_destinations,
+)
 from pdf_tooling.safety.paths import classify_operand
 from pdf_tooling.safety.policy import SafetyPolicy
 from pdf_tooling.secret import Secret
@@ -217,6 +222,7 @@ def _dry_run_result(
     source: Path,
     target: Path,
     plan: PlannedOutputs,
+    policy: SafetyPolicy,
     password: PasswordSource = NO_PASSWORD,
     warnings: tuple[str, ...] = (),
     engine_probe: EngineProbe | None = None,
@@ -256,6 +262,9 @@ def _dry_run_result(
         source_count = getattr(engine_probe, "page_count", None)
         if refusal is None and source_count is not None:
             _select_pages(source, pages_spec, source_count, verb=verb)
+    if refusal is None:
+        # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+        predict_degraded_destinations([target], policy=policy, kind="pdf")
     detail = plan.detail()
     if refusal is not None and plan.refusal is None:
         detail = {**detail, "would_exit": refusal.exit_code, "planned_refusal": "AuthError"}
@@ -331,6 +340,7 @@ def watermark_run(
             source=source,
             target=target,
             plan=plan,
+            policy=policy,
             password=password,
             warnings=text_warnings,
             engine_probe=DryOpenProbe(composite=True),
@@ -496,6 +506,7 @@ def stamp_run(
             source=source,
             target=target,
             plan=plan,
+            policy=policy,
             password=password,
             engine_probe=DryOpenProbe(composite=True),
             from_probe=(from_path, DryOpenProbe(composite=False)),

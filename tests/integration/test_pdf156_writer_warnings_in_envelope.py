@@ -157,10 +157,6 @@ WRITING_LEAVES: Final[tuple[str, ...]] = (
     "watermark",
 )
 
-#: The leaves that construct their writer under ``--dry-run`` and so print (and,
-#: after this spec, publish) the degraded line in a dry run too (E4).
-DRY_PREDICTING: Final[frozenset[str]] = frozenset({"merge", "create", "compose"})
-
 MERGE_INFO_ENTRY: Final[str] = (
     "good2.pdf: merge does not carry the input's document /Info to its output"
 )
@@ -556,14 +552,12 @@ def test_ac6_dry_real_pairs(world: World, leaf: str) -> None:
     real = world.run(argv, cell)
     assert real.rc == 0, real.err
     assert writer_entries(real.warnings) == expected
-    if leaf in DRY_PREDICTING:
-        assert writer_entries(dry.warnings) == expected
-        assert sorted(line for line in dry.stderr_lines if line.startswith(DEGRADED_PREFIX)) == (
-            sorted(expected)
-        )
-    else:
-        assert writer_entries(dry.warnings) == []
-        assert not any(line.startswith(DEGRADED_PREFIX) for line in dry.stderr_lines)
+    # PDF-170 (OR-87): every writing leaf's dry run predicts the line the real run prints
+    # (the former `else` arm pinned the base defect, `(0, deg)`).
+    assert writer_entries(dry.warnings) == expected
+    assert sorted(line for line in dry.stderr_lines if line.startswith(DEGRADED_PREFIX)) == (
+        sorted(expected)
+    )
 
 
 # PDF-163 / B-551 (1): PDF-156's refusal row as BYTES, provenance e7384d2 (E2).

@@ -98,7 +98,7 @@ from pdf_tooling.ops.batch import BatchLedger, preflight_operands
 from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_tooling.ops.pagerange import parse
 from pdf_tooling.ports.structure import OpenStructureDocument, require_structure
-from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem, predict_degraded_destinations
 from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
@@ -614,6 +614,13 @@ def _run_with_resolver(
 
     if policy.dry_run:
         fs_detail = plan.detail()
+        if not plan.refused:
+            # PDF-170 (OR-87): only rows that survived tier 1 reach a real writer.
+            predict_degraded_destinations(
+                [item.target for item in planned if not ledger.failed(item.source)],
+                policy=policy,
+                kind="pdf",
+            )
         return OperationResult(
             schema_version=_SCHEMA_VERSION,
             verb=verb,

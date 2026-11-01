@@ -80,7 +80,7 @@ from pdf_tooling.ports.structure import (
     require_image_pass,
     require_structure,
 )
-from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem
+from pdf_tooling.safety.atomic import AtomicWriter, plan_filesystem, predict_degraded_destinations
 from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import (
@@ -352,6 +352,9 @@ def compress_run(
                         "would_exit": refusal.exit_code,
                         "planned_refusal": "AuthError",
                     }
+            if refusal is None:
+                # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+                predict_degraded_destinations([item.target], policy=policy, kind="pdf")
             return ItemResult(
                 input=str(item.source),
                 output=str(item.target),
@@ -556,6 +559,9 @@ def repair_run(
         # boundary arm ii). A dry run never reads the secret, so
         # `verified` is unconditionally `False` here.
         detail = {**detail, **password_detail([password], verified=False)}
+        if refusal is None:
+            # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+            predict_degraded_destinations([target], policy=policy, kind="pdf")
         item = ItemResult(
             input=str(source),
             output=str(target),
@@ -666,6 +672,9 @@ def linearize_run(
         # boundary arm ii). A dry run never reads the secret, so
         # `verified` is unconditionally `False` here.
         detail = {**detail, **password_detail([password], verified=False)}
+        if refusal is None:
+            # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+            predict_degraded_destinations([target], policy=policy, kind="pdf")
         item = ItemResult(
             input=str(source),
             output=str(target),

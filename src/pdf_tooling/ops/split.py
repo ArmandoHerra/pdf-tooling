@@ -32,7 +32,7 @@ from pdf_tooling.models import ItemResult, OperationResult
 from pdf_tooling.ops.document_password import NO_PASSWORD, PasswordResolver, PasswordSource
 from pdf_tooling.ops.pagerange import PageRangeError, parse
 from pdf_tooling.ports.structure import OpenStructureDocument, require_structure
-from pdf_tooling.safety.atomic import AtomicWriter, plan_output_set
+from pdf_tooling.safety.atomic import AtomicWriter, plan_output_set, predict_degraded_destinations
 from pdf_tooling.safety.naming import render_name, used_fields
 from pdf_tooling.safety.paths import check_output_collisions, classify_operand
 from pdf_tooling.safety.policy import SafetyPolicy
@@ -241,6 +241,9 @@ def split_document(
                 detail: dict[str, object] = {"would_exit": plan.would_exit}
                 if plan.refusal is not None:
                     detail["would_refuse"] = plan.would_refuse
+                else:
+                    # PDF-170 (OR-87): the plan is clean, so every part is written.
+                    predict_degraded_destinations(targets, policy=policy, kind="pdf")
                 items = tuple(
                     ItemResult(
                         input=str(source),

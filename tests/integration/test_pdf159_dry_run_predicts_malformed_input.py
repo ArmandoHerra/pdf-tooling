@@ -515,12 +515,14 @@ def test_ac8_probe_is_pure_once_and_secret_free(
     password = PasswordSource(slot="password", source="file:/x/pw", read=thunk)
 
     def _no_writer(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("a preview must not construct a writer")
+        raise AssertionError("a preview must not create or write through a writer")
 
     def _no_process(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("a preview must not start a process")
 
-    monkeypatch.setattr(atomic.AtomicWriter, "__init__", _no_writer)
+    # PDF-170 / OR-97: a preview may construct a writer, never enter, plan or open one.
+    for attribute in ("__enter__", "_plan", "_open_temp"):
+        monkeypatch.setattr(atomic.AtomicWriter, attribute, _no_writer)
     monkeypatch.setattr(subprocess, "Popen", _no_process)
 
     source = work / operand

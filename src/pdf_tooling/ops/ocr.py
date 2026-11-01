@@ -79,7 +79,12 @@ from pdf_tooling.ops.pagerange import ALL_PAGES_TOKEN, parse
 from pdf_tooling.ports.ocr import OcrEngine, require_ocr
 from pdf_tooling.ports.raster import enforce_render_budget, require_raster
 from pdf_tooling.ports.structure import StructureEngine, require_structure
-from pdf_tooling.safety.atomic import AtomicWriter, ScratchDir, plan_filesystem
+from pdf_tooling.safety.atomic import (
+    AtomicWriter,
+    ScratchDir,
+    plan_filesystem,
+    predict_degraded_destinations,
+)
 from pdf_tooling.safety.confirm import BulkContext
 from pdf_tooling.safety.naming import render_name
 from pdf_tooling.safety.paths import check_output_collisions
@@ -373,6 +378,13 @@ def ocr_run(
         # A source that failed page selection above already carries its own row
         # in the ledger, so the preview reports it exactly as the real run does
         # -- same exit code, same collection key, same order (OR-7 / X-185).
+        if not plan.refused:
+            # PDF-170 (OR-87): the OK rows' writers, in item order.
+            predict_degraded_destinations(
+                [item.target for item in planned if not ledger.failed(item.source)],
+                policy=policy,
+                kind="pdf",
+            )
         items = [
             ItemResult(
                 input=str(item.source),

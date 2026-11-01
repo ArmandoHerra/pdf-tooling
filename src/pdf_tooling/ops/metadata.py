@@ -50,7 +50,12 @@ from pdf_tooling.ops.document_password import (
     predict_password_refusal,
 )
 from pdf_tooling.ports.structure import MetadataFacts, require_structure
-from pdf_tooling.safety.atomic import AtomicWriter, PlannedOutputs, plan_filesystem
+from pdf_tooling.safety.atomic import (
+    AtomicWriter,
+    PlannedOutputs,
+    plan_filesystem,
+    predict_degraded_destinations,
+)
 from pdf_tooling.safety.paths import classify_operand, read_source_bytes
 from pdf_tooling.safety.policy import SafetyPolicy
 
@@ -362,6 +367,9 @@ def meta_set_run(
         # refusal is already predicted (D2's boundary arm ii). A dry run never
         # reads the secret, so `verified` is unconditionally `False` here.
         detail = {**detail, **password_detail([password], verified=False)}
+        if refusal is None:
+            # PDF-170 (OR-87): the row is OK, so the real run reaches its writer.
+            predict_degraded_destinations([target], policy=policy, kind="pdf")
         item = ItemResult(
             input=str(source),
             output=str(target),
