@@ -4619,6 +4619,20 @@ def test_help_import_count_stays_under_the_ceiling(help_imports: HelpImports) ->
 #: this control exists for.
 PLANTED_EAGER_IMPORT: Final = "hypothesis"
 
+#: Ballast planted alongside `PLANTED_EAGER_IMPORT` so the ceiling arm does not
+#: depend on ONE library's import weight. Observed 2026-11-18 on the
+#: python-minor-patch Dependabot bump: `hypothesis` 6.170.2 -> 6.170.15 went
+#: lazier (`import hypothesis` 277 -> 214 modules), and under `make cover` (the
+#: `engines-present` job), where coverage.py's own imports are credited to the
+#: floor, the planted census fell to 271 against the 320 ceiling -- the control
+#: stopped reddening although the product's own `--help` footprint had not
+#: moved. With `bandit` (a dev dependency, not in `ENGINE_MODULES`,
+#: `PLAN_FORBIDDEN` or `EXTRA_FORBIDDEN`) added the same census is 499 outside
+#: coverage and clears the ceiling under it. The ceiling is NOT widened; only
+#: the plant got heavier. The allowlist arm still keys on
+#: `PLANTED_EAGER_IMPORT` alone.
+PLANTED_EAGER_BALLAST: Final = "bandit"
+
 
 def _entry_with_a_planted_eager_import(tmp_path: Path) -> Path:
     """An entry script that imports a heavy package at module scope, then runs
@@ -4655,7 +4669,7 @@ def _entry_with_a_planted_eager_import(tmp_path: Path) -> Path:
     """
     entry = tmp_path / "planted_entry.py"
     entry.write_text(
-        f"import {PLANTED_EAGER_IMPORT}  # planted, module scope\n"
+        f"import {PLANTED_EAGER_IMPORT}, {PLANTED_EAGER_BALLAST}  # planted, module scope\n"
         "from pdf_tooling.cli.main import main\n"
         "main()\n"
     )
