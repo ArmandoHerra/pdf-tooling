@@ -72,7 +72,7 @@
   {
     "License": "MPL-2.0",
     "Name": "pikepdf",
-    "Version": "10.17.0"
+    "Version": "10.18.0"
   },
   {
     "License": "MIT-CMU",
@@ -97,7 +97,7 @@
   {
     "License": "BSD-3-Clause, Apache-2.0, dependency licenses",
     "Name": "pypdfium2",
-    "Version": "5.14.0"
+    "Version": "5.15.0"
   },
   {
     "License": "GNU General Public License v2 or later (GPLv2+); GNU Lesser General Public License v2 or later (LGPLv2+); Mozilla Public License 1.1 (MPL 1.1)",
@@ -112,7 +112,7 @@
   {
     "License": "BSD License",
     "Name": "reportlab",
-    "Version": "5.0.1"
+    "Version": "5.1.0"
   },
   {
     "License": "MIT License",
@@ -137,7 +137,7 @@
   {
     "License": "MIT",
     "Name": "typer",
-    "Version": "0.27.3"
+    "Version": "0.28.0"
   },
   {
     "License": "BSD License",

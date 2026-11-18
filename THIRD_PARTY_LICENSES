@@ -382,7 +382,7 @@ SOFTWARE.
 
 
 pikepdf
-10.17.0
+10.18.0
 MPL-2.0
 Mozilla Public License Version 2.0
 ==================================
@@ -2439,7 +2439,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 
 pypdfium2
-5.14.0
+5.15.0
 BSD-3-Clause, Apache-2.0, dependency licenses
 UNKNOWN
 
@@ -2997,7 +2997,7 @@ Apache Software License
 
 
 reportlab
-5.0.1
+5.1.0
 BSD License
 #####################################################################################
 #
@@ -3132,7 +3132,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 typer
-0.27.3
+0.28.0
 MIT
 The MIT License (MIT)
 
